@@ -1567,5 +1567,3 @@ try:
     init_db()
 except Exception as e:
     print('WARN: init_db() 失败:', e)
-
-
