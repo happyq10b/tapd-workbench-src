@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - TAPD 看板</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f0f2f5 0%,#e6f0fa 100%);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+.card{background:#fff;border-radius:12px;padding:40px 36px;width:360px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.logo{text-align:center;margin-bottom:24px}
+.logo .icon{width:56px;height:56px;border-radius:10px;background:#1890ff;display:inline-flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:12px}
+.logo h1{font-size:20px;color:#1f1f1f}
+.logo p{font-size:12px;color:#7a88a0;margin-top:4px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:13px;color:#8c8c8c;margin-bottom:6px;font-weight:500}
+.field input{width:100%;padding:11px 14px;border:1px solid #d5dce6;border-radius:8px;font-size:14px;outline:none;transition:border-color .15s}
+.field input:focus{border-color:#1890ff}
+button{width:100%;padding:12px;border:none;border-radius:8px;background:#1890ff;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
+button:hover{opacity:.9}
+button:disabled{opacity:.5;cursor:not-allowed}
+.msg{margin-top:14px;font-size:13px;text-align:center;color:#d63c3c;min-height:18px}
+.hint{margin-top:18px;font-size:11.5px;color:#7a88a0;text-align:center;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="icon">📊</div>
+    <h1>TAPD 看板</h1>
+    <p>财务核算部 · 2026 年度工作事项</p>
+  </div>
+  <div class="field"><label>账号</label><input id="u" autocomplete="username" placeholder="请输入账号"></div>
+  <div class="field"><label>密码</label><input id="p" type="password" autocomplete="current-password" placeholder="请输入密码"></div>
+  <button id="btn">登 录</button>
+  <div class="msg" id="msg"></div>
+  <div class="hint">账号由管理员分配，权限范围以账号配置为准</div>
+</div>
+<script>
+const u=document.getElementById('u'),p=document.getElementById('p'),btn=document.getElementById('btn'),msg=document.getElementById('msg');
+function show(m,ok){msg.textContent=m;msg.style.color=ok?'#0f9d6e':'#d63c3c'}
+async function doLogin(){
+  if(!u.value.trim()||!p.value){show('请输入账号和密码');return}
+  btn.disabled=true;btn.textContent='登录中...';msg.textContent='';
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:u.value.trim(),password:p.value})});
+    const d=await r.json();
+    if(!r.ok){show(d.detail||'登录失败');return}
+    localStorage.setItem('tk',d.token);
+    location.href='/';
+  }catch(e){show('网络错误，请重试')}
+  finally{btn.disabled=false;btn.textContent='登 录'}
+}
+btn.onclick=doLogin;
+p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+</script>
+</body>
+</html>

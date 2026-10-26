@@ -1,0 +1,2744 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<!-- 版本：2026-08-21 09:10 统一版本标识（含 8-20 全部优化：看板管理重构/board_config 关联/主从 UI/配色焕新/冻结筛选/事件委托/滚动条动态控制/恢复滚动条）；WS 实时链路已修复（venv 补装 websockets） -->
+<title>财务中心核算部 · 部门工作台</title>
+<style>
+:root{--bg:#f0f2f5;--card:#fff;--border:#e8e8e8;--text:#1f1f1f;--text2:#8c8c8c;--primary:#002D74;--success:#52c41a;--warning:#faad14;--danger:#ff4d4f;--shadow:0 2px 8px rgba(0,45,116,.06);--radius:8px;--radius-sm:4px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+button{font-family:inherit}
+.app-header{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.header-left{display:flex;align-items:center;gap:10px}
+.header-left h1{font-size:18px;font-weight:600;color:var(--text)}
+.year-badge{background:var(--primary);color:#fff;font-size:11px;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500;margin-left:4px}
+.header-actions{display:flex;align-items:center;gap:8px}
+.header-user{display:flex;align-items:center;gap:8px;margin-right:8px;font-size:13px;color:var(--text2)}
+.header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
+.header-btn:hover{border-color:var(--primary);color:var(--primary)}
+.role-tag{font-size:11px;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500}
+.role-admin{background:#fff7e6;color:#d46b08;border:1px solid #ffd591}
+.role-editor{background:#e6f7ff;color:#1890ff;border:1px solid #91d5ff}
+.role-viewer{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}
+.board-tabs{display:flex;gap:6px;padding:12px 24px 0;flex-wrap:wrap;max-width:1440px;margin:0 auto}
+.tab-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;background:#fafafa;color:var(--text2);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:500}
+.tab-btn:hover{color:var(--primary)}
+.tab-btn.active{background:#fff;color:var(--primary);border-color:var(--border);box-shadow:0 -2px 6px rgba(0,0,0,.03);font-weight:600}
+.tab-count{background:var(--border);color:var(--text2);font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
+.tab-btn.active .tab-count{background:var(--primary);color:#fff}
+/* 「＋ 新建看板」按钮：虚线描边、强调色，与管理员操作呼应 */
+.tab-add{border-style:dashed;color:var(--primary);background:transparent;border-bottom:none}
+.tab-add:hover{background:#eef5ff;transform:translateY(-1px)}
+.wrap{max-width:1440px;margin:0 auto;padding:16px 24px 60px}
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px}
+.toolbar-left{display:flex;gap:10px;flex-wrap:wrap;flex:1}
+.search-input,.filter-select{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text)}
+.search-input:focus,.filter-select:focus{border-color:var(--primary)}
+.search-input{min-width:220px;flex:1}
+.btn-primary{background:var(--primary);color:#fff;border:none;padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;font-weight:500;transition:opacity .15s}
+.btn-primary:hover{opacity:.85}
+.btn-default{border:1px solid var(--border);background:#fff;color:var(--text);padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;transition:all .15s}
+.btn-default:hover{border-color:var(--primary);color:var(--primary)}
+.btn-secondary{border:1px solid var(--border);background:#fff;color:var(--text);padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;font-weight:500;transition:all .15s}
+.btn-secondary:hover{border-color:var(--primary);color:var(--primary)}
+.progress-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.stat-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;box-shadow:var(--shadow)}
+.stat-label{font-size:12px;color:var(--text2)}
+.stat-value{font-size:26px;font-weight:600;margin-top:2px}
+.stat-value.blue{color:var(--primary)}.stat-value.green{color:var(--success)}.stat-value.orange{color:var(--warning)}.stat-value.red{color:var(--danger)}
+.board-content{display:flex;flex-direction:column;gap:12px}
+.week-group{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.week-header{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;user-select:none;transition:background .15s}
+.week-header:hover{background:#fafafa}
+.week-header .chev{transition:transform .2s;color:var(--text2);font-size:12px}
+.week-group.open .chev{transform:rotate(90deg)}
+.week-title{font-size:14px;font-weight:600}
+.week-meta{font-size:12px;color:var(--text2)}
+.week-bar{flex:1;max-width:180px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
+.week-bar i{display:block;height:100%;background:var(--success)}
+.week-body{display:none;border-top:1px solid var(--border);padding:8px}
+.week-group.open .week-body{display:block}
+.item-card{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);transition:background .15s}
+.item-card:hover{background:#fafafa}
+.item-card.locked{background:#fffbe6}
+.item-title{flex:1;font-size:13.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.item-title:hover{color:var(--primary)}
+.owner-avatar{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;background:#1890ff}
+.item-date{font-size:12px;color:var(--text2);flex-shrink:0}
+.status-tag{font-size:11.5px;padding:2px 10px;border-radius:var(--radius-sm);font-weight:500;flex-shrink:0}
+.status-tag.done{background:#f6ffed;color:var(--success);border:1px solid #b7eb8f}
+.status-tag.progressing{background:#e6f7ff;color:var(--primary);border:1px solid #91d5ff}
+.status-tag.pending{background:#fff1f0;color:var(--danger);border:1px solid #ffa39e}
+.lock-tag{font-size:11px;color:#d48806;background:#fffbe6;border:1px solid #ffe58f;padding:2px 8px;border-radius:var(--radius-sm);flex-shrink:0}
+.icon-btn{border:none;background:none;cursor:pointer;font-size:13px;color:var(--text2);padding:4px 8px;border-radius:var(--radius-sm);transition:all .15s}
+.pwd-wrap{display:inline-flex;align-items:center;gap:4px;width:100%;max-width:100%}
+.pwd-wrap>input{flex:1;min-width:0;width:100%}
+.pwd-eye{border:1px solid var(--border);background:#fff;border-radius:4px;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);flex-shrink:0;padding:0;transition:all .15s}
+.pwd-eye:hover{border-color:var(--primary);color:var(--primary)}
+.pwd-eye svg{width:15px;height:15px}
+.icon-btn:hover{color:var(--primary);background:#f0f5ff}
+.icon-btn.delete:hover{color:var(--danger);background:#fff1f0}
+.empty{padding:48px;text-align:center;color:var(--text2);font-size:13px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center}
+.modal{background:#fff;border-radius:12px;width:640px;max-width:94vw;max-height:94vh;overflow:auto;padding:20px 24px;box-shadow:0 8px 24px rgba(0,0,0,.15)}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;cursor:move;user-select:none}
+.modal-header h2{font-size:16px;font-weight:600}
+.modal-close{border:none;background:none;font-size:18px;color:var(--text2);cursor:pointer;line-height:1}
+.modal-close:hover{color:var(--danger)}
+.modal-header:active{cursor:grabbing}
+.modal-footer{cursor:move}
+.modal-dragging{cursor:grabbing;user-select:none}
+.modal-body{display:flex;flex-direction:column;gap:12px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-group label{display:block;font-size:12px;color:var(--text2);margin-bottom:4px}
+.form-input,.form-select,.form-textarea{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;font-family:inherit;background:#fff;color:var(--text)}
+.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--primary)}
+.form-textarea{min-height:100px;resize:vertical}
+.member-picker{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;min-height:40px}
+.pp{position:relative;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;min-height:42px;background:var(--color-background-primary,#fff)}
+.pp:focus-within{border-color:var(--primary);box-shadow:0 0 0 2px rgba(24,144,255,.12)}
+.pp-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
+.pp-tag{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:12px;padding:2px 6px 2px 9px;border-radius:10px;border:1px solid #b5d4f4}
+.pp-tag i{font-style:normal;cursor:pointer;color:#85b7eb;font-size:13px;line-height:1}
+.pp-tag i:hover{color:var(--danger)}
+.pp-ip{position:relative}
+.pp-in{width:100%;border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;box-sizing:border-box}
+.pp-drop{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:min(240px,60vh);overflow:auto;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow-lg);z-index:400;padding:4px}
+.pp-opt{padding:6px 10px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-radius:4px;white-space:nowrap}
+.pp-opt:hover{background:rgba(47,128,237,.1);color:var(--primary)}
+.pp-opt.sel{background:rgba(47,128,237,.12);color:var(--primary);font-weight:500}
+.pp-opt.sel::after{content:'✓';color:var(--success)}
+.pp-empty{padding:8px 10px;font-size:12px;color:var(--text3)}
+.tree-pick{position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-lg);z-index:900;font-size:13px}
+.tp-node{display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:4px;white-space:nowrap}
+.tp-node:hover{background:rgba(47,128,237,.06)}
+.tp-arrow{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);font-size:10px;flex-shrink:0;border-radius:3px}
+.tp-arrow:hover{background:rgba(47,128,237,.12);color:var(--primary)}
+.tp-label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--text);flex:1;position:relative;outline:none;border-radius:3px}
+.tp-label:focus-visible{box-shadow:0 0 0 2px var(--primary)}
+.tp-box{display:inline-block;width:14px;height:14px;border:1.5px solid #d9d9d9;border-radius:3px;background:#fff;cursor:pointer;position:relative;flex-shrink:0;vertical-align:middle;transition:border-color .15s;user-select:none;pointer-events:none}
+.tp-box.on,.tp-box.half{background:var(--primary);border-color:var(--primary)}
+.tp-box .tp-tick{position:absolute;left:3px;top:0;width:4px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.tp-box .tp-bar{position:absolute;left:2px;right:2px;top:50%;height:2px;background:#fff;transform:translateY(-50%);border-radius:1px}
+.member-tag{display:inline-flex;align-items:center;gap:4px;background:#f0f5ff;color:var(--primary);border:1px solid #91d5ff;border-radius:var(--radius-sm);padding:2px 10px;font-size:12px;cursor:pointer;user-select:none}
+.member-tag.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
+.modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
+.comment-box{border-top:1px solid var(--border);padding-top:10px;margin-top:4px}
+.comment-box h4{font-size:13px;color:var(--text2);margin-bottom:8px}
+.comment-item{font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--border)}
+.comment-item .who{color:var(--primary);font-weight:500}
+.comment-item .when{color:var(--text2);font-size:11px;margin-left:6px}
+.comment-form{display:flex;gap:8px;margin-top:8px}
+.comment-form input{flex:1;padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none}
+.detail-desc{background:#fafafa;border-left:3px solid var(--primary);padding:10px 14px;font-size:13px;color:var(--text);white-space:pre-wrap;border-radius:0 6px 6px 0;margin-top:10px}
+.detail-meta{font-size:13px;color:var(--text2);line-height:2}
+.detail-meta b{color:var(--text);font-weight:500}
+.subtask-box{border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-top:12px;background:#fafcff}
+.subtask-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.subtask-title{font-size:13px;font-weight:600;color:var(--text)}
+.subtask-count{font-size:12px;color:var(--text2);background:var(--bg);padding:1px 10px;border-radius:10px}
+.subtask-list{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow:auto}
+.subtask-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:13px}
+.subtask-item:hover{background:#f0f5ff}
+.subtask-item.done .st-text{color:var(--text2);text-decoration:line-through}
+.subtask-item input[type=checkbox]{width:15px;height:15px;accent-color:var(--primary);cursor:pointer;flex-shrink:0}
+.st-text{flex:1;word-break:break-all;cursor:pointer}
+.st-text input{width:100%;padding:3px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px;outline:none}
+.st-who{font-size:11px;color:var(--text2);flex-shrink:0}
+.st-del{background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:4px;flex-shrink:0}
+.st-del:hover{background:#fff1f0;color:var(--danger)}
+.subtask-add{display:flex;gap:8px;margin-top:8px}
+.subtask-add input{flex:1;padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none}
+.subtask-add input:focus{border-color:var(--primary)}
+.st-mini{font-size:11px;color:var(--text2);background:var(--bg);padding:1px 8px;border-radius:10px;margin-left:8px;flex-shrink:0}
+.st-mini.all{color:var(--success)}
+.subitems-row{display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 12px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)}
+.subitems-title{font-size:13px;font-weight:600;color:var(--text)}
+.subitems-count{font-size:12px;color:var(--text2)}
+.subitems-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-left:4px}
+.subitem-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;font-size:13px;background:#fafafa;border:1px solid var(--border)}
+.subitem-row:hover{background:#f0f5ff;border-color:#91d5ff}
+.subitem-name{flex:1;cursor:pointer;word-break:break-all}
+.subitem-name:hover{color:var(--primary)}
+.subitem-meta{font-size:12px;color:var(--text2);flex-shrink:0}
+.sub-toggle{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:11.5px;cursor:pointer;padding:2px 10px;border-radius:10px;border:1px solid #b5d4f4;flex-shrink:0;font-weight:500;line-height:1.6;margin:0}
+.sub-toggle:hover{background:#d0e3f5;border-color:#85b7eb}
+.item-wrap{margin-bottom:8px}
+.drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;opacity:0;pointer-events:none;transition:opacity .25s}
+.drawer-mask.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:440px;max-width:92vw;background:var(--color-background-primary,#fff);border-left:1px solid var(--border);box-shadow:-8px 0 32px rgba(0,0,0,.12);z-index:301;transform:translateX(100%);transition:transform .28s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column}
+.drawer.open{transform:translateX(0)}
+.drawer-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.drawer-back{background:none;border:1px solid var(--border);border-radius:6px;width:28px;height:28px;cursor:pointer;color:var(--text2);font-size:13px;line-height:1;display:none}
+.drawer-back.show{display:inline-block}
+.drawer-back:hover{background:var(--bg);color:var(--primary)}
+.drawer-title{flex:1;font-size:15px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drawer-close{background:none;border:none;font-size:15px;cursor:pointer;color:var(--text2);width:28px;height:28px;border-radius:6px}
+.drawer-close:hover{background:var(--bg);color:var(--text)}
+.drawer-body{flex:1;overflow-y:auto;padding:14px 16px}
+.pcard{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg);margin-bottom:12px}
+.pcard h3{font-size:14px;font-weight:500;margin:0 0 6px;color:var(--text)}
+.pcard .pmeta{font-size:12px;color:var(--text2);display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+.pcard .pdesc{font-size:12.5px;color:var(--text);white-space:pre-wrap;max-height:72px;overflow:auto;background:var(--color-background-primary,#fff);border-radius:6px;padding:6px 8px;border:1px solid var(--border)}
+.sub-sec{font-size:12px;color:var(--text2);font-weight:500;margin:14px 0 8px;display:flex;align-items:center;gap:6px}
+.sub-new{border:1px dashed var(--border);border-radius:10px;padding:10px;margin-bottom:6px}
+.sub-new input{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;outline:none;box-sizing:border-box}
+.sub-new input:focus{border-color:var(--primary)}
+.sub-new .sn-fields{display:none;margin-top:10px;flex-direction:column;gap:8px}
+.sub-new.expand .sn-fields{display:flex}
+.sn-row{display:flex;gap:8px}
+.sn-row .form-select,.sn-row .form-input{flex:1}
+.sn-actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
+.sl-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--color-background-primary,#fff);cursor:pointer;transition:border-color .15s}
+.sl-row:hover{border-color:var(--primary)}
+.sl-main{flex:1;min-width:0}
+.sl-name{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sl-meta{font-size:11.5px;color:var(--text2);margin-top:2px}
+.sl-ops{display:none;gap:4px;flex-shrink:0}
+.sl-row:hover .sl-ops{display:flex}
+.sl-ops button{background:none;border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;color:var(--text2);padding:2px 8px}
+.sl-ops button:hover{color:var(--primary);border-color:var(--primary)}
+.sl-ops button.del:hover{color:var(--danger);border-color:var(--danger)}
+.se-form{display:flex;flex-direction:column;gap:10px}
+.se-form .form-group{margin:0}
+.se-owner{display:flex;flex-wrap:wrap;gap:6px}
+.se-todo{border-top:1px dashed var(--border);margin-top:14px;padding-top:10px}
+.empty-hint{color:var(--text2);font-size:12px;padding:14px;text-align:center;border:1px dashed var(--border);border-radius:8px}
+.toast{position:fixed;top:70px;right:24px;background:rgba(0,0,0,.75);color:#fff;padding:10px 18px;border-radius:var(--radius-sm);font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+@media(max-width:900px){.progress-overview{grid-template-columns:repeat(2,1fr)}.form-row{grid-template-columns:1fr}}
+
+/* ===== 视觉美化层 v1（仅叠加视觉样式，不影响任何功能/结构与JS状态类） ===== */
+:root{
+  /* 品牌色 —— 安通蓝（骨架主色）/ 安通金（点睛点缀） */
+  --antong-blue:#002D74; --antong-blue-lt:#0a3f93;
+  --antong-gold:#CCB484; --antong-gold-dk:#b89b65;
+  --primary:#002D74; --primary-600:#0a3f93; --primary-rgb:0,45,116;
+  --gold:#CCB484; --gold-rgb:204,180,132;
+  --success:#22c55e; --warning:#f59e0b; --danger:#ef4444;
+  --text:#1f2329; --text2:#646a73; --text3:#a8abb2;
+  --border:#e6e8eb; --bg:#f4f6fa; --card:#ffffff;
+  --gradient:linear-gradient(135deg,#002D74 0%,#0a3f93 100%);
+  --gradient-brand:linear-gradient(90deg,#002D74 0%,#0a3f93 100%);
+  --gradient-soft:linear-gradient(135deg,#eef3fb 0%,#f7faff 100%);
+  --shadow-sm:0 1px 3px rgba(0,45,116,.07);
+  --shadow:0 2px 10px rgba(0,45,116,.07);
+  --shadow-md:0 8px 24px rgba(0,45,116,.12);
+  --shadow-lg:0 16px 40px rgba(0,45,116,.16);
+  --radius:10px; --radius-sm:6px;
+  --ring:0 0 0 3px rgba(0,45,116,.16);
+}
+*{font-variant-numeric:tabular-nums}
+html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{
+  color:var(--text);
+  background:
+    radial-gradient(1200px 480px at 100% -10%, rgba(0,45,116,.06), transparent 60%),
+    radial-gradient(900px 420px at -10% 0%, rgba(0,45,116,.05), transparent 55%),
+    linear-gradient(180deg,#f5f7fb 0%,#eef1f6 100%);
+  background-attachment:fixed;
+}
+
+/* Header */
+.app-header{position:relative;background:linear-gradient(180deg,#ffffff,#fbfcfe);box-shadow:0 1px 0 var(--border),0 6px 22px rgba(16,24,40,.05);padding:14px 24px}
+.app-header::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--primary)}
+.header-left h1{font-size:19px;letter-spacing:.2px}
+.header-left h1 .year-badge{background:var(--primary);box-shadow:0 2px 6px rgba(0,45,116,.30)}
+.header-btn{border-radius:var(--radius-sm);transition:all .2s}
+.header-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff;box-shadow:var(--shadow-sm)}
+.role-tag{box-shadow:var(--shadow-sm)}
+
+/* Tabs */
+.board-tabs{gap:8px}
+.tab-btn{border-radius:10px 10px 0 0;padding:9px 18px;transition:all .2s;box-shadow:var(--shadow-sm)}
+.tab-btn:hover{background:#fff;color:var(--primary);transform:translateY(-1px)}
+.tab-btn.active{background:#fff;color:var(--primary);border-color:var(--border) var(--border) transparent;box-shadow:0 -3px 10px rgba(16,24,40,.04);position:relative}
+.tab-btn.active::after{content:'';position:absolute;left:18px;right:18px;bottom:-1px;height:2px;background:var(--gold);border-radius:2px}
+.tab-count{box-shadow:var(--shadow-sm)}
+
+/* Toolbar */
+.toolbar{box-shadow:var(--shadow);border-radius:var(--radius)}
+.search-input,.filter-select,.form-input,.form-select,.form-textarea{border-radius:var(--radius-sm);transition:all .2s}
+.search-input:focus,.filter-select:focus,.form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--primary);box-shadow:var(--ring)}
+
+/* Buttons */
+.btn-primary{background:var(--primary);border:1px solid transparent;box-shadow:0 4px 12px rgba(0,45,116,.26);border-radius:var(--radius-sm);transition:all .2s}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(0,45,116,.34);opacity:1}
+.btn-primary:active{transform:translateY(0)}
+.btn-default{border-radius:var(--radius-sm);transition:all .2s}
+.btn-default:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff;box-shadow:var(--shadow-sm)}
+
+/* Progress stat cards */
+.progress-overview{gap:16px}
+.stat-card{position:relative;overflow:hidden;border-radius:var(--radius);box-shadow:var(--shadow);transition:transform .25s,box-shadow .25s;animation:fadeUp .35s ease both}
+.stat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--primary);opacity:.92}
+.stat-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md)}
+.stat-label{font-weight:500}
+.stat-value{letter-spacing:.5px}
+
+/* Week groups */
+.week-group{border-radius:var(--radius);box-shadow:var(--shadow);transition:box-shadow .25s,transform .25s;animation:fadeUp .4s ease both}
+.week-group:hover{box-shadow:var(--shadow-md)}
+.week-header{padding:14px 18px}
+.week-header:hover{background:#f7f9fc}
+.week-title{font-size:15px}
+.week-bar{background:#eef1f6;border-radius:6px}
+.week-bar i{background:linear-gradient(90deg,#52c41a,#22c55e);box-shadow:0 0 8px rgba(34,197,94,.4)}
+
+/* Item cards */
+.item-card{border-radius:var(--radius-sm);transition:all .2s;padding:11px 14px}
+.item-card:hover{background:#f5f8ff;box-shadow:var(--shadow-sm);transform:translateX(2px)}
+.item-title{font-weight:500}
+.owner-avatar{background:var(--primary);box-shadow:var(--shadow-sm)}
+.status-tag{border-radius:20px;box-shadow:var(--shadow-sm);font-weight:600}
+.icon-btn:hover{background:rgba(0,45,116,.06)}
+
+/* Modal & drawer */
+.modal-overlay{backdrop-filter:blur(3px);background:rgba(16,24,40,.45)}
+.modal{border-radius:14px;box-shadow:var(--shadow-lg);animation:modalIn .25s ease both}
+.modal-header h2{color:var(--primary);background:none;-webkit-text-fill-color:initial}
+.drawer{box-shadow:-12px 0 40px rgba(16,24,40,.18)}
+.drawer-head{background:linear-gradient(180deg,#fff,#fbfcfe)}
+.pcard{box-shadow:var(--shadow-sm);border-radius:12px}
+
+/* Team modal - group chips (replace inline labels) */
+.tm-grp-cell{padding:8px 10px;min-width:260px;text-align:left;vertical-align:middle}
+.tm-grp-opt{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px 3px;border-radius:5px;cursor:pointer;font-size:12.5px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;user-select:none;border:1px solid transparent}
+.tm-grp-opt:hover{background:rgba(0,45,116,.06);border-color:rgba(0,45,116,.16)}
+.tm-grp-opt:has(input:checked){background:rgba(0,45,116,.10);border-color:rgba(0,45,116,.30);color:var(--primary);font-weight:500}
+.tm-grp-opt input[type=checkbox]{margin:0;cursor:pointer;accent-color:var(--primary)}
+#teamList{max-height:min(520px,calc(100vh - 180px));overflow:auto;border:1px solid var(--border);border-radius:8px}
+#teamList table{table-layout:fixed;width:100%}
+#teamList thead tr{position:sticky;top:0;z-index:2;background:var(--bg)}
+
+/* 可输入下拉面板（过滤 + 滚动） */
+.combo-panel{position:fixed;z-index:400;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow-lg);max-height:min(240px,60vh);overflow:auto;padding:4px}
+.combo-opt{padding:6px 10px;cursor:pointer;font-size:13px;border-radius:4px;white-space:nowrap}
+.combo-opt:hover{background:rgba(0,45,116,.07);color:var(--primary)}
+.combo-empty{padding:8px 10px;color:var(--text3);font-size:12px}
+
+/* Toast */
+.toast{background:rgba(16,24,40,.82);border-radius:10px;box-shadow:var(--shadow-lg);backdrop-filter:blur(4px)}
+
+/* Misc polish */
+.subtask-box,.subitems-row,.sl-row{border-radius:var(--radius)}
+.comment-item{border-bottom-color:var(--border)}
+.detail-desc{border-left-width:4px;background:#f7faff}
+
+/* Focus accessibility */
+.btn-primary:focus-visible,.btn-default:focus-visible,.header-btn:focus-visible,.tab-btn:focus-visible,.icon-btn:focus-visible{outline:none;box-shadow:var(--ring)}
+.search-input:focus-visible,.form-input:focus-visible,.form-select:focus-visible,.form-textarea:focus-visible{outline:none}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes modalIn{from{opacity:0;translate:0 12px;scale:.98}to{opacity:1;translate:0 0;scale:1}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* 恢复各界面滚动条（使用浏览器默认滚动条样式） */
+/* 弹窗打开时锁定背景（底层看板）滚动，防止滚轮穿透 */
+html.modal-open,html.modal-open body{overflow:hidden}
+html.modal-open{overscroll-behavior:none}
+
+</style>
+<style>
+/* ---- file:// 直接打开时的引导遮罩（仅非 http(s) 协议下显示） ---- */
+#fileGuard{position:fixed;inset:0;z-index:99999;background:rgba(255,255,255,.97);
+display:none;flex-direction:column;align-items:center;justify-content:center;
+padding:32px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+#fileGuard.show{display:flex}
+#fileGuard .fg-box{max-width:580px}
+#fileGuard .fg-icon{font-size:52px;line-height:1;margin-bottom:14px}
+#fileGuard h2{margin:0 0 10px;font-size:19px;color:#1f1f1f;font-weight:600}
+#fileGuard p{margin:0 0 8px;font-size:14px;color:#5c6b7f;line-height:1.8}
+#fileGuard .fg-code{display:block;background:#f4f6f9;border:1px solid #e2e8f0;border-radius:6px;
+padding:10px 12px;margin:10px 0;font-family:Consolas,Monaco,monospace;font-size:13px;color:#002D74;
+word-break:break-all;user-select:all;text-align:left}
+#fileGuard .fg-tip{font-size:13px;color:#8c9bb0;margin-top:14px;line-height:1.7}
+#fileGuard .fg-btn{display:inline-block;margin-top:16px;background:#002D74;color:#fff;
+padding:10px 22px;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;cursor:pointer}
+#fileGuard .fg-btn:hover{background:#003d99}
+</style>
+<script>
+// ===== 协议判定与 API 基址 =====
+// file:// 直接打开时，相对路径 /api/xxx 会解析成 file:///api/xxx 必然失败；
+// 此时把 API 基址指向本机后端。
+window.__IS_FILE__ = (location.protocol === 'file:');
+window.API_BASE = window.__IS_FILE__ ? 'http://127.0.0.1:8000' : '';
+
+// 接口地址统一拼接：file:// 下补全到本机后端，其余情况保持原有相对路径
+function apiUrl(p){
+  if(!p) return window.API_BASE || '/';
+  if(/^https?:\/\//i.test(p)) return p;
+  if(window.__IS_FILE__ && p.charAt(0)==='/') return window.API_BASE + p;
+  return p;
+}
+
+// 登录跳转：file:// 下跳 /login 会变成 file:///E:/login（文件不存在），
+// 改为弹引导层，明确告知正确打开方式。
+function goLogin(){
+  if(window.__IS_FILE__){
+    if(typeof showFileGuard === 'function') showFileGuard();
+    return;
+  }
+  location.href='/login';
+}
+</script>
+</head>
+<body>
+<div id="fileGuard">
+  <div class="fg-box">
+    <div class="fg-icon">🗃</div>
+    <h2>这个页面需要后端服务才能打开</h2>
+    <p>你是直接双击文件打开的（<code>file://</code> 协议）。工作台的数据全部来自后端接口（<code>/api/*</code>），直接打开时浏览器无法读取这些数据。</p>
+    <p>请先启动后端服务，再用浏览器访问：</p>
+    <span class="fg-code">http://127.0.0.1:8000/</span>
+    <p>启动命令（在 tapd_webapp 目录下执行）：</p>
+    <span class="fg-code">uvicorn app.app:app --host 127.0.0.1 --port 8000</span>
+    <a class="fg-btn" href="http://127.0.0.1:8000/" id="fgOpen">打开工作台</a>
+    <div class="fg-tip" id="fgTip">正在检测本机 8000 端口的后端服务…</div>
+  </div>
+</div>
+<header class="app-header">
+  <div class="header-left"><h1>财务中心核算部 · 部门工作台<span class="year-badge">2026</span></h1></div>
+  <div class="header-actions">
+    <span class="header-user"><span id="userName"></span><span class="role-tag" id="roleTag"></span></span>
+    <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
+    <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
+    <button class="header-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>
+    <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
+    <button class="header-btn" onclick="exportData()" title="导出数据备份">📤 导出</button>
+    <button class="header-btn" onclick="document.getElementById('importFile').click()" title="导入数据备份">📥 导入</button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+    <button class="header-btn" onclick="logout()">退出</button>
+  </div>
+</header>
+<div class="board-tabs" id="boardTabs"></div>
+<div class="wrap">
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <input type="text" class="search-input" id="searchInput" placeholder="搜索工作事项…" oninput="debounceReload()">
+      <select class="filter-select" id="statusFilter" onchange="reload(1)">
+        <option value="">全部状态</option><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option>
+      </select>
+      <select class="filter-select" id="ownerFilter" onchange="reload(1)"><option value="">全部负责人</option></select>
+    </div>
+    <div class="toolbar-right" style="display:flex;gap:8px">
+      <button class="btn-primary" id="newBtn" style="display:none" onclick="openNewModal()">+ 新建事项</button>
+      <button class="btn-default" onclick="expandAll()">展开全部</button>
+      <button class="btn-default" onclick="collapseAll()">收起全部</button>
+    </div>
+  </div>
+  <div class="progress-overview" id="progressOverview"></div>
+  <main class="board-content" id="boardContent"></main>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal-overlay" id="editModal" style="display:none">
+  <div class="modal">
+    <div class="modal-header"><h2 id="editTitle">编辑事项</h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="openDrawer(editing)" title="在右侧面板管理子事项">▤ 子事项</button>
+        <button class="modal-close" onclick="closeEdit()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
+      <div class="form-row">
+        <div class="form-group"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
+        <div class="form-group"><label>状态</label><select class="form-select" id="e_status"><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin"></div>
+        <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>负责人</label><div class="member-picker" id="e_owner"></div></div>
+        <div class="form-group"><label>参与人</label><div class="member-picker" id="e_cc"></div></div>
+      </div>
+      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="e_desc" style="min-height:147px"></textarea></div>
+      <div class="subtask-box">
+        <div class="subtask-head">
+          <span class="subtask-title">代办任务</span>
+          <span class="subtask-count" id="e_subtask_count"></span>
+        </div>
+        <div id="e_subtask_list" class="subtask-list"></div>
+        <div class="subtask-add">
+          <input type="text" class="form-input" id="e_subtask_new" placeholder="添加代办任务，回车确认…" onkeydown="if(event.key==='Enter')addSubtask()">
+          <button class="btn-default" onclick="addSubtask()" style="flex-shrink:0">添加</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-default" style="color:var(--danger);border-color:var(--danger)" onclick="deleteCard()">删除</button>
+      <button class="btn-default" onclick="closeEdit()">取消</button>
+      <button class="btn-primary" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建弹窗 -->
+<div class="modal-overlay" id="newModal" style="display:none">
+  <div class="modal">
+    <div class="modal-header"><h2>新建事项</h2><button class="modal-close" onclick="closeModal('newModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
+      <div class="form-group"><label>标题</label><input type="text" class="form-input" id="n_name" placeholder="请输入工作标题"></div>
+      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
+    </div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('newModal')">取消</button><button class="btn-primary" onclick="createCard()">创建</button></div>
+  </div>
+</div>
+
+<!-- 新建看板弹窗（仅管理员） -->
+<div class="modal-overlay" id="boardModal" style="display:none">
+  <div class="modal" style="width:min(520px,94vw)">
+    <div class="modal-header"><h2>🗂️ 新建看板</h2><button class="modal-close" onclick="closeModal('boardModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>看板名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="b_name" placeholder="例如：2026 预算执行看板"></div>
+      <div class="form-group"><label>工作空间 ID</label><input type="text" class="form-input" id="b_ws" placeholder="TAPD 工作空间 ID（可选，留空亦可）"></div>
+      <div class="form-group"><label>负责人</label><input type="text" class="form-input" id="b_owner" placeholder="留空默认为当前账号"></div>
+      <div style="font-size:12px;color:var(--text3)">新建后该看板会出现在上方标签页（初始为空），可立即向其添加工作事项；其他成员的可见性由其账号「可见看板」权限决定。</div>
+    </div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('boardModal')">取消</button><button class="btn-primary" onclick="createBoard()">创建看板</button></div>
+  </div>
+</div>
+
+<!-- 详情弹窗 -->
+<div class="modal-overlay" id="detailModal" style="display:none">
+  <div class="modal">
+    <div class="modal-header"><h2 id="d_title"></h2><button class="modal-close" onclick="closeModal('detailModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="detail-meta" id="d_meta"></div>
+      <div class="detail-desc" id="d_desc" style="display:none"></div>
+      <div class="subtask-box" id="d_subtask_box" style="display:none">
+        <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count" id="d_subtask_count"></span></div>
+        <div id="d_subtask_list" class="subtask-list"></div>
+      </div>
+      <div class="comment-box"><h4>评论</h4><div id="d_comments"></div>
+        <div class="comment-form"><input id="d_new_comment" placeholder="写评论…"><button class="btn-default" onclick="addComment()">发送</button></div>
+      </div>
+      <div class="comment-box"><h4>操作记录</h4><div id="d_actions"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 团队弹窗 -->
+<div class="modal-overlay" id="teamModal" style="display:none">
+  <div class="modal" style="width:fit-content;min-width:920px;max-width:min(1200px,98vw);max-height:min(92vh,880px);overflow:hidden;display:flex;flex-direction:column">
+    <div class="modal-header"><h2>👥 成员与账号管理</h2><button class="modal-close" onclick="closeModal('teamModal')">✕</button></div>
+    <div class="modal-body" style="flex:1;overflow:auto;min-height:0">
+      <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 12px;font-size:12.5px;color:#0050b3;margin-bottom:12px">
+        在此管理团队成员与配套登录账号。成员可单独存在，也可「开通账号」获得登录权限并分配角色（管理员/可编辑/只读）。
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+          <div class="form-group" style="flex:1;min-width:130px"><label>姓名 *</label><input type="text" class="form-input" id="t_new_name" placeholder="成员姓名"></div>
+          <div class="form-group" style="flex:1;min-width:130px" id="t_new_account_wrap"><label>登录账号（可选）</label><input type="text" class="form-input" id="t_new_account" placeholder="留空则不开通"></div>
+          <div class="form-group" style="flex:1;min-width:150px" id="t_new_pwd_wrap"><label>密码（开通时必填）</label><span class="pwd-wrap" style="width:100%"><input type="password" class="form-input" id="t_new_pwd" placeholder="设置密码" style="flex:1;min-width:0"><button type="button" class="pwd-eye" onclick="togglePwd('t_new_pwd',this)" title="显示/隐藏密码"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></span></div>
+          <div class="form-group" style="min-width:100px"><label>角色</label><select class="form-select" id="t_new_role"><option value="" selected>无权限</option><option value="editor">可编辑</option><option value="viewer">只读</option><option value="admin">管理员</option></select></div>
+          <button class="btn-primary" onclick="addTeamMember()" style="flex-shrink:0;height:36px">添加成员</button>
+        </div>
+        <div class="form-group"><label>工作组（可选，多选）</label><input type="text" class="form-input" id="t_new_wg_btn" readonly value="" placeholder="点击选择工作组（支持展开层级）" style="cursor:pointer;margin-bottom:4px" onclick="openTreePick(this, ADD_WG_SEL, (sel)=>{ADD_WG_SEL=sel; renderAddWgTags()})"><div id="t_new_wg_tags" class="pp-tags"></div></div>
+      </div>
+      <div id="teamList"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('teamModal')">取消</button>
+      <button class="btn-primary" onclick="saveAllTeamMembers()">保存全部</button>
+    </div>
+  </div>
+</div>
+
+<!-- 架构管理弹窗（原工作组管理） -->
+<div class="modal-overlay" id="wgModal" style="display:none">
+  <div class="modal" style="width:min(1280px,96vw);max-height:min(96vh,1200px)">
+    <div class="modal-header"><h2>🏗️ 架构管理</h2><button class="modal-close" onclick="closeModal('wgModal')">✕</button></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;overflow:hidden;gap:0">
+      <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 12px;font-size:12.5px;color:#0050b3;margin-bottom:12px;flex-shrink:0">
+        工作组架构与板块权限：部门配<strong>部门长</strong>、工作组配<strong>负责人</strong>；先为部门配置看板，其子工作组只能从部门范围内选择；工作组内成员的看板访问受绑定限制。
+      </div>
+      <div style="flex:1;min-height:0;display:flex;gap:16px;overflow:hidden">
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:6px;flex-shrink:0">工作组架构图</div>
+          <div id="wgList" style="flex:1;min-height:0;border:1px solid var(--border);border-radius:8px;padding:6px 0;overflow:auto"></div>
+        </div>
+        <div style="width:360px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-shrink:0">
+            <span style="font-size:12px;color:var(--text2)">配置区 · <strong id="g_form_title">新增工作组节点</strong></span>
+            <button class="icon-btn" id="g_cancel_edit" style="display:none" onclick="resetWgForm()">取消编辑</button>
+          </div>
+          <div style="flex:1;min-height:0;border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;overflow:hidden">
+            <div class="form-group" style="flex-shrink:0"><label>名称 *</label><input type="text" class="form-input" id="g_new_name" placeholder="如：核算部 / 收入组"></div>
+            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>上级工作组</label><select class="form-select" id="g_new_parent" onchange="onWgParentChange()"></select></div>
+            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label id="g_leader_label">部门长（团队成员，可选）</label>
+              <select class="form-select" id="g_new_leader"><option value="">未选定</option></select>
+            </div>
+            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>职能说明（可选）</label><textarea class="form-textarea" id="g_new_desc" rows="2" placeholder="描述该工作组的职责或功能" style="width:100%"></textarea></div>
+            <div class="form-group" style="margin-top:10px;display:flex;flex-direction:column;min-height:0">
+              <label id="g_boards_label" style="flex-shrink:0">板块绑定（可选）</label>
+              <input type="text" id="g_boards_search" class="form-input" placeholder="搜索板块（名称/ID）" style="margin-top:6px;flex-shrink:0;height:32px;font-size:13px">
+              <div id="g_new_boards" style="display:flex;flex-direction:column;gap:6px;max-height:168px;overflow:auto;margin-top:6px"></div>
+              <div style="font-size:12px;color:var(--text3);margin-top:4px;flex-shrink:0" id="g_boards_hint">先为部门配置看板，其子组只能选择部门范围内的看板；留空=不限制。</div>
+            </div>
+            <button class="btn-primary" id="g_submit_btn" onclick="submitWgForm()" style="width:100%;margin-top:12px;height:36px;flex-shrink:0">添加</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 看板管理弹窗：主从布局（左=真实看板列表，右=编辑区域） -->
+<style>
+.bc-wrap{display:flex;gap:0;flex:1;min-height:0;overflow:hidden}
+.bc-left{width:340px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+.bc-left-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
+.bc-left-head .t{font-size:13px;font-weight:600;color:var(--text)}
+.bc-left-head .c{font-size:11px;color:var(--text2);background:var(--bg);padding:1px 8px;border-radius:10px}
+.bc-filter{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0;display:grid;grid-template-columns:repeat(2,1fr);gap:8px 10px}
+.bc-filter-row{display:flex;flex-direction:column;gap:4px}
+.bc-filter-row .lab{font-size:11px;color:var(--text2);font-weight:500}
+.bc-filter-row select{padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);outline:none;cursor:pointer;transition:all .15s}
+.bc-filter-row select:hover{border-color:var(--primary)}
+.bc-filter-row select:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(0,45,116,.12)}
+.bc-list{flex:1;min-height:0;overflow:hidden;padding:10px}
+.bc-item{display:flex;flex-direction:column;gap:5px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:all .15s;background:var(--card)}
+.bc-item:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
+.bc-item.active{border-color:var(--primary);background:#faf7ef;box-shadow:0 0 0 2px rgba(0,45,116,.14)}
+.bc-item .nm{font-size:13.5px;font-weight:500;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.bc-item .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2)}
+.bc-item .cnt{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:0 8px;font-size:11px}
+.bc-right{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
+.bc-edit{margin:0 auto;padding:20px 22px;display:flex;flex-direction:column;gap:18px;max-width:640px;width:100%;box-sizing:border-box}
+.bc-edit-title{font-size:15px;font-weight:600;color:var(--text);display:flex;align-items:baseline;gap:8px}
+.bc-edit-title .sub{font-size:12px;font-weight:400;color:var(--text2)}
+.bc-boardcard{display:flex;align-items:center;gap:12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.bc-boardcard .bi-name{font-size:14px;font-weight:600;color:var(--text)}
+.bc-boardcard .bi-meta{font-size:12px;color:var(--text2);margin-top:2px}
+.bc-section{display:flex;flex-direction:column;gap:9px}
+.bc-section > .lab{font-size:12.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
+.bc-section > .lab .req{color:var(--danger);font-size:12px}
+.bc-pills{display:flex;flex-wrap:wrap;gap:8px}
+.bc-pill{border:1px solid var(--border);background:var(--card);color:var(--text);padding:7px 16px;border-radius:20px;font-size:13px;cursor:pointer;transition:all .15s;user-select:none}
+.bc-pill:hover{border-color:var(--primary);color:var(--primary)}
+.bc-pill.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(0,45,116,.25)}
+.bc-pill.on.warn{background:var(--warning);border-color:var(--warning);box-shadow:0 2px 8px rgba(250,173,20,.3)}
+.bc-empty-edit{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:var(--text2);font-size:13px;gap:10px;padding:50px;text-align:center}
+.bc-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
+.badge-active{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:rgba(0,45,116,.10);color:#002D74;border:1px solid rgba(0,45,116,.30)}
+.badge-locked{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff7e6;color:var(--warning);border:1px solid #ffd591}
+.badge-muted{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:var(--bg);color:var(--text3);border:1px solid var(--border)}
+</style>
+
+<div class="modal-overlay" id="boardConfigModal" style="display:none">
+  <div class="modal" style="width:min(1060px,96vw);max-height:min(90vh,860px);overflow:hidden;display:flex;flex-direction:column">
+    <div class="modal-header"><h2>📊 看板管理</h2><button class="modal-close" onclick="closeModal('boardConfigModal')">✕</button></div>
+    <div class="modal-body" style="flex:1;min-height:0;display:flex;flex-direction:column;gap:0;overflow:hidden">
+      <div class="bc-wrap">
+        <div class="bc-left">
+          <div class="bc-left-head">
+            <span class="t">真实看板</span>
+            <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-primary" style="padding:4px 11px;font-size:12px" onclick="configBoard()">+ 新建</button></span>
+          </div>
+          <div class="bc-filter" id="bcFilter">
+            <div class="bc-filter-row"><span class="lab">年份</span><select id="bcf_year" onchange="bcFilterChange('year',this.value)"></select></div>
+            <div class="bc-filter-row"><span class="lab">归属部门</span><select id="bcf_dept" onchange="bcFilterChange('dept',this.value)"></select></div>
+            <div class="bc-filter-row"><span class="lab">属性</span><select id="bcf_attr" onchange="bcFilterChange('attr',this.value)"></select></div>
+            <div class="bc-filter-row"><span class="lab">状态</span><select id="bcf_status" onchange="bcFilterChange('status',this.value)"></select></div>
+          </div>
+          <div class="bc-list" id="bcList"></div>
+        </div>
+        <div class="bc-right">
+          <div id="bcEditArea"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 操作日志弹窗（仅管理员） -->
+<div class="modal-overlay" id="auditModal" style="display:none">
+  <div class="modal" style="width:min(1080px,96vw);max-height:min(92vh,860px);overflow:hidden;display:flex;flex-direction:column">
+    <div class="modal-header"><h2>📋 操作日志</h2><button class="modal-close" onclick="closeModal('auditModal')">✕</button></div>
+    <div class="modal-body" style="flex:1;min-height:0;display:flex;flex-direction:column;gap:0;overflow:hidden">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;flex-shrink:0">
+        <div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">开始日期</label><input type="date" class="form-input" id="audit_start" style="width:140px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">结束日期</label><input type="date" class="form-input" id="audit_end" style="width:140px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">操作类型</label><select class="form-select" id="audit_action" style="width:130px"><option value="">全部</option></select></div>
+        <div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">账号名</label><input type="text" class="form-input" id="audit_username" placeholder="模糊匹配" style="width:110px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">IP 地址</label><input type="text" class="form-input" id="audit_ip" placeholder="模糊匹配" style="width:120px"></div>
+        <div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">结果</label><select class="form-select" id="audit_result" style="width:100px"><option value="">全部</option><option value="success">成功</option><option value="failed">失败</option></select></div>
+        <button class="btn-primary" onclick="loadAuditLogs(1)" style="flex-shrink:0">查询</button>
+        <button class="btn-secondary" onclick="resetAuditFilter()">重置</button>
+      </div>
+      <div id="auditList" style="flex:1;min-height:0;overflow:auto"></div>
+      <div id="auditPager" style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:10px;font-size:13px;flex-shrink:0"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 账号管理弹窗（管理员） -->
+<div class="modal-overlay" id="adminModal" style="display:none">
+  <div class="modal" style="width:760px">
+    <div class="modal-header"><h2>🔐 账号密码配置</h2><button class="modal-close" onclick="closeModal('adminModal')">✕</button></div>
+    <div class="modal-body">
+      <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:10px 14px;font-size:12.5px;color:#0050b3;margin-bottom:12px">
+        在此创建登录账号并分配角色与看板权限。角色：<b>管理员</b>=全部权限 · <b>可编辑</b>=可增删改 · <b>只读</b>=仅查看。新成员先从「团队成员」或「从数据同步」加入名单，再在下方建号。
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px">
+        <div class="form-row" style="margin-bottom:8px">
+          <div class="form-group"><label>账号</label><input type="text" class="form-input" id="au_name" placeholder="登录账号"></div>
+          <div class="form-group"><label>初始密码</label><input type="text" class="form-input" id="au_pwd" placeholder="设置密码"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>角色</label><select class="form-select" id="au_role"><option value="viewer">只读</option><option value="editor">可编辑</option><option value="admin">管理员</option></select></div>
+          <div class="form-group"><label>可见看板（逗号分隔 ID，* = 全部）</label><input type="text" class="form-input" id="au_boards" placeholder="* 或 1162069797001000245,1162069797001000242"></div>
+        </div>
+        <div style="margin-top:10px"><button class="btn-primary" onclick="adminCreateUser()">创建账号</button></div>
+      </div>
+      <div style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:#fafafa"><th style="padding:8px 10px;text-align:left">账号</th><th style="padding:8px 10px;text-align:left">角色</th><th style="padding:8px 10px;text-align:left">可见看板</th><th style="padding:8px 10px;text-align:left">板块细分</th><th style="padding:8px 10px;text-align:left">操作</th></tr></thead>
+          <tbody id="adminUserList"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 板块权限配置弹窗 -->
+<div class="modal-overlay" id="colModal" style="display:none">
+  <div class="modal" style="width:700px">
+    <div class="modal-header"><h2>板块权限配置：<span id="cm_user"></span></h2><button class="modal-close" onclick="closeModal('colModal')">✕</button></div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;margin-bottom:10px;align-items:center">
+        <label style="font-size:13px;color:var(--text2)">权限模式：</label>
+        <select class="form-select" id="cm_mode" style="flex:1" onchange="cmModeChange()">
+          <option value="*">全部板块</option>
+          <option value="custom">按板块细分</option>
+        </select>
+      </div>
+      <div id="cm_boards" style="display:none;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px">勾选该用户可见的看板与板块（不勾的板块不可见）</div>
+        <div id="cm_board_list"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-default" onclick="closeModal('colModal')">取消</button>
+      <button class="btn-primary" onclick="saveColPerm()">保存权限</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- 右侧抽屉：父事项 + 子事项 -->
+<div class="drawer-mask" id="drawerMask" onclick="closeDrawer()"></div>
+<aside class="drawer" id="drawerPanel">
+  <div class="drawer-head">
+    <button class="drawer-back" id="drawerBack" onclick="drawerBack()" title="返回">←</button>
+    <span class="drawer-title" id="drawerTitle">子事项</span>
+    <button class="drawer-close" onclick="closeDrawer()" title="关闭">✕</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script>
+let TOKEN=localStorage.getItem('tk')||'';
+const COST_BOARD_ID='1162069797001000241';
+function isCostCard(c){return c&&c.board_id===COST_BOARD_ID}
+function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_edit}
+let ME=null, curBoard='', curPage=1, pageSize=100, debounceT=null, editing=null, editLockTimer=null;
+let DETAIL_ID=null, TEAM_MEMBERS=[], expandedAll=false;
+
+function api(path,opts={}){
+  const o={headers:{'Authorization':'Bearer '+TOKEN},...opts};
+  if(opts.body)o.headers['Content-Type']='application/json';
+  return fetch(apiUrl(path),o).then(async r=>{
+    if(r.status===401){goLogin();throw new Error('unauth')}
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    return d;
+  });
+}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)}
+function logout(){
+  // 登出前上报审计日志（fire-and-forget）
+  try{fetch('/api/logout',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})}catch(e){}
+  localStorage.removeItem('tk');goLogin()
+}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+// 密码可见性切换（小眼睛）
+const EYE_ON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+function pwdEyeHtml(inputId){return `<button type="button" class="pwd-eye" onclick="togglePwd('${inputId}',this)" title="显示/隐藏密码">${EYE_ON}</button>`}
+function togglePwd(inputId,btn){
+  const inp=document.getElementById(inputId);
+  if(!inp)return;
+  const show=inp.type==='password';
+  inp.type=show?'text':'password';
+  btn.innerHTML=show?EYE_OFF:EYE_ON;
+  btn.title=show?'隐藏密码':'显示密码';
+  inp.focus();
+}
+// 生成随机密码（10位，无易混字符）并明文显示，供超管为历史账号重置后"看到当下密码"
+function genPwd(mid){
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let p='';
+  for(let i=0;i<10;i++)p+=chars[Math.floor(Math.random()*chars.length)];
+  const inp=document.getElementById('tm_pwd_'+mid);
+  if(inp){inp.type='text';inp.value=p;inp.focus();inp.select()}
+}
+function debounceReload(){clearTimeout(debounceT);debounceT=setTimeout(()=>reload(1),400)}
+function closeModal(id){document.getElementById(id).style.display='none'}
+// 是否有任意弹窗处于打开状态（display 不为 none）
+function anyModalOpen(){
+  return [...document.querySelectorAll('.modal-overlay')].some(o=>o.style.display==='flex'||getComputedStyle(o).display!=='none');
+}
+// 弹窗打开时锁定背景滚动；全部关闭后释放
+function updateScrollLock(){
+  document.documentElement.classList.toggle('modal-open',anyModalOpen());
+}
+// 弹窗/下拉面板出现后，滚轮/触摸仅对浮层内部有效：可滚动区域照常滚，否则拦截以防止穿透到底层看板
+function modalScrollGuard(e){
+  const hasFloat=anyModalOpen()||document.querySelector('.tree-pick,.combo-panel');
+  if(!hasFloat)return;
+  const container=e.target.closest?e.target.closest('.modal-overlay,.tree-pick,.combo-panel'):null;
+  if(!container){e.preventDefault();return;}
+  const dy=e.deltaY||0;
+  let el=e.target;let scrollable=null;
+  while(el&&el!==overlay){
+    const oy=getComputedStyle(el).overflowY;
+    const scrollableNow=(oy==='auto'||oy==='scroll')&&el.scrollHeight>el.clientHeight+1;
+    if(scrollableNow){
+      if(e.type==='touchmove'){scrollable=el;break;}
+      const canDown=el.scrollTop+el.clientHeight<el.scrollHeight-1;
+      const canUp=el.scrollTop>1;
+      if((dy>0&&canDown)||(dy<0&&canUp)){scrollable=el;break;}
+    }
+    el=el.parentElement;
+  }
+  if(!scrollable)e.preventDefault();
+}
+document.addEventListener('wheel',modalScrollGuard,{passive:false,capture:true});
+document.addEventListener('touchmove',modalScrollGuard,{passive:false,capture:true});
+function setupDraggableModals(){
+  document.querySelectorAll('.modal-overlay').forEach(overlay=>{
+    const modal=overlay.querySelector('.modal');
+    if(!modal)return;
+    if(modal.dataset.dragInited)return;
+    modal.dataset.dragInited='1';
+    modal.addEventListener('mousedown',e=>{
+      if(e.button!==0)return;
+      // 内容区、表单元素、按钮、链接不触发拖拽
+      if(e.target.closest('button,input,select,textarea,a,[contenteditable]'))return;
+      if(e.target.closest('.modal-body'))return;
+      e.preventDefault();
+      closeTreePick();
+      const startX=e.clientX,startY=e.clientY;
+      const tx=parseFloat(modal.dataset.dragX||0),ty=parseFloat(modal.dataset.dragY||0);
+      modal.classList.add('modal-dragging');
+      function move(ev){
+        const dx=ev.clientX-startX,dy=ev.clientY-startY;
+        const nx=tx+dx,ny=ty+dy;
+        modal.dataset.dragX=nx;modal.dataset.dragY=ny;
+        modal.style.transform='translate('+nx+'px,'+ny+'px)';
+      }
+      function up(){
+        document.removeEventListener('mousemove',move);
+        document.removeEventListener('mouseup',up);
+        modal.classList.remove('modal-dragging');
+      }
+      document.addEventListener('mousemove',move);
+      document.addEventListener('mouseup',up);
+    });
+    const mo=new MutationObserver(()=>{
+      const d=overlay.style.display;
+      if(d!=='none'&&d!==''){
+        modal.style.transform='';
+        modal.dataset.dragX='0';
+        modal.dataset.dragY='0';
+      }
+      updateScrollLock();
+    });
+    mo.observe(overlay,{attributes:true,attributeFilter:['style']});
+  });
+}
+function avatarColor(name){const colors=['#1890ff','#52c41a','#faad14','#722ed1','#eb2f96','#13c2c2','#fa8c16','#2f54eb'];let h=0;for(const c of name)h=(h*31+c.charCodeAt(0))>>>0;return colors[h%colors.length]}
+function initials(name){return name?name.slice(0,2):'??'}
+
+async function init(){
+  if(!TOKEN){goLogin();return}
+  try{
+    ME=await api('/api/me');
+    document.getElementById('userName').textContent='👤 '+ME.username;
+    document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
+    document.getElementById('roleTag').className='role-tag role-'+ME.role;
+    if(!ME.is_admin){document.getElementById('teamBtn').style.display='none';document.getElementById('wgBtn').style.display='none';document.getElementById('auditBtn').style.display='none'}
+    if(ME.can_edit)document.getElementById('newBtn').style.display='';
+    updateNewBtn();
+    const team=await api('/api/team');
+    TEAM_MEMBERS=(team.members||[]).map(m=>m.name);
+    renderTabs();renderProgress();reload(1);connectWS();setupDraggableModals();
+  }catch(e){toast(e.message)}
+}
+function renderTabs(){
+  const tabs=document.getElementById('boardTabs');
+  tabs.innerHTML=`<button class="tab-btn ${curBoard===''?'active':''}" onclick="pickBoard('')">全部看板<span class="tab-count">${ME.boards.length}</span></button>`+
+    ME.boards.map(b=>`<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')">${esc(b.board_name)}${b.board_id===COST_BOARD_ID?' 🔒':''}</button>`).join('')+
+    (ME.is_admin?`<button class="tab-btn tab-add" onclick="openBoardModal()" title="新建看板">＋ 新建看板</button>`:'');
+}
+function pickBoard(bid){curBoard=bid;renderTabs();reload(1);updateNewBtn()}
+function updateNewBtn(){
+  const btn=document.getElementById('newBtn');
+  if(!btn||!ME)return;
+  if(!ME.can_edit){btn.style.display='none';return}
+  // editor 在成本看板不允许新建
+  btn.style.display=(curBoard===COST_BOARD_ID&&!ME.is_admin)?'none':'';
+}
+async function renderProgress(){
+  const ov=await api('/api/overview');
+  const rate=ov.total?Math.round(ov.done/ov.total*100):0;
+  document.getElementById('progressOverview').innerHTML=`
+    <div class="stat-card"><div class="stat-label">总事项</div><div class="stat-value blue">${ov.total}</div></div>
+    <div class="stat-card"><div class="stat-label">已完成</div><div class="stat-value green">${ov.done}</div></div>
+    <div class="stat-card"><div class="stat-label">进行中</div><div class="stat-value blue">${ov.progressing||0}</div></div>
+    <div class="stat-card"><div class="stat-label">未完成</div><div class="stat-value orange">${ov.open}</div></div>`;
+  // 负责人下拉
+  const os_=document.getElementById('ownerFilter');
+  if(os_.options.length<=1){
+    ov.owners.forEach(o=>{const op=document.createElement('option');op.value=o.owner;op.textContent=o.owner;os_.appendChild(op)});
+  }
+}
+async function reload(page){
+  curPage=page;
+  const ps=new URLSearchParams({page:curPage,size:pageSize});
+  const s=document.getElementById('statusFilter').value,o=document.getElementById('ownerFilter').value,
+        q=document.getElementById('searchInput').value.trim();
+  if(curBoard)ps.set('board_id',curBoard);
+  if(s)ps.set('status',s);if(o)ps.set('owner',o);if(q)ps.set('q',q);
+  const d=await api('/api/cards?'+ps);
+  renderBoard(d.cards);
+}
+function renderBoard(cards){
+  const c=document.getElementById('boardContent');
+  if(!cards.length){c.innerHTML='<div class="empty">没有符合条件的工作事项</div>';return}
+  // 按 column_name 分组
+  const groups={};
+  cards.forEach(card=>{const k=card.column_name||'未分组';(groups[k]=groups[k]||[]).push(card)});
+  const order=Object.keys(groups).sort();
+  c.innerHTML=order.map((k,i)=>{
+    const list=groups[k];
+    const done=list.filter(x=>x.status==='done').length;
+    const rate=Math.round(done/list.length*100);
+    return `<div class="week-group open" id="wg_${i}">
+      <div class="week-header" onclick="toggleWeek(${i})">
+        <span class="chev">▶</span><span class="week-title">${esc(k)}</span>
+        <span class="week-meta">${done}/${list.length} 完成</span>
+        <div class="week-bar"><i style="width:${rate}%"></i></div>
+      </div>
+      <div class="week-body">${list.map(cardItem).join('')}</div>
+    </div>`;
+  }).join('');
+}
+function cardItem(c){
+  const locked=c.locked_by;
+  const lockedByOther=locked&&locked!==ME.username;
+  const lockHtml=lockedByOther?`<span class="lock-tag">🔒 ${esc(locked)} 已锁定</span>`:'';
+  const ops=canEditCard(c)
+    ? (lockedByOther?'<span style="font-size:11px;color:var(--text2)">已锁定</span>'
+      :`<button class="icon-btn" onclick="openEdit('${c.card_id}')">✏️ 编辑</button>`)
+    :(ME.can_edit?`<span style="font-size:11px;color:var(--text2)" title="成本卡仅管理员可编辑">🔒 仅管理员</span>`:'');
+  const overdue=c.due && c.status!=='done' && c.due < new Date().toISOString().slice(0,10);
+  const subBtn=(ME.can_edit||c.sub_count>0)
+    ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="管理子事项">${c.sub_count>0?('子事项 '+c.sub_count):'+ 子事项'}</button>`
+    :'';
+  return `<div class="item-wrap">
+  <div class="item-card ${lockedByOther?'locked':''}">
+    <span class="owner-avatar" style="background:${avatarColor(c.owner||'?')}">${esc(initials(c.owner||'?'))}</span>
+    <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)} ${lockHtml}</span>
+    ${overdue?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
+    <span class="item-date">截止 ${esc(c.due||'—')}</span>
+    ${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}
+    <span class="status-tag ${c.status==='done'?'done':c.status==='progressing'?'progressing':'pending'}">${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</span>
+    ${subBtn}
+    ${ops}
+  </div>
+  </div>`;
+}
+function toggleWeek(i){const g=document.getElementById('wg_'+i);g.classList.toggle('open')}
+function expandAll(){document.querySelectorAll('.week-group').forEach(g=>g.classList.add('open'))}
+function collapseAll(){document.querySelectorAll('.week-group').forEach(g=>g.classList.remove('open'))}
+
+// ---------- 编辑 ----------
+async function lockCard(id){
+  try{await api('/api/cards/'+id+'/lock',{method:'POST'})}
+  catch(e){toast(e.message);return false}
+  editLockTimer=setInterval(()=>{api('/api/cards/'+id+'/heartbeat',{method:'POST'}).catch(()=>{})},30000);
+  return true;
+}
+async function unlockCard(id){clearInterval(editLockTimer);try{await api('/api/cards/'+id+'/unlock',{method:'POST'})}catch(e){}}
+function renderPickers(){
+  initPersonPicker('e_owner',window._editOwner=window._editOwner||[]);
+  initPersonPicker('e_cc',window._editCc=window._editCc||[]);
+}
+async function openEdit(id){
+  if(!ME.can_edit){toast('无编辑权限');return}
+  const d=await api('/api/cards?size=2000');
+  const c=d.cards.find(x=>x.card_id===id);
+  if(!c){toast('卡片不存在');return}
+  if(isCostCard(c)&&!ME.is_admin){toast('成本卡仅管理员可编辑');return}
+  if(c.locked_by&&c.locked_by!==ME.username){toast(`已被 ${c.locked_by} 锁定`);return}
+  if(!await lockCard(id))return;
+  editing=id;
+  window._editOwner=(c.owner||'').split(';').filter(Boolean);
+  window._editCc=(c.cc||'').split(';').filter(Boolean);
+  document.getElementById('e_name').value=c.card_name||'';
+  document.getElementById('e_status').value=c.status==='done'?'done':c.status==='progressing'?'progressing':'open';
+  document.getElementById('e_begin').value=c.begin||'';
+  document.getElementById('e_due').value=c.due||'';
+  document.getElementById('e_desc').value=c.description||'';
+  document.getElementById('e_board').innerHTML=ME.boards.map(b=>`<option value="${b.board_id}" ${b.board_id===c.board_id?'selected':''}>${esc(b.board_name)}</option>`).join('');
+  renderPickers();
+  document.getElementById('editModal').style.display='flex';
+  loadEditSubtasks(id);
+}
+async function saveEdit(){
+  const id=editing;
+  const fields={
+    card_name:document.getElementById('e_name').value,
+    status:document.getElementById('e_status').value,
+    status_name:document.getElementById('e_status').value==='done'?'已完成':document.getElementById('e_status').value==='progressing'?'进行中':'未完成',
+    owner:(window._editOwner||[]).join(';'),
+    cc:(window._editCc||[]).join(';'),
+    begin:document.getElementById('e_begin').value,
+    due:document.getElementById('e_due').value,
+    description:document.getElementById('e_desc').value,
+  };
+  try{
+    // 跨看板移动
+    const nb=document.getElementById('e_board').value;
+    const cur=await api('/api/cards?size=2000');
+    const c=cur.cards.find(x=>x.card_id===id);
+    if(c&&nb!==c.board_id){
+      await api('/api/cards/'+id+'/move',{method:'PUT',body:JSON.stringify({board_id:nb,column_id:'',column_name:''})});
+    }
+    await api('/api/cards/'+id,{method:'PUT',body:JSON.stringify({fields})});
+    toast('已保存');closeEdit();reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+async function deleteCard(){
+  if(!confirm('确定删除该事项？删除后不可恢复'))return;
+  try{await api('/api/cards/'+editing,{method:'DELETE'});toast('已删除');closeEdit();reload(1);renderProgress()}
+  catch(e){toast(e.message)}
+}
+function closeEdit(){
+  document.getElementById('editModal').style.display='none';
+  if(editing)unlockCard(editing);
+  editing=null;
+}
+async function openNewModal(){
+  document.getElementById('n_board').innerHTML=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID).map(b=>`<option value="${b.board_id}">${esc(b.board_name)}</option>`).join('');
+  document.getElementById('n_name').value='';document.getElementById('n_desc').value='';
+  document.getElementById('newModal').style.display='flex';
+}
+async function createCard(){
+  const board_id=document.getElementById('n_board').value;
+  const card_name=document.getElementById('n_name').value.trim();
+  if(!card_name){toast('标题不能为空');return}
+  const board=ME.boards.find(b=>b.board_id===board_id);
+  try{
+    await api('/api/cards',{method:'POST',body:JSON.stringify({board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:{description:document.getElementById('n_desc').value}})});
+    toast('已创建');closeModal('newModal');reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+// ---------- 新建看板（管理员） ----------
+function openBoardModal(){
+  document.getElementById('b_name').value='';
+  document.getElementById('b_ws').value='';
+  document.getElementById('b_owner').value=ME.username||'';
+  document.getElementById('boardModal').style.display='flex';
+}
+async function createBoard(){
+  const board_name=document.getElementById('b_name').value.trim();
+  if(!board_name){toast('看板名称不能为空');return}
+  const workspace_id=document.getElementById('b_ws').value.trim();
+  const owner=document.getElementById('b_owner').value.trim();
+  try{
+    const r=await api('/api/boards',{method:'POST',body:JSON.stringify({board_name,workspace_id,owner})});
+    toast('看板已创建：'+board_name);
+    closeModal('boardModal');
+    ME=await api('/api/me');           // 刷新看板列表（含新建看板）
+    curBoard=r.board_id;               // 自动切换到新看板（初始为空）
+    renderTabs();updateNewBtn();
+    reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+// ---------- 子事项 ----------
+var EDIT_SUBTASKS=[];
+function renderSubtasks(list,listEl,countEl,editable,cardId){
+  const done=list.filter(s=>s.done).length;
+  countEl.textContent=`${done}/${list.length} 已完成`;
+  if(!list.length){listEl.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px 0">暂无代办任务</div>';return}
+  listEl.innerHTML=list.map(s=>{
+    const who=s.done_by?`<span class="st-who">✓ ${esc(s.done_by)}</span>`:'';
+    const del=editable?`<button class="st-del" onclick="delSubtask(${s.id},'${cardId||''}')" title="删除">✕</button>`:'';
+    return `<div class="subtask-item ${s.done?'done':''}" id="st_${s.id}">
+      ${editable?`<input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask(${s.id},this.checked,'${cardId||''}')">`:''}
+      <span class="st-text" ${editable?`onclick="editSubtaskTitle(${s.id})"`:''} title="点击编辑标题">${esc(s.title)}</span>
+      ${who}${del}
+    </div>`;
+  }).join('');
+}
+async function loadEditSubtasks(cardId){
+  const d=await api('/api/cards/'+cardId+'/subtasks');
+  EDIT_SUBTASKS=d.subtasks;
+  renderSubtasks(EDIT_SUBTASKS,document.getElementById('e_subtask_list'),document.getElementById('e_subtask_count'),true,cardId);
+}
+async function addSubtask(){
+  const title=document.getElementById('e_subtask_new').value.trim();
+  if(!title){toast('请输入代办任务内容');return}
+  try{
+    await api('/api/cards/'+editing+'/subtasks',{method:'POST',body:JSON.stringify({title})});
+    document.getElementById('e_subtask_new').value='';
+    await loadEditSubtasks(editing);
+  }catch(e){toast(e.message)}
+}
+async function toggleSubtask(sid,checked,cardId){
+  cardId=cardId||editing;
+  if(!cardId)return;
+  try{
+    await api('/api/cards/'+cardId+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({done:checked?1:0})});
+    await loadEditSubtasks(cardId);
+  }catch(e){toast(e.message);loadEditSubtasks(cardId)}
+}
+async function delSubtask(sid,cardId){
+  if(!confirm('删除该代办任务？'))return;
+  cardId=cardId||editing;
+  if(!cardId)return;
+  try{
+    await api('/api/cards/'+cardId+'/subtasks/'+sid,{method:'DELETE'});
+    await loadEditSubtasks(cardId);
+  }catch(e){toast(e.message)}
+}
+async function editSubtaskTitle(sid){
+  const item=EDIT_SUBTASKS.find(s=>s.id===sid);if(!item)return;
+  const cell=document.getElementById('st_'+sid).querySelector('.st-text');
+  cell.innerHTML=`<input type="text" value="${esc(item.title)}" onkeydown="if(event.key==='Enter')this.blur()" onblur="saveSubtaskTitle(${sid},this.value)">`;
+  const inp=cell.querySelector('input');inp.focus();inp.select();
+}
+async function saveSubtaskTitle(sid,title){
+  title=(title||'').trim();
+  if(!title){await loadEditSubtasks(editing);return}
+  try{
+    await api('/api/cards/'+editing+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({title})});
+    await loadEditSubtasks(editing);
+  }catch(e){toast(e.message);loadEditSubtasks(editing)}
+}
+// ---------- 右侧抽屉：父事项 + 子事项 ----------
+var DRAWER_STACK=[];      // [{type:'list',cardId} | {type:'edit',cardId,parentId}]
+var DRAWER_OWNER=[];
+function stBadge(s){return `<span class="status-tag ${s==='done'?'done':s==='progressing'?'progressing':'pending'}" style="padding:1px 8px;font-size:11px">${s==='done'?'已完成':s==='progressing'?'进行中':'未完成'}</span>`}
+function todayStr(){return new Date().toISOString().slice(0,10)}
+// ---------- 人员选择器：下拉 + 输入（输入必须命中成员名单） ----------
+var PP={};
+function ppMembers(){
+  return TEAM_MEMBERS.length?TEAM_MEMBERS:['吴春梅','吴海霞','曾玉梅','谭亚利','林园园','何巧娴'];
+}
+function initPersonPicker(containerId,arr){
+  const el=document.getElementById(containerId);
+  if(!el)return;
+  const ALL=ppMembers();
+  el.innerHTML=`<div class="pp">
+    <div class="pp-tags"></div>
+    <div class="pp-ip"><input class="pp-in" placeholder="搜索或输入成员名…" autocomplete="off"><div class="pp-drop"></div></div>
+  </div>`;
+  const tags=el.querySelector('.pp-tags'),inp=el.querySelector('.pp-in'),drop=el.querySelector('.pp-drop');
+  PP[containerId]={arr,tags,inp,drop,ALL};
+  const rt=()=>{tags.innerHTML=arr.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="ppRemove('${containerId}','${esc(n)}')">×</i></span>`).join('')};
+  const rd=(f)=>{const list=ALL.filter(n=>!f||n.includes(f));
+    drop.innerHTML=list.map(n=>`<div class="pp-opt ${arr.includes(n)?'sel':''}" onmousedown="ppToggle('${containerId}','${esc(n)}')">${esc(n)}</div>`).join('')
+      ||'<div class="pp-empty">无匹配成员</div>';
+    drop.style.display='block';};
+  rt();
+  inp.addEventListener('focus',()=>rd(inp.value));
+  inp.addEventListener('input',()=>rd(inp.value));
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();ppAddTyped(containerId)}});
+  inp.addEventListener('blur',()=>setTimeout(()=>{drop.style.display='none'},180));
+}
+// ---------- 树形多选选择器（工作组选择：点击展开/折叠 + 勾选） ----------
+var TREE_PICK=null;
+function openTreePick(anchorEl, selected, onConfirm, opts){
+  closeTreePick();
+  const mode=(opts&&opts.mode)||'select';   // 'select'=联动全选孙级；'filter'=仅 toggle 自身（用于筛选）
+  opts=opts||{};
+  const panel=document.createElement('div');
+  panel.className='tree-pick';
+  const PW=opts.width||340;
+  const maxH=Math.max(160,Math.min(opts.height||360,window.innerHeight-20));
+  // 先挂载并渲染，拿到面板“真实”高度再定位。
+  // 旧逻辑用估算高度(PHmax)在渲染前定位置，面板偏矮时下方留出大段空隙→视觉上“上飘/脱节”。
+  panel.style.width=PW+'px';
+  panel.style.maxHeight=maxH+'px';
+  panel.style.display='flex';
+  panel.style.flexDirection='column';
+  document.body.appendChild(panel);
+  // 过滤孤儿引用：selected 里已不在架构树中的名字（如已删除的工作组）直接丢弃，防止残留回写
+  const treeSource = opts.tree || WG_ALL;  // 可指定渲染源（架构筛选传入含虚拟节点的扩展树）
+  const validNames=new Set();
+  (function flat(ns){ (ns||[]).forEach(n=>{ validNames.add(n.name); flat(n.children||[]); }); })(treeSource||[]);
+  TREE_PICK={panel, selected:[...(selected||[])].filter(x=>validNames.has(x)||x.startsWith('__')), onConfirm, expanded:new Set(), mode, tree: treeSource, showSelectAll: !!opts.showSelectAll};
+  renderTreePick();
+  const ph=Math.min(panel.offsetHeight, maxH);          // 真实渲染高度（关键：消除估算高度导致的空隙）
+  const vh=window.innerHeight, vw=window.innerWidth;
+  const r0=anchorEl.getBoundingClientRect();
+  const margin=40;
+  const belowTop=r0.bottom+4;
+  const aboveTop=r0.top-ph-4;
+  let top;
+  // 优先策略：按钮在视口下半区（或下方放不下）时，向上展开，彻底避免底部溢出
+  const wantAbove=(r0.top > vh*0.55) || (belowTop+ph+margin > vh);
+  if(wantAbove){
+    if(aboveTop >= margin){ top=aboveTop; }                       // 上方充足 → 向上展开
+    else if(belowTop+ph+margin <= vh){ top=belowTop; }            // 上方不够但下方够 → 向下
+    else { top=Math.max(margin, vh-margin-ph); panel.style.maxHeight=Math.max(140, vh-margin-top)+'px'; } // 都紧张 → 限高贴顶
+  } else {
+    if(belowTop+ph+margin <= vh){ top=belowTop; }                  // 默认：向下展开
+    else if(aboveTop >= margin){ top=aboveTop; }                  // 下方不够 → 向上
+    else { top=Math.max(margin, vh-margin-ph); panel.style.maxHeight=Math.max(140, vh-margin-top)+'px'; } // 都紧张 → 限高贴顶
+  }
+  const left=Math.max(4,Math.min(r0.left, vw-PW-4));
+  panel.style.left=left+'px';
+  panel.style.top=top+'px';
+  setTimeout(()=>document.addEventListener('mousedown', treePickOutside, true), 0);
+}
+function closeTreePick(){
+  if(TREE_PICK&&TREE_PICK.panel){TREE_PICK.panel.remove();TREE_PICK=null;}
+  document.removeEventListener('mousedown', treePickOutside, true);
+}
+function treePickOutside(e){
+  if(TREE_PICK&&TREE_PICK.panel&&!TREE_PICK.panel.contains(e.target))closeTreePick();
+}
+function renderTreePick(){
+  if(!TREE_PICK)return;
+  const p=TREE_PICK.panel;
+  const title=TREE_PICK.mode==='filter'
+    ? '架构筛选（点击 ▶ 展开，多选）'
+    : '选择工作组（点击 ▶ 展开 / 折叠，选中上级将自动全选下级）';
+  p.innerHTML=`
+    <div style="font-size:12px;color:var(--text2);padding:8px 10px 4px">${title}</div>
+    <div style="flex:1;overflow:auto;padding:2px 6px 6px;min-height:60px">${treePickNodes(TREE_PICK.tree,0)}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--border)">
+      <span style="font-size:12px;color:var(--text3)">已选 <span id="tp_count">${TREE_PICK.selected.length}</span> 项</span>
+      <span style="display:flex;gap:8px;align-items:center">
+        ${TREE_PICK.showSelectAll?'<button id="tp_select_all_btn" class="icon-btn" onclick="tpSelectAll()" title="全选所有节点">全选</button>':''}
+        <button class="btn-secondary" onclick="closeTreePick()">取消</button>
+        <button class="btn-primary" onclick="treePickConfirm()">确定</button>
+      </span>
+    </div>`;
+  paintAll();
+  // 初始化"全选"按钮文字：若当前 selected 已包含所有节点，显示"取消全选"；否则显示"全选"
+  const _abtn=document.getElementById('tp_select_all_btn');
+  if(_abtn && TREE_PICK.tree){
+    const _all=[]; (function w(ns){ (ns||[]).forEach(n=>{ _all.push(n.name); w(n.children||[]); }); })(TREE_PICK.tree);
+    _abtn.textContent=(_all.length>0 && _all.every(x=>TREE_PICK.selected.includes(x)))?'取消全选':'全选';
+  }
+}
+function treePickNodes(nodes,dep){
+  return (nodes||[]).map(n=>{
+    const hasCh=n.children&&n.children.length;
+    const exp=TREE_PICK.expanded.has(n.id);
+    const labelText=n.label||n.name;   // 优先显示 label（虚拟节点可定制文案）
+    return `<div class="tp-node" style="padding-left:${dep*16}px">
+      ${hasCh?`<span class="tp-arrow" id="tp_arrow_${n.id}" onclick="tpToggle(${n.id})" title="展开/折叠">${exp?'▼':'▶'}</span>`:'<span class="tp-arrow" style="visibility:hidden">▶</span>'}
+      <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择 ${esc(labelText)}" onclick="tpBoxClick('${esc(n.name)}',${n.id})" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpBoxClick('${esc(n.name)}',${n.id})}"><span class="tp-box" id="tp_box_${n.id}"></span><span>${esc(labelText)}</span></label>
+    </div>${hasCh?`<div id="tp_children_${n.id}" style="display:${exp?'block':'none'}">${treePickNodes(n.children,dep+1)}</div>`:''}`;
+  }).join('');
+}
+function paintAll(){
+  if(!TREE_PICK)return;
+  // filter 模式：用户明确勾选，直接根据自身 selected 绘制（无半选概念，避免视觉与 selected 不一致）
+  if(TREE_PICK.mode==='filter'){
+    (function paint(ns){
+      (ns||[]).forEach(n=>{
+        const box=document.getElementById('tp_box_'+n.id);
+        const kids=n.children||[];
+        if(box){
+          setBox(box, TREE_PICK.selected.includes(n.name)?'on':'off');
+        }
+        paint(kids);
+      });
+    })(TREE_PICK.tree||WG_ALL||[]);
+    const cnt=document.getElementById('tp_count');
+    if(cnt)cnt.textContent=TREE_PICK.selected.length;
+    return;
+  }
+  // select 模式（【选择工作组】标准三态）：
+  // - 叶子：自身被选 → ✓；否则空
+  // - 有子级：子级全选 → ✓；部分子级 → ▣半选；子级全空 → 空（父级 selfSel 不单独撑起）
+  if(TREE_PICK.mode==='select'){
+    const descCache={};
+    (function build(ns){
+      (ns||[]).forEach(n=>{ descCache[n.id]=collectDesc(n); build(n.children||[]); });
+    })(TREE_PICK.tree||WG_ALL||[]);
+    (function paint(ns){
+      (ns||[]).forEach(n=>{
+        const box=document.getElementById('tp_box_'+n.id);
+        const kids=n.children||[];
+        if(box){
+          const allDesc=descCache[n.id]||[];
+          const descSel=allDesc.filter(x=>TREE_PICK.selected.includes(x)).length;
+          const selfSel=TREE_PICK.selected.includes(n.name);
+          if(kids.length===0){
+            setBox(box, selfSel?'on':'off');
+          }else{
+            if(descSel===allDesc.length){
+              setBox(box,'on');       // 子级全选 → ✓
+            }else if(descSel>0){
+              setBox(box,'half');     // 子级部分选 → ▣ 半选
+            }else{
+              setBox(box,'off');      // 子级全空 → 空
+            }
+          }
+        }
+        paint(kids);
+      });
+    })(TREE_PICK.tree||WG_ALL||[]);
+    const cnt=document.getElementById('tp_count');
+    if(cnt)cnt.textContent=TREE_PICK.selected.length;
+    return;
+  }
+}
+function collectDesc(n){
+  const out=[];
+  (n.children||[]).forEach(c=>{ out.push(c.name); out.push(...collectDesc(c)); });
+  return out;
+}
+function normalizeSelected(){ return [...TREE_PICK.selected]; }   // 保留接口（暂不污染 selected）
+function setBox(box,mode){
+  // 勾/横线 用 CSS class 子元素绘制（规范化，替代 inline style）
+  box.className='tp-box'+(mode==='on'||mode==='half'?(' '+mode):'');
+  box.innerHTML = mode==='on' ? '<span class="tp-tick"></span>'
+                 : mode==='half' ? '<span class="tp-bar"></span>'
+                 : '';
+}
+function tpBoxClick(name,id){
+  if(!TREE_PICK)return;
+  const isOn=TREE_PICK.selected.includes(name);
+  const kids=(function find(ns){let r=null;ns.forEach(n=>{if(n.id===id)r=n;else if(!r)r=find(n.children||[])});return r})(WG_ALL);
+  const allDesc=kids?collectDesc(kids):[];
+  const descSel=allDesc.filter(x=>TREE_PICK.selected.includes(x)).length;
+  // 点击父级：若部分/未选 → 全选后代+自身；若全选 → 全取消
+  if(kids&&kids.children&&kids.children.length){
+    if(isOn && descSel===allDesc.length){
+      tpCheck(name,false);      // 全选状态点一下 → 全部取消
+    }else{
+      tpCheck(name,true);       // 未选/部分 → 全选（联动后代）
+    }
+  }else{
+    tpCheck(name,!isOn);        // 叶子：切换自身
+  }
+}
+function tpToggle(id){
+  if(!TREE_PICK)return;
+  TREE_PICK.expanded.has(id)?TREE_PICK.expanded.delete(id):TREE_PICK.expanded.add(id);
+  const exp=TREE_PICK.expanded.has(id);
+  const wrap=document.getElementById('tp_children_'+id);
+  if(wrap)wrap.style.display=exp?'block':'none';
+  const arrow=document.getElementById('tp_arrow_'+id);
+  if(arrow)arrow.textContent=exp?'▼':'▶';
+}
+function tpCheck(name,checked){
+  if(!TREE_PICK)return;
+  // filter 模式（用于筛选）：仅切换自身，不联动孙级
+  if(TREE_PICK.mode==='filter'){
+    const i=TREE_PICK.selected.indexOf(name);
+    if(checked&&i<0)TREE_PICK.selected.push(name);
+    if(!checked&&i>=0)TREE_PICK.selected.splice(i,1);
+    paintAll();
+    return;
+  }
+  // select 模式：选中/取消上级 → 其全部后代联动（含自身）
+  const names=[name];
+  (function walk(ns){
+    (ns||[]).forEach(n=>{
+      if(n.name===name){
+        (function collect(x){
+          (x.children||[]).forEach(c=>{names.push(c.name);collect(c)});
+        })(n);
+      }else walk(n.children||[]);
+    });
+  })(TREE_PICK.tree||WG_ALL||[]);
+  names.forEach(nm=>{
+    const i=TREE_PICK.selected.indexOf(nm);
+    if(checked&&i<0)TREE_PICK.selected.push(nm);
+    if(!checked&&i>=0)TREE_PICK.selected.splice(i,1);
+  });
+  paintAll();   // 只更新视觉，不重建 DOM
+}
+function treePickConfirm(){
+  if(TREE_PICK&&TREE_PICK.onConfirm)TREE_PICK.onConfirm([...TREE_PICK.selected]);
+  closeTreePick();
+}
+var ADD_WG_SEL=[];
+function renderAddWgTags(){
+  const box=document.getElementById('t_new_wg_tags');
+  if(box)box.innerHTML=ADD_WG_SEL.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="removeAddWg('${esc(n)}')">×</i></span>`).join('');
+}
+function removeAddWg(n){
+  const i=ADD_WG_SEL.indexOf(n);if(i>=0)ADD_WG_SEL.splice(i,1);
+  renderAddWgTags();
+}
+function ppSyncTags(containerId){
+  const o=PP[containerId];if(!o)return;
+  o.tags.innerHTML=o.arr.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="ppRemove('${containerId}','${esc(n)}')">×</i></span>`).join('');
+}
+function ppToggle(containerId,n){
+  const o=PP[containerId];if(!o)return;
+  const i=o.arr.indexOf(n);
+  if(i>=0)o.arr.splice(i,1);else o.arr.push(n);
+  ppSyncTags(containerId);
+  o.drop.querySelectorAll('.pp-opt').forEach(d=>{d.classList.toggle('sel',o.arr.includes(d.dataset.name))});
+}
+function ppAddTyped(containerId){
+  const o=PP[containerId];if(!o)return;
+  const v=o.inp.value.trim();
+  if(!v)return;
+  if(!o.ALL.some(x=>(typeof x==='string'?x:x.name)===v)){
+    toast(`「${v}」不在列表中，请从下拉选择`);
+    o.inp.value='';
+    return;
+  }
+  if(!o.arr.includes(v))o.arr.push(v);
+  o.inp.value='';
+  ppSyncTags(containerId);
+}
+function ppRemove(containerId,n){
+  const o=PP[containerId];if(!o)return;
+  const i=o.arr.indexOf(n);if(i>=0)o.arr.splice(i,1);
+  ppSyncTags(containerId);
+}
+async function openDrawer(cardId){
+  DRAWER_STACK=[{type:'list',cardId}];
+  document.getElementById('drawerMask').classList.add('show');
+  document.getElementById('drawerPanel').classList.add('open');
+  await renderDrawer();
+}
+function closeDrawer(){
+  document.getElementById('drawerMask').classList.remove('show');
+  document.getElementById('drawerPanel').classList.remove('open');
+  DRAWER_STACK=[];
+}
+async function drawerBack(){
+  DRAWER_STACK.pop();
+  if(!DRAWER_STACK.length){closeDrawer();return}
+  await renderDrawer();
+}
+async function renderDrawer(){
+  const top=DRAWER_STACK[DRAWER_STACK.length-1];
+  document.getElementById('drawerBack').classList.toggle('show',DRAWER_STACK.length>1);
+  if(top.type==='list'){
+    document.getElementById('drawerTitle').textContent='子事项';
+    await renderDrawerList(top.cardId);
+  }else{
+    document.getElementById('drawerTitle').textContent='编辑子事项';
+    await renderDrawerEdit(top.cardId,top.parentId);
+  }
+}
+async function renderDrawerList(parentId){
+  const body=document.getElementById('drawerBody');
+  body.innerHTML='<div style="color:var(--text2);font-size:13px;padding:30px;text-align:center">加载中…</div>';
+  const pc=await api('/api/cards?card_id='+parentId);
+  const p=pc.cards[0];
+  if(!p){body.innerHTML='<div class="empty-hint">父事项不存在或已删除</div>';return}
+  const d=await api('/api/cards?parent_id='+parentId+'&size=200');
+  const subs=d.cards;
+  const todo=await api('/api/cards/'+parentId+'/subtasks');
+  const tdone=todo.subtasks.filter(x=>x.done).length;
+  const overdue=p.due&&p.status!=='done'&&p.due<todayStr();
+  body.innerHTML=`
+    <div class="pcard">
+      <h3>${esc(p.card_name)}</h3>
+      <div class="pmeta">${stBadge(p.status)}
+        ${p.owner?`<span>负责人：${esc(p.owner)}</span>`:''}
+        ${(p.begin||p.due)?`<span>时间：${p.begin?('开始 '+esc(p.begin)):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(p.due)):''}${overdue?' <b style="color:var(--danger)">已逾期</b>':''}</span>`:''}
+        ${todo.subtasks.length?`<span>代办：${tdone}/${todo.subtasks.length}</span>`:''}
+      </div>
+      ${p.description?`<div class="pdesc">${esc(p.description)}</div>`:''}
+    </div>
+    ${ME.can_edit?`
+    <div class="sub-new expand" id="drawerNewBox">
+      <input id="dn_name" placeholder="输入子事项标题，回车添加（可连续添加多个）…" onkeydown="if(event.key==='Enter')createDrawerSub()" onfocus="expandDrawerNew()">
+      <div class="sn-fields" id="dn_fields">
+        <div class="sn-row">
+          <select class="form-select" id="dn_status"><option value="open">未完成</option><option value="progressing">进行中</option><option value="done">已完成</option></select>
+          <input type="date" class="form-input" id="dn_begin" title="开始日期${p.begin?('（不能早于父事项 '+esc(p.begin)+'）'):'（父事项未设起始时间，不限制）'}" ${p.begin?`min="${esc(p.begin)}"`:''}>
+          <input type="date" class="form-input" id="dn_due" title="截止日期${p.due?('（不能晚于父事项 '+esc(p.due)+'）'):'（父事项未设截止时间，不限制）'}" ${p.due?`max="${esc(p.due)}"`:''}>
+        </div>
+        ${(p.begin||p.due)?`<div style="font-size:11px;color:var(--text2);margin-top:4px">父事项时间范围：${p.begin?('开始 '+esc(p.begin)):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(p.due)):''}</div>`:''}
+        <div class="form-group"><label style="font-size:12px;color:var(--text2)">负责人</label><div class="se-owner" id="dn_owner"></div></div>
+        <div class="form-group"><label style="font-size:12px;color:var(--text2)">描述</label><textarea class="form-textarea" id="dn_desc" rows="2" placeholder="子事项内容简述…"></textarea></div>
+        <div class="sn-actions"><button class="btn-default" onclick="collapseDrawerNew()">收起</button><button class="btn-primary" onclick="createDrawerSub()">创建子事项</button></div>
+      </div>
+    </div>`:''}
+    <div class="sub-sec">子事项 · ${subs.length} 个</div>
+    ${subs.map(s=>{
+      const od=s.due&&s.status!=='done'&&s.due<todayStr();
+      return `<div class="sl-row" onclick="openSubEdit('${s.card_id}','${parentId}')">
+        ${stBadge(s.status)}
+        <div class="sl-main">
+          <div class="sl-name">${esc(s.card_name)}</div>
+          <div class="sl-meta">${[s.owner?('👤 '+esc(s.owner)):'',s.due?('截止 '+esc(s.due)):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
+        </div>
+        ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
+          <button onclick="openSubEdit('${s.card_id}','${parentId}')">编辑</button>
+          <button class="del" onclick="delDrawerSub('${s.card_id}','${parentId}')">删除</button>
+        </div>`:''}
+      </div>`;
+    }).join('')||'<div class="empty-hint">暂无子事项，在上方输入标题创建第一个</div>'}`;
+  if(ME.can_edit)initPersonPicker('dn_owner',DRAWER_OWNER);
+}
+function expandDrawerNew(){
+  const b=document.getElementById('drawerNewBox');
+  if(b&&!b.classList.contains('expand')){b.classList.add('expand');DRAWER_OWNER=[];initPersonPicker('dn_owner',DRAWER_OWNER)}
+}
+function collapseDrawerNew(){document.getElementById('drawerNewBox').classList.remove('expand')}
+async function createDrawerSub(){
+  const parentId=DRAWER_STACK[DRAWER_STACK.length-1].cardId;
+  const name=document.getElementById('dn_name').value.trim();
+  if(!name){toast('子事项标题不能为空');return}
+  const st=document.getElementById('dn_status').value;
+  try{
+    await api('/api/cards',{method:'POST',body:JSON.stringify({
+      parent_id:parentId,board_id:'',card_name:name,
+      fields:{
+        status:st,status_name:st==='done'?'已完成':st==='progressing'?'进行中':'未完成',
+        owner:DRAWER_OWNER.join(';'),
+        begin:document.getElementById('dn_begin').value,
+        due:document.getElementById('dn_due').value,
+        description:document.getElementById('dn_desc').value
+      }
+    })});
+    // 连续添加模式：保持表单展开 + 清空标题 + 焦点留在输入框
+    document.getElementById('dn_name').value='';
+    document.getElementById('dn_desc').value='';
+    document.getElementById('dn_begin').value='';document.getElementById('dn_due').value='';
+    DRAWER_OWNER=[];
+    document.getElementById('drawerNewBox').classList.add('expand');
+    initPersonPicker('dn_owner',DRAWER_OWNER);
+    toast(`已添加「${name}」，可继续输入下一个`);
+    await renderDrawerList(parentId);
+    const inp=document.getElementById('dn_name');
+    if(inp)inp.focus();
+    reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+async function openSubEdit(subId,parentId){
+  DRAWER_STACK.push({type:'edit',cardId:subId,parentId});
+  await renderDrawer();
+}
+async function renderDrawerEdit(subId,parentId){
+  const body=document.getElementById('drawerBody');
+  body.innerHTML='<div style="color:var(--text2);font-size:13px;padding:30px;text-align:center">加载中…</div>';
+  const d=await api('/api/cards?card_id='+subId);
+  const c=d.cards[0];
+  if(!c){body.innerHTML='<div class="empty-hint">子事项不存在或已删除</div>';return}
+  const todo=await api('/api/cards/'+subId+'/subtasks');
+  const pc=parentId?await api('/api/cards?card_id='+parentId):null;
+  const pp=pc&&pc.cards[0]?pc.cards[0]:null;
+  const pBegin=pp?(pp.begin||''):'';
+  const pDue=pp?(pp.due||''):'';
+  DRAWER_OWNER=(c.owner||'').split(';').filter(Boolean);
+  body.innerHTML=`
+    <div class="se-form">
+      <div class="form-group"><label>标题</label><input type="text" class="form-input" id="se_name" value="${esc(c.card_name)}"></div>
+      <div class="sn-row">
+        <div class="form-group" style="flex:1"><label>状态</label><select class="form-select" id="se_status"><option value="open" ${c.status==='open'?'selected':''}>未完成</option><option value="progressing" ${c.status==='progressing'?'selected':''}>进行中</option><option value="done" ${c.status==='done'?'selected':''}>已完成</option></select></div>
+      </div>
+      <div class="sn-row">
+        <div class="form-group" style="flex:1"><label>开始日期</label><input type="date" class="form-input" id="se_begin" value="${esc(c.begin||'')}" title="开始日期${pBegin?('（不能早于父事项 '+esc(pBegin)+'）'):'（父事项未设起始时间，不限制）'}" ${pBegin?`min="${esc(pBegin)}"`:''}></div>
+        <div class="form-group" style="flex:1"><label>截止日期</label><input type="date" class="form-input" id="se_due" value="${esc(c.due||'')}" title="截止日期${pDue?('（不能晚于父事项 '+esc(pDue)+'）'):'（父事项未设截止时间，不限制）'}" ${pDue?`max="${esc(pDue)}"`:''}></div>
+      </div>
+      ${(pBegin||pDue)?`<div style="font-size:11px;color:var(--text2);margin-top:-4px">父事项时间范围：${pBegin?('开始 '+esc(pBegin)):''}${pBegin&&pDue?' ～ ':''}${pDue?('截止 '+esc(pDue)):''}</div>`:''}
+      <div class="form-group"><label>负责人</label><div class="se-owner" id="se_owner"></div></div>
+      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="se_desc" rows="3">${esc(c.description||'')}</textarea></div>
+      <div class="sn-actions" style="justify-content:space-between">
+        <button class="btn-default" style="color:var(--danger);border-color:var(--danger)" onclick="delDrawerSub('${subId}','${parentId}',true)">删除子事项</button>
+        <span style="display:flex;gap:8px">
+          <button class="btn-default" onclick="drawerBack()">返回</button>
+          ${ME.can_edit?`<button class="btn-primary" onclick="saveDrawerSub('${subId}','${parentId}')">保存</button>`:''}
+        </span>
+      </div>
+      <div class="se-todo">
+        <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count">${todo.subtasks.filter(x=>x.done).length}/${todo.subtasks.length}</span></div>
+        <div id="se_todo_list" class="subtask-list"></div>
+        ${ME.can_edit?`<div class="subtask-add"><input type="text" class="form-input" id="se_todo_new" placeholder="添加代办任务，回车确认…" onkeydown="if(event.key==='Enter')addDrawerTodo('${subId}')"><button class="btn-default" onclick="addDrawerTodo('${subId}')">添加</button></div>`:''}
+      </div>
+    </div>`;
+  renderSeTodos(subId,todo.subtasks);
+  if(ME.can_edit)initPersonPicker('se_owner',DRAWER_OWNER);
+}
+function renderSeTodos(subId,list){
+  const el=document.getElementById('se_todo_list');
+  el.innerHTML=list.map(t=>`<div class="subtask-item ${t.done?'done':''}">
+    <input type="checkbox" ${t.done?'checked':''} onchange="toggleSeTodo('${subId}',${t.id},this.checked)">
+    <span class="st-text" style="cursor:default">${esc(t.title)}</span>
+    ${t.done_by?`<span class="st-who">✓ ${esc(t.done_by)}</span>`:''}
+    <button class="st-del" onclick="delSeTodo('${subId}',${t.id})">✕</button>
+  </div>`).join('')||'<div style="color:var(--text2);font-size:12px;padding:4px 0">暂无代办任务</div>';
+}
+async function addDrawerTodo(subId){
+  const v=document.getElementById('se_todo_new').value.trim();
+  if(!v){toast('请输入代办任务内容');return}
+  try{await api('/api/cards/'+subId+'/subtasks',{method:'POST',body:JSON.stringify({title:v})});document.getElementById('se_todo_new').value='';renderDrawerEdit(subId,DRAWER_STACK[DRAWER_STACK.length-1].parentId)}
+  catch(e){toast(e.message)}
+}
+async function toggleSeTodo(subId,sid,checked){
+  try{await api('/api/cards/'+subId+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({done:checked?1:0})});renderDrawerEdit(subId,DRAWER_STACK[DRAWER_STACK.length-1].parentId)}
+  catch(e){toast(e.message)}
+}
+async function delSeTodo(subId,sid){
+  if(!confirm('删除该代办任务？'))return;
+  try{await api('/api/cards/'+subId+'/subtasks/'+sid,{method:'DELETE'});renderDrawerEdit(subId,DRAWER_STACK[DRAWER_STACK.length-1].parentId)}
+  catch(e){toast(e.message)}
+}
+async function saveDrawerSub(subId,parentId){
+  const st=document.getElementById('se_status').value;
+  try{
+    await api('/api/cards/'+subId,{method:'PUT',body:JSON.stringify({fields:{
+      card_name:document.getElementById('se_name').value,
+      status:st,status_name:st==='done'?'已完成':st==='progressing'?'进行中':'未完成',
+      owner:DRAWER_OWNER.join(';'),
+      begin:document.getElementById('se_begin').value,
+      due:document.getElementById('se_due').value,
+      description:document.getElementById('se_desc').value
+    }})});
+    toast('已保存');
+    await renderDrawerList(parentId);
+    DRAWER_STACK.pop();
+    await renderDrawer();
+    reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+async function delDrawerSub(subId,parentId,stay){
+  if(!confirm('删除该子事项？不可恢复'))return;
+  try{
+    await api('/api/cards/'+subId,{method:'DELETE'});
+    toast('已删除');
+    if(stay){
+      DRAWER_STACK.pop();
+      await renderDrawerList(parentId);
+      await renderDrawer();
+    }else{
+      await renderDrawerList(parentId);
+    }
+    reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
+// ---------- 详情 + 评论 ----------
+async function openDetail(id){
+  DETAIL_ID=id;
+  const d=await api('/api/cards?size=2000');
+  const c=d.cards.find(x=>x.card_id===id);
+  if(!c){toast('卡片不存在');return}
+  const cs=await api('/api/cards/'+id+'/comments');
+  const acts=await api('/api/cards/'+id+'/actions');
+  document.getElementById('d_title').textContent=c.card_name||'';
+  document.getElementById('d_meta').innerHTML=
+    `看板：<b>${esc(c.board_name)}</b>　板块：<b>${esc(c.column_name||'—')}</b>　状态：<b>${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</b><br>`+
+    `负责人：<b>${esc(c.owner||'—')}</b>　创建：<b>${esc(c.created)}</b>　截止：<b>${esc(c.due||'—')}</b>`;
+  const dd=document.getElementById('d_desc');
+  if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
+  document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${esc(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
+  document.getElementById('d_actions').innerHTML=acts.actions.slice(0,10).map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(a.action)}<span class="when">${esc(a.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
+  document.getElementById('d_new_comment').value='';
+  // 详情弹窗子事项（只读展示；editor 可勾选）
+  const st=await api('/api/cards/'+id+'/subtasks');
+  const box=document.getElementById('d_subtask_box');
+  if(st.subtasks.length){
+    box.style.display='';
+    renderSubtasks(st.subtasks,document.getElementById('d_subtask_list'),document.getElementById('d_subtask_count'),ME.can_edit,id);
+  }else{box.style.display='none'}
+  document.getElementById('detailModal').style.display='flex';
+}
+async function addComment(){
+  const v=document.getElementById('d_new_comment').value.trim();
+  if(!v||!DETAIL_ID)return;
+  try{await api('/api/cards/'+DETAIL_ID+'/comments',{method:'POST',body:JSON.stringify({content:v})});openDetail(DETAIL_ID)}
+  catch(e){toast(e.message)}
+}
+// ---------- 团队 ----------
+var TM_ALL=[];  // [{id,name,workgroups:[...]}]
+var TM_FILTER={name:'',workgroup:[],role:['noaccount']};  // 成员表格筛选条件（workgroup/role 改为多选数组）
+async function openTeamModal(){
+  if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
+  const isAdmin=ME.is_admin, isSuperUser=ME.username==='admin';
+  const [team, groupsRes]=await Promise.all([api('/api/team'), api('/api/workgroups')]);
+  WG_ALL=groupsRes.groups||[];  // 树形工作组选择器使用架构树
+  WG_FLAT=wgFlat(WG_ALL);
+  TM_ALL=(team.members||[]).map(m=>({id:m.id,name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set}));
+  TEAM_MEMBERS=TM_ALL.map(m=>m.name);
+  TM_FILTER={name:'',workgroup:[],role:['noaccount']};
+  initTeamFilterBar();
+  renderTeamList();
+  document.getElementById('t_new_name').value='';
+  document.getElementById('t_new_account').value='';
+  // 账号开通/密码管理对管理员可见（密码重置仍仅超管）
+  const _accW=document.getElementById('t_new_account_wrap'), _pwdW=document.getElementById('t_new_pwd_wrap');
+  if(_accW)_accW.style.display=isAdmin?'':'none';
+  if(_pwdW)_pwdW.style.display=isAdmin?'':'none';
+  const _np=document.getElementById('t_new_pwd');
+  _np.value='';_np.type='password';
+  const _nb=_np.parentElement.querySelector('.pwd-eye');
+  if(_nb){_nb.innerHTML=EYE_ON;_nb.title='显示/隐藏密码'}
+  document.getElementById('t_new_role').value='';
+  ADD_WG_SEL=[];
+  renderAddWgTags();
+  document.getElementById('teamModal').style.display='flex';
+}
+function flattenWgToLeaves(names){
+  // 把所选名字展开到最细颗粒（叶子级）：父级节点自动拆为其所有后代叶子，去重；已删除的工作组（未知名字）直接忽略
+  const byName={};
+  (function flat(ns){ (ns||[]).forEach(n=>{ byName[n.name]=n; flat(n.children||[]); }); })(WG_ALL||[]);
+  const out=new Set();
+  (names||[]).forEach(nm=>{
+    const n=byName[nm];
+    if(!n){ return; }   // 跳过已删除的工作组
+    if(n.children&&n.children.length){
+      (function collect(x){ (x.children||[]).forEach(c=>{ out.add(c.name); collect(c); }); })(n);
+    }else{
+      out.add(nm);
+    }
+  });
+  return [...out];
+}
+function renderTeamList(){
+  const canEdit=ME.can_edit, isAdmin=ME.is_admin;
+  const isSuperUser = ME.username === 'admin';  // 仅内置管理员账号可设置/重置密码
+  const tbody=document.getElementById('tm_tbody');
+  const footer=document.getElementById('tm_footer');
+  if(!tbody)return;
+  // 筛选
+  const q=(TM_FILTER.name||'').trim().toLowerCase();
+  const workgroupList=Array.isArray(TM_FILTER.workgroup)?TM_FILTER.workgroup:[];
+  const roleList=Array.isArray(TM_FILTER.role)?TM_FILTER.role:['noaccount'];
+  // 架构筛选：按所选节点集合，汇总其自身+后代叶子集合；只要成员的 workgroups 命中任一即匹配
+  let wgMatchSet=new Set();
+  if(workgroupList.length){
+    (function collect(ns){
+      (ns||[]).forEach(n=>{
+        if(workgroupList.includes(n.name)) (function walk(x){ wgMatchSet.add(x.name); (x.children||[]).forEach(c=>walk(c)); })(n);
+        else collect(n.children||[]);
+      });
+    })(WG_ALL||[]);
+  }
+  // 特殊：未分组（虚拟节点）→ 匹配 m.workgroups 为空
+  if(workgroupList.includes('未分组')) wgMatchSet.add('__NO_GROUP__');
+  const filtered=TM_ALL.filter(m=>{
+    if(q && !m.name.toLowerCase().includes(q)) return false;
+    // 角色筛选：无权限(noaccount)=无账号成员；其他=匹配 m.role
+    if(roleList.length){
+      const isNoAccount=!m.account;
+      if(isNoAccount){
+        if(!roleList.includes('noaccount')) return false;
+        // 不直接 return true —— 必须继续走架构筛选（保证全部筛选条件 AND 关系）
+      }else{
+        if(!roleList.includes(m.role)) return false;
+      }
+    }
+    // 架构筛选：分三种语义
+    //  - 只选了"未分组"→ 匹配 workgroups 为空的成员
+    //  - 选了"未分组"+ 其他工作组 → 同时满足空 workgroups 或命中后代
+    //  - 只选了具体工作组 → 命中任一后代
+    if(workgroupList.length){
+      const noGroup=wgMatchSet.has('__NO_GROUP__');
+      const realWgSel=workgroupList.filter(x=>x!=='未分组');
+      const hasGroup=m.workgroups&&m.workgroups.length;
+      if(realWgSel.length===0 && noGroup){
+        // 只选了"未分组"
+        if(hasGroup) return false;
+      }else if(realWgSel.length>0 && noGroup){
+        // "未分组" + 其他工作组（OR）
+        if(!hasGroup) return true;
+        if(!m.workgroups.some(g=>wgMatchSet.has(g))) return false;
+      }else{
+        // 只选了具体工作组
+        if(!hasGroup) return false;
+        if(!m.workgroups.some(g=>wgMatchSet.has(g))) return false;
+      }
+    }
+    return true;
+  });
+  tbody.innerHTML=filtered.length?filtered.map(m=>{
+        const hasAccount = !!m.account;
+        const pwdCell = !isAdmin
+          ? (m.password_set ? '<span style="color:var(--text2);font-size:12px">已设置</span>' : '<span style="color:var(--text3);font-size:12px">未设置密码</span>')
+          : !hasAccount
+            ? `<span class="pwd-wrap"><input type="password" id="tm_pwd_${m.id}" placeholder="设置密码" style="padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">${pwdEyeHtml('tm_pwd_'+m.id)}</span>`
+            : isSuperUser
+              ? `<span class="pwd-wrap"><input type="password" id="tm_pwd_${m.id}" placeholder="${m.password_set?'已设置':'设置密码'}" style="padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">${pwdEyeHtml('tm_pwd_'+m.id)}${m.password_set?`<button class="pwd-eye" onclick="genPwd(${m.id})" title="生成随机密码重置">🔄</button>`:''}</span>`
+              : (m.password_set ? '<span style="color:var(--text2);font-size:12px">已设置</span>' : '<span style="color:var(--text3);font-size:12px">未设置密码</span>');
+        return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:7px 10px;color:var(--text2);font-size:12px">${m.id}</td>
+        <td style="padding:7px 10px" id="tm_name_${m.id}">
+          <input type="text" id="tm_edit_name_${m.id}" value="${esc(m.name)}" style="width:100px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">
+        </td>
+        <td class="tm-grp-cell" id="tm_wg_${m.id}"><button class="icon-btn" style="border:1px solid var(--border);border-radius:4px;padding:3px 10px;background:var(--bg);font-size:12.5px;width:fit-content;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;height:30px;vertical-align:middle;gap:4px" onclick="openTreePick(this, TM_ALL.find(x=>x.id===${m.id}).workgroups, (sel)=>{TM_ALL.find(x=>x.id===${m.id}).workgroups=sel; renderTeamList()})">🌳 选择工作组</button></td>
+        <td style="padding:7px 10px;font-size:12.5px;color:var(--text2)">${(()=>{const leaves=flattenWgToLeaves(m.workgroups);return leaves.length?leaves.map(x=>`<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 7px;background:var(--bg);border:1px solid var(--border);border-radius:10px">${esc(x)}</span>`).join(''):'<span style="color:var(--text3)">—</span>'})()}</td>
+        <td style="padding:7px 10px">${isAdmin
+            ? `<input type="text" id="tm_account_${m.id}" value="${esc(m.account)}" placeholder="登录账号名" style="width:140px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">`
+            : (hasAccount ? `<span style="font-size:13px;color:var(--text)">${esc(m.account)}</span>` : '<span style="color:var(--text3);font-size:12px">—</span>')}</td>
+        <td style="padding:7px 10px">${pwdCell}</td>
+        <td style="padding:7px 10px">${
+          isAdmin || hasAccount ? `<select id="tm_role_${m.id}" class="form-select" style="padding:3px 8px;font-size:12px;width:100px">
+              <option value="" ${!m.role?'selected':''}>无权限</option>
+              <option value="admin" ${m.role==='admin'?'selected':''}>管理员</option>
+              <option value="editor" ${m.role==='editor'?'selected':''}>可编辑</option>
+              <option value="viewer" ${m.role==='viewer'?'selected':''}>只读</option>
+            </select>`
+          : '<span style="color:var(--text3);font-size:12px" title="该成员未开通登录账号，无权限">无权限</span>'
+        }</td>
+        ${canEdit?`<td style="padding:7px 10px">
+          <button class="icon-btn delete" onclick="removeTeamMember(${m.id})">删除</button>
+        </td>`:''}
+      </tr>`}).join(''):'<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text2);font-size:13px">无匹配成员</td></tr>';
+  footer.textContent=`显示 ${filtered.length} / ${TM_ALL.length} 人 · 权限（角色）只对已开通登录账号的成员生效；管理员可开通账号并设置首次密码/角色，密码重置仅超级管理员可操作 · 编辑后点「保存全部」统一提交`;
+}
+function resetTmFilter(){
+  TM_FILTER={name:'',workgroup:[],role:['noaccount']};
+  const ni=document.getElementById('tm_filter_name'); if(ni)ni.value='';
+  const oi=document.getElementById('tm_filter_workgroup'); if(oi)oi.value='';
+  const ri=document.getElementById('tm_filter_role'); if(ri){ri.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); ri.textContent='角色（全部）';}
+  renderTeamList();
+}
+function openRoleMulti(btn){
+  closeRoleMulti();
+  // 打开时保存快照：外部点击/取消则恢复，只有点「确定」才应用
+  ROLE_SNAP=[...TM_FILTER.role];
+  const pop=document.createElement('div');
+  pop.className='tree-pick';
+  pop.id='role_multi_pop';
+  pop.style.padding='8px 10px';
+  pop.style.minWidth='150px';
+  const r=btn.getBoundingClientRect();
+  pop.style.position='fixed';
+  pop.style.left=r.left+'px';
+  pop.style.top=(r.bottom+4)+'px';
+  const map={admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'};
+  const opts=['admin','editor','viewer','noaccount'];
+  pop.innerHTML=opts.map(v=>`<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer"><input type="checkbox" value="${v}" ${ROLE_SNAP.includes(v)?'checked':''}> <span>${map[v]}</span></label>`).join('')+`<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span id="role_select_all_btn"><button class="icon-btn" onclick="selectAllRoles()" id="role_select_all_btn_inner">全选</button></span><span style="display:flex;gap:8px"><button class="btn-secondary" onclick="closeRoleMulti()">取消</button><button class="btn-primary" onclick="applyRoleMulti()">确定</button></span></div>`;
+  document.body.appendChild(pop);
+  // 初始化"全选/取消全选"按钮文字：若快照里全部选项都已选，显示"取消全选"；否则显示"全选"
+  const _all=['admin','editor','viewer','noaccount'];
+  const _btnInit=document.getElementById('role_select_all_btn_inner');
+  if(_btnInit) _btnInit.textContent = (_all.every(x=>ROLE_SNAP.includes(x)) && ROLE_SNAP.length>=_all.length) ? '取消全选' : '全选';
+  // 勾选只更新临时状态（不应用筛选），确定才生效；同时联动更新全选按钮文字
+  pop.querySelectorAll('input[type=checkbox]').forEach(c=>c.addEventListener('change',()=>{
+    TM_FILTER.role=[]; pop.querySelectorAll('input[type=checkbox]:checked').forEach(x=>TM_FILTER.role.push(x.value));
+    renderRoleBtn();
+    const __btn=document.getElementById('role_select_all_btn_inner');
+    if(__btn){
+      const __checked=[...pop.querySelectorAll('input[type=checkbox]:checked')].length;
+      const __total=pop.querySelectorAll('input[type=checkbox]').length;
+      __btn.textContent = (__checked>=__total)?'取消全选':'全选';
+    }
+  }));
+  setTimeout(()=>document.addEventListener('mousedown', roleMultiOutside, true), 0);
+}
+function selectAllRoles(){
+  // toggle 行为：当前已全选 → 点击取消全选（清空）；否则全选所有角色（含无权限）
+  const pop=document.getElementById('role_multi_pop');
+  if(!pop)return;
+  const all=['admin','editor','viewer','noaccount'];
+  const cbs=pop.querySelectorAll('input[type=checkbox]');
+  const checked=[...cbs].filter(c=>c.checked).map(c=>c.value);
+  const isAllOn=checked.length>=all.length;
+  if(isAllOn){
+    // 当前已全选 → 点击变取消全选（清空）
+    cbs.forEach(c=>c.checked=false);
+    TM_FILTER.role=[];
+  }else{
+    cbs.forEach(c=>c.checked=true);
+    TM_FILTER.role=[...all];
+  }
+  renderRoleBtn();
+  // 更新自身文字（视觉上提示当前状态）
+  const btn=document.getElementById('role_select_all_btn_inner');
+  if(btn)btn.textContent=isAllOn?'全选':'取消全选';
+}
+function applyRoleMulti(){
+  ROLE_SNAP=[...TM_FILTER.role];
+  console.log('[applyRoleMulti] 确定 → role=', [...TM_FILTER.role]);
+  renderTeamList();
+  renderRoleBtn();
+  closeRoleMulti(true);   // 传 true 表示已确认，关闭时不要走恢复逻辑
+}
+var ROLE_SNAP=[];
+function closeRoleMulti(confirmed){
+  const pop=document.getElementById('role_multi_pop');
+  if(pop)pop.remove();
+  document.removeEventListener('mousedown', roleMultiOutside, true);
+  // 取消/外部关闭：恢复快照（不应用未确认的修改）
+  if(!confirmed && TM_FILTER.role.join(',')!==ROLE_SNAP.join(',')){
+    TM_FILTER.role=[...ROLE_SNAP];
+    renderRoleBtn();
+  }
+}
+function roleMultiOutside(e){
+  const pop=document.getElementById('role_multi_pop');
+  if(pop && !pop.contains(e.target) && e.target.id!=='tm_filter_role') closeRoleMulti();
+}
+function renderRoleBtn(){
+  const btn=document.getElementById('tm_filter_role');
+  if(!btn)return;
+  const map={admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'};
+  const txt=TM_FILTER.role.length?TM_FILTER.role.map(r=>map[r]||r).join(' / '):'角色（全部）';
+  btn.textContent=txt;
+  btn.title=txt;   // 截断时 hover 看完整内容
+}
+function openWgFilterPicker(anchor){
+  // 架构筛选：在树顶部插入虚拟节点【未分组】（成员 workgroups 为空），与财务中心并列
+  // 用 name='__no_group__' 作为语义哨兵（避免与真实工作组名冲突），label 显示中文
+  openTreePick(anchor, TM_FILTER.workgroup||[], (sel)=>{ TM_FILTER.workgroup=sel; anchor.value=sel.join(' / '); renderTeamList(); }, {mode:'select', width:300, height:360, tree:[{id:-1,name:'未分组',label:'未分组',children:[]}].concat(WG_ALL||[]), showSelectAll:true});
+}
+function tpSelectAll(){
+  if(!TREE_PICK||!TREE_PICK.tree)return;
+  // toggle：当前已全选 → 点击取消全选（清空）；否则全选所有节点
+  const allNames=[];
+  (function walk(ns){ (ns||[]).forEach(n=>{ allNames.push(n.name); walk(n.children||[]); }); })(TREE_PICK.tree);
+  const isAllOn=allNames.length>0 && allNames.every(x=>TREE_PICK.selected.includes(x));
+  if(isAllOn){
+    TREE_PICK.selected=[];
+  }else{
+    TREE_PICK.selected=[...allNames];
+  }
+  paintAll();
+  // 联动更新底部"全选"按钮文字
+  const btn=document.getElementById('tp_select_all_btn');
+  if(btn)btn.textContent=isAllOn?'全选':'取消全选';
+}
+function initTeamFilterBar(){
+  const canEdit=ME.can_edit;
+  const list=document.getElementById('teamList');
+  // 架构下拉选项（树状缩进）
+  const opts=(function tree(ns,prefix){
+    let out=[];
+    ns.forEach((n,i)=>{
+      const last=i===ns.length-1;
+      out.push({name:n.name,label:(prefix||'')+(last?'└─ ':'├─ ')+n.name});
+      out=out.concat(tree(n.children||[], (prefix||'')+(last?'　  ':'│  ')).map(x=>({name:x.name,label:x.label})));
+    });
+    return out;
+  })(WG_ALL||[],'');
+  list.innerHTML=`
+    <div style="position:sticky;top:0;background:var(--bg);z-index:5;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input type="text" class="form-input" id="tm_filter_name" placeholder="姓名搜索" value="${esc(TM_FILTER.name||'')}" style="width:140px" oninput="TM_FILTER.name=this.value;renderTeamList()">
+      <input type="text" class="form-input" id="tm_filter_workgroup" readonly value="${TM_FILTER.workgroup.length?TM_FILTER.workgroup.join(' / '):''}" placeholder="架构筛选（全部）" style="width:240px;cursor:pointer" onclick="openWgFilterPicker(this)">
+      <button type="button" class="form-input" id="tm_filter_role" style="width:140px;height:32px;cursor:pointer;text-align:left;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;padding:0 8px" title="${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'角色（全部）'}" onclick="openRoleMulti(this)">${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'角色（全部）'}</button>
+      <button class="icon-btn" onclick="resetTmFilter()">清空</button>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:var(--bg)">
+          <th style="padding:6px 10px;text-align:left;width:48px">ID</th>
+          <th style="padding:6px 10px;text-align:left;width:110px">姓名</th>
+          <th style="padding:6px 10px;text-align:left;width:170px">工作组</th>
+          <th style="padding:6px 10px;text-align:left;width:240px">已选工作组（最细颗粒）</th>
+          <th style="padding:6px 10px;text-align:left;width:150px">账号</th>
+          <th style="padding:6px 10px;text-align:left;width:170px">密码</th>
+          <th style="padding:6px 10px;text-align:left;width:120px">权限（角色）</th>
+          ${canEdit?'<th style="padding:6px 10px;text-align:left;width:90px">操作</th>':''}
+        </tr></thead>
+        <tbody id="tm_tbody"></tbody>
+      </table>
+    </div>
+    <div id="tm_footer" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>`;
+}
+async function addTeamMember(){
+  const n=document.getElementById('t_new_name').value.trim();
+  if(!n){toast('请输入姓名');return}
+  const workgroups=ADD_WG_SEL||[];
+  const role=document.getElementById('t_new_role').value;
+  const body={name:n,workgroups,role};
+  // 管理员可开通账号并设置首次密码/角色；密码重置仍仅超管
+  if(ME.is_admin){
+    const account=document.getElementById('t_new_account').value.trim();
+    if(account){
+      const pwd=document.getElementById('t_new_pwd').value;
+      if(!pwd){toast('开通账号需填写密码');return}
+      body.account=account;body.password=pwd;
+    }
+  }
+  try{await api('/api/team',{method:'POST',body:JSON.stringify(body)});toast('已添加');openTeamModal()}
+  catch(e){toast(e.message)}
+}
+async function saveAllTeamMembers(){
+  const isAdmin=ME.is_admin, isSuperUser=ME.username==='admin';
+  const updates=[];
+  let pwdChanged=0;
+  for(const m of TM_ALL){
+    const name=(document.getElementById('tm_edit_name_'+m.id)?.value||'').trim();
+    if(!name){toast(`ID ${m.id} 的姓名不能为空`);return}
+    const workgroups=m.workgroups||[];  // 已通过树形选择器更新到 TM_ALL
+    const role=document.getElementById('tm_role_'+m.id)?.value??'';
+    const u={id:m.id,name,workgroups,role};
+    // 管理员可提交账号开通与角色；超管额外可重置已有账号密码，普通管理员仅在首次开通时允许设置密码
+    if(isAdmin){
+      const accInp=document.getElementById('tm_account_'+m.id);
+      const account=accInp?(accInp.value||'').trim():'';
+      u.account=account;
+      const pwdInp=document.getElementById('tm_pwd_'+m.id);
+      const pwd=pwdInp?(pwdInp.value||''):'';
+      if(pwd && (isSuperUser || (!m.account && account))){
+        u.password=pwd; pwdChanged++;
+      }
+    }
+    updates.push(u);
+  }
+  try{
+    await Promise.all(updates.map(u=>api('/api/team/'+u.id,{method:'PUT',body:JSON.stringify(u)})));
+    toast(`已保存 ${updates.length} 位成员`+(pwdChanged?`，密码已更新 ${pwdChanged} 位`:''));
+    openTeamModal();
+  }catch(e){toast(e.message)}
+}
+async function removeTeamMember(mid){
+  const m=TM_ALL.find(x=>x.id===mid);
+  if(!confirm(`删除成员「${m?m.name:mid}」${m&&m.account?'及其关联账号':''}？不影响已有卡片的历史记录`))return;
+  try{await api('/api/team/'+mid,{method:'DELETE'});toast('已移除');openTeamModal()}
+  catch(e){toast(e.message)}
+}
+// ---------- 操作日志（仅管理员） ----------
+const AUDIT_ACTIONS={'login':'登入','logout':'登出','view':'查看','create':'新建','update':'编辑','delete':'删除','move':'移动','lock':'锁定','unlock':'解锁','comment':'评论','subtask_add':'新增子事项','subtask_update':'更新子事项','subtask_delete':'删除子事项','member_create':'新增成员','member_update':'编辑成员','member_delete':'删除成员','group_create':'新增工作组','group_update':'编辑工作组','group_delete':'删除工作组','user_create':'新建账号','user_update':'编辑账号','user_delete':'删除账号','export':'导出','import':'导入'};
+var AUDIT_PAGE=1, AUDIT_PAGE_SIZE=30, AUDIT_TOTAL=0;
+function openAuditModal(){
+  if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
+  const sel=document.getElementById('audit_action');
+  if(sel.options.length<=1){
+    sel.innerHTML='<option value="">全部</option>'+Object.keys(AUDIT_ACTIONS).map(k=>`<option value="${k}">${AUDIT_ACTIONS[k]}</option>`).join('');
+  }
+  document.getElementById('auditModal').style.display='flex';
+  loadAuditLogs(1);
+}
+function resetAuditFilter(){
+  document.getElementById('audit_start').value='';
+  document.getElementById('audit_end').value='';
+  document.getElementById('audit_action').value='';
+  document.getElementById('audit_username').value='';
+  document.getElementById('audit_ip').value='';
+  document.getElementById('audit_result').value='';
+  loadAuditLogs(1);
+}
+async function loadAuditLogs(page){
+  AUDIT_PAGE=Math.max(1,page);
+  const q=new URLSearchParams();
+  q.set('page',AUDIT_PAGE);q.set('page_size',AUDIT_PAGE_SIZE);
+  const s=document.getElementById('audit_start').value, e=document.getElementById('audit_end').value;
+  if(s)q.set('start',s);
+  if(e)q.set('end',e);
+  const a=document.getElementById('audit_action').value; if(a)q.set('action',a);
+  const u=document.getElementById('audit_username').value.trim(); if(u)q.set('username',u);
+  const ip=document.getElementById('audit_ip').value.trim(); if(ip)q.set('ip',ip);
+  const r=document.getElementById('audit_result').value; if(r)q.set('result',r);
+  try{
+    const d=await api('/api/audit-logs?'+q.toString());
+    AUDIT_TOTAL=d.total;
+    renderAuditList(d.items||[]);
+    renderAuditPager();
+  }catch(e){toast(e.message)}
+}
+function renderAuditList(items){
+  const box=document.getElementById('auditList');
+  if(!items.length){box.innerHTML='<div style="color:var(--text2);font-size:13px;padding:20px;text-align:center">无匹配日志</div>';return}
+  box.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <thead><tr style="background:var(--bg)">
+      <th style="padding:6px 8px;text-align:left;width:140px">时间</th>
+      <th style="padding:6px 8px;text-align:left;width:90px">账号</th>
+      <th style="padding:6px 8px;text-align:left;width:100px">IP</th>
+      <th style="padding:6px 8px;text-align:left;width:90px">操作</th>
+      <th style="padding:6px 8px;text-align:left;width:160px">对象</th>
+      <th style="padding:6px 8px;text-align:left">详情</th>
+      <th style="padding:6px 8px;text-align:center;width:60px">结果</th>
+    </tr></thead>
+    <tbody>${items.map(it=>`<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:6px 8px;color:var(--text2);white-space:nowrap">${esc(it.ts)}</td>
+      <td style="padding:6px 8px;white-space:nowrap">${esc(it.username)}</td>
+      <td style="padding:6px 8px;white-space:nowrap">${esc(it.ip)}</td>
+      <td style="padding:6px 8px;white-space:nowrap">${esc(AUDIT_ACTIONS[it.action]||it.action)}</td>
+      <td style="padding:6px 8px;color:var(--text2)">${esc(it.target)}</td>
+      <td style="padding:6px 8px;color:var(--text)"><span title="${esc(it.detail)}" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px">${esc(it.detail)}</span></td>
+      <td style="padding:6px 8px;text-align:center">${it.result==='success'?'<span style="color:#52c41a">成功</span>':it.result==='failed'?'<span style="color:#ff4d4f">失败</span>':'<span style="color:#faad14">拒绝</span>'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+function renderAuditPager(){
+  const pager=document.getElementById('auditPager');
+  const pages=Math.max(1,Math.ceil(AUDIT_TOTAL/AUDIT_PAGE_SIZE));
+  const btn=(txt,pg,dis)=>`<button class="icon-btn" style="${dis?'opacity:.4;pointer-events:none':''}" onclick="loadAuditLogs(${pg})">${txt}</button>`;
+  pager.innerHTML=`<span style="color:var(--text2)">共 ${AUDIT_TOTAL} 条</span>${btn('上一页',AUDIT_PAGE-1,AUDIT_PAGE<=1)}<span style="color:var(--text2)">${AUDIT_PAGE}/${pages}</span>${btn('下一页',AUDIT_PAGE+1,AUDIT_PAGE>=pages)}`;
+}
+
+// ---------- 架构管理（原工作组管理：树形工作组 + 板块绑定） ----------
+var WG_ALL=[];    // 树形 [{id,name,parent_id,leader,function,description,boards,children:[]}]
+var WG_FLAT=[];   // 平铺（含 children）
+var WG_BOARDS=[]; // 全部看板 [{board_id,board_name}]
+var WG_EDIT_ID=0; // 0=新增模式，>0=编辑节点 id
+var WG_COLLAPSED=new Set();
+// 可输入下拉（带过滤 + 滚动面板，高度随窗口自适应）
+let _comboPanel=null;
+function comboMount(input){
+  comboClose();
+  const opts=TEAM_MEMBERS||[];
+  const rect=input.getBoundingClientRect();
+  const panel=document.createElement('div');
+  panel.className='combo-panel';
+  panel.style.left=rect.left+'px';
+  panel.style.top=(rect.bottom+4)+'px';
+  panel.style.width=Math.max(rect.width,150)+'px';
+  panel._input=input;
+  const kw=(input.value||'').trim().toLowerCase();
+  const list=opts.filter(o=>o.toLowerCase().includes(kw));
+  if(!list.length){
+    panel.innerHTML='<div class="combo-empty">无匹配成员</div>';
+  }else{
+    panel.innerHTML=list.map(o=>`<div class="combo-opt" data-v="${esc(o)}">${esc(o)}</div>`).join('');
+    panel.querySelectorAll('.combo-opt').forEach(el=>{
+      el.addEventListener('mousedown', e=>{ e.preventDefault(); input.value=el.getAttribute('data-v'); comboClose(); });
+    });
+  }
+  document.body.appendChild(panel);
+  _comboPanel=panel;
+  setTimeout(()=>document.addEventListener('mousedown', comboOutside, true), 0);
+}
+function comboOutside(e){
+  if(_comboPanel && !_comboPanel.contains(e.target) && e.target!==_comboPanel._input){ comboClose(); }
+}
+function comboClose(){
+  if(_comboPanel){_comboPanel.remove();_comboPanel=null;}
+  document.removeEventListener('mousedown', comboOutside, true);
+}
+function bindCombo(input){
+  if(!input||input.dataset.comboBound) return;
+  input.dataset.comboBound='1';
+  input.addEventListener('focus', ()=>comboMount(input));
+  input.addEventListener('input', ()=>comboMount(input));
+}
+function wgFlat(nodes){return (nodes||[]).reduce((a,n)=>a.concat(n, wgFlat(n.children||[])), [])}
+function wgDescendants(n){
+  const out=[];
+  (function walk(ns){ns.forEach(x=>{out.push(x.id);walk(x.children||[])})})(n.children||[]);
+  return out;
+}
+function boardNames(boards){
+  if(!boards) return '';
+  if(boards==='*') return '全部看板';
+  return boards.split(',').map(b=>{const x=WG_BOARDS.find(y=>y.board_id===b);return x?x.board_name:b}).join('、');
+}
+function rebuildWgParentOptions(exceptId, selected){
+  const sel=document.getElementById('g_new_parent');
+  const exclude=exceptId?new Set([exceptId, ...wgDescendants({children:WG_FLAT.filter(x=>x.id===exceptId).map(x=>({...x}))})]):new Set();
+  const opts=['<option value="0">顶层（不设上级）</option>'];
+  (function walk(ns,dep){
+    ns.forEach(n=>{
+      if(exclude.has(n.id))return;
+      opts.push(`<option value="${n.id}" ${selected===n.id?'selected':''}>${'　'.repeat(dep)}${esc(n.name)}</option>`);
+      walk(n.children||[],dep+1);
+    });
+  })(WG_ALL,1);
+  sel.innerHTML=opts.join('');
+}
+function updateLeaderLabel(parentId){
+  let role='组长';
+  if(parentId===0) role='中心负责人';
+  else{
+    const p=WG_FLAT.find(x=>x.id===parentId);
+    if(!p || p.parent_id===0) role='部门长';
+  }
+  const lb=document.getElementById('g_leader_label');
+  lb.textContent=role+'（团队成员，可选）';
+}
+function parentBoardLimit(parentId){
+  /* 返回所选上级的板块限制：null=不限制；array=受限看板ID列表 */
+  if(!parentId) return null;
+  const p=WG_FLAT.find(x=>x.id===parentId);
+  if(!p) return null;
+  const b=(p.boards||'').trim();
+  if(!b || b==='*') return null;
+  return b.split(',');
+}
+function renderBoardChecks(boards, limit, searchTerm){
+  const wrap=document.getElementById('g_new_boards');
+  const hint=document.getElementById('g_boards_hint');
+  const input=document.getElementById('g_boards_search');
+  const search=(searchTerm!==undefined?searchTerm:(input?input.value:'')).trim().toLowerCase();
+  if(input) input.style.display='';
+  const sel=boards==='*'?[]:(boards||'').split(',').filter(Boolean);
+  wrap.dataset.boards=sel.join(',');
+  wrap.dataset.limit=JSON.stringify(limit||[]);
+  let pool=WG_BOARDS;
+  if(limit) pool=WG_BOARDS.filter(b=>limit.includes(b.board_id));
+  const totalPool=pool.length;
+  if(search) pool=pool.filter(b=>((b.board_name||'').toLowerCase().includes(search))||((b.board_id||'').toLowerCase().includes(search)));
+  const chk=pool.map(b=>`<label class="tm-grp-opt" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}><span style="font-size:12.5px">${esc(b.board_name)}</span></label>`).join('');
+  wrap.innerHTML=(chk||'<span style="color:var(--text3);font-size:12px">'+(search?'无匹配板块':(limit?'上级部门未绑定看板，暂无可用选项':'暂无看板数据'))+'</span>');
+  if(limit){
+    hint.textContent='上级部门已绑定 '+totalPool+' 个看板，子级仅能选择其中部分（或留空不限制）。';
+  }else{
+    hint.textContent='勾选该工作组可访问的看板；子级只能选择父级范围内的看板；留空=不限制。';
+  }
+}
+document.getElementById('g_boards_search').addEventListener('input',e=>{
+  const wrap=document.getElementById('g_new_boards');
+  const limit=JSON.parse(wrap.dataset.limit||'[]');
+  const checked=[...document.querySelectorAll('.g_brd_chk:checked')].map(c=>c.value).join(',');
+  renderBoardChecks(checked, limit, e.target.value);
+});
+function collectBoardChecks(){
+  return [...document.querySelectorAll('.g_brd_chk:checked')].map(c=>c.value).join(',');
+}
+function fillLeaderOptions(selected){
+  const sel=document.getElementById('g_new_leader');
+  sel.innerHTML='<option value="">未选定</option>'+TEAM_MEMBERS.map(n=>`<option value="${esc(n)}" ${selected===n?'selected':''}>${esc(n)}</option>`).join('');
+}
+function onWgParentChange(){
+  const parent=parseInt(document.getElementById('g_new_parent').value||'0',10);
+  updateLeaderLabel(parent);
+  renderBoardChecks('', parentBoardLimit(parent));
+}
+function resetWgForm(){
+  WG_EDIT_ID=0;
+  document.getElementById('g_form_title').textContent='新增工作组节点';
+  document.getElementById('g_submit_btn').textContent='添加';
+  document.getElementById('g_cancel_edit').style.display='none';
+  document.getElementById('g_new_name').value='';
+  document.getElementById('g_new_desc').value='';
+  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
+  const top=WG_FLAT.find(x=>x.parent_id===0);
+  rebuildWgParentOptions(0, top?top.id:0);
+  fillLeaderOptions('');
+  updateLeaderLabel(top?top.id:0);
+  renderBoardChecks('', parentBoardLimit(top?top.id:0));
+}
+async function openWgModal(){
+  if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
+  const [gd, td] = await Promise.all([api('/api/workgroups'), api('/api/team')]);
+  WG_ALL=gd.groups||[];
+  WG_FLAT=wgFlat(WG_ALL);
+  WG_BOARDS=gd.all_boards||[];
+  TEAM_MEMBERS=(td.members||[]).map(m=>m.name);
+  resetWgForm();
+  renderWgList();
+  document.getElementById('wgModal').style.display='flex';
+}
+function renderWgList(){
+  const canEdit=ME.is_admin;
+  const box=document.getElementById('wgList');
+  if(!WG_FLAT.length){box.innerHTML='<div style="color:var(--text2);font-size:13px;padding:20px;text-align:center">暂无工作组，请在上方填写后添加顶层部门</div>';return}
+  const row=(n,dep)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);background:${n.parent_id?'#fff':'#fafafa'}">
+      <span style="width:${dep*22}px;flex-shrink:0"></span>
+      ${(n.children&&n.children.length)?`<button class="icon-btn" onclick="toggleWg(${n.id})" style="padding:0;width:20px;height:20px" title="展开/折叠">${WG_COLLAPSED.has(n.id)?'▶':'▼'}</button>`:'<span style="width:20px;flex-shrink:0"></span>'}
+      <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:80px">${esc(n.name)}</span>
+      <span style="font-size:11px;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:0 5px;flex-shrink:0;background:var(--bg)">${n.parent_id===0?'中心':((n.children&&n.children.length)?'部门':'组')}</span>
+      <span style="color:var(--text2);font-size:12px;width:76px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(n.parent_id?'组长':'部门长')}">${n.leader?esc(n.leader):'<span style="color:var(--text3)">未选定</span>'}</span>
+      <span style="color:${n.boards?'var(--primary)':'var(--text3)'};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right">${n.parent_id===0?'🔒 全部看板（锁定）':(n.boards?('板块：'+boardNames(n.boards)):'未绑定板块')}</span>
+      ${canEdit?`<span style="flex-shrink:0">
+        <button class="icon-btn" onclick="addWgChild(${n.id})" title="在此工作组下新增子级">+ 子组</button>
+        <button class="icon-btn" onclick="editWg(${n.id})">编辑</button>
+        ${n.parent_id===0?'':'<button class="icon-btn delete" onclick="removeWg('+n.id+')">删除</button>'}
+      </span>`:''}
+    </div>
+    ${(n.children&&!WG_COLLAPSED.has(n.id))?n.children.map(c=>row(c,dep+1)).join(''):''}
+  `;
+  box.innerHTML=WG_ALL.map(n=>row(n,0)).join('')+
+    `<div style="margin-top:10px;font-size:12px;color:var(--text2);padding:0 10px">共 ${WG_FLAT.length} 个工作组节点 · 部门配部门长 / 工作组配负责人 · 删除工作组前需先删除其子工作组 · 板块绑定后组内成员仅可访问绑定看板</div>`;
+}
+function toggleWg(id){
+  WG_COLLAPSED.has(id)?WG_COLLAPSED.delete(id):WG_COLLAPSED.add(id);
+  renderWgList();
+}
+function addWgChild(pid){
+  resetWgForm();
+  document.getElementById('g_new_parent').value=String(pid);
+  onWgParentChange();
+  document.getElementById('g_form_title').textContent='新增子级工作组节点';
+}
+function editWg(gid){
+  const g=WG_FLAT.find(x=>x.id===gid); if(!g)return;
+  const isRoot=g.parent_id===0;
+  WG_EDIT_ID=gid;
+  document.getElementById('g_form_title').textContent='编辑：'+g.name;
+  document.getElementById('g_submit_btn').textContent='保存修改';
+  document.getElementById('g_cancel_edit').style.display='';
+  document.getElementById('g_new_name').value=g.name;
+  document.getElementById('g_new_desc').value=g.description||'';
+  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
+  rebuildWgParentOptions(gid, g.parent_id||0);
+  fillLeaderOptions(g.leader||'');
+  updateLeaderLabel(g.parent_id||0);
+  if(isRoot){
+    // 最顶层：板块锁定全部看板，不可修改
+    const wrap=document.getElementById('g_new_boards');
+    wrap.innerHTML='<span style="color:#ad6800;font-size:12px;background:#fffbe6;border:1px solid #ffd591;border-radius:4px;padding:4px 10px;display:inline-block">🔒 最顶层锁定全部看板，不可修改</span>';
+    document.getElementById('g_boards_hint').textContent='';
+    const s=document.getElementById('g_boards_search'); if(s) s.style.display='none';
+  }else{
+    renderBoardChecks(g.boards||'', parentBoardLimit(g.parent_id||0));
+  }
+}
+async function submitWgForm(){
+  const name=document.getElementById('g_new_name').value.trim();
+  const parent=parseInt(document.getElementById('g_new_parent').value||'0',10);
+  const leader=document.getElementById('g_new_leader').value.trim();
+  const desc=document.getElementById('g_new_desc').value.trim();
+  const isRootEdit=WG_EDIT_ID&&(WG_FLAT.find(x=>x.id===WG_EDIT_ID)||{}).parent_id===0;
+  const boards=isRootEdit?'*':collectBoardChecks();
+  if(!name){toast('请输入工作组名称');return}
+  // 编辑模式：父级板块收缩时检测子级冲突，需用户确认后才保存
+  if(WG_EDIT_ID && !isRootEdit){
+    const g=WG_FLAT.find(x=>x.id===WG_EDIT_ID);
+    if(g){
+      const oldB=(g.boards||'').trim();
+      const newB=boards.trim();
+      let removed=[];
+      if(oldB && oldB!=='*' && newB && newB!=='*'){
+        removed=[...new Set(oldB.split(','))].filter(b=>!newB.split(',').includes(b));
+      }else if(oldB==='*' && newB && newB!=='*'){
+        removed=['*'];  // 全部 → 有限集：所有非空后代受影响
+      }
+      if(removed.length){
+        const lines=[];
+        (function walk(ns){
+          (ns||[]).forEach(n=>{
+            const nb=(n.boards||'').trim();
+            if(nb){
+              const lost = removed.includes('*')
+                ? (nb==='*'?['*']:nb.split(','))
+                : nb==='*' ? removed : nb.split(',').filter(b=>removed.includes(b));
+              if(lost.length){
+                const names=lost.map(b=>{const x=WG_BOARDS.find(y=>y.board_id===b);return x?x.board_name:b});
+                lines.push(`• ${n.name}：${names.join('、')} 将被移除`);
+              }
+            }
+            walk(n.children||[]);
+          });
+        })(g.children||[]);
+        if(lines.length){
+          const ok=confirm(`「${g.name}」取消看板后，以下子级将同步移除对应权限：\n\n${lines.join('\n')}\n\n确定继续保存？`);
+          if(!ok)return;  // 用户取消 → 放弃保存
+        }
+      }
+    }
+  }
+  const body={name,parent_id:parent,leader,description:desc,boards};
+  try{
+    if(WG_EDIT_ID){await api('/api/workgroups/'+WG_EDIT_ID,{method:'PUT',body:JSON.stringify(body)});toast('已更新')}
+    else{await api('/api/workgroups',{method:'POST',body:JSON.stringify(body)});toast('已添加')}
+    openWgModal();
+  }catch(e){toast(e.message)}
+}
+async function removeWg(gid){
+  const g=WG_FLAT.find(x=>x.id===gid);
+  if(g&&g.parent_id===0){toast('最顶层工作组（财务中心）不可删除');return}
+  if(!confirm(`删除工作组节点「${g?g.name:gid}」？${g&&g.children&&g.children.length?'其下有子工作组，需先删除子级。':''}`))return;
+  try{await api('/api/workgroups/'+gid,{method:'DELETE'});toast('已移除');openWgModal()}
+  catch(e){toast(e.message)}
+}
+// ---------- 账号管理（管理员） ----------
+async function openAdminModal(){
+  document.getElementById('au_name').value='';document.getElementById('au_pwd').value='';
+  document.getElementById('au_boards').value='*';
+  await adminLoadUsers();
+  document.getElementById('adminModal').style.display='flex';
+}
+async function adminLoadUsers(){
+  const d=await api('/api/admin/users');
+  const tb=document.getElementById('adminUserList');
+  tb.innerHTML=d.users.map(u=>`<tr>
+    <td style="padding:8px 10px">${esc(u.username)}</td>
+    <td style="padding:8px 10px"><select class="form-select" style="padding:3px 8px;font-size:12px" onchange="adminSetRole('${esc(u.username)}',this.value)">
+      <option value="viewer" ${u.role==='viewer'?'selected':''}>只读</option>
+      <option value="editor" ${u.role==='editor'?'selected':''}>可编辑</option>
+      <option value="admin" ${u.role==='admin'?'selected':''}>管理员</option>
+    </select></td>
+    <td style="padding:8px 10px;font-size:12px;color:var(--text2)">${u.allowed_boards==='*'?'全部看板':esc(u.allowed_boards)}</td>
+    <td style="padding:8px 10px;font-size:12px;color:var(--text2)">${u.allowed_columns==='*'?'全部板块':(u.allowed_columns||'').length>18?esc(u.allowed_columns.slice(0,18))+'…':esc(u.allowed_columns||'—')}</td>
+    <td style="padding:8px 10px">
+      <button class="icon-btn" onclick="openColModal('${esc(u.username)}','${esc(u.allowed_columns||'*')}')">板块权限</button>
+      <button class="icon-btn" onclick="adminResetPwd('${esc(u.username)}')">重置密码</button>
+      <button class="icon-btn delete" onclick="adminDeleteUser('${esc(u.username)}')">删除</button>
+    </td>
+  </tr>`).join('');
+}
+let CM_USER='', CM_ALL_COLS={}, CM_BOARD_SEL={};
+async function openColModal(name, curCols){
+  CM_USER=name;
+  const bc=await api('/api/admin/board-columns');
+  CM_ALL_COLS=bc.boards;
+  // 解析当前配置
+  let cur={};
+  if(curCols&&curCols!=='*'){try{cur=JSON.parse(curCols)}catch(e){}}
+  const mode=curCols==='*'?'*':'custom';
+  document.getElementById('cm_user').textContent=name;
+  document.getElementById('cm_mode').value=mode;
+  cmModeChange();
+  if(mode==='custom'){
+    CM_BOARD_SEL={};
+    Object.keys(CM_ALL_COLS).forEach(bid=>{
+      const cols=CM_ALL_COLS[bid].columns;
+      // 该用户的看板内，已选板块集合；默认全选（未配置时该看板全部可见）
+      const sel=(cur[bid]&&cur[bid].length)?new Set(cur[bid]):new Set(Object.keys(cols));
+      CM_BOARD_SEL[bid]={cols:Object.keys(cols), sel};
+    });
+    renderCmBoards();
+  }
+  document.getElementById('colModal').style.display='flex';
+}
+function cmModeChange(){
+  const mode=document.getElementById('cm_mode').value;
+  document.getElementById('cm_boards').style.display=mode==='custom'?'block':'none';
+}
+function renderCmBoards(){
+  const box=document.getElementById('cm_board_list');
+  box.innerHTML=Object.keys(CM_ALL_COLS).map(bid=>{
+    const b=CM_ALL_COLS[bid];
+    const st=CM_BOARD_SEL[bid];
+    if(!st)return '';
+    const selAll=st.sel.size===st.cols.length;
+    const colsHtml=st.cols.map(cid=>`<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 8px 3px 0;font-size:12.5px;cursor:pointer">
+      <input type="checkbox" ${st.sel.has(cid)?'checked':''} onchange="cmToggleCol('${bid}','${cid}')"> ${esc(CM_ALL_COLS[bid].columns[cid]||cid)}
+    </label>`).join('');
+    return `<div style="border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:13px;font-weight:600">${esc(b.board_name)}</span>
+        <label style="font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="checkbox" ${selAll?'checked':''} onchange="cmToggleBoardAll('${bid}',this.checked)"> 全选</label>
+      </div>
+      <div>${colsHtml}</div>
+    </div>`;
+  }).join('')||'<div style="color:var(--text2);font-size:12px;padding:10px">无可配置的看板</div>';
+}
+function cmToggleCol(bid,cid){
+  const st=CM_BOARD_SEL[bid];
+  if(st.sel.has(cid))st.sel.delete(cid);else st.sel.add(cid);
+  renderCmBoards();
+}
+function cmToggleBoardAll(bid,on){
+  const st=CM_BOARD_SEL[bid];
+  st.sel=on?new Set(st.cols):new Set();
+  renderCmBoards();
+}
+async function saveColPerm(){
+  const mode=document.getElementById('cm_mode').value;
+  let columns='*';
+  if(mode==='custom'){
+    const obj={};
+    Object.keys(CM_BOARD_SEL).forEach(bid=>{
+      const st=CM_BOARD_SEL[bid];
+      if(st.sel.size===st.cols.length)return; // 全选=该看板不限制
+      if(st.sel.size)obj[bid]=Array.from(st.sel);
+    });
+    columns=Object.keys(obj).length?JSON.stringify(obj):'*';
+  }
+  try{
+    await api('/api/admin/users/'+encodeURIComponent(CM_USER),{method:'PUT',body:JSON.stringify({columns})});
+    toast('板块权限已保存');closeModal('colModal');adminLoadUsers();
+  }catch(e){toast(e.message)}
+}
+async function adminCreateUser(){
+  const name=document.getElementById('au_name').value.trim();
+  const pwd=document.getElementById('au_pwd').value.trim();
+  const role=document.getElementById('au_role').value;
+  const boards=document.getElementById('au_boards').value.trim()||'*';
+  if(!name||!pwd){toast('账号和密码不能为空');return}
+  try{
+    await api('/api/admin/users',{method:'POST',body:JSON.stringify({username:name,password:pwd,role,boards})});
+    toast('账号已创建');openAdminModal();
+  }catch(e){toast(e.message)}
+}
+async function adminSetRole(name,role){
+  try{await api('/api/admin/users/'+encodeURIComponent(name),{method:'PUT',body:JSON.stringify({role})});toast('角色已更新')}
+  catch(e){toast(e.message)}
+}
+async function adminResetPwd(name){
+  const p=prompt('为账号 '+name+' 设置新密码：');
+  if(!p||!p.trim())return;
+  try{await api('/api/admin/users/'+encodeURIComponent(name),{method:'PUT',body:JSON.stringify({password:p.trim()})});toast('密码已重置')}
+  catch(e){toast(e.message)}
+}
+async function adminDeleteUser(name){
+  if(!confirm('确定删除账号 '+name+'？'))return;
+  try{await api('/api/admin/users/'+encodeURIComponent(name),{method:'DELETE'});toast('已删除');adminLoadUsers()}
+  catch(e){toast(e.message)}
+}
+// ---------- 导出 / 导入 ----------
+async function exportData(){
+  try{
+    const d=await api('/api/export');
+    const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='工作台数据备份_'+new Date().toISOString().slice(0,10)+'.json';
+    a.click();
+    toast('已导出 '+d.cards.length+' 条数据');
+  }catch(e){toast(e.message)}
+}
+async function importData(ev){
+  const f=ev.target.files[0];
+  if(!f)return;
+  try{
+    const text=await f.text();
+    const data=JSON.parse(text);
+    await api('/api/import',{method:'POST',body:JSON.stringify({cards:data.cards||[],team:data.team||[]})});
+    toast('导入成功：'+((data.cards||[]).length)+' 条事项');ev.target.value='';reload(1);renderProgress();
+  }catch(e){toast('导入失败：'+e.message);ev.target.value=''}
+}
+// ---------- WebSocket ----------
+function connectWS(){
+  const wsBase=window.__IS_FILE__?'ws://127.0.0.1:8000':((location.protocol==='https:'?'wss://':'ws://')+location.host);
+  const ws=new WebSocket(wsBase+'/ws?token='+encodeURIComponent(TOKEN));
+  ws.onmessage=e=>{const m=JSON.parse(e.data);
+    if(m.type==='lock'||m.type==='unlock'||m.type==='card_update'||m.type==='card_create'||m.type==='card_delete'){
+      reload(curPage);renderProgress();
+      // 编辑/详情弹窗开着且是同一张卡 → 刷新代办任务
+      const cid=m.card_id;
+      if(cid&&cid!=='*'&&(editing===cid||DETAIL_ID===cid)){
+        if(editing===cid)loadEditSubtasks(cid);
+        if(DETAIL_ID===cid&&document.getElementById('detailModal').style.display==='flex'){
+          api('/api/cards/'+cid+'/subtasks').then(st=>{
+            const box=document.getElementById('d_subtask_box');
+            if(st.subtasks.length){box.style.display='';renderSubtasks(st.subtasks,document.getElementById('d_subtask_list'),document.getElementById('d_subtask_count'),ME.can_edit,cid)}
+            else box.style.display='none';
+          });
+        }
+      }
+      // 抽屉开着 → 刷新抽屉视图（子事项实时同步）
+      if(DRAWER_STACK.length&&document.getElementById('drawerPanel').classList.contains('open')){
+        const top=DRAWER_STACK[DRAWER_STACK.length-1];
+        if(top.type==='list'&&top.cardId===cid){renderDrawerList(cid)}
+        else if(top.type==='edit'&&top.cardId===cid){renderDrawerEdit(cid,top.parentId)}
+      }
+    }};
+  ws.onclose=()=>setTimeout(connectWS,5000);
+  setInterval(()=>{if(ws.readyState===1)ws.send('ping')},25000);
+}
+init();
+
+// ---------- file:// 直接打开：引导层与后端存活探测 ----------
+function showFileGuard(){
+  var g=document.getElementById('fileGuard');
+  if(g)g.classList.add('show');
+}
+// 用 no-cors 探测本机后端是否在跑：只要服务器有响应即视为存活（不受 CORS 限制）
+function probeBackend(){
+  if(!window.__IS_FILE__)return;
+  var btn=document.getElementById('fgOpen');
+  var tip=document.getElementById('fgTip');
+  fetch('http://127.0.0.1:8000/api/me',{mode:'no-cors',cache:'no-store'})
+    .then(function(){
+      if(btn)btn.textContent='工作台已就绪 → 点击进入';
+      if(tip)tip.textContent='已检测到本机 8000 端口的后端服务，点击上方按钮即可进入工作台。';
+    })
+    .catch(function(){
+      if(tip)tip.textContent='⚠ 未检测到本机 8000 端口的后端服务，请先启动后端（见上方命令）。';
+    });
+}
+if(window.__IS_FILE__){showFileGuard();probeBackend();}
+
+// ---------- 看板管理（主从布局：左=真实看板列表，右=编辑区域） ----------
+var BC_EDIT_ID=0;
+var BC_BOARDS=[];
+var BC_SELECTED=null;
+var BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+var BC_FILTER={year:'',dept:'',attr:'',status:''};
+var BC_YEARS=['2025','2026','2027','2028','2029','2030'];
+var BC_DEPTS=['财务中心','核算部','总账部','管理部','资金部','商务部'];
+function initBcListEvents(){
+  const box=document.getElementById('bcList');
+  if(!box||box._bcEvtBound)return;
+  box.addEventListener('click',function(e){
+    const item=e.target.closest('.bc-item');
+    if(!item)return;
+    const bid=item.getAttribute('data-bid');
+    if(bid)bcSelect(bid);
+  });
+  box._bcEvtBound=true;
+}
+async function openBoardConfigModal(){
+  if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
+  await loadBoardConfig();
+  initBcListEvents();
+  BC_SELECTED=null; BC_EDIT_ID=0;
+  BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+  renderEditArea();
+  document.getElementById('boardConfigModal').style.display='flex';
+}
+async function loadBoardConfig(){
+  const res=await api('/api/boards');
+  BC_BOARDS=res.boards||[];
+  renderFilters();
+  renderBoardList();
+}
+function renderFilters(){
+  const all='<option value="">全部</option>';
+  document.getElementById('bcf_year').innerHTML=all+BC_YEARS.map(function(y){return '<option value="'+y+'"'+(BC_FILTER.year===y?' selected':'')+'>'+y+'</option>'}).join('');
+  document.getElementById('bcf_dept').innerHTML=all+BC_DEPTS.map(function(d){return '<option value="'+esc(d)+'"'+(BC_FILTER.dept===d?' selected':'')+'>'+esc(d)+'</option>'}).join('');
+  document.getElementById('bcf_attr').innerHTML=all+['日常','专项'].map(function(a){return '<option value="'+a+'"'+(BC_FILTER.attr===a?' selected':'')+'>'+a+'</option>'}).join('');
+  document.getElementById('bcf_status').innerHTML=all
+    +'<option value="启用"'+(BC_FILTER.status==='启用'?' selected':'')+'>启用</option>'
+    +'<option value="封存"'+(BC_FILTER.status==='封存'?' selected':'')+'>封存</option>'
+    +'<option value="未配置"'+(BC_FILTER.status==='未配置'?' selected':'')+'>未配置</option>';
+}
+function renderBoardList(){
+  const list=BC_BOARDS.filter(function(b){
+    if(BC_FILTER.year && b.year!==BC_FILTER.year)return false;
+    if(BC_FILTER.dept && b.dept!==BC_FILTER.dept)return false;
+    if(BC_FILTER.attr && b.attr!==BC_FILTER.attr)return false;
+    if(BC_FILTER.status){
+      if(BC_FILTER.status==='未配置'){if(b.status)return false;}
+      else if(b.status!==BC_FILTER.status)return false;
+    }
+    return true;
+  });
+  const cnt=document.getElementById('bcLeftCount'); if(cnt)cnt.textContent=list.length;
+  const box=document.getElementById('bcList');
+  if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';return}
+  box.innerHTML=list.map(function(b){
+    const st = b.status==='封存' ? '<span class="badge-locked">封存</span>'
+            : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
+    const sel = (BC_SELECTED && BC_SELECTED.board_id===b.board_id) ? ' active':'';
+    return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
+      +'<div class="nm"><span>'+esc(b.board_name||b.board_id)+'</span>'+st+'</div>'
+      +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
+      +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
+      +'<span style="margin-left:auto;color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span></div>'
+      +'</div>';
+  }).join('');
+  setBcListScroll(list.length);
+}
+function setBcListScroll(n){
+  const box=document.getElementById('bcList');
+  if(!box)return;
+  if(n<=7){
+    box.style.maxHeight='none';
+    box.style.overflow='hidden';
+  }else{
+    const first=box.querySelector('.bc-item');
+    if(first){
+      const style=window.getComputedStyle(first);
+      const mb=parseInt(style.marginBottom||0,10);
+      const h=first.offsetHeight+mb;
+      box.style.maxHeight=(h*7+20)+'px'; // 20 = bc-list 上下 padding 10+10
+    }else{
+      box.style.maxHeight='454px';
+    }
+    box.style.overflow='auto';
+  }
+}
+function bcFilterChange(dim,val){
+  BC_FILTER[dim]=val;
+  renderBoardList();
+}
+function bcSelect(bid){
+  const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
+  if(!b)return;
+  BC_SELECTED=b;
+  BC_EDIT_ID=b.config_id||0;
+  BC_FORM={year:b.year||'2026',dept:b.dept||'财务中心',attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};
+  renderBoardList();
+  renderEditArea();
+}
+function configBoard(){
+  const unconf=BC_BOARDS.filter(function(b){return !b.config_id;});
+  if(!unconf.length){toast('所有看板均已配置');return;}
+  BC_SELECTED=unconf[0];
+  BC_EDIT_ID=0;
+  BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+  renderEditArea();
+}
+function bcChangeBoard(bid){
+  const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
+  if(b){BC_SELECTED=b;BC_EDIT_ID=0;BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};}
+}
+function bcPick(dim,val){
+  BC_FORM[dim]=val;
+  document.querySelectorAll('[data-dim="'+dim+'"]').forEach(function(p){
+    const on=p.getAttribute('data-val')===val;
+    p.classList.toggle('on',on);
+    if(dim==='status'){ p.classList.toggle('warn', on && val==='封存'); }
+  });
+}
+function renderEditArea(){
+  const area=document.getElementById('bcEditArea');
+  if(!BC_SELECTED){
+    area.innerHTML='<div class="bc-empty-edit"><div style="font-size:34px">📋</div><div>从左侧选择看板进行配置</div><div style="font-size:12px;color:var(--text3)">或点击左上「+ 新建」为未配置的看板登记维度</div></div>';
+    return;
+  }
+  const b=BC_SELECTED, isEdit=!!BC_EDIT_ID;
+  let boardBlock;
+  if(isEdit){
+    boardBlock='<div class="bc-boardcard"><div><div class="bi-name">'+esc(b.board_name||b.board_id)+'</div>'
+      +'<div class="bi-meta">工作空间 '+esc(b.workspace_id||'-')+' · '+(b.card_count||0)+' 张卡片</div></div>'
+      +'<span class="badge-active">已配置</span></div>';
+  }else{
+    const unconf=BC_BOARDS.filter(function(x){return !x.config_id;});
+    const opts=unconf.map(function(x){return '<option value="'+x.board_id+'"'+(x.board_id===b.board_id?' selected':'')+'>'+esc(x.board_name||x.board_id)+'</option>';}).join('');
+    boardBlock='<div class="bc-boardcard" style="flex-direction:column;align-items:stretch;gap:6px">'
+      +'<div class="bi-meta">为以下真实看板新建配置</div>'
+      +'<select class="form-select" id="bc_board" onchange="bcChangeBoard(this.value)">'+opts+'</select></div>';
+  }
+  const yearPills=BC_YEARS.map(function(y){return '<span class="bc-pill'+(BC_FORM.year===y?' on':'')+'" data-dim="year" data-val="'+y+'" onclick="bcPick(\'year\',\''+y+'\')">'+y+'</span>';}).join('');
+  const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d)+'"'+(BC_FORM.dept===d?' selected':'')+'>'+esc(d)+'</option>';}).join('');
+  const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
+  const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
+  let footer='<div class="bc-footer">';
+  if(isEdit){footer+='<button class="btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteBoardConfig('+BC_EDIT_ID+')">删除配置</button>';}
+  footer+='<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
+    +'<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
+  area.innerHTML='<div class="bc-edit">'
+    +'<div class="bc-edit-title">'+(isEdit?'✏️ 编辑看板配置':'➕ 新建看板配置')+'<span class="sub">'+(isEdit?'修改该看板的维度属性':'为真实看板登记维度属性')+'</span></div>'
+    +boardBlock
+    +'<div class="bc-section"><div class="lab"><span class="req">*</span>年份</div><div class="bc-pills">'+yearPills+'</div></div>'
+    +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div><select class="form-select" id="bc_dept" onchange="BC_FORM.dept=this.value" style="max-width:240px">'+deptOpts+'</select></div>'
+    +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills">'+attrPills+'</div></div>'
+    +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills">'+statusPills+'</div></div>'
+    +'<div class="bc-section"><div class="lab">备注（可选）</div><textarea class="form-textarea" id="bc_remark" rows="2" placeholder="如：年度预算看板" oninput="BC_FORM.remark=this.value">'+esc(BC_FORM.remark||'')+'</textarea></div>'
+    +footer
+    +'</div>';
+}
+function resetBoardConfigForm(){
+  BC_EDIT_ID=0; BC_SELECTED=null;
+  BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+  renderEditArea();
+}
+async function submitBoardConfigForm(){
+  if(!BC_SELECTED){toast('请选择看板');return;}
+  const bid=BC_SELECTED.board_id;
+  const payload={board_id:bid, year:BC_FORM.year, dept:BC_FORM.dept, attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
+  try{
+    if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
+    else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
+    await loadBoardConfig();
+    const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
+    if(b){BC_SELECTED=b;BC_EDIT_ID=b.config_id||0;BC_FORM={year:b.year||'2026',dept:b.dept||'财务中心',attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
+    renderEditArea();
+    toast('已保存');
+  }catch(e){ /* api 内部已 toast 错误 */ }
+}
+async function deleteBoardConfig(id){
+  if(!confirm('确认删除该看板配置？'))return;
+  try{
+    await api('/api/board-config/'+id,{method:'DELETE'});
+    if(BC_SELECTED && BC_SELECTED.config_id===id){BC_SELECTED=null;BC_EDIT_ID=0;}
+    await loadBoardConfig();
+    renderEditArea();
+    toast('已删除');
+  }catch(e){}
+}
+
+</script>
+</body>
+</html>
+
