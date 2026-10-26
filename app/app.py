@@ -1431,6 +1431,118 @@ async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_
     return {'ok': True}
 
 # ---------------- API：导出 / 导入 ----------------
+# xlsx 导出的列定义（与 TAPD 平台导出格式对齐，全部平铺，无合并单元格）
+XLSX_COLUMNS = [
+    ('卡片名称',   'card_name',    50),
+    ('详细描述',   'description',  50),
+    ('板块标题',   'column_name',  15),
+    ('状态',       'status_name',  15),
+    ('开始时间',   'begin',        15),
+    ('截止时间',   'due',          15),
+]
+
+@app.get('/api/export/xlsx')
+def export_xlsx(board_id: str = '', username: str = Depends(require_auth), request: Request = None):
+    """导出当前用户可见范围的卡片为 xlsx（.xlsx）
+
+    - board_id 非空时只导出该看板（仍受用户看板/板块权限约束）
+    - 严格遵循用户可见性（看板 + 板块双层过滤）
+    - 全平铺结构，**不使用任何合并单元格**（merge_cells 一次都不调用）
+    - 表头加粗居中、首行冻结、自动筛选
+    """
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    boards, columns = user_allowed(username)
+    # 指定看板时做交集校验：不在可见范围内的看板按不可见处理
+    target_boards = None
+    if board_id:
+        if boards is None:
+            target_boards = {board_id}
+        elif board_id in boards:
+            target_boards = {board_id}
+        else:
+            target_boards = set()
+    cards = [dict(r) for r in filter_rows(
+        dbq('SELECT * FROM cards WHERE deleted=0'), target_boards, columns)]
+    # 稳定排序：按开始时间、卡片名，保证多次导出一致
+    cards.sort(key=lambda c: (str(c.get('begin') or ''), str(c.get('card_name') or '')))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Board_list'
+
+    header_font = Font(bold=True, size=11)
+    header_align = Alignment(horizontal='center', vertical='center')
+    header_fill = PatternFill('solid', fgColor='F2F2F2')
+    thin = Side(style='thin', color='D0D0D0')
+    cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    body_align = Alignment(vertical='top', wrap_text=True)
+
+    # 表头
+    for idx, (title, _key, _w) in enumerate(XLSX_COLUMNS, start=1):
+        c = ws.cell(row=1, column=idx, value=title)
+        c.font = header_font
+        c.alignment = header_align
+        c.fill = header_fill
+        c.border = cell_border
+
+    # 数据行（逐格写入，不做任何单元格合并）
+    for r, card in enumerate(cards, start=2):
+        for idx, (_title, key, _w) in enumerate(XLSX_COLUMNS, start=1):
+            val = card.get(key)
+            if val is None:
+                val = ''
+            c = ws.cell(row=r, column=idx, value=val)
+            c.alignment = body_align
+            c.border = cell_border
+
+    # 列宽
+    for idx, (_title, _key, width) in enumerate(XLSX_COLUMNS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+    # 冻结首行 + 自动筛选（增强可读性，不涉及合并）
+    ws.freeze_panes = 'A2'
+    if cards:
+        ws.auto_filter.ref = f'A1:{get_column_letter(len(XLSX_COLUMNS))}{len(cards) + 1}'
+
+    # 落盘到内存
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    audit_log(username, client_ip(request), 'export', '数据导出',
+              f'导出 xlsx：卡片 {len(cards)} 张', 'success')
+
+    # 文件名沿用 TAPD 命名习惯：看板名_YYYYMMDDHHMMSS.xlsx
+    ts = time.strftime('%Y%m%d%H%M%S')
+    if target_boards is not None and len(target_boards) == 1:
+        bid = list(target_boards)[0]
+        row = dbq('SELECT board_name FROM boards WHERE board_id=? LIMIT 1', (bid,))
+        board_label = (row[0]['board_name'] if row else '') or '看板'
+    else:
+        names = sorted({c.get('board_name') or '' for c in cards if c.get('board_name')})
+        if len(names) == 1:
+            board_label = names[0]
+        elif names:
+            board_label = f'{len(names)}个看板'
+        else:
+            board_label = '全部看板'
+    safe = re.sub(r'[\\/:*?"<>|]', '_', board_label)
+    filename = f'看板_{safe}_{ts}.xlsx'
+    # RFC 5987 编码，兼容中文文件名
+    from urllib.parse import quote
+    disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
+
+    return Response(
+        content=buf.getvalue(),
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': disposition},
+    )
+
+
 @app.get('/api/export')
 def export_data(username: str = Depends(require_auth), request: Request = None):
     """导出当前用户可见范围全部数据为 JSON（含团队、评论、子事项）"""

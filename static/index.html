@@ -410,8 +410,9 @@ function goLogin(){
     <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
     <button class="header-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>
     <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
-    <button class="header-btn" onclick="exportData()" title="导出数据备份">📤 导出</button>
-    <button class="header-btn" onclick="document.getElementById('importFile').click()" title="导入数据备份">📥 导入</button>
+    <button class="header-btn" onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
+    <button class="header-btn" onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
+    <button class="header-btn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复">📥 恢复</button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
@@ -2474,6 +2475,31 @@ async function adminDeleteUser(name){
   catch(e){toast(e.message)}
 }
 // ---------- 导出 / 导入 ----------
+// 导出 Excel（xlsx）：走后端生成，格式与 TAPD 导出一致，全平铺无合并单元格
+async function exportXlsx(){
+  try{
+    toast('正在生成 Excel...');
+    // 当前选中看板时只导该看板，否则导全部可见看板
+    const q = curBoard ? ('?board_id='+encodeURIComponent(curBoard)) : '';
+    const r=await fetch(apiUrl('/api/export/xlsx'+q),{headers:{'Authorization':'Bearer '+TOKEN}});
+    if(r.status===401){goLogin();return}
+    if(!r.ok){let d={};try{d=await r.json()}catch(e){};throw new Error(d.detail||('HTTP '+r.status))}
+    const blob=await r.blob();
+    // 优先用后端下发的文件名（RFC5987 编码），取不到再本地生成
+    let fname='工作台数据_'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,'')+'.xlsx';
+    const cd=r.headers.get('Content-Disposition')||'';
+    const m=cd.match(/filename\*=UTF-8''([^;]+)/i);
+    if(m){try{fname=decodeURIComponent(m[1])}catch(e){}}
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=fname;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+    toast('已导出 Excel：'+fname);
+  }catch(e){toast('导出失败：'+e.message)}
+}
+
+// 备份（JSON）：完整业务数据，可用于恢复
 async function exportData(){
   try{
     const d=await api('/api/export');
@@ -2482,7 +2508,8 @@ async function exportData(){
     a.href=URL.createObjectURL(blob);
     a.download='工作台数据备份_'+new Date().toISOString().slice(0,10)+'.json';
     a.click();
-    toast('已导出 '+d.cards.length+' 条数据');
+    setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+    toast('备份完成：'+d.cards.length+' 条数据');
   }catch(e){toast(e.message)}
 }
 async function importData(ev){
