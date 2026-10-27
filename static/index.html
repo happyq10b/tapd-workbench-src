@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <!-- 版本：2026-08-21 09:10 统一版本标识（含 8-20 全部优化：看板管理重构/board_config 关联/主从 UI/配色焕新/冻结筛选/事件委托/滚动条动态控制/恢复滚动条）；WS 实时链路已修复（venv 补装 websockets） -->
-<title>财务中心核算部 · 部门工作台</title>
+<title>财务工作事项平台</title>
 <style>
 :root{--bg:#f0f2f5;--card:#fff;--border:#e8e8e8;--text:#1f1f1f;--text2:#8c8c8c;--primary:#002D74;--success:#52c41a;--warning:#faad14;--danger:#ff4d4f;--shadow:0 2px 8px rgba(0,45,116,.06);--radius:8px;--radius-sm:4px}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -87,6 +87,16 @@ button{font-family:inherit}
 .week-bar i{display:block;height:100%;background:var(--success)}
 .week-body{display:none;border-top:1px solid var(--border);padding:8px}
 .week-group.open .week-body{display:block}
+/* ---- 板块头部右侧操作区：创建日期 / 板块置顶 / 事项+ ---- */
+.week-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.week-created{font-size:11.5px;color:var(--text3);white-space:nowrap}
+.pin-btn{border:1px solid var(--border);background:#fff;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;color:var(--text2);transition:all .15s;white-space:nowrap;font-family:inherit}
+.pin-btn:hover{border-color:var(--primary);color:var(--primary)}
+.pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
+.add-item-btn{border:1px solid #b5d4f4;background:#e6f1fb;color:#185fa5;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;transition:all .15s;white-space:nowrap;font-weight:500;font-family:inherit}
+.add-item-btn:hover{background:#d6e9fb}
+/* 事项尾部的创建日期 */
+.item-created{font-size:12px;color:var(--text3);flex-shrink:0;white-space:nowrap}
 .item-card{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);transition:background .15s}
 .item-card:hover{background:#fafafa}
 .item-card.locked{background:#fffbe6}
@@ -123,6 +133,12 @@ button{font-family:inherit}
 .form-input,.form-select,.form-textarea{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;font-family:inherit;background:#fff;color:var(--text)}
 .form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--primary)}
 .form-textarea{min-height:100px;resize:vertical}
+/* ---- 单选组（新建板块的「性质」）---- */
+.radio-group{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.radio-item{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;user-select:none}
+.radio-item input{width:15px;height:15px;margin:0;accent-color:var(--primary);cursor:pointer}
+/* 只读字段（创建人）：锁定不可修改 */
+.form-input[readonly]{background:#f5f7fa;color:var(--text2);cursor:not-allowed}
 .member-picker{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;min-height:40px}
 .pp{position:relative;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;min-height:42px;background:var(--color-background-primary,#fff)}
 .pp:focus-within{border-color:var(--primary);box-shadow:0 0 0 2px rgba(24,144,255,.12)}
@@ -431,20 +447,20 @@ function goLogin(){
   </div>
 </div>
 <header class="app-header">
-  <div class="header-left"><h1>财务中心核算部 · 部门工作台<span class="year-badge">2026</span></h1></div>
+  <div class="header-left"><h1>财务工作事项平台<span class="year-badge">2026</span></h1></div>
   <div class="header-actions">
     <span class="header-user"><span id="userName"></span><span class="role-tag" id="roleTag"></span></span>
     <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
     <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
     <button class="header-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>
     <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
-    <button class="header-btn" onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
     <button class="header-btn" onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
     <button class="header-btn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复">📥 恢复</button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+    <button class="header-btn" id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
     <button class="header-btn" id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
     <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="importXlsx(event)">
-    <button class="header-btn" id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
+    <button class="header-btn" onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
 </header>
@@ -459,7 +475,7 @@ function goLogin(){
       <select class="filter-select" id="ownerFilter" onchange="reload(1)"><option value="">全部负责人</option></select>
     </div>
     <div class="toolbar-right" style="display:flex;gap:8px">
-      <button class="btn-primary" id="newBtn" style="display:none" onclick="openNewModal()">+ 新建事项</button>
+      <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
       <button class="btn-default" onclick="expandAll()">展开全部</button>
       <button class="btn-default" onclick="collapseAll()">收起全部</button>
     </div>
@@ -518,10 +534,32 @@ function goLogin(){
     <div class="modal-header"><h2>新建事项</h2><button class="modal-close" onclick="closeModal('newModal')">✕</button></div>
     <div class="modal-body">
       <div class="form-group"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
+      <div class="form-group" id="n_col_wrap" style="display:none"><label>所属板块</label><input type="text" class="form-input" id="n_col" readonly></div>
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="n_name" placeholder="请输入工作标题"></div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('newModal')">取消</button><button class="btn-primary" onclick="createCard()">创建</button></div>
+  </div>
+</div>
+
+<!-- 新建板块弹窗 -->
+<div class="modal-overlay" id="columnModal" style="display:none">
+  <div class="modal" style="width:min(520px,94vw)">
+    <div class="modal-header"><h2>🗂️ 新建板块</h2><button class="modal-close" onclick="closeModal('columnModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
+      <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
+      <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）"></div>
+      <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
+      <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
+        <div class="radio-group">
+          <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
+          <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。</div>
+    </div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" onclick="createColumn()">创建板块</button></div>
   </div>
 </div>
 
@@ -783,7 +821,7 @@ let TOKEN=localStorage.getItem('tk')||'';
 const COST_BOARD_ID='1162069797001000241';
 function isCostCard(c){return c&&c.board_id===COST_BOARD_ID}
 function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_edit}
-let ME=null, curBoard='', curPage=1, pageSize=100, debounceT=null, editing=null, editLockTimer=null;
+let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
 let DETAIL_ID=null, TEAM_MEMBERS=[], expandedAll=false;
 
 function api(path,opts={}){
@@ -1073,28 +1111,78 @@ async function reload(page){
   if(curBoard)ps.set('board_id',curBoard);
   if(s)ps.set('status',s);if(o)ps.set('owner',o);if(q)ps.set('q',q);
   const d=await api('/api/cards?'+ps);
-  renderBoard(d.cards);
+  renderBoard(d.cards,d.columns);
 }
-function renderBoard(cards){
+function renderBoard(cards,cols){
   const c=document.getElementById('boardContent');
-  if(!cards.length){c.innerHTML='<div class="empty">没有符合条件的工作事项</div>';return}
+  const cmeta={};
+  (cols||[]).forEach(x=>{cmeta[x.column_name]=x});
+  window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id
+  // 没有事项但有板块（如刚建的空板块）时仍要展示板块列表
+  if(!(cards||[]).length && !(cols||[]).length){
+    c.innerHTML='<div class="empty">没有符合条件的工作事项</div>';return}
   // 按 column_name 分组
   const groups={};
-  cards.forEach(card=>{const k=card.column_name||'未分组';(groups[k]=groups[k]||[]).push(card)});
-  const order=Object.keys(groups).sort();
-  c.innerHTML=order.map((k,i)=>{
-    const list=groups[k];
-    const done=list.filter(x=>x.status==='done').length;
-    const rate=Math.round(done/list.length*100);
+  (cards||[]).forEach(card=>{const k=card.column_name||'未分组';(groups[k]=groups[k]||[]).push(card)});
+  // 板块列表：以接口返回的板块为准（含暂无事项的空板块），排序规则见 cmpColumn
+  let names;
+  if(cols&&cols.length){
+    names=cols.map(x=>x.column_name);
+    // 兜底：分组里出现、但接口未返回的板块名（历史脏数据 / 并发新建）
+    Object.keys(groups).forEach(k=>{if(k!=='未分组'&&names.indexOf(k)<0)names.push(k)});
+  }else{
+    names=Object.keys(groups);
+  }
+  names.sort((a,b)=>cmpColumn(a,b,cmeta));
+  c.innerHTML=names.map((k,i)=>{
+    const list=groups[k]||[];
+    const meta=cmeta[k];
+    // 板块内事项排序：置顶优先，其余按创建时间降序
+    list.sort(cmpCard);
+    const total=meta?meta.card_count:list.length;
+    const done=meta?meta.done_count:list.filter(x=>x.status==='done').length;
+    const rate=total?Math.round(done/total*100):0;
+    const pinned=meta?!!meta.pinned:false;
+    const created=meta?(String(meta.created_at||'').slice(0,10)||'—'):'—';
+    const colKey=meta?meta.col_key:(curBoard+'::'+k);
+    const boardId=meta?meta.board_id:curBoard;
     return `<div class="week-group open" id="wg_${i}">
       <div class="week-header" onclick="toggleWeek(${i})">
         <span class="chev">▶</span><span class="week-title">${esc(k)}</span>
-        <span class="week-meta">${done}/${list.length} 完成</span>
+        <span class="week-meta">${done}/${total} 完成</span>
         <div class="week-bar"><i style="width:${rate}%"></i></div>
+        <div class="week-actions" onclick="event.stopPropagation()">
+          <span class="week-created" title="板块创建日期">创建 ${esc(created)}</span>
+          <button class="pin-btn ${pinned?'on':''}" onclick="toggleColumnPin('${esc(colKey)}',${pinned?0:1})" title="${pinned?'取消置顶':'置顶该板块（在本看板内优先显示）'}">${pinned?'📌 已置顶':'📌 板块置顶'}</button>
+          <button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button>
+        </div>
       </div>
       <div class="week-body">${list.map(cardItem).join('')}</div>
     </div>`;
   }).join('');
+}
+// 排序比较：置顶优先 → 创建时间降序 → 名称（保证同分时顺序稳定）
+function cmpColumn(a,b,cmeta){
+  const ma=cmeta[a]||{},mb=cmeta[b]||{};
+  const pa=ma.pinned?0:1,pb=mb.pinned?0:1;
+  if(pa!==pb)return pa-pb;
+  const ta=tsVal(ma.created_at),tb=tsVal(mb.created_at);
+  if(ta!==tb)return tb-ta;
+  return String(a).localeCompare(String(b),'zh');
+}
+function cmpCard(a,b){
+  const pa=a.pinned?0:1,pb=b.pinned?0:1;
+  if(pa!==pb)return pa-pb;
+  const ta=tsVal(a.created),tb=tsVal(b.created);
+  if(ta!==tb)return tb-ta;
+  return 0;
+}
+// 归一化时间：'YYYY-MM-DD' / 'YYYY-MM-DD HH:MM:SS' → 可比较的数值
+function tsVal(v){
+  const s=String(v||'').trim();
+  if(!s)return 0;
+  const t=Date.parse(s.replace(' ','T'));
+  return isNaN(t)?0:t;
 }
 function cardItem(c){
   const locked=c.locked_by;
@@ -1108,6 +1196,12 @@ function cardItem(c){
   const subBtn=(ME.can_edit||c.sub_count>0)
     ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="管理子事项">${c.sub_count>0?('子事项 '+c.sub_count):'+ 子事项'}</button>`
     :'';
+  // 事项置顶（作用域：所在板块内部）；无编辑权限或被他人锁定时不提供
+  const canPin=ME.can_edit&&canEditCard(c)&&!lockedByOther;
+  const pinBtn=canPin
+    ?`<button class="pin-btn ${c.pinned?'on':''}" onclick="toggleCardPin('${c.card_id}',${c.pinned?0:1})" title="${c.pinned?'取消置顶':'置顶该事项（在本板块内优先显示）'}">${c.pinned?'📌 已置顶':'📌 置顶'}</button>`
+    :'';
+  const created=c.created?String(c.created).slice(0,10):'';
   return `<div class="item-wrap">
   <div class="item-card ${lockedByOther?'locked':''}">
     <span class="owner-avatar" style="background:${avatarColor(c.owner||'?')}">${esc(initials(c.owner||'?'))}</span>
@@ -1118,8 +1212,26 @@ function cardItem(c){
     <span class="status-tag ${c.status==='done'?'done':c.status==='progressing'?'progressing':'pending'}">${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</span>
     ${subBtn}
     ${ops}
+    <span class="item-created" title="事项创建日期">创建 ${esc(created||'—')}</span>
+    ${pinBtn}
   </div>
   </div>`;
+}
+// 板块置顶 / 取消置顶
+async function toggleColumnPin(colKey,pinned){
+  try{
+    await api('/api/columns/pin',{method:'POST',body:JSON.stringify({col_key:colKey,pinned:!!pinned})});
+    toast(pinned?'板块已置顶':'已取消板块置顶');
+    reload(curPage);
+  }catch(e){toast(e.message)}
+}
+// 事项置顶 / 取消置顶
+async function toggleCardPin(cardId,pinned){
+  try{
+    await api('/api/cards/'+cardId+'/pin',{method:'POST',body:JSON.stringify({pinned:!!pinned})});
+    toast(pinned?'事项已置顶':'已取消事项置顶');
+    reload(curPage);
+  }catch(e){toast(e.message)}
 }
 function toggleWeek(i){const g=document.getElementById('wg_'+i);g.classList.toggle('open')}
 function expandAll(){document.querySelectorAll('.week-group').forEach(g=>g.classList.add('open'))}
@@ -1192,9 +1304,33 @@ function closeEdit(){
   if(editing)unlockCard(editing);
   editing=null;
 }
-async function openNewModal(){
-  document.getElementById('n_board').innerHTML=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID).map(b=>`<option value="${b.board_id}">${esc(b.board_name)}</option>`).join('');
+// openNewModal(boardId, colKey)：从「＋ 事项」按钮进来时锁定看板与板块
+let NEW_CARD_COL=null;   // {board_id, column_id, column_name}
+async function openNewModal(boardId,colKey){
+  const boards=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID);
+  document.getElementById('n_board').innerHTML=boards.map(b=>`<option value="${b.board_id}">${esc(b.board_name)}</option>`).join('');
   document.getElementById('n_name').value='';document.getElementById('n_desc').value='';
+  const wrap=document.getElementById('n_col_wrap'),colInp=document.getElementById('n_col');
+  NEW_CARD_COL=null;
+  if(colKey){
+    // 来自板块行的「＋ 事项」：板块固定，看板同步锁定
+    const sep=colKey.indexOf('::');
+    const bid=boardId||(sep>0?colKey.slice(0,sep):'');
+    const cname=sep>0?colKey.slice(sep+2):colKey;
+    const b=ME.boards.find(x=>x.board_id===bid);
+    if(b){document.getElementById('n_board').value=bid;document.getElementById('n_board').disabled=true}
+    colInp.value=(b?b.board_name+' / ':'')+cname;
+    wrap.style.display='';
+    // 板块的 TAPD column_id：从板块元信息里取（板块级权限依赖它）
+    let cid='';
+    const meta=(window.COLS_META||[]).find(x=>x.col_key===colKey);
+    if(meta)cid=meta.column_id||'';
+    NEW_CARD_COL={board_id:bid,column_id:cid,column_name:cname};
+  }else{
+    document.getElementById('n_board').disabled=false;
+    wrap.style.display='none';
+    colInp.value='';
+  }
   document.getElementById('newModal').style.display='flex';
 }
 async function createCard(){
@@ -1203,8 +1339,45 @@ async function createCard(){
   if(!card_name){toast('标题不能为空');return}
   const board=ME.boards.find(b=>b.board_id===board_id);
   try{
-    await api('/api/cards',{method:'POST',body:JSON.stringify({board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:{description:document.getElementById('n_desc').value}})});
+    const fields={description:document.getElementById('n_desc').value};
+    const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:fields};
+    if(NEW_CARD_COL){
+      body.column_id=NEW_CARD_COL.column_id||'';
+      fields.column_name=NEW_CARD_COL.column_name;
+    }
+    await api('/api/cards',{method:'POST',body:JSON.stringify(body)});
     toast('已创建');closeModal('newModal');reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+// ---------- 新建板块 ----------
+function openColumnModal(){
+  const boards=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID);
+  document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
+  document.getElementById('c_name').value='';
+  // 创建日期：必填，默认当天（不限制可选范围）
+  const d=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  document.getElementById('c_created').value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  // 创建人：取当前登录用户并锁定
+  document.getElementById('c_creator').value=ME.username||'';
+  const nat=document.querySelector('input[name="c_nature"]:checked');
+  if(nat)nat.checked=true;
+  document.getElementById('columnModal').style.display='flex';
+}
+async function createColumn(){
+  const board_id=document.getElementById('c_board').value;
+  const column_name=document.getElementById('c_name').value.trim();
+  const created_at=document.getElementById('c_created').value;
+  const nature=(document.querySelector('input[name="c_nature"]:checked')||{}).value||'日常';
+  if(!column_name){toast('板块名称不能为空');return}
+  if(!board_id){toast('请选择所属看板');return}
+  if(!created_at){toast('创建日期为必填项');return}
+  try{
+    await api('/api/columns',{method:'POST',body:JSON.stringify({board_id,column_name,created_at,nature})});
+    toast('板块已创建：'+column_name);
+    closeModal('columnModal');
+    if(curBoard!==board_id){curBoard=board_id;ensureDeptOpen(board_id)}
+    reload(1);renderProgress();
   }catch(e){toast(e.message)}
 }
 // ---------- 新建看板（管理员） ----------

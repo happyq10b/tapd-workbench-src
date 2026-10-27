@@ -28,7 +28,7 @@ CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','work
     'begin','due','completed','created','modified','description','attachment_count',
     'label','b_sort','entity_type','cover_setted','cover_info','is_filed','created_from',
     'date_status','due_time_ux','begin_date_status','begin_time_ux','comments',
-    'column_sort','board_status','board_creator','parent_id']
+    'column_sort','board_status','board_creator','parent_id','pinned']
 
 app = FastAPI(title="TAPD 看板", docs_url=None, redoc_url=None)
 
@@ -265,6 +265,74 @@ def perm_pass(row: dict, boards, columns) -> bool:
 def filter_rows(rows, boards, columns):
     return [dict(r) for r in rows if perm_pass(dict(r), boards, columns)]
 
+# ---------------- 板块（看板内的分组，如「成本组（第1周）」）----------------
+# 板块此前只隐含在 cards.column_name 中，没有独立记录，导致「创建日期 / 性质 /
+# 置顶」无处存放。board_columns 表承载这些元信息。
+# 业务主键 col_key = board_id + '::' + column_name：
+#   column_id 在同一看板内唯一，但历史数据存在 column_id 为空的分组，
+#   用组合键更稳妥，也不会因 column_id 缺失而无法定位板块。
+COLUMN_NATURES = {'日常', '专项'}
+
+
+def col_key(board_id, column_name):
+    return '%s::%s' % (board_id or '', column_name or '')
+
+
+def _ts(v):
+    """把 'YYYY-MM-DD' 或 'YYYY-MM-DD HH:MM:SS' 归一成可比较的时间戳（越大越新）"""
+    s = (v or '').strip()
+    if not s:
+        return 0.0
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+        try:
+            return time.mktime(time.strptime(s[:19] if fmt != '%Y-%m-%d' else s[:10], fmt))
+        except ValueError:
+            continue
+    return 0.0
+
+
+def ensure_column(board_id, column_name, column_id='', creator='', created_at=''):
+    """确保板块元信息存在；不存在则按默认值建一条（幂等）"""
+    if not (board_id and column_name):
+        return None
+    key = col_key(board_id, column_name)
+    if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
+        return key
+    cid = column_id or ('COL' + str(int(time.time() * 1000)))
+    ca = created_at or time.strftime('%Y-%m-%d %H:%M:%S')
+    dbe('INSERT OR IGNORE INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, pinned)'
+        ' VALUES (?,?,?,?,?,?,?,0)',
+        (key, cid, board_id, column_name, ca, creator or '', '日常'))
+    return key
+
+
+def visible_columns(username, boards, columns, board_id=None, counts=None):
+    """列出当前用户可见的板块元信息（按置顶优先、创建时间降序）
+
+    counts: {col_key: (总数, 已完成数)}，用于板块进度条
+    """
+    rows = dbq('SELECT * FROM board_columns')
+    out = []
+    for r in rows:
+        d = dict(r)
+        if boards is not None and d['board_id'] not in boards:
+            continue
+        if board_id and d['board_id'] != board_id:
+            continue
+        # 板块级权限：用户被限定在某几个 column_id 时，看板内未授权的板块不展示
+        if columns is not None:
+            allowed = columns.get(d['board_id'])
+            if allowed is not None and d['column_id'] not in allowed:
+                continue
+        n, dn = (counts or {}).get(d['col_key'], (0, 0))
+        d['card_count'] = n
+        d['done_count'] = dn
+        d['pinned'] = int(d.get('pinned') or 0)
+        out.append(d)
+    # 排序：置顶优先；置顶项内部与普通项各自按创建时间降序
+    out.sort(key=lambda d: (0 if d['pinned'] else 1, -_ts(d.get('created_at')), d['column_name']))
+    return out
+
 # ---------------- 卡片查询 ----------------
 def card_dict(r) -> dict:
     d = dict(r)
@@ -495,6 +563,18 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
     if q:
         mine = [r for r in mine if q in (r.get('card_name') or '') or q in (r.get('description') or '')]
     total = len(mine)
+    # 板块元信息 + 进度统计：基于**全量**过滤结果，不受分页影响，
+    # 否则板块进度条上的「已完成/总数」会与实际列出的事项对不上
+    ccnt, dcnt = defaultdict(int), defaultdict(int)
+    for r in mine:
+        k = col_key(r['board_id'], r['column_name'])
+        ccnt[k] += 1
+        if r['status'] == 'done':
+            dcnt[k] += 1
+    counts = {k: (ccnt[k], dcnt[k]) for k in ccnt}
+    cols_meta = visible_columns(username, boards, columns, board_id, counts)
+    if column:
+        cols_meta = [c for c in cols_meta if c['column_name'] == column]
     start = (page - 1) * size
     page_rows = mine[start:start + size]
     st = subtask_stats([r['card_id'] for r in page_rows])
@@ -506,7 +586,99 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         d['subtask_total'] = st.get(r['card_id'], {}).get('total', 0)
         d['sub_count'] = sub_count.get(r['card_id'], 0)
         out.append(d)
-    return {'total': total, 'page': page, 'size': size, 'cards': out}
+    return {'total': total, 'page': page, 'size': size, 'cards': out, 'columns': cols_meta}
+
+# ---------------- API：板块（新建 / 置顶）----------------
+class ColumnCreate(BaseModel):
+    board_id: str
+    column_name: str
+    created_at: str = ''     # 创建日期（必填，允许 YYYY-MM-DD 或含时分秒）
+    nature: str = '日常'      # 性质：日常 / 专项
+
+
+class ColumnPinReq(BaseModel):
+    col_key: str
+    pinned: bool = False
+
+
+class PinReq(BaseModel):
+    """事项置顶请求（板块置顶另用 ColumnPinReq，需要带 col_key）"""
+    pinned: bool = False
+
+
+@app.post('/api/columns')
+async def create_column(req: ColumnCreate, username: str = Depends(require_editor), request: Request = None):
+    """新建板块：创建日期必填（默认当天），创建人取当前登录用户（前端锁定，服务端也强制）"""
+    name = (req.column_name or '').strip()
+    if not name:
+        raise HTTPException(400, '板块名称不能为空')
+    if not req.board_id:
+        raise HTTPException(400, '请选择所属看板')
+    if req.nature not in COLUMN_NATURES:
+        raise HTTPException(400, '性质只能是「日常」或「专项」')
+    created = (req.created_at or '').strip()
+    if not created:
+        # 创建日期为必填项：前端日期选择器已默认预填当天，服务端同样强制校验，
+        # 避免绕过前端直接调接口时产生无日期的板块
+        raise HTTPException(400, '创建日期为必填项')
+    if not re.match(r'^\d{4}-\d{2}-\d{2}', created):
+        raise HTTPException(400, '创建日期格式应为 YYYY-MM-DD')
+    # 看板必须存在且对当前用户可见
+    boards, _cols = user_allowed(username)
+    if boards is not None and req.board_id not in boards:
+        raise HTTPException(403, '无权在该看板下新建板块')
+    if not dbq('SELECT board_id FROM boards WHERE board_id=?', (req.board_id,)):
+        raise HTTPException(404, '所属看板不存在')
+    key = col_key(req.board_id, name)
+    if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
+        raise HTTPException(409, '该看板下已存在同名板块')
+    new_cid = 'COL' + str(int(time.time() * 1000))
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, pinned)'
+        ' VALUES (?,?,?,?,?,?,?,0)',
+        (key, new_cid, req.board_id, name, created, username, req.nature))
+    log_action('__column__', username, 'create', f'新建板块 {name}')
+    audit_log(username, client_ip(request), 'create', f'板块 {name}',
+              f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，创建日期 {created}）', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
+            'created_at': created, 'creator': username, 'nature': req.nature, 'pinned': 0}
+
+
+@app.post('/api/columns/pin')
+async def pin_column(req: ColumnPinReq, username: str = Depends(require_editor), request: Request = None):
+    """板块置顶/取消置顶（作用域：所在看板内部）"""
+    row = dbq('SELECT * FROM board_columns WHERE col_key=?', (req.col_key,))
+    if not row:
+        raise HTTPException(404, '板块不存在')
+    boards, _cols = user_allowed(username)
+    if boards is not None and row[0]['board_id'] not in boards:
+        raise HTTPException(403, '无权操作该板块')
+    val = 1 if req.pinned else 0
+    dbe('UPDATE board_columns SET pinned=? WHERE col_key=?', (val, req.col_key))
+    log_action('__column__', username, 'pin', f'{"置顶" if val else "取消置顶"}板块 {row[0]["column_name"]}')
+    audit_log(username, client_ip(request), 'update', f'板块 {row[0]["column_name"]}',
+              f'{"置顶" if val else "取消置顶"}板块：{row[0]["column_name"]}', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'col_key': req.col_key, 'pinned': val}
+
+
+@app.post('/api/cards/{card_id}/pin')
+async def pin_card(card_id: str, req: PinReq, username: str = Depends(require_editor), request: Request = None):
+    """事项置顶/取消置顶（作用域：所在板块内部）"""
+    cur = dbq('SELECT card_id, board_id, card_name FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if not cur:
+        raise HTTPException(404, '事项不存在或已删除')
+    boards, columns = user_allowed(username)
+    if not perm_pass(dict(cur[0]), boards, columns):
+        raise HTTPException(403, '无权操作该事项')
+    val = 1 if req.pinned else 0
+    dbe('UPDATE cards SET pinned=?, modified=? WHERE card_id=?',
+        (val, time.strftime('%Y-%m-%d %H:%M:%S'), card_id))
+    log_action(card_id, username, 'pin', f'{"置顶" if val else "取消置顶"} {cur[0]["card_name"]}')
+    audit_log(username, client_ip(request), 'update', f'事项 {cur[0]["card_name"]}',
+              f'{"置顶" if val else "取消置顶"}事项：{cur[0]["card_name"]}', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'card_id': card_id, 'pinned': val}
 
 # ---------------- API：编辑（写操作） ----------------
 class CardUpdate(BaseModel):
@@ -626,6 +798,11 @@ async def create_card(req: CardCreate, username: str = Depends(require_editor), 
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
+    # 事项带板块名时，确保板块元信息存在（否则该板块在板块列表里没有创建日期/性质/置顶位）
+    cname = (vals.get('column_name') or '').strip()
+    if cname and not req.parent_id:
+        ensure_column(req.board_id, cname, vals.get('column_id') or '', username,
+                      vals.get('created') or time.strftime('%Y-%m-%d %H:%M:%S'))
     log_action(new_id, username, 'create', f'{req.card_name} (parent={req.parent_id or "-"})')
     audit_log(username, client_ip(request), 'create', f'卡片 {new_id}', f'新建卡片：{req.card_name}' + (f'（父事项 {req.parent_id}）' if req.parent_id else ''), 'success')
     await ws_mgr.broadcast({'type': 'card_create', 'card_id': new_id,

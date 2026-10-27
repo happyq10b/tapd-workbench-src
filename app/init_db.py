@@ -107,6 +107,27 @@ CREATE TABLE IF NOT EXISTS board_config (
 );
 CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(year, dept, attr);
 
+-- 板块元信息（看板内的分组，如「成本组（第1周）」）
+-- 板块本身此前只隐含在 cards.column_name 中，没有独立记录，
+-- 导致「创建日期 / 性质 / 置顶」无处存放。这里补一张表：
+--   col_key      = board_id + '::' + column_name，稳定业务主键
+--   column_id    = TAPD 原始列 ID（板块级权限 perm_pass 依赖它）
+--   nature       = 性质：日常 / 专项
+--   pinned       = 置顶标记（作用域：所在看板内）
+CREATE TABLE IF NOT EXISTS board_columns (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    col_key     TEXT NOT NULL UNIQUE,
+    column_id   TEXT NOT NULL DEFAULT '',
+    board_id    TEXT NOT NULL DEFAULT '',
+    column_name TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    creator     TEXT NOT NULL DEFAULT '',
+    nature      TEXT NOT NULL DEFAULT '日常' CHECK (nature IN ('日常','专项')),
+    pinned      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
+CREATE INDEX IF NOT EXISTS idx_board_columns_name ON board_columns(column_name);
+
 CREATE TABLE IF NOT EXISTS actions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     card_id     TEXT NOT NULL,
@@ -245,6 +266,10 @@ def init_db(force_import=False):
     if 'parent_id' not in cols:
         conn.execute("ALTER TABLE cards ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''")
         conn.execute('CREATE INDEX IF NOT EXISTS idx_cards_parent ON cards(parent_id)')
+    # 事项置顶：作用域为所在板块内部
+    if 'pinned' not in cols:
+        conn.execute('ALTER TABLE cards ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_cards_pinned ON cards(pinned)')
     cols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]
     if 'workgroups' not in cols:
         conn.execute("ALTER TABLE team_members ADD COLUMN workgroups TEXT NOT NULL DEFAULT ''")
@@ -263,6 +288,23 @@ def init_db(force_import=False):
     cnt = conn.execute("SELECT COUNT(*) FROM cards WHERE deleted=0").fetchone()[0]
     if cnt == 0 or force_import:
         import_csv(conn)
+    # 板块元信息回填：从已有卡片派生板块，创建日期取该板块最早的事项创建时间
+    # （必须放在 CSV 导入之后 —— 新库导入完成才有板块可派生）
+    conn.execute("""
+        INSERT OR IGNORE INTO board_columns
+            (col_key, column_id, board_id, column_name, created_at, creator, nature, pinned)
+        SELECT board_id || '::' || column_name,
+               COALESCE(MIN(NULLIF(column_id,'')), ''),
+               board_id,
+               column_name,
+               MIN(NULLIF(created,'')),
+               COALESCE(MIN(NULLIF(creator,'')), ''),
+               '日常',
+               0
+        FROM cards
+        WHERE deleted=0 AND column_name IS NOT NULL AND column_name!=''
+        GROUP BY board_id, column_name
+    """)
     # 架构管理（工作组树）：初始化部门层级（最顶层：财务中心）
     gcnt = conn.execute('SELECT COUNT(*) FROM workgroups').fetchone()[0]
     depts = ['管理部', '总账部', '核算部', '资金部', '商务部']
