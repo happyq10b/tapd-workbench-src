@@ -25,7 +25,31 @@ button{font-family:inherit}
 .role-admin{background:#fff7e6;color:#d46b08;border:1px solid #ffd591}
 .role-editor{background:#e6f7ff;color:#1890ff;border:1px solid #91d5ff}
 .role-viewer{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}
-.board-tabs{display:flex;gap:6px;padding:12px 24px 0;flex-wrap:wrap;max-width:1440px;margin:0 auto}
+.board-tabs{display:flex;flex-direction:column;gap:0;padding:12px 24px 0;max-width:1440px;margin:0 auto}
+/* ---- 目录树：按归属部门分组折叠 ---- */
+.tree-root{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;margin-bottom:8px}
+/* 部门层：所有部门节点排在同一行（紧凑），空部门同样占位不隐藏 */
+.tree-dept-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%}
+.tree-dept{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:600;flex-shrink:0}
+.tree-dept:hover{border-color:var(--primary);color:var(--primary)}
+.tree-dept.open{background:#eef5ff;border-color:var(--primary);color:var(--primary)}
+.tree-dept .chev{display:inline-block;transition:transform .2s;color:var(--text2);font-size:11px}
+.tree-dept.open .chev{transform:rotate(90deg)}
+.tree-dept .dept-count{background:var(--border);color:var(--text2);font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
+.tree-dept.open .dept-count{background:var(--primary);color:#fff}
+/* 空部门：仍展示节点，虚线+弱化配色，视觉上可辨识但明显区别于有内容的部门 */
+.tree-dept.empty{border-style:dashed;color:var(--text2);background:#fafafa}
+.tree-dept.empty:hover{color:var(--primary)}
+.tree-dept.empty .dept-count{background:#fff;color:var(--text3)}
+.tree-dept.empty .chev{color:#d0d0d0}
+/* 板块层：所属部门的板块缩进排在下一行，左侧竖线体现层级归属 */
+.tree-children{display:flex;flex-wrap:wrap;gap:6px;align-items:center;width:100%;padding:4px 0 4px 22px;border-left:2px solid var(--border);margin-left:8px}
+.tree-children .tab-btn{border:1px solid var(--border);border-radius:16px;padding:6px 14px;background:#fff}
+.tree-children .tab-btn:hover{background:#eef5ff;color:var(--primary)}
+.tree-children .tab-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.tree-children .tab-btn.active::after{display:none}
+.tree-children .tab-btn.active .tab-count{background:rgba(255,255,255,.25);color:#fff}
+.tree-empty-tip{font-size:12px;color:var(--text3);padding:2px 4px}
 .tab-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;background:#fafafa;color:var(--text2);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:500}
 .tab-btn:hover{color:var(--primary)}
 .tab-btn.active{background:#fff;color:var(--primary);border-color:var(--border);box-shadow:0 -2px 6px rgba(0,0,0,.03);font-weight:600}
@@ -254,7 +278,11 @@ body{
 .role-tag{box-shadow:var(--shadow-sm)}
 
 /* Tabs */
-.board-tabs{gap:8px}
+.board-tabs{gap:0}
+.tree-dept{border-radius:10px;padding:8px 15px;transition:all .2s;box-shadow:var(--shadow-sm)}
+.tree-dept:hover{transform:translateY(-1px)}
+.tree-dept.empty{box-shadow:none}
+.tree-children{gap:7px}
 .tab-btn{border-radius:10px 10px 0 0;padding:9px 18px;transition:all .2s;box-shadow:var(--shadow-sm)}
 .tab-btn:hover{background:#fff;color:var(--primary);transform:translateY(-1px)}
 .tab-btn.active{background:#fff;color:var(--primary);border-color:var(--border) var(--border) transparent;box-shadow:0 -3px 10px rgba(16,24,40,.04);position:relative}
@@ -874,6 +902,7 @@ function initials(name){return name?name.slice(0,2):'??'}
 async function init(){
   if(!TOKEN){goLogin();return}
   try{
+    loadDeptOpen();
     ME=await api('/api/me');
     document.getElementById('userName').textContent='👤 '+ME.username;
     document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
@@ -886,13 +915,94 @@ async function init(){
     renderTabs();renderProgress();reload(1);connectWS();setupDraggableModals();
   }catch(e){toast(e.message)}
 }
+// ---------- 目录树：按「归属部门」分组折叠 ----------
+// 顶层 = 部门节点（含空部门），展开后显示该部门下的板块。
+// ME.depts 由后端给出有序部门清单；ME.boards[].dept 为板块的归属部门。
+// 展开状态存在 DEPT_OPEN，并持久化到 localStorage（刷新后保留）。
+var DEPT_OPEN={};
+var UNASSIGNED_KEY='__unassigned__';
+function loadDeptOpen(){
+  try{
+    const raw=localStorage.getItem('tapd.deptOpen');
+    if(raw){const o=JSON.parse(raw); if(o&&typeof o==='object') DEPT_OPEN=o;}
+  }catch(e){DEPT_OPEN={};}
+}
+function saveDeptOpen(){
+  try{localStorage.setItem('tapd.deptOpen',JSON.stringify(DEPT_OPEN));}catch(e){}
+}
+// 分组：部门 -> 板块列表。
+// 部门顺序 = ME.depts（后端有序，与看板配置一致）；
+// 部门内板块顺序 = ME.boards 原顺序（按 board_id 排序），保持与原标签页一致。
+// 未配置归属部门的板块单独归入「未配置」节点，不丢失、不混入其他部门。
+function groupBoardsByDept(){
+  const depts=(ME.depts&&ME.depts.length)?ME.depts.slice():[];
+  const map={}; depts.forEach(d=>{map[d]=[];});
+  const unassigned=[];
+  (ME.boards||[]).forEach(b=>{
+    const d=b.dept||'';
+    if(d&&Object.prototype.hasOwnProperty.call(map,d)) map[d].push(b);
+    else unassigned.push(b);
+  });
+  return {depts:depts.map(d=>({name:d,boards:map[d]})),unassigned:unassigned};
+}
+// 单个板块 tab（部门分组内）
+function boardTabHtml(b,deptLabel){
+  const lock=b.board_id===COST_BOARD_ID?' 🔒':'';
+  const title=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
+  return `<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')" title="${esc(title)}">${esc(b.board_name)}${lock}</button>`;
+}
 function renderTabs(){
   const tabs=document.getElementById('boardTabs');
-  tabs.innerHTML=`<button class="tab-btn ${curBoard===''?'active':''}" onclick="pickBoard('')">全部看板<span class="tab-count">${ME.boards.length}</span></button>`+
-    ME.boards.map(b=>`<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')">${esc(b.board_name)}${b.board_id===COST_BOARD_ID?' 🔒':''}</button>`).join('')+
-    (ME.is_admin?`<button class="tab-btn tab-add" onclick="openBoardModal()" title="新建看板">＋ 新建看板</button>`:'');
+  const g=groupBoardsByDept();
+  const total=(ME.boards||[]).length;
+  // 第 1 层：全部看板 + 新建看板
+  let html=`<div class="tree-root">`
+    +`<button class="tab-btn ${curBoard===''?'active':''}" onclick="pickBoard('')" title="全部可见看板">全部看板<span class="tab-count">${total}</span></button>`
+    +(ME.is_admin?`<button class="tab-btn tab-add" onclick="openBoardModal()" title="新建看板">＋ 新建看板</button>`:'')
+    +`</div>`;
+  // 第 2 层：部门节点（全部展示，空部门同样占位）
+  html+=`<div class="tree-dept-row">`;
+  g.depts.forEach(d=>{
+    const open=!!DEPT_OPEN[d.name];
+    const cnt=d.boards.length;
+    const emptyCls=cnt?'':' empty';
+    const tip=cnt?('展开 '+d.name+' 下的 '+cnt+' 个板块'):(d.name+' 下暂无板块（可在「看板管理」中把板块挂载到该部门）');
+    html+=`<button class="tree-dept${open?' open':''}${emptyCls}" onclick="toggleDept('${esc(d.name)}')" title="${esc(tip)}" aria-expanded="${open}">`
+      +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span></button>`;
+  });
+  if(g.unassigned.length){
+    const open=!!DEPT_OPEN[UNASSIGNED_KEY];
+    html+=`<button class="tree-dept${open?' open':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的板块" aria-expanded="${open}">`
+      +`<span class="chev">▶</span>未配置<span class="dept-count">${g.unassigned.length}</span></button>`;
+  }
+  html+=`</div>`;
+  // 第 3 层：展开的部门，其板块缩进排在下一行
+  g.depts.forEach(d=>{
+    if(!DEPT_OPEN[d.name])return;
+    const inner=d.boards.length
+      ? d.boards.map(b=>boardTabHtml(b,d.name)).join('')
+      : `<span class="tree-empty-tip">「${esc(d.name)}」下暂无板块 — 可在「看板管理」中把板块挂载到该部门</span>`;
+    html+=`<div class="tree-children">${inner}</div>`;
+  });
+  if(g.unassigned.length&&DEPT_OPEN[UNASSIGNED_KEY]){
+    html+=`<div class="tree-children">${g.unassigned.map(b=>boardTabHtml(b,'')).join('')}</div>`;
+  }
+  tabs.innerHTML=html;
 }
-function pickBoard(bid){curBoard=bid;renderTabs();reload(1);updateNewBtn()}
+function toggleDept(name){
+  DEPT_OPEN[name]=!DEPT_OPEN[name];
+  saveDeptOpen();
+  renderTabs();
+}
+function pickBoard(bid){curBoard=bid;ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()}
+// 选中某板块时，自动展开其所属部门，保证该板块在目录树中始终可见
+function ensureDeptOpen(bid){
+  if(!bid||!ME||!ME.boards)return;
+  const b=ME.boards.find(x=>x.board_id===bid);
+  if(!b)return;
+  const d=b.dept||UNASSIGNED_KEY;
+  if(!DEPT_OPEN[d]){DEPT_OPEN[d]=true;saveDeptOpen();}
+}
 function updateNewBtn(){
   const btn=document.getElementById('newBtn');
   if(!btn||!ME)return;
@@ -1074,6 +1184,7 @@ async function createBoard(){
     closeModal('boardModal');
     ME=await api('/api/me');           // 刷新看板列表（含新建看板）
     curBoard=r.board_id;               // 自动切换到新看板（初始为空）
+    ensureDeptOpen(r.board_id);        // 新建板块尚未配置归属部门，自动展开「未配置」节点
     renderTabs();updateNewBtn();
     reload(1);renderProgress();
   }catch(e){toast(e.message)}
@@ -2748,6 +2859,9 @@ async function submitBoardConfigForm(){
     if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
     else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
     await loadBoardConfig();
+    // 归属部门可能已变更，刷新 ME 并重渲染目录树，保证「板块↔部门」归属关系一致
+    ME=await api('/api/me');
+    renderTabs();
     const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
     if(b){BC_SELECTED=b;BC_EDIT_ID=b.config_id||0;BC_FORM={year:b.year||'2026',dept:b.dept||'财务中心',attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
     renderEditArea();
@@ -2760,6 +2874,9 @@ async function deleteBoardConfig(id){
     await api('/api/board-config/'+id,{method:'DELETE'});
     if(BC_SELECTED && BC_SELECTED.config_id===id){BC_SELECTED=null;BC_EDIT_ID=0;}
     await loadBoardConfig();
+    // 删除配置后该板块归属变为「未配置」，同步刷新目录树
+    ME=await api('/api/me');
+    renderTabs();
     renderEditArea();
     toast('已删除');
   }catch(e){}

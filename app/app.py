@@ -402,14 +402,22 @@ def me(username: str = Depends(require_auth)):
     allb = _all_boards()
     if boards is not None:
         allb = [b for b in allb if b['board_id'] in boards]
-    boards_out = allb
+    # 归属部门（board_config）：目录树按部门分组折叠用。
+    # 未在「看板管理」里配置归属的看板 dept=''，前端归入「未配置」节点，不会丢失。
+    dept_map = {r['board_id']: r['dept'] for r in dbq('SELECT board_id, dept FROM board_config')}
+    boards_out = []
+    for b in allb:
+        item = dict(b)
+        item['dept'] = dept_map.get(b['board_id'], '')
+        boards_out.append(item)
     # 板块级权限信息（供前端配置/展示）
     col_info = None
     if columns is not None:
         col_info = {bid: sorted(cols) for bid, cols in columns.items()}
     return {'username': username, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
-            'allowed_columns': col_info}
+            'allowed_columns': col_info,
+            'depts': DEPT_ORDER}   # 有序部门清单：空部门同样占位，前端据此渲染树顶层节点
 
 @app.get('/api/overview')
 def overview(username: str = Depends(require_auth)):
@@ -1190,7 +1198,10 @@ def del_org_alias(gid: int, username: str = Depends(require_admin), request: Req
 # ---------------- API：看板管理（配置板块：年份/归属部门/属性/状态） ----------------
 # 枚举可选值（与 DB CHECK 约束保持一致，应用层二次校验，越界即 400）
 ALLOWED_YEARS = {'2025', '2026', '2027', '2028', '2029', '2030'}
-ALLOWED_DEPTS = {'财务中心', '核算部', '总账部', '管理部', '资金部', '商务部'}
+# 部门的**有序**列表：目录树按此顺序渲染顶层部门节点（空部门同样占位）。
+# ALLOWED_DEPTS 仅为校验用的集合，顺序无意义，故另设此有序列表。
+DEPT_ORDER = ['财务中心', '核算部', '总账部', '管理部', '资金部', '商务部']
+ALLOWED_DEPTS = set(DEPT_ORDER)
 ALLOWED_ATTRS = {'日常', '专项'}
 ALLOWED_STATUSES = {'启用', '封存'}
 
