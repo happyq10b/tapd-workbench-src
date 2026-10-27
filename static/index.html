@@ -671,7 +671,7 @@ function goLogin(){
         <div class="bc-left">
           <div class="bc-left-head">
             <span class="t">真实看板</span>
-            <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-primary" style="padding:4px 11px;font-size:12px" onclick="configBoard()">+ 新建</button></span>
+            <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-default" style="padding:4px 11px;font-size:12px" onclick="configBoard()" title="为尚未配置的看板补齐年份/归属部门/属性/状态">+ 配置</button><button class="btn-primary" style="padding:4px 11px;font-size:12px" onclick="openBoardModal()" title="创建一个全新的看板">+ 新建看板</button></span>
           </div>
           <div class="bc-filter" id="bcFilter">
             <div class="bc-filter-row"><span class="lab">年份</span><select id="bcf_year" onchange="bcFilterChange('year',this.value)"></select></div>
@@ -955,10 +955,9 @@ function renderTabs(){
   const tabs=document.getElementById('boardTabs');
   const g=groupBoardsByDept();
   const total=(ME.boards||[]).length;
-  // 第 1 层：全部看板 + 新建看板
+  // 第 1 层：全部看板（新建看板入口已移入「看板管理」弹窗）
   let html=`<div class="tree-root">`
     +`<button class="tab-btn ${curBoard===''?'active':''}" onclick="pickBoard('')" title="全部可见看板">全部看板<span class="tab-count">${total}</span></button>`
-    +(ME.is_admin?`<button class="tab-btn tab-add" onclick="openBoardModal()" title="新建看板">＋ 新建看板</button>`:'')
     +`</div>`;
   // 第 2 层：部门节点（全部展示，空部门同样占位）
   html+=`<div class="tree-dept-row">`;
@@ -1171,7 +1170,11 @@ function openBoardModal(){
   document.getElementById('b_name').value='';
   document.getElementById('b_ws').value='';
   document.getElementById('b_owner').value=ME.username||'';
-  document.getElementById('boardModal').style.display='flex';
+  const m=document.getElementById('boardModal');
+  m.style.display='flex';
+  // 「新建看板」现在从「看板管理」弹窗里唤起，必须盖在其之上
+  // （所有 .modal-overlay 默认 z-index 相同，靠 DOM 顺序不可靠）
+  m.style.zIndex=120;
 }
 async function createBoard(){
   const board_name=document.getElementById('b_name').value.trim();
@@ -1187,7 +1190,15 @@ async function createBoard(){
     ensureDeptOpen(r.board_id);        // 新建板块尚未配置归属部门，自动展开「未配置」节点
     renderTabs();updateNewBtn();
     reload(1);renderProgress();
-  }catch(e){toast(e.message)}
+    // 新建入口已移入「看板管理」弹窗：刷新其列表并选中新看板，
+    // 让管理员可以立即给它配置归属部门（否则它只能待在「未配置」节点里）
+    if(document.getElementById('boardConfigModal').style.display!=='none'){
+      await loadBoardConfig();
+      // 先设选中，再重绘列表 —— active 样式由 renderBoardList 依据 BC_SELECTED 渲染
+      bcChangeBoard(r.board_id);
+      renderBoardList();
+      renderEditArea();
+    }  }catch(e){toast(e.message)}
 }
 // ---------- 子事项 ----------
 var EDIT_SUBTASKS=[];
@@ -2773,6 +2784,12 @@ function setBcListScroll(n){
       box.style.maxHeight='454px';
     }
     box.style.overflow='auto';
+  }
+  // 选中项可能排在列表末尾（新建看板即如此），滚动到可见位置，
+  // 否则管理员看不到自己刚建的看板
+  const act=box.querySelector('.bc-item.active');
+  if(act&&box.scrollHeight>box.clientHeight){
+    act.scrollIntoView({block:'nearest'});
   }
 }
 function bcFilterChange(dim,val){
