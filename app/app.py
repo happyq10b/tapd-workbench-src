@@ -1625,6 +1625,293 @@ async def import_data(req: ImportReq, username: str = Depends(require_editor), r
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'cards': len(req.cards), 'team': len(req.team)}
 
+# ---------------- API：从 xlsx 导入 TAPD 数据 ----------------
+# 模板列（第一行为表头，列名即 TAPD 字段名）：
+#   必填：card_name（事项名称）、board_name（所属看板）
+#   选填：card_id / board_id / column_id / column_name / workspace_id / status /
+#         status_name / creator / owner / cc / follower / begin / due /
+#         completed / created / modified / description / label / b_sort
+# 行为：追加式导入（已有数据不动），同 card_id 视为同一条则更新。
+# 与 /api/import（JSON 覆盖式恢复）语义不同，两者并存。
+
+# 模板中允许用户填写的列 -> cards 表列
+XLSX_IMPORT_COLS = [
+    'card_id', 'board_id', 'board_name', 'column_id', 'column_name', 'workspace_id',
+    'card_name', 'status', 'status_name', 'priority', 'creator', 'owner', 'cc',
+    'follower', 'begin', 'due', 'completed', 'created', 'modified', 'description',
+    'label', 'b_sort', 'entity_type', 'cover_setted', 'is_filed', 'comments',
+    'column_sort', 'board_status', 'board_creator',
+]
+XLSX_REQUIRED = ['card_name', 'board_name']
+# 状态归一：用户可能填中文「已完成」，转成系统内部状态值
+XLSX_STATUS_MAP = {
+    '已完成': 'done', '完成': 'done', 'done': 'done', '已关闭': 'done', 'closed': 'done',
+    '进行中': 'progressing', '处理中': 'progressing', 'progressing': 'progressing',
+    '未开始': 'open', '待处理': 'open', 'open': 'open', '未完成': 'open', 'todo': 'open',
+}
+
+@app.get('/api/import/template')
+def download_import_template(username: str = Depends(require_auth)):
+    """下载 TAPD 数据导入模板（.xlsx），含表头 + 字段说明 + 2 行示例"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from urllib.parse import quote
+    import io
+
+    notes = {
+        'card_name': '必填 · 事项名称',
+        'board_name': '必填 · 所属看板名称',
+        'card_id': '选填 · 事项 ID（留空自动生成；与库中已有 ID 相同则更新该条）',
+        'board_id': '选填 · 看板 ID（留空自动生成）',
+        'column_name': '选填 · 板块名称（如 2026年第1/2周）',
+        'column_id': '选填 · 板块 ID',
+        'workspace_id': '选填 · TAPD 工作空间 ID',
+        'status': '选填 · 状态（open/progressing/done，也接受 已完成/进行中/未开始）',
+        'status_name': '选填 · 状态显示名（留空按 status 自动生成）',
+        'creator': '选填 · 创建人',
+        'owner': '选填 · 负责人（多人用分号分隔）',
+        'cc': '选填 · 知会人（分号分隔）',
+        'follower': '选填 · 关注人（分号分隔）',
+        'begin': '选填 · 开始日期（YYYY-MM-DD）',
+        'due': '选填 · 截止日期（YYYY-MM-DD）',
+        'completed': '选填 · 完成时间',
+        'created': '选填 · 创建时间',
+        'modified': '选填 · 修改时间',
+        'description': '选填 · 详细描述',
+        'label': '选填 · 标签',
+        'priority': '选填 · 优先级',
+        'b_sort': '选填 · 排序值（数字）',
+        'entity_type': '选填 · 实体类型（默认 BoardCard）',
+        'cover_setted': '选填 · 是否有封面（0/1）',
+        'is_filed': '选填 · 是否归档（0/1）',
+        'comments': '选填 · 评论数',
+        'column_sort': '选填 · 板块排序值',
+        'board_status': '选填 · 看板状态（默认 open）',
+        'board_creator': '选填 · 看板创建人',
+    }
+
+    wb = Workbook()
+    # Sheet1：导入数据（带表头）
+    ws = wb.active
+    ws.title = '导入数据'
+    ws.append(XLSX_IMPORT_COLS)
+    hdr_fill = PatternFill('solid', fgColor='002D74')
+    hdr_font = Font(bold=True, color='FFFFFF', size=11)
+    thin = Side(style='thin', color='D9D9D9')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for i, c in enumerate(XLSX_IMPORT_COLS, 1):
+        cell = ws.cell(1, i)
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = border
+        ws.column_dimensions[get_column_letter(i)].width = 18 if c in XLSX_REQUIRED else 14
+    # 两行示例 —— 用字典构造再按 COLS 顺序取值，避免手写列表导致列错位
+    sample_a = {
+        'card_name': '示例-事项A', 'board_name': '示例看板（2026年度）',
+        'column_name': '2026年第1/2周（1.4-1.9）', 'status': 'open', 'status_name': '未开始',
+        'creator': '张三', 'owner': '张三', 'begin': '2026-01-04', 'due': '2026-01-10',
+        'created': '2026-01-02 09:00:00', 'modified': '2026-01-02 09:00:00',
+        'description': '这是详细描述，可留空', 'b_sort': '1',
+    }
+    sample_b = {
+        'card_name': '示例-事项B', 'board_name': '示例看板（2026年度）',
+        'column_name': '2026年第1/2周（1.4-1.9）', 'status': 'done', 'status_name': '已完成',
+        'creator': '李四', 'owner': '王五', 'begin': '2026-01-05', 'due': '2026-01-12',
+        'completed': '2026-01-11 17:30:00', 'created': '2026-01-02 09:00:00',
+        'modified': '2026-01-02 09:00:00', 'b_sort': '2',
+    }
+    for smp in (sample_a, sample_b):
+        ws.append([smp.get(c, '') for c in XLSX_IMPORT_COLS])
+    ws.freeze_panes = 'A2'
+    ws.auto_filter.ref = ws.dimensions
+
+    # Sheet2：字段说明
+    ws2 = wb.create_sheet('字段说明')
+    ws2.append(['列名', '是否必填', '说明'])
+    for i, h in enumerate(['列名', '是否必填', '说明'], 1):
+        cell = ws2.cell(1, i)
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = border
+    ws2.column_dimensions['A'].width = 20
+    ws2.column_dimensions['B'].width = 12
+    ws2.column_dimensions['C'].width = 56
+    for col in XLSX_IMPORT_COLS:
+        req = '必填' if col in XLSX_REQUIRED else '选填'
+        ws2.append([col, req, notes.get(col, '')])
+    for r in range(2, ws2.max_row + 1):
+        for c in range(1, 4):
+            ws2.cell(r, c).border = border
+            ws2.cell(r, c).alignment = Alignment(vertical='center')
+
+    # Sheet3：使用说明
+    ws3 = wb.create_sheet('使用说明')
+    for line in [
+        ['TAPD 数据导入模板 · 使用说明'],
+        [''],
+        ['1. 填写「导入数据」工作表，第一行表头请勿修改、勿增删列。'],
+        ['2. 必填列只有 card_name（事项名称）和 board_name（所属看板）两列。'],
+        ['3. 负责人 / 知会人 / 关注人 多人时用英文分号 ; 分隔。'],
+        ['4. 导入为「追加式」：库中已有的数据不会被删除；'],
+        ['   card_id 相同视为同一条事项，会更新该条；card_id 留空则自动生成。'],
+        ['5. 导入的看板会自动登记到「看板管理」中，可在那边指定归属部门。'],
+        ['6. 日期建议统一用 YYYY-MM-DD；Excel 单元格格式设为文本以免被自动转换。'],
+        ['7. 以「示例」开头的事项名 / 看板名会被自动跳过，不会导入真实数据。'],
+        [''],
+        ['示例数据为占位内容，正式导入前可自行删除（留着也不会被导入）。'],
+    ]:
+        ws3.append(line)
+    ws3.column_dimensions['A'].width = 92
+    ws3['A1'].font = Font(bold=True, size=13, color='002D74')
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fn = 'TAPD数据导入模板_%s.xlsx' % time.strftime('%Y%m%d%H%M%S')
+    return Response(
+        content=buf.getvalue(),
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': "attachment; filename*=UTF-8''%s" % quote(fn, safe='')}
+    )
+
+@app.post('/api/import/xlsx')
+async def import_xlsx(request: Request, username: str = Depends(require_editor)):
+    """从上传的 .xlsx 导入 TAPD 数据（追加式，不删除既有数据）"""
+    if 'multipart/form-data' not in (request.headers.get('content-type') or ''):
+        raise HTTPException(400, '请以 multipart/form-data 方式上传 xlsx 文件')
+    form = await request.form()
+    up = form.get('file')
+    if up is None:
+        raise HTTPException(400, '未收到文件')
+    raw = await up.read()
+    if not raw:
+        raise HTTPException(400, '文件为空')
+    if not raw[:2] == b'PK':
+        raise HTTPException(400, '不是有效的 xlsx 文件（请用 .xlsx 格式，不要用 .xls）')
+
+    from openpyxl import load_workbook
+    import io as _io
+    try:
+        wb = load_workbook(_io.BytesIO(raw), read_only=True, data_only=True)
+    except Exception as ex:
+        raise HTTPException(400, 'xlsx 解析失败：%s' % ex)
+
+    # 优先读「导入数据」工作表，否则读第一个工作表
+    ws = wb['导入数据'] if '导入数据' in wb.sheetnames else wb[wb.sheetnames[0]]
+    rows = ws.iter_rows(values_only=True)
+    try:
+        header = next(rows)
+    except StopIteration:
+        raise HTTPException(400, 'xlsx 里没有数据行')
+    # 表头归一：去空格、小写
+    hmap = {}
+    for i, h in enumerate(header):
+        if h is None:
+            continue
+        key = str(h).strip().lower()
+        if key:
+            hmap[key] = i
+    missing = [c for c in XLSX_REQUIRED if c not in hmap]
+    if missing:
+        raise HTTPException(400, '缺少必填列：%s' % '、'.join(missing))
+
+    conn = get_conn()
+    created = updated = skipped = 0
+    new_boards = {}
+    try:
+        for r in rows:
+            if r is None or all(c is None or str(c).strip() == '' for c in r):
+                continue
+            def cell(name):
+                i = hmap.get(name)
+                if i is None or i >= len(r):
+                    return ''
+                v = r[i]
+                if v is None:
+                    return ''
+                # 日期型单元格转成字符串，避免 2026-01-04 变成时间戳
+                if hasattr(v, 'strftime'):
+                    v = v.strftime('%Y-%m-%d %H:%M:%S')
+                return str(v).strip()
+            # ID 归一：从 Excel 导出的 ID 常带前后单引号（如 '116206979...），
+            # 不去掉会导致与库中已有记录匹配不上、导入出重复数据
+            def norm_id(v):
+                return str(v).strip().strip("'").strip('"').strip()
+            card_name = cell('card_name')
+            board_name = cell('board_name')
+            if not card_name or not board_name:
+                skipped += 1
+                continue
+            # 示例行：以「示例」开头的事项名视为模板占位，不导入真实库
+            if card_name.startswith('示例') or board_name.startswith('示例'):
+                skipped += 1
+                continue
+            board_id = norm_id(cell('board_id')) or ('B' + str(int(time.time() * 1000)) + str(len(new_boards)))
+            # 同一 xlsx 内同名的看板共用一个 board_id
+            if board_name in new_boards:
+                board_id = new_boards[board_name]
+            else:
+                new_boards[board_name] = board_id
+                # 看板不存在则登记（不写 board_config，归属部门稍后由管理员在「看板管理」指定）
+                if not dbq('SELECT 1 FROM boards WHERE board_id=?', (board_id,)):
+                    dbe('INSERT OR IGNORE INTO boards (board_id, board_name, workspace_id, owner, sort, created_at) '
+                        'VALUES (?,?,?,?,?,?)',
+                        (board_id, board_name, cell('workspace_id'), cell('board_creator') or username, 0,
+                         time.strftime('%Y-%m-%d %H:%M:%S')))
+            card_id = norm_id(cell('card_id')) or ('C' + str(int(time.time() * 1000000)) + str(created + updated))
+            status = cell('status').lower()
+            status = XLSX_STATUS_MAP.get(status, status) or 'open'
+            status_name = cell('status_name') or {'done': '已完成', 'progressing': '进行中', 'open': '未完成'}.get(status, '未完成')
+            vals = {
+                'card_id': card_id, 'board_id': board_id, 'board_name': board_name,
+                'column_id': norm_id(cell('column_id')), 'column_name': cell('column_name'),
+                'workspace_id': norm_id(cell('workspace_id')), 'card_name': card_name,
+                'status': status, 'status_name': status_name,
+                'priority': cell('priority'), 'creator': cell('creator') or username,
+                'owner': cell('owner'), 'cc': cell('cc'), 'follower': cell('follower'),
+                'begin': cell('begin'), 'due': cell('due'), 'completed': cell('completed'),
+                'created': cell('created') or time.strftime('%Y-%m-%d %H:%M:%S'),
+                'modified': cell('modified') or time.strftime('%Y-%m-%d %H:%M:%S'),
+                'description': cell('description'), 'attachment_count': '0',
+                'label': cell('label'), 'b_sort': cell('b_sort') or '0',
+                'entity_type': cell('entity_type') or 'BoardCard',
+                'cover_setted': cell('cover_setted') or '0', 'cover_info': '',
+                'is_filed': cell('is_filed') or '0', 'created_from': '',
+                'date_status': '', 'due_time_ux': cell('due'), 'begin_date_status': '',
+                'begin_time_ux': cell('begin'), 'comments': cell('comments') or '0',
+                'column_sort': cell('column_sort') or '0',
+                'board_status': cell('board_status') or 'open',
+                'board_creator': cell('board_creator'), 'parent_id': '', 'version': '1', 'deleted': '0',
+            }
+            exists = dbq('SELECT 1 FROM cards WHERE card_id=?', (card_id,))
+            cols = [k for k in CARD_FIELDS if k in vals]
+            conn.execute(f'INSERT OR REPLACE INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
+                         [vals[k] for k in cols])
+            if exists:
+                updated += 1
+            else:
+                created += 1
+        conn.commit()
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as ex:
+        conn.rollback()
+        raise HTTPException(500, '写入失败：%s' % ex)
+    finally:
+        conn.close()
+
+    log_action('__import_xlsx__', username, 'import', f'created={created} updated={updated} skipped={skipped}')
+    audit_log(username, client_ip(request), 'import_xlsx', 'xlsx 数据导入',
+              f'新增 {created} 条、更新 {updated} 条、跳过 {skipped} 条', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'created': created, 'updated': updated, 'skipped': skipped,
+            'boards': len(new_boards)}
+
+
 # ---------------- API：审计日志查询（仅管理员） ----------------
 @app.get('/api/audit-logs')
 def get_audit_logs(start: Optional[str] = None, end: Optional[str] = None,
