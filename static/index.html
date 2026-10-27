@@ -29,7 +29,7 @@ button{font-family:inherit}
 /* ---- 目录树：按归属部门分组折叠 ---- */
 .tree-root{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;margin-bottom:8px}
 /* 部门层：所有部门节点排在同一行（紧凑），空部门同样占位不隐藏 */
-.tree-dept-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%}
+.tree-dept-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;margin-bottom:4px}
 .tree-dept{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:600;flex-shrink:0}
 .tree-dept:hover{border-color:var(--primary);color:var(--primary)}
 .tree-dept.open{background:#eef5ff;border-color:var(--primary);color:var(--primary)}
@@ -43,7 +43,7 @@ button{font-family:inherit}
 .tree-dept.empty .dept-count{background:#fff;color:var(--text3)}
 .tree-dept.empty .chev{color:#d0d0d0}
 /* 板块层：所属部门的板块缩进排在下一行，左侧竖线体现层级归属 */
-.tree-children{display:flex;flex-wrap:wrap;gap:6px;align-items:center;width:100%;padding:4px 0 4px 22px;border-left:2px solid var(--border);margin-left:8px}
+.tree-children{display:flex;flex-wrap:wrap;gap:6px;align-items:center;width:100%;padding:12px 0 4px 22px;border-left:2px solid var(--border);margin-left:8px}
 .tree-children .tab-btn{border:1px solid var(--border);border-radius:16px;padding:6px 14px;background:#fff}
 .tree-children .tab-btn:hover{background:#eef5ff;color:var(--primary)}
 .tree-children .tab-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -97,6 +97,42 @@ button{font-family:inherit}
 .add-item-btn:hover{background:#d6e9fb}
 /* 事项尾部的创建日期 */
 .item-created{font-size:12px;color:var(--text3);flex-shrink:0;white-space:nowrap}
+/* ---- 置顶标识：紧贴标题，不单独占位 ---- */
+.pin-mark{display:inline-flex;align-items:center;justify-content:center;border:none;background:none;cursor:pointer;font-size:12px;padding:1px 4px;border-radius:4px;color:#d0d0d0;transition:all .15s;flex-shrink:0;line-height:1;margin-right:-2px}
+.pin-mark:hover{background:#fff7e6;color:#d46b08}
+.pin-mark.on{color:#d46b08}
+/* 事项行左侧的子事项目录展开箭头 */
+.item-chev{display:inline-flex;align-items:center;justify-content:center;width:16px;flex-shrink:0;cursor:pointer;color:var(--text3);font-size:10px;transition:transform .2s;user-select:none}
+.item-chev:hover{color:var(--primary)}
+.item-chev.open{transform:rotate(90deg);color:var(--primary)}
+/* ---- 子事项树（主事项下方）---- */
+.sub-tree{margin:0 0 8px 32px;padding:2px 0 2px 12px;border-left:2px solid var(--border)}
+.sub-tree.empty{padding-left:12px;border-left-color:transparent}
+.sub-node{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12.5px;color:var(--text);transition:background .15s}
+.sub-node:hover{background:#fafafa}
+.sub-node .s-chev{width:14px;text-align:center;color:var(--text3);font-size:10px;cursor:pointer;transition:transform .2s;flex-shrink:0}
+.sub-node .s-chev.open{transform:rotate(90deg)}
+.sub-node .s-chev.leaf{visibility:hidden}
+.sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
+.sub-node .s-meta{font-size:11px;color:var(--text3);flex-shrink:0}
+.sub-node .s-dot{width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0}
+/* ---- 搜索结果视图 ---- */
+.sr-wrap{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.sr-head{padding:11px 16px;font-size:12.5px;color:var(--text2);border-bottom:1px solid var(--border);background:#fafbfd}
+.sr-group{border-bottom:1px solid var(--border)}
+.sr-group:last-child{border-bottom:none}
+.sr-group-head{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#f7f9fc;font-weight:500;font-size:13px}
+.sr-group-head .sr-tag{font-size:10.5px;background:#fff7e6;color:#d46b08;border:1px solid #ffd591;border-radius:9px;padding:1px 8px;font-weight:400}
+.sr-item{display:flex;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid var(--border)}
+.sr-item:hover{background:#fafafa}
+.sr-item .sr-name{flex:1;font-size:13.5px;color:var(--text);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr-item .sr-name:hover{color:var(--primary)}
+.sr-item .sr-badge{font-size:11px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 9px;flex-shrink:0}
+.sr-item .sr-hit{font-size:11px;color:#d46b08;flex-shrink:0}
+/* ---- 板块行的「折叠事项 / 展开事项」---- */
+.fold-btn{border:1px solid var(--border);background:#fff;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;color:var(--text2);transition:all .15s;white-space:nowrap;font-family:inherit}
+.fold-btn:hover{border-color:var(--primary);color:var(--primary)}
 .item-card{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius-sm);transition:background .15s}
 .item-card:hover{background:#fafafa}
 .item-card.locked{background:#fffbe6}
@@ -468,7 +504,7 @@ function goLogin(){
 <div class="wrap">
   <div class="toolbar">
     <div class="toolbar-left">
-      <input type="text" class="search-input" id="searchInput" placeholder="搜索工作事项…" oninput="debounceReload()">
+      <input type="text" class="search-input" id="searchInput" placeholder="搜索事项 / 板块…" oninput="debounceReload()">
       <select class="filter-select" id="statusFilter" onchange="reload(1)">
         <option value="">全部状态</option><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option>
       </select>
@@ -476,8 +512,8 @@ function goLogin(){
     </div>
     <div class="toolbar-right" style="display:flex;gap:8px">
       <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
-      <button class="btn-default" onclick="expandAll()">展开全部</button>
-      <button class="btn-default" onclick="collapseAll()">收起全部</button>
+      <button class="btn-default" onclick="expandAll()">展开板块</button>
+      <button class="btn-default" onclick="collapseAll()">折叠板块</button>
     </div>
   </div>
   <div class="progress-overview" id="progressOverview"></div>
@@ -1111,10 +1147,12 @@ async function reload(page){
   if(curBoard)ps.set('board_id',curBoard);
   if(s)ps.set('status',s);if(o)ps.set('owner',o);if(q)ps.set('q',q);
   const d=await api('/api/cards?'+ps);
-  renderBoard(d.cards,d.columns);
+  renderBoard(d.cards,d.columns,q,d.column_hits);
 }
-function renderBoard(cards,cols){
+function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
+  // 有搜索词时切换到「统一搜索结果」视图
+  if(q){renderSearchResults(c,cards,cols,q,colHits||[]);return}
   const cmeta={};
   (cols||[]).forEach(x=>{cmeta[x.column_name]=x});
   window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id
@@ -1153,6 +1191,8 @@ function renderBoard(cards,cols){
         <div class="week-bar"><i style="width:${rate}%"></i></div>
         <div class="week-actions" onclick="event.stopPropagation()">
           <span class="week-created" title="板块创建日期">创建 ${esc(created)}</span>
+          <button class="fold-btn" onclick="foldItems('wg_${i}',false)" title="折叠该板块下各事项的子事项目录">折叠事项</button>
+          <button class="fold-btn" onclick="foldItems('wg_${i}',true)" title="展开该板块下各事项的子事项目录">展开事项</button>
           <button class="pin-btn ${pinned?'on':''}" onclick="toggleColumnPin('${esc(colKey)}',${pinned?0:1})" title="${pinned?'取消置顶':'置顶该板块（在本看板内优先显示）'}">${pinned?'📌 已置顶':'📌 板块置顶'}</button>
           <button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button>
         </div>
@@ -1160,6 +1200,56 @@ function renderBoard(cards,cols){
       <div class="week-body">${list.map(cardItem).join('')}</div>
     </div>`;
   }).join('');
+}
+// ---------- 搜索结果：事项与板块统一展示 ----------
+// 板块名命中 → 该板块成组展示（标注「板块名匹配」）
+// 事项名/描述命中 → 逐条展示，每条标注所属板块
+function renderSearchResults(container,cards,cols,q,colHits){
+  const hitByKey={};
+  (colHits||[]).forEach(h=>{hitByKey[h.col_key]=h});
+  const groups={};
+  const loose=[];
+  (cards||[]).forEach(card=>{
+    const key=card.board_id+'::'+(card.column_name||'');
+    if(card.match_type==='column'&&hitByKey[key]){
+      (groups[key]=groups[key]||{meta:hitByKey[key],items:[]}).items.push(card);
+    }else{
+      loose.push(card);
+    }
+  });
+  const groupHtml=Object.keys(groups).map(k=>{
+    const g=groups[k];
+    return `<div class="sr-group">
+      <div class="sr-group-head">
+        <span>${esc(g.meta.column_name)}</span>
+        <span class="sr-tag">板块名匹配</span>
+        <span style="color:var(--text3);font-weight:400;font-size:12px">${g.items.length} 个事项</span>
+      </div>
+      ${g.items.map(x=>srItemHtml(x)).join('')}
+    </div>`;
+  }).join('');
+  const looseHtml=loose.length?`<div class="sr-group">
+      <div class="sr-group-head"><span>事项匹配</span><span class="sr-tag">${loose.length} 条</span></div>
+      ${loose.map(x=>srItemHtml(x)).join('')}
+    </div>`:'';
+  const total=(cards||[]).length;
+  container.innerHTML=`<div class="sr-wrap">
+    <div class="sr-head">搜索「${esc(q)}」：共 ${total} 条结果${
+      (colHits&&colHits.length)?`（其中 ${colHits.length} 个板块名命中）`:''}</div>
+    ${groupHtml}
+    ${looseHtml}
+    ${(groupHtml||looseHtml)?'':'<div class="empty" style="padding:40px;text-align:center;color:var(--text3)">没有匹配的事项或板块</div>'}
+  </div>`;
+}
+function srItemHtml(x){
+  const board=(ME.boards||[]).find(b=>b.board_id===x.board_id);
+  const badge=(x.column_name||'未分组')+(board?(' · '+board.board_name):'');
+  return `<div class="sr-item">
+    <span class="owner-avatar" style="background:${avatarColor(x.owner||'?')}">${esc(initials(x.owner||'?'))}</span>
+    <span class="sr-name" onclick="openDetail('${x.card_id}')" title="${esc(x.card_name)}">${esc(x.card_name)}</span>
+    <span class="sr-badge" title="所属板块 / 看板">${esc(badge)}</span>
+    <span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':'pending'}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':'未完成'}</span>
+  </div>`;
 }
 // 排序比较：置顶优先 → 创建时间降序 → 名称（保证同分时顺序稳定）
 function cmpColumn(a,b,cmeta){
@@ -1196,26 +1286,112 @@ function cardItem(c){
   const subBtn=(ME.can_edit||c.sub_count>0)
     ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="管理子事项">${c.sub_count>0?('子事项 '+c.sub_count):'+ 子事项'}</button>`
     :'';
-  // 事项置顶（作用域：所在板块内部）；无编辑权限或被他人锁定时不提供
+  // 置顶标识：紧贴事项标题，不在行尾单独占位
   const canPin=ME.can_edit&&canEditCard(c)&&!lockedByOther;
-  const pinBtn=canPin
-    ?`<button class="pin-btn ${c.pinned?'on':''}" onclick="toggleCardPin('${c.card_id}',${c.pinned?0:1})" title="${c.pinned?'取消置顶':'置顶该事项（在本板块内优先显示）'}">${c.pinned?'📌 已置顶':'📌 置顶'}</button>`
+  const pinMark=canPin
+    ?`<button class="pin-mark ${c.pinned?'on':''}" onclick="toggleCardPin('${c.card_id}',${c.pinned?0:1})" title="${c.pinned?'取消置顶':'置顶该事项（在本板块内优先显示）'}">📌</button>`
+    :(c.pinned?`<span class="pin-mark on" title="已置顶">📌</span>`:'');
+  // 有子事项时给出目录展开箭头
+  const hasSubs=(c.sub_count||0)>0;
+  const subArrow=hasSubs
+    ?`<span class="item-chev" data-cid="${c.card_id}" onclick="toggleSubTree('${c.card_id}')" title="展开子事项目录">▶</span>`
     :'';
   const created=c.created?String(c.created).slice(0,10):'';
-  return `<div class="item-wrap">
+  return `<div class="item-wrap" id="iw_${c.card_id}">
   <div class="item-card ${lockedByOther?'locked':''}">
+    ${subArrow}
     <span class="owner-avatar" style="background:${avatarColor(c.owner||'?')}">${esc(initials(c.owner||'?'))}</span>
     <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)} ${lockHtml}</span>
+    ${pinMark}
     ${overdue?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
+    <span class="item-created" title="创建时间">创建 ${esc(created||'—')}</span>
     <span class="item-date">截止 ${esc(c.due||'—')}</span>
     ${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}
     <span class="status-tag ${c.status==='done'?'done':c.status==='progressing'?'progressing':'pending'}">${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</span>
     ${subBtn}
     ${ops}
-    <span class="item-created" title="事项创建日期">创建 ${esc(created||'—')}</span>
-    ${pinBtn}
   </div>
+  <div class="sub-tree" id="subtree_${c.card_id}" style="display:none"></div>
   </div>`;
+}
+// ---------- 子事项目录（树形）----------
+const SUBTREE_CACHE={};   // card_id -> 子事项树
+const SUBTREE_OPEN={};    // card_id -> 是否展开（子树内部节点）
+async function toggleSubTree(cardId,force){
+  const box=document.getElementById('subtree_'+cardId);
+  if(!box)return;
+  const arrow=document.querySelector(`.item-chev[data-cid="${cardId}"]`);
+  const isOpen=box.style.display!=='none';
+  const want=(force===undefined)?!isOpen:!!force;
+  if(want===isOpen)return;
+  if(!want){
+    box.style.display='none';
+    if(arrow)arrow.classList.remove('open');
+    return;
+  }
+  box.style.display='block';
+  if(arrow)arrow.classList.add('open');
+  if(!SUBTREE_CACHE[cardId]){
+    box.innerHTML='<div class="sub-node" style="color:var(--text3)">加载中…</div>';
+    try{
+      const d=await api('/api/cards/'+cardId+'/children');
+      SUBTREE_CACHE[cardId]=d.children||[];
+    }catch(e){
+      box.innerHTML=`<div class="sub-node" style="color:var(--danger)">加载失败：${esc(e.message)}</div>`;
+      return;
+    }
+  }
+  renderSubTree(box,SUBTREE_CACHE[cardId]);
+}
+function renderSubTree(box,nodes,level){
+  level=level||0;
+  if(!nodes||!nodes.length){
+    box.innerHTML='<div class="sub-node" style="color:var(--text3)">暂无子事项</div>';
+    return;
+  }
+  box.innerHTML=nodes.map(n=>subNodeHtml(n,level)).join('');
+}
+function subNodeHtml(n,level){
+  const kids=n.children||[];
+  const open=!!SUBTREE_OPEN[n.card_id];
+  const od=n.due&&n.status!=='done'&&n.due<todayStr();
+  const st=n.status==='done'?'已完成':n.status==='progressing'?'进行中':'未完成';
+  return `<div class="sub-node ${n.status==='done'?'done':''}">
+    ${kids.length
+      ?`<span class="s-chev ${open?'open':''}" onclick="toggleSubNode('${n.card_id}')">▶</span>`
+      :`<span class="s-chev leaf">▶</span>`}
+    <span class="s-dot" style="background:${avatarColor(n.owner||'?')}"></span>
+    <span class="s-title" onclick="openDetail('${n.card_id}')" title="${esc(n.card_name)}">${esc(n.card_name)}</span>
+    <span class="s-meta">${st}${n.owner?(' · '+esc(n.owner)):''}${n.due?(' · 截止'+esc(n.due)):''}${od?' · 逾期':''}</span>
+  </div>
+  ${kids.length?`<div class="sub-tree" id="subnode_${n.card_id}" style="display:${open?'block':'none'}">${kids.map(k=>subNodeHtml(k,level+1)).join('')}</div>`:''}`;
+}
+function toggleSubNode(cardId){
+  const box=document.getElementById('subnode_'+cardId);
+  if(!box)return;
+  const open=box.style.display==='none';
+  box.style.display=open?'block':'none';
+  SUBTREE_OPEN[cardId]=open;
+  const prev=box.previousElementSibling;
+  const chev=prev?prev.querySelector('.s-chev'):null;
+  if(chev)chev.classList.toggle('open',open);
+}
+// 板块内的「折叠事项 / 展开事项」：批量收起/展开该板块所有主事项的子事项目录
+async function foldItems(gid,expand){
+  const g=document.getElementById(gid);
+  if(!g)return;
+  const arrows=g.querySelectorAll('.item-chev');
+  for(let i=0;i<arrows.length;i++){
+    const cid=arrows[i].getAttribute('data-cid');
+    if(expand){
+      await toggleSubTree(cid,true);
+    }else{
+      const box=document.getElementById('subtree_'+cid);
+      if(box)box.style.display='none';
+      arrows[i].classList.remove('open');
+    }
+  }
+  toast(expand?'已展开该板块的事项目录':'已折叠该板块的事项目录');
 }
 // 板块置顶 / 取消置顶
 async function toggleColumnPin(colKey,pinned){
@@ -1234,8 +1410,20 @@ async function toggleCardPin(cardId,pinned){
   }catch(e){toast(e.message)}
 }
 function toggleWeek(i){const g=document.getElementById('wg_'+i);g.classList.toggle('open')}
-function expandAll(){document.querySelectorAll('.week-group').forEach(g=>g.classList.add('open'))}
-function collapseAll(){document.querySelectorAll('.week-group').forEach(g=>g.classList.remove('open'))}
+// 展开板块：展开所有板块，并展开各主事项下的子事项目录
+async function expandAll(){
+  document.querySelectorAll('.week-group').forEach(g=>g.classList.add('open'));
+  const arrows=document.querySelectorAll('.item-chev');
+  for(let i=0;i<arrows.length;i++){
+    await toggleSubTree(arrows[i].getAttribute('data-cid'),true);
+  }
+}
+// 折叠板块：收起所有板块（含其下子事项目录）
+function collapseAll(){
+  document.querySelectorAll('.week-group').forEach(g=>g.classList.remove('open'));
+  document.querySelectorAll('.sub-tree').forEach(t=>t.style.display='none');
+  document.querySelectorAll('.item-chev').forEach(a=>a.classList.remove('open'));
+}
 
 // ---------- 编辑 ----------
 async function lockCard(id){
@@ -1479,6 +1667,8 @@ async function saveSubtaskTitle(sid,title){
 // ---------- 右侧抽屉：父事项 + 子事项 ----------
 var DRAWER_STACK=[];      // [{type:'list',cardId} | {type:'edit',cardId,parentId}]
 var DRAWER_OWNER=[];
+var DRAWER_NEW_UNDER=null;  // 新建子事项要挂到哪个子事项下（null = 挂在主事项下）
+var DRAWER_NEW_UNDER_NAME='';
 function stBadge(s){return `<span class="status-tag ${s==='done'?'done':s==='progressing'?'progressing':'pending'}" style="padding:1px 8px;font-size:11px">${s==='done'?'已完成':s==='progressing'?'进行中':'未完成'}</span>`}
 function todayStr(){return new Date().toISOString().slice(0,10)}
 // ---------- 人员选择器：下拉 + 输入（输入必须命中成员名单） ----------
@@ -1761,6 +1951,7 @@ function ppRemove(containerId,n){
 }
 async function openDrawer(cardId){
   DRAWER_STACK=[{type:'list',cardId}];
+  DRAWER_NEW_UNDER=null;
   document.getElementById('drawerMask').classList.add('show');
   document.getElementById('drawerPanel').classList.add('open');
   await renderDrawer();
@@ -1792,24 +1983,28 @@ async function renderDrawerList(parentId){
   const pc=await api('/api/cards?card_id='+parentId);
   const p=pc.cards[0];
   if(!p){body.innerHTML='<div class="empty-hint">父事项不存在或已删除</div>';return}
-  const d=await api('/api/cards?parent_id='+parentId+'&size=200');
-  const subs=d.cards;
+  const d=await api('/api/cards/'+parentId+'/children');
+  const subs=d.children||[];
   const todo=await api('/api/cards/'+parentId+'/subtasks');
-  const tdone=todo.subtasks.filter(x=>x.done).length;
+  const tdone=todo.done||0;
   const overdue=p.due&&p.status!=='done'&&p.due<todayStr();
   body.innerHTML=`
-    <div class="pcard">
-      <h3>${esc(p.card_name)}</h3>
-      <div class="pmeta">${stBadge(p.status)}
-        ${p.owner?`<span>负责人：${esc(p.owner)}</span>`:''}
-        ${(p.begin||p.due)?`<span>时间：${p.begin?('开始 '+esc(p.begin)):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(p.due)):''}${overdue?' <b style="color:var(--danger)">已逾期</b>':''}</span>`:''}
-        ${todo.subtasks.length?`<span>代办：${tdone}/${todo.subtasks.length}</span>`:''}
+    <div class="pcard" style="display:flex;align-items:flex-start;gap:8px">
+      <span class="s-chev open" id="drawerMainChev" onclick="toggleDrawerMain()" title="折叠 / 展开主事项" style="cursor:pointer;margin-top:5px">▶</span>
+      <div style="flex:1;min-width:0">
+        <h3 style="margin:0">${esc(p.card_name)}</h3>
+        <div class="pmeta">${stBadge(p.status)}
+          ${p.owner?`<span>负责人：${esc(p.owner)}</span>`:''}
+          ${(p.begin||p.due)?`<span>时间：${p.begin?('开始 '+esc(p.begin)):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(p.due)):''}${overdue?' <b style="color:var(--danger)">已逾期</b>':''}</span>`:''}
+          ${todo.total?`<span>代办：${tdone}/${todo.total}</span>`:''}
+        </div>
+        ${p.description?`<div class="pdesc">${esc(p.description)}</div>`:''}
       </div>
-      ${p.description?`<div class="pdesc">${esc(p.description)}</div>`:''}
     </div>
     ${ME.can_edit?`
     <div class="sub-new expand" id="drawerNewBox">
       <input id="dn_name" placeholder="输入子事项标题，回车添加（可连续添加多个）…" onkeydown="if(event.key==='Enter')createDrawerSub()" onfocus="expandDrawerNew()">
+      <div id="dnUnderTip" style="display:none;font-size:11.5px;color:#d46b08;padding:4px 2px"></div>
       <div class="sn-fields" id="dn_fields">
         <div class="sn-row">
           <select class="form-select" id="dn_status"><option value="open">未完成</option><option value="progressing">进行中</option><option value="done">已完成</option></select>
@@ -1822,30 +2017,105 @@ async function renderDrawerList(parentId){
         <div class="sn-actions"><button class="btn-default" onclick="collapseDrawerNew()">收起</button><button class="btn-primary" onclick="createDrawerSub()">创建子事项</button></div>
       </div>
     </div>`:''}
-    <div class="sub-sec">子事项 · ${subs.length} 个</div>
-    ${subs.map(s=>{
-      const od=s.due&&s.status!=='done'&&s.due<todayStr();
-      return `<div class="sl-row" onclick="openSubEdit('${s.card_id}','${parentId}')">
-        ${stBadge(s.status)}
-        <div class="sl-main">
-          <div class="sl-name">${esc(s.card_name)}</div>
-          <div class="sl-meta">${[s.owner?('👤 '+esc(s.owner)):'',s.due?('截止 '+esc(s.due)):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
-        </div>
-        ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
-          <button onclick="openSubEdit('${s.card_id}','${parentId}')">编辑</button>
-          <button class="del" onclick="delDrawerSub('${s.card_id}','${parentId}')">删除</button>
-        </div>`:''}
-      </div>`;
-    }).join('')||'<div class="empty-hint">暂无子事项，在上方输入标题创建第一个</div>'}`;
+    <div id="drawerSubSec">
+      ${todo.total?`<div class="sub-sec">代办清单 · ${tdone}/${todo.total}</div>${drawerTodoTree(todo.subtasks,0)}`:''}
+      <div class="sub-sec">子事项目录 · ${subs.length} 个顶层 / ${d.total} 个合计</div>
+      ${drawerSubTree(subs,parentId,0)||'<div class="empty-hint">暂无子事项，在上方输入标题创建第一个</div>'}
+    </div>`;
   if(ME.can_edit)initPersonPicker('dn_owner',DRAWER_OWNER);
+  // 恢复「挂在所选子事项下」的提示（重绘后需要还原）
+  if(ME.can_edit&&DRAWER_NEW_UNDER){
+    const tip=document.getElementById('dnUnderTip');
+    const inp=document.getElementById('dn_name');
+    if(tip){tip.style.display='';tip.textContent='新子事项将挂在「'+DRAWER_NEW_UNDER_NAME+'」下'}
+    if(inp)inp.placeholder='输入下级子事项标题，回车添加…';
+  }
+}
+// 弹窗内的子事项目录（树形层级）
+let DRAWER_SUB_OPEN={};
+let DRAWER_TODO_OPEN={};
+// 代办清单（card_subtasks）也按树形展示
+function drawerTodoTree(nodes,level){
+  return (nodes||[]).map(n=>{
+    const kids=n.children||[];
+    const open=!!DRAWER_TODO_OPEN[n.id];
+    return `<div class="sl-row" style="padding-left:${level*16}px" onclick="event.stopPropagation()">
+      ${kids.length
+        ?`<span class="s-chev ${open?'open':''}" onclick="toggleDrawerTodo('${n.id}')" style="cursor:pointer;flex-shrink:0">▶</span>`
+        :`<span class="s-chev leaf" style="flex-shrink:0">▶</span>`}
+      <input type="checkbox" ${n.done?'checked':''} onchange="toggleDrawerTodoDone('${n.id}',this.checked)" style="width:15px;height:15px;accent-color:var(--primary);cursor:pointer;flex-shrink:0">
+      <div class="sl-main"><div class="sl-name" style="${n.done?'color:var(--text2);text-decoration:line-through':''}">${esc(n.title)}</div></div>
+    </div>
+    ${kids.length?`<div id="dtodo_${n.id}" style="display:${open?'block':'none'}">${drawerTodoTree(kids,level+1)}</div>`:''}`;
+  }).join('');
+}
+function toggleDrawerTodo(id){
+  const box=document.getElementById('dtodo_'+id);
+  if(!box)return;
+  const open=box.style.display==='none';
+  box.style.display=open?'block':'none';
+  DRAWER_TODO_OPEN[id]=open;
+  const prev=box.previousElementSibling;
+  const chev=prev?prev.querySelector('.s-chev'):null;
+  if(chev)chev.classList.toggle('open',open);
+}
+async function toggleDrawerTodoDone(sid,done){
+  const parentId=DRAWER_STACK[DRAWER_STACK.length-1].cardId;
+  try{
+    await api('/api/cards/'+parentId+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({done:done?1:0})});
+    await renderDrawerList(parentId);
+  }catch(e){toast(e.message)}
+}
+function drawerSubTree(nodes,parentId,level){
+  return (nodes||[]).map(n=>{
+    const od=n.due&&n.status!=='done'&&n.due<todayStr();
+    const kids=n.children||[];
+    const open=!!DRAWER_SUB_OPEN[n.card_id];
+    return `<div class="sl-row" onclick="openSubEdit('${n.card_id}','${parentId}')" style="padding-left:${level*16}px">
+      ${kids.length
+        ?`<span class="s-chev ${open?'open':''}" onclick="event.stopPropagation();toggleDrawerSub('${n.card_id}')" style="cursor:pointer;flex-shrink:0">▶</span>`
+        :`<span class="s-chev leaf" style="flex-shrink:0">▶</span>`}
+      ${stBadge(n.status)}
+      <div class="sl-main">
+        <div class="sl-name">${esc(n.card_name)}</div>
+        <div class="sl-meta">${[n.owner?('👤 '+esc(n.owner)):'',n.due?('截止 '+esc(n.due)):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
+      </div>
+      ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
+        <button onclick="openSubEdit('${n.card_id}','${parentId}')">编辑</button>
+        <button onclick="startDrawerSubUnder('${n.card_id}','${esc(n.card_name)}')" title="在该子事项下再挂一级">＋下级</button>
+        <button class="del" onclick="delDrawerSub('${n.card_id}','${parentId}')">删除</button>
+      </div>`:''}
+    </div>
+    ${kids.length?`<div id="dsub_${n.card_id}" style="display:${open?'block':'none'}">${drawerSubTree(kids,parentId,level+1)}</div>`:''}`;
+  }).join('');
+}
+function toggleDrawerSub(cardId){
+  const box=document.getElementById('dsub_'+cardId);
+  if(!box)return;
+  const open=box.style.display==='none';
+  box.style.display=open?'block':'none';
+  DRAWER_SUB_OPEN[cardId]=open;
+  const prev=box.previousElementSibling;
+  const chev=prev?prev.querySelector('.s-chev'):null;
+  if(chev)chev.classList.toggle('open',open);
+}
+// 弹窗内折叠/展开主事项（连同其下的子事项目录）
+function toggleDrawerMain(){
+  const box=document.getElementById('drawerSubSec');
+  const chev=document.getElementById('drawerMainChev');
+  if(!box)return;
+  const folded=box.style.display!=='none';
+  box.style.display=folded?'none':'block';
+  if(chev)chev.classList.toggle('open',!folded);
 }
 function expandDrawerNew(){
   const b=document.getElementById('drawerNewBox');
   if(b&&!b.classList.contains('expand')){b.classList.add('expand');DRAWER_OWNER=[];initPersonPicker('dn_owner',DRAWER_OWNER)}
 }
 function collapseDrawerNew(){document.getElementById('drawerNewBox').classList.remove('expand')}
-async function createDrawerSub(){
-  const parentId=DRAWER_STACK[DRAWER_STACK.length-1].cardId;
+async function createDrawerSub(underId){
+  const mainId=DRAWER_STACK[DRAWER_STACK.length-1].cardId;
+  const parentId=underId||DRAWER_NEW_UNDER||mainId;
   const name=document.getElementById('dn_name').value.trim();
   if(!name){toast('子事项标题不能为空');return}
   const st=document.getElementById('dn_status').value;
@@ -1867,12 +2137,28 @@ async function createDrawerSub(){
     DRAWER_OWNER=[];
     document.getElementById('drawerNewBox').classList.add('expand');
     initPersonPicker('dn_owner',DRAWER_OWNER);
-    toast(`已添加「${name}」，可继续输入下一个`);
-    await renderDrawerList(parentId);
+    toast(`已添加「${name}」${parentId!==mainId?'（挂到所选子事项下）':''}，可继续输入下一个`);
+    // 展开新建出来的这一支
+    if(parentId!==mainId)DRAWER_SUB_OPEN[parentId]=true;
+    await renderDrawerList(mainId);
     const inp=document.getElementById('dn_name');
     if(inp)inp.focus();
     reload(1);renderProgress();
   }catch(e){toast(e.message)}
+}
+// 「＋下级」：把新建表单切到「挂在指定子事项下」的模式
+function startDrawerSubUnder(cardId,name){
+  DRAWER_NEW_UNDER=cardId;
+  DRAWER_NEW_UNDER_NAME=name||'';
+  const box=document.getElementById('drawerNewBox');
+  if(box)box.classList.add('expand');
+  const tip=document.getElementById('dnUnderTip');
+  if(tip){
+    tip.style.display='';
+    tip.textContent='新子事项将挂在「'+(name||'')+'」下';
+  }
+  const inp=document.getElementById('dn_name');
+  if(inp){inp.placeholder='输入下级子事项标题，回车添加…';inp.focus()}
 }
 async function openSubEdit(subId,parentId){
   DRAWER_STACK.push({type:'edit',cardId:subId,parentId});

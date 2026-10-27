@@ -156,9 +156,13 @@ CREATE TABLE IF NOT EXISTS card_subtasks (
     done_by     TEXT NOT NULL DEFAULT '',
     done_at     TEXT NOT NULL DEFAULT '',
     created_by  TEXT NOT NULL DEFAULT '',
+    parent_id   INTEGER NOT NULL DEFAULT 0,   -- 上级子事项 id（0 = 顶层）
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_subtasks_card ON card_subtasks(card_id);
+-- 注意：parent_id 的索引不能在 SCHEMA 里建 —— 老库还没有该列，
+-- executescript(SCHEMA) 会因 "no such column" 中断整个初始化。
+-- 索引统一在 init_db() 的 ALTER 之后创建。
 
 -- 审计日志：登录/登出/各类操作（仅管理员可查）
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -270,6 +274,12 @@ def init_db(force_import=False):
     if 'pinned' not in cols:
         conn.execute('ALTER TABLE cards ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_cards_pinned ON cards(pinned)')
+    # 子事项层级：parent_id 指向同卡片下的另一个子事项，0 表示顶层
+    scols = [r[1] for r in conn.execute('PRAGMA table_info(card_subtasks)').fetchall()]
+    if 'parent_id' not in scols:
+        conn.execute('ALTER TABLE card_subtasks ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0')
+    # 索引放在 ALTER 之后建（老库要先补列才能建索引）
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_subtasks_parent ON card_subtasks(parent_id)')
     cols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]
     if 'workgroups' not in cols:
         conn.execute("ALTER TABLE team_members ADD COLUMN workgroups TEXT NOT NULL DEFAULT ''")

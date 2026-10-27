@@ -560,8 +560,27 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         mine = [r for r in mine if owner in (r.get('owner') or '')]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]
+    # 搜索：同时命中「事项」（名称/描述）与「板块」（板块名）
+    # 板块名命中时，该板块下的全部事项都算命中；返回结果按 match_type 区分
+    col_hit_keys = set()
     if q:
-        mine = [r for r in mine if q in (r.get('card_name') or '') or q in (r.get('description') or '')]
+        ql = q.lower()
+        for r in mine:
+            cn = (r.get('column_name') or '')
+            if cn and ql in cn.lower():
+                col_hit_keys.add(col_key(r['board_id'], cn))
+        card_hit = set()
+        for r in mine:
+            if (ql in (r.get('card_name') or '').lower()
+                    or ql in (r.get('description') or '').lower()):
+                card_hit.add(r['card_id'])
+        mine = [r for r in mine
+                if col_key(r['board_id'], r.get('column_name') or '') in col_hit_keys
+                or r['card_id'] in card_hit]
+        for r in mine:
+            r['match_type'] = ('column'
+                               if col_key(r['board_id'], r.get('column_name') or '') in col_hit_keys
+                               else 'card')
     total = len(mine)
     # 板块元信息 + 进度统计：基于**全量**过滤结果，不受分页影响，
     # 否则板块进度条上的「已完成/总数」会与实际列出的事项对不上
@@ -575,6 +594,8 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
     cols_meta = visible_columns(username, boards, columns, board_id, counts)
     if column:
         cols_meta = [c for c in cols_meta if c['column_name'] == column]
+    # 板块命中清单（供前端把该板块的事项归到一起展示）
+    col_hits = [c for c in cols_meta if c['col_key'] in col_hit_keys] if q else []
     start = (page - 1) * size
     page_rows = mine[start:start + size]
     st = subtask_stats([r['card_id'] for r in page_rows])
@@ -586,7 +607,8 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         d['subtask_total'] = st.get(r['card_id'], {}).get('total', 0)
         d['sub_count'] = sub_count.get(r['card_id'], 0)
         out.append(d)
-    return {'total': total, 'page': page, 'size': size, 'cards': out, 'columns': cols_meta}
+    return {'total': total, 'page': page, 'size': size, 'cards': out,
+            'columns': cols_meta, 'column_hits': col_hits, 'q': q}
 
 # ---------------- API：板块（新建 / 置顶）----------------
 class ColumnCreate(BaseModel):
@@ -842,14 +864,24 @@ async def delete_card(card_id: str, username: str = Depends(require_editor), req
     res = dbe('UPDATE cards SET deleted=1 WHERE card_id=? AND deleted=0', (card_id,))
     if res.rowcount == 0:
         raise HTTPException(404, '卡片不存在或已删除')
-    # 级联：删除子事项（含其代办任务）
-    subs = [r['card_id'] for r in dbq('SELECT card_id FROM cards WHERE parent_id=? AND deleted=0', (card_id,))]
-    for sid in subs:
+    # 级联：删除子事项（递归，含孙级）及其代办任务
+    allsubs = dbq('SELECT card_id, parent_id FROM cards WHERE deleted=0 AND parent_id!=?', (card_id,))
+    byid = {r['card_id']: (r['parent_id'] or 0) for r in allsubs}
+    victims = {card_id}
+    changed = True
+    while changed:
+        changed = False
+        for cid, pid in byid.items():
+            if pid in victims and cid not in victims:
+                victims.add(cid)
+                changed = True
+    victims.discard(card_id)
+    for sid in victims:
         dbe('UPDATE cards SET deleted=1 WHERE card_id=?', (sid,))
         dbe('DELETE FROM card_subtasks WHERE card_id=?', (sid,))
     dbe('DELETE FROM card_subtasks WHERE card_id=?', (card_id,))
-    log_action(card_id, username, 'delete', f'subitems={len(subs)}')
-    audit_log(username, client_ip(request), 'delete', f'卡片 {card_id}', f'删除卡片（含 {len(subs)} 个子事项）', 'success')
+    log_action(card_id, username, 'delete', f'subitems={len(victims)}')
+    audit_log(username, client_ip(request), 'delete', f'卡片 {card_id}', f'删除卡片（含 {len(victims)} 个子事项）', 'success')
     lock_mgr.release(card_id, username)
     await ws_mgr.broadcast({'type': 'card_delete', 'card_id': card_id,
         'by': username}, exclude=username)
@@ -906,12 +938,86 @@ class SubtaskReq(BaseModel):
     title: Optional[str] = None
     done: Optional[int] = None
     sort: Optional[int] = None
+    parent_id: Optional[int] = None   # 上级子事项 id（0/None = 顶层）
+
+
+def build_subtask_tree(rows):
+    """把平铺的子事项列表组装成树（children 嵌套）。
+
+    孤儿节点（parent_id 指向不存在的行）会被提到顶层，避免子事项「消失」。
+    """
+    items = []
+    index = {}
+    for r in rows:
+        d = dict(r)
+        d['children'] = []
+        items.append(d)
+        index[d['id']] = d
+    roots = []
+    for d in items:
+        pid = d.get('parent_id') or 0
+        if pid and pid in index and pid != d['id']:
+            index[pid]['children'].append(d)
+        else:
+            roots.append(d)
+    # 防御环路：若因数据异常形成环，按原顺序提为顶层
+    def depth_of(d, seen=None):
+        seen = seen or set()
+        n = 0
+        cur = d
+        while cur.get('children'):
+            cur = cur['children'][0]
+            if cur['id'] in seen:
+                break
+            seen.add(cur['id'])
+            n += 1
+            if n > 32:
+                break
+        return n
+    for d in items:
+        d['depth'] = depth_of(d)
+    return roots, items
+
 
 @app.get('/api/cards/{card_id}/subtasks')
 def get_subtasks(card_id: str, username: str = Depends(require_auth)):
-    rows = dbq('SELECT id, card_id, title, done, sort, done_by, done_at, created_by, created_at '
+    """返回子事项**树形**结构：顶层子事项在 subtasks，每项带 children 子树"""
+    rows = dbq('SELECT id, card_id, title, done, sort, done_by, done_at, created_by, parent_id, created_at '
                'FROM card_subtasks WHERE card_id=? ORDER BY sort, id', (card_id,))
-    return {'subtasks': [dict(r) for r in rows]}
+    roots, flat = build_subtask_tree(rows)
+    return {'subtasks': roots, 'flat': flat,
+            'total': len(flat), 'done': sum(1 for x in flat if x.get('done'))}
+
+@app.get('/api/cards/{card_id}/children')
+def get_card_children(card_id: str, username: str = Depends(require_auth)):
+    """返回该事项的**子事项树**（子卡片递归嵌套），供列表与弹窗按目录展示"""
+    boards, columns = user_allowed(username)
+    all_rows = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
+    mine = filter_rows(all_rows, boards, columns)
+    by_parent = defaultdict(list)
+    for r in mine:
+        if r.get('parent_id'):
+            by_parent[r['parent_id']].append(r)
+
+    def build(pid, depth=0):
+        out = []
+        for r in sorted(by_parent.get(pid, []), key=lambda x: (x.get('created') or '', x['card_id'])):
+            d = dict(r)
+            d['children'] = build(r['card_id'], depth + 1) if depth < 6 else []
+            d['child_count'] = len(by_parent.get(r['card_id'], []))
+            d['locked_by'] = lock_mgr.who(r['card_id'])
+            out.append(d)
+        return out
+
+    tree = build(card_id)
+    stack = list(tree)
+    total = 0
+    while stack:
+        n = stack.pop()
+        total += 1
+        stack.extend(n.get('children') or [])
+    return {'children': tree, 'total': total}
+
 
 @app.post('/api/cards/{card_id}/subtasks')
 async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(require_editor), request: Request = None):
@@ -928,10 +1034,25 @@ async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(req
     if not dbq('SELECT 1 FROM cards WHERE card_id=? AND deleted=0', (card_id,)):
         raise HTTPException(404, '卡片不存在或已删除')
     mx = dbq('SELECT COALESCE(MAX(sort),0) m FROM card_subtasks WHERE card_id=?', (card_id,))[0]['m']
-    dbe('INSERT INTO card_subtasks (card_id, title, done, sort, created_by) VALUES (?,?,?,?,?)',
-        (card_id, title, 0, mx + 10, username))
+    # 层级：parent_id 必须是同一卡片下的既有子事项（0/None = 顶层）
+    pid = int(req.parent_id or 0)
+    if pid:
+        if not dbq('SELECT 1 FROM card_subtasks WHERE id=? AND card_id=?', (pid, card_id)):
+            raise HTTPException(400, '上级子事项不存在')
+        # 防止成环：父级不能是自己的后代
+        anc = dbq('SELECT id, parent_id FROM card_subtasks WHERE card_id=?', (card_id,))
+        byid = {r['id']: (r['parent_id'] or 0) for r in anc}
+        cur, guard = pid, 0
+        while cur and guard < 64:
+            cur = byid.get(cur, 0)
+            guard += 1
+            if cur == pid:
+                raise HTTPException(400, '不能把子事项挂到它自己的下级')
+    dbe('INSERT INTO card_subtasks (card_id, title, done, sort, created_by, parent_id) VALUES (?,?,?,?,?,?)',
+        (card_id, title, 0, mx + 10, username, pid))
     log_action(card_id, username, 'subtask_add', title)
-    audit_log(username, client_ip(request), 'subtask_add', f'卡片 {card_id}', f'新增子事项：{title}', 'success')
+    audit_log(username, client_ip(request), 'subtask_add', f'卡片 {card_id}',
+              ('新增子事项：%s' % title) + (f'（上级 #{pid}）' if pid else ''), 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id,
         'by': username}, exclude=username)
     return {'ok': True}
@@ -978,11 +1099,26 @@ async def delete_subtask(card_id: str, sid: int, username: str = Depends(require
     card_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if card_row:
         check_cost_permission(card_row[0]['board_id'], username)
-    res = dbe('DELETE FROM card_subtasks WHERE id=? AND card_id=?', (sid, card_id))
+    # 删除父级时一并删除其所有后代，避免留下孤儿节点
+    allrows = dbq('SELECT id, parent_id FROM card_subtasks WHERE card_id=?', (card_id,))
+    byid = {r['id']: (r['parent_id'] or 0) for r in allrows}
+    victims = {sid}
+    changed = True
+    while changed:
+        changed = False
+        for cid, pid in byid.items():
+            if pid in victims and cid not in victims:
+                victims.add(cid)
+                changed = True
+    marks = ','.join('?' * len(victims))
+    res = dbe(f'DELETE FROM card_subtasks WHERE card_id=? AND id IN ({marks})',
+              [card_id] + sorted(victims))
     if res.rowcount == 0:
         raise HTTPException(404, '子事项不存在')
-    log_action(card_id, username, 'subtask_del', f'#{sid}')
-    audit_log(username, client_ip(request), 'subtask_delete', f'卡片 {card_id} 子事项#{sid}', '删除子事项', 'success')
+    extra = len(victims) - 1
+    log_action(card_id, username, 'subtask_del', f'#{sid}' + (f' (+{extra} 下级)' if extra else ''))
+    audit_log(username, client_ip(request), 'subtask_delete', f'卡片 {card_id} 子事项#{sid}',
+              ('删除子事项：%s' % ('含 %d 个下级' % extra if extra else '单条')), 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id,
         'by': username}, exclude=username)
     return {'ok': True}
@@ -1820,6 +1956,65 @@ XLSX_IMPORT_COLS = [
     'column_sort', 'board_status', 'board_creator',
 ]
 XLSX_REQUIRED = ['card_name', 'board_name']
+
+# 中文表头（模板展示用）+ 反向别名表（导入时兼容中英文两种表头）
+XLSX_COL_LABELS = {
+    'card_id': '事项ID',
+    'board_id': '看板ID',
+    'board_name': '所属看板名称',
+    'column_id': '板块ID',
+    'column_name': '板块名称',
+    'workspace_id': '工作空间ID',
+    'card_name': '事项名称',
+    'status': '状态',
+    'status_name': '状态显示名',
+    'priority': '优先级',
+    'creator': '创建人',
+    'owner': '负责人',
+    'cc': '知会人',
+    'follower': '关注人',
+    'begin': '开始日期',
+    'due': '截止日期',
+    'completed': '完成时间',
+    'created': '创建时间',
+    'modified': '修改时间',
+    'description': '详细描述',
+    'label': '标签',
+    'b_sort': '排序值',
+    'entity_type': '实体类型',
+    'cover_setted': '是否有封面',
+    'is_filed': '是否归档',
+    'comments': '评论数',
+    'column_sort': '板块排序值',
+    'board_status': '看板状态',
+    'board_creator': '看板创建人',
+}
+
+
+def _build_header_aliases():
+    """表头别名表：中文名 / 英文名 / 去下划线英文名 → 内部字段名"""
+    al = {}
+    for k, v in XLSX_COL_LABELS.items():
+        for key in (v, v.replace(' ', ''), k, k.replace('_', '')):
+            al[str(key).strip().lower()] = k
+    return al
+
+
+XLSX_HEADER_ALIASES = _build_header_aliases()
+
+
+def norm_xlsx_header(h):
+    """归一化表头：去掉必填标记与空白，再查别名表（查不到就原样返回）"""
+    s = str(h or '').strip()
+    if not s:
+        return ''
+    # 去掉「*」「必填」「（必填）」等标注
+    for junk in ('（必填）', '(必填)', '必填', '*', '＊'):
+        s = s.replace(junk, '')
+    s = s.strip().lower()
+    s = re.sub(r'[\s_\-]+', '', s)
+    return XLSX_HEADER_ALIASES.get(s, s)
+
 # 状态归一：用户可能填中文「已完成」，转成系统内部状态值
 XLSX_STATUS_MAP = {
     '已完成': 'done', '完成': 'done', 'done': 'done', '已关闭': 'done', 'closed': 'done',
@@ -1837,53 +2032,58 @@ def download_import_template(username: str = Depends(require_auth)):
     import io
 
     notes = {
-        'card_name': '必填 · 事项名称',
-        'board_name': '必填 · 所属看板名称',
-        'card_id': '选填 · 事项 ID（留空自动生成；与库中已有 ID 相同则更新该条）',
-        'board_id': '选填 · 看板 ID（留空自动生成）',
-        'column_name': '选填 · 板块名称（如 2026年第1/2周）',
-        'column_id': '选填 · 板块 ID',
-        'workspace_id': '选填 · TAPD 工作空间 ID',
-        'status': '选填 · 状态（open/progressing/done，也接受 已完成/进行中/未开始）',
-        'status_name': '选填 · 状态显示名（留空按 status 自动生成）',
-        'creator': '选填 · 创建人',
-        'owner': '选填 · 负责人（多人用分号分隔）',
-        'cc': '选填 · 知会人（分号分隔）',
-        'follower': '选填 · 关注人（分号分隔）',
-        'begin': '选填 · 开始日期（YYYY-MM-DD）',
-        'due': '选填 · 截止日期（YYYY-MM-DD）',
-        'completed': '选填 · 完成时间',
-        'created': '选填 · 创建时间',
-        'modified': '选填 · 修改时间',
-        'description': '选填 · 详细描述',
-        'label': '选填 · 标签',
-        'priority': '选填 · 优先级',
-        'b_sort': '选填 · 排序值（数字）',
-        'entity_type': '选填 · 实体类型（默认 BoardCard）',
-        'cover_setted': '选填 · 是否有封面（0/1）',
-        'is_filed': '选填 · 是否归档（0/1）',
-        'comments': '选填 · 评论数',
-        'column_sort': '选填 · 板块排序值',
-        'board_status': '选填 · 看板状态（默认 open）',
-        'board_creator': '选填 · 看板创建人',
+        'card_name': '事项名称（必填）',
+        'board_name': '所属看板名称（必填）',
+        'card_id': '事项 ID（留空自动生成；与库中已有 ID 相同则更新该条）',
+        'board_id': '看板 ID（留空自动生成）',
+        'column_name': '板块名称（如 2026年第1/2周）',
+        'column_id': '板块 ID',
+        'workspace_id': 'TAPD 工作空间 ID',
+        'status': '状态（open/progressing/done，也接受 已完成/进行中/未开始）',
+        'status_name': '状态显示名（留空按状态自动生成）',
+        'creator': '创建人',
+        'owner': '负责人（多人用分号分隔）',
+        'cc': '知会人（分号分隔）',
+        'follower': '关注人（分号分隔）',
+        'begin': '开始日期（YYYY-MM-DD）',
+        'due': '截止日期（YYYY-MM-DD）',
+        'completed': '完成时间',
+        'created': '创建时间',
+        'modified': '修改时间',
+        'description': '详细描述',
+        'label': '标签',
+        'priority': '优先级',
+        'b_sort': '排序值（数字）',
+        'entity_type': '实体类型（默认 BoardCard）',
+        'cover_setted': '是否有封面（0/1）',
+        'is_filed': '是否归档（0/1）',
+        'comments': '评论数',
+        'column_sort': '板块排序值',
+        'board_status': '看板状态（默认 open）',
+        'board_creator': '看板创建人',
     }
 
     wb = Workbook()
-    # Sheet1：导入数据（带表头）
+    # Sheet1：导入数据（中文表头；必填列红色底 + 星号标注）
     ws = wb.active
     ws.title = '导入数据'
-    ws.append(XLSX_IMPORT_COLS)
+    headers = [(XLSX_COL_LABELS.get(c, c) + (' *' if c in XLSX_REQUIRED else ''))
+               for c in XLSX_IMPORT_COLS]
+    ws.append(headers)
     hdr_fill = PatternFill('solid', fgColor='002D74')
+    req_fill = PatternFill('solid', fgColor='B42318')     # 必填列：红底
     hdr_font = Font(bold=True, color='FFFFFF', size=11)
     thin = Side(style='thin', color='D9D9D9')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     for i, c in enumerate(XLSX_IMPORT_COLS, 1):
         cell = ws.cell(1, i)
-        cell.fill = hdr_fill
+        required = c in XLSX_REQUIRED
+        cell.fill = req_fill if required else hdr_fill
         cell.font = hdr_font
         cell.alignment = Alignment(horizontal='center', vertical='center')
         cell.border = border
-        ws.column_dimensions[get_column_letter(i)].width = 18 if c in XLSX_REQUIRED else 14
+        ws.column_dimensions[get_column_letter(i)].width = 20 if required else 14
+    ws.row_dimensions[1].height = 22
     # 两行示例 —— 用字典构造再按 COLS 顺序取值，避免手写列表导致列错位
     sample_a = {
         'card_name': '示例-事项A', 'board_name': '示例看板（2026年度）',
@@ -1918,11 +2118,15 @@ def download_import_template(username: str = Depends(require_auth)):
     ws2.column_dimensions['C'].width = 56
     for col in XLSX_IMPORT_COLS:
         req = '必填' if col in XLSX_REQUIRED else '选填'
-        ws2.append([col, req, notes.get(col, '')])
+        label = XLSX_COL_LABELS.get(col, col)
+        ws2.append([label + (' *' if col in XLSX_REQUIRED else ''), req, notes.get(col, '')])
     for r in range(2, ws2.max_row + 1):
         for c in range(1, 4):
             ws2.cell(r, c).border = border
             ws2.cell(r, c).alignment = Alignment(vertical='center')
+        if ws2.cell(r, 2).value == '必填':
+            ws2.cell(r, 2).font = Font(bold=True, color='B42318')
+            ws2.cell(r, 1).font = Font(bold=True, color='B42318')
 
     # Sheet3：使用说明
     ws3 = wb.create_sheet('使用说明')
@@ -1930,13 +2134,15 @@ def download_import_template(username: str = Depends(require_auth)):
         ['TAPD 数据导入模板 · 使用说明'],
         [''],
         ['1. 填写「导入数据」工作表，第一行表头请勿修改、勿增删列。'],
-        ['2. 必填列只有 card_name（事项名称）和 board_name（所属看板）两列。'],
+        ['2. 表头为中文；带红色底色和 * 号的列是必填列，只有两列：'],
+        ['   「事项名称 *」和「所属看板名称 *」，其余均可留空。'],
         ['3. 负责人 / 知会人 / 关注人 多人时用英文分号 ; 分隔。'],
         ['4. 导入为「追加式」：库中已有的数据不会被删除；'],
-        ['   card_id 相同视为同一条事项，会更新该条；card_id 留空则自动生成。'],
+        ['   「事项ID」相同视为同一条事项，会更新该条；留空则自动生成。'],
         ['5. 导入的看板会自动登记到「看板管理」中，可在那边指定归属部门。'],
         ['6. 日期建议统一用 YYYY-MM-DD；Excel 单元格格式设为文本以免被自动转换。'],
         ['7. 以「示例」开头的事项名 / 看板名会被自动跳过，不会导入真实数据。'],
+        ['8. 表头也兼容英文写法（如 card_name / board_name），两种写法都能识别。'],
         [''],
         ['示例数据为占位内容，正式导入前可自行删除（留着也不会被导入）。'],
     ]:
@@ -1983,17 +2189,18 @@ async def import_xlsx(request: Request, username: str = Depends(require_editor))
         header = next(rows)
     except StopIteration:
         raise HTTPException(400, 'xlsx 里没有数据行')
-    # 表头归一：去空格、小写
+    # 表头归一：兼容中文表头与英文表头；自动去掉「*」「必填」等标注
     hmap = {}
     for i, h in enumerate(header):
         if h is None:
             continue
-        key = str(h).strip().lower()
+        key = norm_xlsx_header(h)
         if key:
             hmap[key] = i
     missing = [c for c in XLSX_REQUIRED if c not in hmap]
     if missing:
-        raise HTTPException(400, '缺少必填列：%s' % '、'.join(missing))
+        raise HTTPException(400, '缺少必填列：%s'
+                            % '、'.join(XLSX_COL_LABELS.get(c, c) for c in missing))
 
     conn = get_conn()
     created = updated = skipped = 0
