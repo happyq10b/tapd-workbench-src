@@ -139,7 +139,13 @@ button{font-family:inherit}
 .item-chev:hover{color:var(--primary)}
 .item-chev.open{transform:rotate(90deg);color:var(--primary)}
 /* ---- 子事项树（主事项下方）---- */
-.sub-tree{margin:0 0 8px 32px;padding:2px 0 2px 12px;border-left:2px solid var(--border)}
+/* 子树缩进 = margin-left 32 + padding-left 12 + border-left 2 = 46px（只影响左侧标题区）。
+   但缩进会让子行的**右边界**比父事项行左移 46px → 右对齐锚点不同 → 字段列起点错位。
+   用 margin-right:8px 把右侧推回来（= 子行 padding-right 8px 与父行 padding-right 14px 的差
+   + 缩进量经实测标定的偏移），使父子两行的**右边界一致** →
+   「负责人 / 创建日期 / 截止日期」三列起点完全对齐。
+   注：数值经 headless Chrome 逐像素实测标定，改动缩进或 padding 时需重新标定。 */
+.sub-tree{margin:0 8px 8px 32px;padding:2px 0 2px 12px;border-left:2px solid var(--border)}
 .sub-tree.empty{padding-left:12px;border-left-color:transparent}
 .sub-node{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12.5px;color:var(--text);transition:background .15s,transform .12s;position:relative;overflow:hidden}
 .sub-node:hover{background:#fafafa}
@@ -156,12 +162,18 @@ button{font-family:inherit}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
 /* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小） */
-.sub-node .fcols{grid-template-columns:156px 132px 168px;gap:0 8px;width:472px;flex:0 0 472px}
+.sub-node .fcols{grid-template-columns:166px 146px 178px;gap:0 10px;width:520px;flex:0 0 520px}
 .sub-node .fcol{font-size:11px}
 /* 子事项行的尾部槽位：同样固定宽度 → 与父事项行同样的对齐逻辑 */
-.sub-node .slot-overdue{width:42px}
-.sub-node .slot-status{width:52px}
-.sub-node .slot-pin{width:76px}
+/* 子事项行的尾部槽位宽度与父事项行**完全一致**（含 gap），
+   保证父子两行的「右对齐锚点」相同 → 字段列起点才能对齐。
+   「＋子事项」那格（.slot-sub）留空即可。 */
+.sub-node .sub-tail{gap:10px}
+.sub-node .slot-overdue{width:46px}
+.sub-node .slot-subtask{width:52px}
+.sub-node .slot-status{width:58px}
+.sub-node .slot-pin{width:84px}
+.sub-node .slot-sub{width:72px}
 /* 子事项前的圆点：统一用品牌金，不再按负责人姓名哈希出不同颜色 */
 .s-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0}
 /* 子事项行内的置顶按钮：与主事项行共用 .pin-btn，仅在目录里用紧凑形态 */
@@ -1509,8 +1521,10 @@ function subNodeHtml(n,level){
     <span class="fcols">${colsHtml}</span>
     <span class="sub-tail">
       <span class="slot-overdue">${od?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}</span>
+      <span class="slot-subtask"></span>
       <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
       <span class="slot-pin">${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}</span>
+      <span class="slot-sub"></span>
     </span>
   </div>
   ${kids.length?`<div class="sub-tree" id="subnode_${n.card_id}" style="display:${open?'block':'none'}">${kids.map(k=>subNodeHtml(k,level+1)).join('')}</div>`:''}`;
