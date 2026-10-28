@@ -98,6 +98,11 @@ button{font-family:inherit}
 .add-item-btn:hover{background:#d6e9fb}
 /* 事项尾部的创建日期 */
 .item-created{font-size:12px;color:var(--text3);flex-shrink:0;white-space:nowrap}
+/* 事项行最前方的顺序序号：每个板块独立从 1 开始 */
+.item-seq{width:20px;height:20px;border-radius:50%;background:#eef2f7;color:var(--text2);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums}
+.item-seq.pin{background:#fff7e6;color:#d46b08;border:1px solid #ffd591}
+/* 负责人姓名：显示在标题之后 */
+.item-owner{font-size:12px;color:var(--text2);flex-shrink:0;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
 /* 事项行左侧的子事项目录展开箭头 */
 .item-chev{display:inline-flex;align-items:center;justify-content:center;width:16px;flex-shrink:0;cursor:pointer;color:var(--text3);font-size:10px;transition:transform .2s;user-select:none}
 .item-chev:hover{color:var(--primary)}
@@ -629,7 +634,12 @@ function goLogin(){
 <!-- 详情弹窗 -->
 <div class="modal-overlay" id="detailModal" style="display:none">
   <div class="modal">
-    <div class="modal-header"><h2 id="d_title"></h2><button class="modal-close" onclick="closeModal('detailModal')">✕</button></div>
+    <div class="modal-header"><h2 id="d_title"></h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <span id="d_ops" style="display:flex;gap:6px;align-items:center"></span>
+        <button class="modal-close" onclick="closeModal('detailModal')">✕</button>
+      </div>
+    </div>
     <div class="modal-body">
       <div class="detail-meta" id="d_meta"></div>
       <div class="detail-desc" id="d_desc" style="display:none"></div>
@@ -872,6 +882,7 @@ function isCostCard(c){return c&&c.board_id===COST_BOARD_ID}
 function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_edit}
 let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
 let EDIT_IS_SUB=false;   // 当前编辑弹窗是否处于「子事项模式」（复用主事项弹窗，裁剪字段）
+let EDIT_FROM_DETAIL=''; // 从详情弹窗进入编辑时记录来源，关闭编辑后回到详情
 let DETAIL_ID=null, TEAM_MEMBERS=[], expandedAll=false;
 
 function api(path,opts={}){
@@ -995,6 +1006,7 @@ async function init(){
   try{
     loadDeptOpen();
     ME=await api('/api/me');
+    loadPins();   // 载入当前账号的个人置顶设置（按账号分桶，互不影响）
     document.getElementById('userName').textContent='👤 '+ME.username;
     document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
     document.getElementById('roleTag').className='role-tag role-'+ME.role;
@@ -1194,10 +1206,11 @@ function renderBoard(cards,cols,q,colHits){
     const total=meta?meta.card_count:list.length;
     const done=meta?meta.done_count:list.filter(x=>x.status==='done').length;
     const rate=total?Math.round(done/total*100):0;
-    const pinned=meta?!!meta.pinned:false;
     const created=meta?(String(meta.created_at||'').slice(0,10)||'—'):'—';
     const colKey=meta?meta.col_key:(curBoard+'::'+k);
     const boardId=meta?meta.board_id:curBoard;
+    // 板块置顶同样是**个人设置**：读当前账号自己的置顶集合
+    const pinned=isPinned('column',colKey);
     return `<div class="week-group open" id="wg_${i}">
       <div class="week-header" onclick="toggleWeek(${i})">
         <span class="chev">▶</span><span class="week-title">${esc(k)}</span>
@@ -1211,7 +1224,7 @@ function renderBoard(cards,cols,q,colHits){
           <button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button>
         </div>
       </div>
-      <div class="week-body">${list.map(cardItem).join('')}</div>
+      <div class="week-body">${list.map((c,i)=>cardItem(c,i+1)).join('')}</div>
     </div>`;
   }).join('');
 }
@@ -1268,16 +1281,18 @@ function srItemHtml(x){
   </div>`;
 }
 // 排序比较：置顶优先 → 创建时间降序 → 名称（保证同分时顺序稳定）
+// 置顶是**个人设置**，因此这里读的是当前账号的置顶集合，而不是服务端的共享字段
+function colPinKey(name,meta){return (meta&&meta.col_key)?meta.col_key:(curBoard+'::'+name)}
 function cmpColumn(a,b,cmeta){
   const ma=cmeta[a]||{},mb=cmeta[b]||{};
-  const pa=ma.pinned?0:1,pb=mb.pinned?0:1;
+  const pa=isPinned('column',colPinKey(a,ma))?0:1,pb=isPinned('column',colPinKey(b,mb))?0:1;
   if(pa!==pb)return pa-pb;
   const ta=tsVal(ma.created_at),tb=tsVal(mb.created_at);
   if(ta!==tb)return tb-ta;
   return String(a).localeCompare(String(b),'zh');
 }
 function cmpCard(a,b){
-  const pa=a.pinned?0:1,pb=b.pinned?0:1;
+  const pa=isPinned('card',a.card_id)?0:1,pb=isPinned('card',b.card_id)?0:1;
   if(pa!==pb)return pa-pb;
   const ta=tsVal(a.created),tb=tsVal(b.created);
   if(ta!==tb)return tb-ta;
@@ -1297,14 +1312,10 @@ function fmtDT(v){
   if(!s)return '';
   return s.length>16?s.slice(0,16):s;
 }
-function cardItem(c){
+function cardItem(c,seq){
   const locked=c.locked_by;
   const lockedByOther=locked&&locked!==ME.username;
   const lockHtml=lockedByOther?`<span class="lock-tag">🔒 ${esc(locked)} 已锁定</span>`:'';
-  const ops=canEditCard(c)
-    ? (lockedByOther?'<span style="font-size:11px;color:var(--text2)">已锁定</span>'
-      :`<button class="icon-btn" onclick="openEdit('${c.card_id}')">✏️ 编辑</button>`)
-    :(ME.can_edit?`<span style="font-size:11px;color:var(--text2)" title="成本卡仅管理员可编辑">🔒 仅管理员</span>`:'');
   const overdue=c.due && c.status!=='done' && c.due < new Date().toISOString().slice(0,10);
   // 「添加子事项」是行内唯一的子事项入口：原来的「子事项 N」按钮已移除 ——
   // 已有子事项时左侧展开箭头就能看到目录，计数再单独占一个操作位属于重复
@@ -1313,8 +1324,10 @@ function cardItem(c){
     ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="为该事项新增子事项">＋ 添加子事项</button>`
     :'';
   // 事项置顶：与「板块置顶」完全一致 —— 按钮带文字标签，无条件渲染，
-  // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶
-  const pinBtnHtml=pinBtn(c.card_id,!!c.pinned,'toggleCardPin','📌 事项置顶');
+  // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶。
+  // 置顶是**个人设置**：读当前账号自己的置顶集合，不读服务端的共享字段
+  const pinned=isPinned('card',c.card_id);
+  const pinBtnHtml=pinBtn(c.card_id,pinned,'toggleCardPin','📌 事项置顶');
   // 有子事项时给出目录展开箭头
   const hasSubs=(c.sub_count||0)>0;
   const subArrow=hasSubs
@@ -1322,11 +1335,18 @@ function cardItem(c){
     :'';
   const created=fmtDT(c.created);
   const due=fmtDT(c.due);
+  // 列表最前方只保留顺序序号（每个板块独立从 1 开始，按当前排序规则连续排列）
+  const seqHtml=seq?`<span class="item-seq ${pinned?'pin':''}" title="本板块第 ${seq} 项">${seq}</span>`:'';
+  // 负责人姓名移到标题之后紧随显示
+  const ownerHtml=c.owner
+    ?`<span class="item-owner" title="负责人：${esc(c.owner)}">👤 ${esc(c.owner)}</span>`
+    :'';
   return `<div class="item-wrap" id="iw_${c.card_id}">
   <div class="item-card ${lockedByOther?'locked':''}">
     ${subArrow}
-    <span class="owner-avatar" style="background:${avatarColor(c.owner||'?')}">${esc(initials(c.owner||'?'))}</span>
+    ${seqHtml}
     <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)} ${lockHtml}</span>
+    ${ownerHtml}
     ${overdue?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
     <span class="item-created" title="创建时间">创建 ${esc(created||'—')}</span>
     <span class="item-date" title="截止时间">截止 ${esc(due||'—')}</span>
@@ -1334,7 +1354,6 @@ function cardItem(c){
     ${statusTag(c.card_id,c.status)}
     ${pinBtnHtml}
     ${subBtn}
-    ${ops}
   </div>
   <div class="sub-tree" id="subtree_${c.card_id}" style="display:none"></div>
   </div>`;
@@ -1390,7 +1409,7 @@ function subNodeHtml(n,level){
     ${od?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
     <span class="s-meta">${n.owner?esc(n.owner):''}${n.created?(' · 创建'+esc(fmtDT(n.created))):''}${n.due?(' · 截止'+esc(fmtDT(n.due))):''}</span>
     ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
-    ${pinBtn(n.card_id,!!n.pinned,'toggleCardPin','📌 子事项置顶',true)}
+    ${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}
   </div>
   ${kids.length?`<div class="sub-tree" id="subnode_${n.card_id}" style="display:${open?'block':'none'}">${kids.map(k=>subNodeHtml(k,level+1)).join('')}</div>`:''}`;
 }
@@ -1421,27 +1440,48 @@ async function foldItems(gid,expand){
   }
   toast(expand?'已展开该板块的事项目录':'已折叠该板块的事项目录');
 }
-// 板块置顶 / 取消置顶
-async function toggleColumnPin(colKey,pinned){
+// ---------- 个人级「置顶」设置 ----------
+// 置顶是**个人偏好**：只对当前登录账号生效，不写入服务端、不影响其他人。
+// 暂不涉及服务端存储，先落在浏览器本地（按账号分桶，换账号互不影响）。
+const PIN_STORE_PREFIX='my_pins_v1:';
+let MY_PINS={card:{},column:{}};   // {card:{card_id:1}, column:{col_key:1}}
+function loadPins(){
+  MY_PINS={card:{},column:{}};
   try{
-    await api('/api/columns/pin',{method:'POST',body:JSON.stringify({col_key:colKey,pinned:!!pinned})});
-    toast(pinned?'板块已置顶':'已取消板块置顶');
-    reload(curPage);
-  }catch(e){toast(e.message)}
-}
-// 事项置顶 / 取消置顶（主事项与子事项共用同一接口与同一按钮形态）
-// isSub=true 时就地刷新目录，不整页 reload —— 否则已展开的子事项目录会被折叠掉
-async function toggleCardPin(cardId,pinned,isSub){
-  try{
-    await api('/api/cards/'+cardId+'/pin',{method:'POST',body:JSON.stringify({pinned:!!pinned})});
-    toast(pinned?'已置顶':'已取消置顶');
-    if(isSub){
-      patchSubTreeNode(cardId,{pinned:!!pinned});
-    }else{
-      reload(curPage);
+    const raw=localStorage.getItem(PIN_STORE_PREFIX+((ME&&ME.username)||'anon'));
+    const v=raw?JSON.parse(raw):null;
+    if(v&&typeof v==='object'){
+      MY_PINS.card=(v.card&&typeof v.card==='object')?v.card:{};
+      MY_PINS.column=(v.column&&typeof v.column==='object')?v.column:{};
     }
-    await refreshDrawerIfOpen();
-  }catch(e){toast(e.message)}
+  }catch(e){MY_PINS={card:{},column:{}}}
+}
+function savePins(){
+  try{localStorage.setItem(PIN_STORE_PREFIX+((ME&&ME.username)||'anon'),JSON.stringify(MY_PINS))}catch(e){}
+}
+function isPinned(kind,key){return !!(MY_PINS[kind]&&MY_PINS[kind][key])}
+function setPinned(kind,key,on){
+  if(!MY_PINS[kind])MY_PINS[kind]={};
+  if(on)MY_PINS[kind][key]=1;else delete MY_PINS[kind][key];
+  savePins();
+}
+// 板块置顶 / 取消置顶（个人级：只对当前账号生效）
+function toggleColumnPin(colKey,pinned){
+  setPinned('column',colKey,!!pinned);
+  toast(pinned?'板块已置顶':'已取消板块置顶');
+  reload(curPage);
+}
+// 事项置顶 / 取消置顶（个人级：主事项与子事项共用同一份设置）
+// isSub=true 时就地刷新目录，不整页 reload —— 否则已展开的子事项目录会被折叠掉
+function toggleCardPin(cardId,pinned,isSub){
+  setPinned('card',cardId,!!pinned);
+  toast(pinned?'已置顶':'已取消置顶');
+  if(isSub){
+    refreshSubTrees();
+  }else{
+    reload(curPage);
+  }
+  refreshDrawerIfOpen();
 }
 // 完成情况：标记 / 取消完成。主事项与子事项写同一套「状态」字段，展示也一致
 async function toggleCardDone(cardId,done,isSub){
@@ -1468,6 +1508,10 @@ function patchSubTreeNode(cardId,patch){
   };
   Object.keys(SUBTREE_CACHE).forEach(k=>walk(SUBTREE_CACHE[k]));
   if(!hit)return;
+  refreshSubTrees();
+}
+// 重绘所有已展开的子事项目录（置顶改成个人设置后，缓存里的服务端 pinned 不再作数，必须重绘）
+function refreshSubTrees(){
   Object.keys(SUBTREE_CACHE).forEach(k=>{
     const box=document.getElementById('subtree_'+k);
     if(box&&box.style.display!=='none')renderSubTree(box,SUBTREE_CACHE[k]);
@@ -1655,7 +1699,9 @@ async function saveEdit(){
 async function deleteCard(){
   if(!confirm('确定删除该事项？删除后不可恢复'))return;
   try{
-    await api('/api/cards/'+editing,{method:'DELETE'});toast('已删除');closeEdit();reload(1);renderProgress();
+    await api('/api/cards/'+editing,{method:'DELETE'});toast('已删除');
+    EDIT_FROM_DETAIL='';   // 卡片已删除，不用再回详情
+    closeEdit();reload(1);renderProgress();
     await refreshDrawerIfOpen();
   }
   catch(e){toast(e.message)}
@@ -1665,6 +1711,9 @@ function closeEdit(){
   if(editing)unlockCard(editing);
   editing=null;
   EDIT_IS_SUB=false;
+  const back=EDIT_FROM_DETAIL;EDIT_FROM_DETAIL='';
+  // 从详情弹窗进来的，关闭编辑后回到详情，保持操作上下文不断
+  if(back)openDetail(back);
 }
 // openNewModal(boardId, colKey)：从「＋ 事项」按钮进来时锁定看板与板块
 let NEW_CARD_COL=null;   // {board_id, column_id, column_name}
@@ -2194,7 +2243,7 @@ async function renderDrawerList(parentId){
         ${p.description?`<div class="pdesc">${esc(p.description)}</div>`:''}
       </div>
       ${ME.can_edit?`<div class="sl-ops" style="align-items:flex-start">
-        ${pinBtn(p.card_id,!!p.pinned,'toggleCardPin','📌 事项置顶')}
+        ${pinBtn(p.card_id,isPinned('card',p.card_id),'toggleCardPin','📌 事项置顶')}
         <button onclick="openEdit('${p.card_id}')" title="打开事项弹窗">编辑</button>
       </div>`:''}
     </div>
@@ -2280,7 +2329,7 @@ function drawerSubTree(nodes,parentId,level){
       </div>
       ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
       ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
-        ${pinBtn(n.card_id,!!n.pinned,'toggleCardPin','📌 子事项置顶',true)}
+        ${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}
         <button onclick="openSubModal('${n.card_id}')" title="打开子事项弹窗">编辑</button>
         <button onclick="startDrawerSubUnder('${n.card_id}','${esc(n.card_name)}')" title="在该子事项下再挂一级">＋下级</button>
         <button class="del" onclick="delDrawerSub('${n.card_id}','${parentId}')">删除</button>
@@ -2394,12 +2443,15 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
 // ---------- 详情 + 评论 ----------
 async function openDetail(id){
   DETAIL_ID=id;
-  const d=await api('/api/cards?size=2000');
-  const c=d.cards.find(x=>x.card_id===id);
+  // 用 card_id 精确取（默认列表只含顶层事项，取不到子事项）
+  const d=await api('/api/cards?card_id='+id);
+  const c=d.cards&&d.cards[0];
   if(!c){toast('卡片不存在');return}
   const cs=await api('/api/cards/'+id+'/comments');
   const acts=await api('/api/cards/'+id+'/actions');
   document.getElementById('d_title').textContent=c.card_name||'';
+  // 编辑入口已从列表行移到这里：编辑按钮 + 置顶 + 完成情况
+  renderDetailOps(c);
   document.getElementById('d_meta').innerHTML=
     `看板：<b>${esc(c.board_name)}</b>　板块：<b>${esc(c.column_name||'—')}</b>　状态：<b>${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</b><br>`+
     `负责人：<b>${esc(c.owner||'—')}</b>　创建：<b>${esc(c.created)}</b>　截止：<b>${esc(c.due||'—')}</b>`;
@@ -2422,6 +2474,52 @@ async function addComment(){
   if(!v||!DETAIL_ID)return;
   try{await api('/api/cards/'+DETAIL_ID+'/comments',{method:'POST',body:JSON.stringify({content:v})});openDetail(DETAIL_ID)}
   catch(e){toast(e.message)}
+}
+// ---------- 详情弹窗的操作区：编辑入口 + 置顶 + 完成情况 ----------
+// 列表行里的「✏️ 编辑」已移除，编辑改从这里进入
+function renderDetailOps(c){
+  const box=document.getElementById('d_ops');
+  if(!box)return;
+  const lockedByOther=c.locked_by&&c.locked_by!==ME.username;
+  const pinned=isPinned('card',c.card_id);
+  const done=c.status==='done';
+  const parts=[];
+  if(lockedByOther)parts.push(`<span class="lock-tag">🔒 ${esc(c.locked_by)} 已锁定</span>`);
+  else if(!canEditCard(c)&&ME.can_edit)parts.push(`<span style="font-size:12px;color:var(--text2)" title="成本卡仅管理员可编辑">🔒 仅管理员</span>`);
+  parts.push(`<button class="pin-btn ${pinned?'on':''}" onclick="detailTogglePin()" title="${pinned?'取消置顶':'置顶该事项（个人设置）'}">${pinned?'📌 已置顶':'📌 事项置顶'}</button>`);
+  parts.push(`<button class="done-btn ${done?'on':''}" onclick="detailToggleDone()" title="${done?'取消完成标记':'标记为已完成'}">${done?'✓ 已完成':'完成'}</button>`);
+  parts.push(`<button class="btn-primary" style="padding:4px 12px;font-size:12px" onclick="openDetailEdit()" title="打开编辑弹窗">✏️ 编辑</button>`);
+  box.innerHTML=parts.join('');
+}
+// 从详情弹窗进入编辑：先关详情再开编辑 —— 两个弹窗同级，详情在 DOM 靠后会把编辑弹窗盖住
+async function openDetailEdit(){
+  const id=DETAIL_ID;
+  if(!id)return;
+  if(!ME.can_edit){toast('无编辑权限');return}
+  EDIT_FROM_DETAIL=id;
+  closeModal('detailModal');
+  await openEdit(id);
+}
+// 详情弹窗里的置顶（个人设置）
+async function detailTogglePin(){
+  const id=DETAIL_ID;
+  if(!id)return;
+  const on=!isPinned('card',id);
+  setPinned('card',id,on);
+  toast(on?'已置顶':'已取消置顶');
+  await reload(curPage);
+  await openDetail(id);
+}
+// 详情弹窗里的完成情况
+async function detailToggleDone(){
+  const id=DETAIL_ID;
+  if(!id)return;
+  const d=await api('/api/cards?card_id='+id);
+  const c=d.cards&&d.cards[0];
+  if(!c)return;
+  const done=c.status!=='done';
+  await toggleCardDone(id,done,false);
+  await openDetail(id);
 }
 // ---------- 团队 ----------
 var TM_ALL=[];  // [{id,name,workgroups:[...]}]
