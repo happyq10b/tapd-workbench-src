@@ -94,10 +94,6 @@ button{font-family:inherit}
 .pin-btn{border:1px solid var(--border);background:#fff;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;color:var(--text2);transition:all .15s;white-space:nowrap;font-family:inherit}
 .pin-btn:hover{border-color:var(--primary);color:var(--primary)}
 .pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
-/* 完成情况按钮：与「事项置顶」同一形态的文字按钮，「已完成」只是切换后的状态文案 */
-.done-btn{border:1px solid var(--border);background:#fff;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;color:var(--text2);transition:all .15s;white-space:nowrap;font-family:inherit}
-.done-btn:hover{border-color:var(--primary);color:var(--primary)}
-.done-btn.on{background:#f6ffed;border-color:#b7eb8f;color:var(--success);font-weight:600}
 .add-item-btn{border:1px solid #b5d4f4;background:#e6f1fb;color:#185fa5;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;transition:all .15s;white-space:nowrap;font-weight:500;font-family:inherit}
 .add-item-btn:hover{background:#d6e9fb}
 /* 事项尾部的创建日期 */
@@ -109,8 +105,15 @@ button{font-family:inherit}
 /* ---- 子事项树（主事项下方）---- */
 .sub-tree{margin:0 0 8px 32px;padding:2px 0 2px 12px;border-left:2px solid var(--border)}
 .sub-tree.empty{padding-left:12px;border-left-color:transparent}
-.sub-node{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12.5px;color:var(--text);transition:background .15s}
+.sub-node{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12.5px;color:var(--text);transition:background .15s,transform .12s;position:relative;overflow:hidden}
 .sub-node:hover{background:#fafafa}
+/* 点击反馈：按压态（轻微缩放）+ 涟漪，让用户明确感知"点到了" */
+.sub-node:active,.sl-row:active{transform:scale(.988);background:#eef4ff}
+.sub-node .s-title{cursor:pointer;transition:color .15s,transform .12s}
+.sub-node .s-title:hover{color:var(--primary)}
+.sub-node .s-title:active{transform:scale(.97)}
+.ripple{position:absolute;border-radius:50%;background:rgba(22,119,255,.20);transform:scale(0);opacity:.85;pointer-events:none;animation:rippleOut .6s ease-out forwards}
+@keyframes rippleOut{to{transform:scale(1);opacity:0}}
 .sub-node .s-chev{width:14px;text-align:center;color:var(--text3);font-size:10px;cursor:pointer;transition:transform .2s;flex-shrink:0}
 .sub-node .s-chev.open{transform:rotate(90deg)}
 .sub-node .s-chev.leaf{visibility:hidden}
@@ -121,8 +124,6 @@ button{font-family:inherit}
 /* 子事项行内的置顶按钮：与主事项行共用 .pin-btn，仅在目录里用紧凑形态 */
 .sub-node .pin-btn{padding:0 7px;font-size:11px;flex-shrink:0}
 .sub-node .pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
-/* 子事项行的完成标记按钮 */
-.sub-node .done-btn{padding:0 8px;font-size:11px;flex-shrink:0}
 /* ---- 搜索结果视图 ---- */
 .sr-wrap{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
 .sr-head{padding:11px 16px;font-size:12.5px;color:var(--text2);border-bottom:1px solid var(--border);background:#fafbfd}
@@ -150,6 +151,10 @@ button{font-family:inherit}
 .status-tag.done{background:#f6ffed;color:var(--success);border:1px solid #b7eb8f}
 .status-tag.progressing{background:#e6f7ff;color:var(--primary);border:1px solid #91d5ff}
 .status-tag.pending{background:#fff1f0;color:var(--danger);border:1px solid #ffa39e}
+/* 状态标签同时是行内唯一的状态切换入口：可点击，带按压态与涟漪反馈 */
+.status-tag-act{cursor:pointer;user-select:none;transition:transform .12s,box-shadow .15s,filter .15s}
+.status-tag-act:hover{box-shadow:0 0 0 2px rgba(22,119,255,.16);filter:brightness(.97)}
+.status-tag-act:active{transform:scale(.93)}
 .lock-tag{font-size:11px;color:#d48806;background:#fffbe6;border:1px solid #ffe58f;padding:2px 8px;border-radius:var(--radius-sm);flex-shrink:0}
 .icon-btn{border:none;background:none;cursor:pointer;font-size:13px;color:var(--text2);padding:4px 8px;border-radius:var(--radius-sm);transition:all .15s}
 .pwd-wrap{display:inline-flex;align-items:center;gap:4px;width:100%;max-width:100%}
@@ -276,7 +281,7 @@ button{font-family:inherit}
 .sn-row{display:flex;gap:8px}
 .sn-row .form-select,.sn-row .form-input{flex:1}
 .sn-actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
-.sl-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--color-background-primary,#fff);cursor:pointer;transition:border-color .15s;flex-wrap:wrap}
+.sl-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--color-background-primary,#fff);cursor:pointer;transition:border-color .15s,transform .12s,background .15s;flex-wrap:wrap;position:relative;overflow:hidden}
 .sl-row:hover{border-color:var(--primary)}
 .sl-main{flex:1 1 150px;min-width:0}
 .sl-name{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -285,9 +290,8 @@ button{font-family:inherit}
 .sl-ops button{background:none;border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;color:var(--text2);padding:2px 8px}
 .sl-ops button:hover{color:var(--primary);border-color:var(--primary)}
 .sl-ops button.del:hover{color:var(--danger);border-color:var(--danger)}
-/* 抽屉子事项操作区与主事项行保持一致：置顶/完成状态有明确的「已开启」形态 */
+/* 抽屉子事项操作区与主事项行保持一致：置顶状态有明确的「已开启」形态 */
 .sl-ops button.pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
-.sl-ops button.done-btn.on{background:#f6ffed;border-color:#b7eb8f;color:var(--success);font-weight:600}
 .se-form{display:flex;flex-direction:column;gap:10px}
 .se-form .form-group{margin:0}
 .se-owner{display:flex;flex-wrap:wrap;gap:6px}
@@ -540,16 +544,16 @@ function goLogin(){
     <div class="modal-body">
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
       <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
-      <div class="form-row">
+      <div class="form-row" id="e_status_row">
         <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
-        <div class="form-group"><label>状态</label><select class="form-select" id="e_status"><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option></select></div>
+        <div class="form-group" id="e_status_group"><label>状态</label><select class="form-select" id="e_status"><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option></select></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due"></div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>负责人</label><div class="member-picker" id="e_owner"></div></div>
+      <div class="form-row" id="e_owner_row">
+        <div class="form-group" id="e_owner_group"><label>负责人<span id="e_owner_opt" style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="e_owner"></div></div>
         <div class="form-group" id="e_cc_wrap"><label>参与人</label><div class="member-picker" id="e_cc"></div></div>
       </div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="e_desc" style="min-height:147px"></textarea></div>
@@ -1324,7 +1328,7 @@ function cardItem(c){
     <span class="item-created" title="创建时间">创建 ${esc(created||'—')}</span>
     <span class="item-date" title="截止时间">截止 ${esc(due||'—')}</span>
     ${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}
-    ${statusTag(c.status)}
+    ${statusTag(c.card_id,c.status)}
     ${pinBtnHtml}
     ${subBtn}
     ${ops}
@@ -1382,9 +1386,8 @@ function subNodeHtml(n,level){
     <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>
     ${od?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
     <span class="s-meta">${n.owner?esc(n.owner):''}${n.created?(' · 创建'+esc(fmtDT(n.created))):''}${n.due?(' · 截止'+esc(fmtDT(n.due))):''}</span>
-    ${statusTag(n.status,'padding:1px 8px;font-size:11px')}
+    ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
     ${pinBtn(n.card_id,!!n.pinned,'toggleCardPin','📌 子事项置顶',true)}
-    ${doneBtn(n.card_id,n.status==='done','toggleCardDone',true)}
   </div>
   ${kids.length?`<div class="sub-tree" id="subnode_${n.card_id}" style="display:${open?'block':'none'}">${kids.map(k=>subNodeHtml(k,level+1)).join('')}</div>`:''}`;
 }
@@ -1475,6 +1478,28 @@ async function refreshDrawerIfOpen(){
   if(!top||top.type!=='list')return;
   await renderDrawerList(top.cardId);
 }
+// 点击涟漪反馈：从点击点扩散一圈水波，让用户明确感知"点到了"。
+// 事件委托挂在容器上 —— 容器内内容会频繁重绘，挂在容器上就不用反复绑监听。
+function attachRipple(container,selector){
+  if(!container||container._rippleBound)return;
+  container._rippleBound=true;
+  container.addEventListener('pointerdown',e=>{
+    if(e.button&&e.button!==0)return;
+    const t=e.target.closest(selector);
+    if(!t||!container.contains(t))return;
+    // 自身带独立交互的控件（展开箭头、置顶、状态标签等）不触发整行涟漪，避免双重反馈
+    if(e.target.closest('button,a,input,select,textarea,.s-chev,.pin-btn,.status-tag'))return;
+    const r=t.getBoundingClientRect();
+    const size=Math.max(r.width,r.height)*2;
+    const span=document.createElement('span');
+    span.className='ripple';
+    span.style.width=size+'px';span.style.height=size+'px';
+    span.style.left=(e.clientX-r.left-size/2)+'px';
+    span.style.top=(e.clientY-r.top-size/2)+'px';
+    t.appendChild(span);
+    setTimeout(()=>{if(span.parentNode)span.parentNode.removeChild(span)},620);
+  });
+}
 function toggleWeek(i){const g=document.getElementById('wg_'+i);g.classList.toggle('open')}
 // 展开板块：展开所有板块，并展开各主事项下的子事项目录
 async function expandAll(){
@@ -1535,10 +1560,29 @@ async function openEdit(id,preloaded){
   document.getElementById('e_cc_wrap').style.display=EDIT_IS_SUB?'none':'';
   document.getElementById('editTitle').textContent=EDIT_IS_SUB?'编辑子事项':'编辑事项';
   document.getElementById('e_sub_btn').textContent=EDIT_IS_SUB?'▤ 下级子事项':'▤ 子事项';
+  applyOwnerSlot(EDIT_IS_SUB);
   await applySubContext(c);
   renderPickers();
   document.getElementById('editModal').style.display='flex';
   loadEditSubtasks(id);
+}
+// 「负责人」字段的位置：子事项模式下搬到「状态」右侧同一行（与状态并列，填满原本的空白格），
+// 并标注为选填；主事项模式还原成原来的「负责人 / 参与人」独立行。
+// 用 DOM 搬移而不是另建一份，保证两处永远是同一个元素、不会出现两份输入框或错位。
+function applyOwnerSlot(isSub){
+  const ownerRow=document.getElementById('e_owner_row');
+  const ownerGroup=document.getElementById('e_owner_group');
+  const statusRow=document.getElementById('e_status_row');
+  const opt=document.getElementById('e_owner_opt');
+  if(isSub){
+    if(ownerGroup.parentNode!==statusRow)statusRow.appendChild(ownerGroup);
+    ownerRow.style.display='none';       // 参与人已隐藏，这一行整体不再占位
+    if(opt)opt.style.display='';
+  }else{
+    if(ownerGroup.parentNode!==ownerRow)ownerRow.insertBefore(ownerGroup,ownerRow.firstChild);
+    ownerRow.style.display='';
+    if(opt)opt.style.display='none';
+  }
 }
 // 打开子事项弹窗：目录点击、抽屉「编辑」按钮共用这一个入口。
 // 无编辑权限时回落到只读详情弹窗（与主事项的权限表现一致）。
@@ -1798,9 +1842,15 @@ var DRAWER_NEW_UNDER=null;  // 新建子事项要挂到哪个子事项下（null
 var DRAWER_NEW_UNDER_NAME='';
 // ---------- 状态与置顶：主事项、子事项共用的展示/操作基元 ----------
 // 状态标签：主事项行、子事项目录行、抽屉子事项行共用同一套 class 与文案，保证视觉一致
+// 同时它就是行内**唯一的状态切换入口**（点击在「未完成 ⇄ 已完成」间切换），
+// 行内不再另设「完成」按钮，避免同一行出现两个做同一件事的控件
 function statusCls(s){return s==='done'?'done':s==='progressing'?'progressing':'pending'}
 function statusText(s){return s==='done'?'已完成':s==='progressing'?'进行中':'未完成'}
-function statusTag(s,style){return `<span class="status-tag ${statusCls(s)}"${style?` style="${style}"`:''}>${statusText(s)}</span>`}
+function statusTag(cardId,s,style,isSub){
+  const done=s==='done';
+  const tip=done?'点击取消完成标记':'点击标记为已完成';
+  return `<span class="status-tag ${statusCls(s)} status-tag-act"${style?` style="${style}"`:''} title="${tip}" onclick="event.stopPropagation();toggleCardDone('${cardId}',${done?0:1},${isSub?'true':'false'})">${statusText(s)}</span>`;
+}
 // 状态下拉选项：主事项弹窗与子事项弹窗共用同一份选项定义
 function statusOptions(cur){
   const v=cur||'open';
@@ -1814,12 +1864,6 @@ function pinBtn(cardId,pinned,fn,offLabel,extra){
   const args=`'${cardId}',${pinned?0:1}${extra!==undefined&&extra!==null?','+extra:''}`;
   return `<button class="pin-btn ${pinned?'on':''}" onclick="${fn}(${args})" title="${pinned?'取消置顶':'置顶（在本级目录内优先显示）'}">${pinned?'📌 已置顶':(offLabel||'📌 事项置顶')}</button>`;
 }
-// 完成情况按钮：与置顶按钮同形态，点一下在「未完成 / 已完成」之间切换
-function doneBtn(cardId,done,fn,extra){
-  const args=`'${cardId}',${done?0:1}${extra!==undefined&&extra!==null?','+extra:''}`;
-  return `<button class="done-btn ${done?'on':''}" onclick="${fn}(${args})" title="${done?'取消完成标记':'标记为已完成'}">${done?'✓ 已完成':'完成'}</button>`;
-}
-function stBadge(s){return statusTag(s,'padding:1px 8px;font-size:11px')}
 function todayStr(){return new Date().toISOString().slice(0,10)}
 // ---------- 人员选择器：下拉 + 输入（输入必须命中成员名单） ----------
 var PP={};
@@ -2139,7 +2183,7 @@ async function renderDrawerList(parentId){
       <span class="s-chev open" id="drawerMainChev" onclick="toggleDrawerMain()" title="折叠 / 展开主事项" style="cursor:pointer;margin-top:5px">▶</span>
       <div style="flex:1;min-width:0">
         <h3 style="margin:0">${esc(p.card_name)}</h3>
-        <div class="pmeta">${stBadge(p.status)}
+        <div class="pmeta">${statusTag(p.card_id,p.status,'padding:1px 8px;font-size:11px')}
           ${p.owner?`<span>负责人：${esc(p.owner)}</span>`:''}
           ${(p.begin||p.due)?`<span>时间：${p.begin?('开始 '+esc(fmtDT(p.begin))):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(fmtDT(p.due))):''}${overdue?' <b style="color:var(--danger)">已逾期</b>':''}</span>`:''}
           ${todo.total?`<span>代办：${tdone}/${todo.total}</span>`:''}
@@ -2148,7 +2192,6 @@ async function renderDrawerList(parentId){
       </div>
       ${ME.can_edit?`<div class="sl-ops" style="align-items:flex-start">
         ${pinBtn(p.card_id,!!p.pinned,'toggleCardPin','📌 事项置顶')}
-        ${doneBtn(p.card_id,p.status==='done','toggleCardDone')}
         <button onclick="openEdit('${p.card_id}')" title="打开事项弹窗">编辑</button>
       </div>`:''}
     </div>
@@ -2232,10 +2275,9 @@ function drawerSubTree(nodes,parentId,level){
         <div class="sl-name">${esc(n.card_name)}</div>
         <div class="sl-meta">${[n.created?('创建 '+esc(fmtDT(n.created))):'',n.due?('截止 '+esc(fmtDT(n.due))):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
       </div>
-      ${statusTag(n.status,'padding:1px 8px;font-size:11px')}
+      ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
       ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
         ${pinBtn(n.card_id,!!n.pinned,'toggleCardPin','📌 子事项置顶',true)}
-        ${doneBtn(n.card_id,n.status==='done','toggleCardDone',true)}
         <button onclick="openSubModal('${n.card_id}')" title="打开子事项弹窗">编辑</button>
         <button onclick="startDrawerSubUnder('${n.card_id}','${esc(n.card_name)}')" title="在该子事项下再挂一级">＋下级</button>
         <button class="del" onclick="delDrawerSub('${n.card_id}','${parentId}')">删除</button>
@@ -3311,6 +3353,9 @@ function connectWS(){
   setInterval(()=>{if(ws.readyState===1)ws.send('ping')},25000);
 }
 init();
+// 点击涟漪：子事项目录项（看板内的子事项树 + 右侧抽屉的子事项行）
+attachRipple(document.getElementById('boardContent'),'.sub-node');
+attachRipple(document.getElementById('drawerBody'),'.sl-row');
 
 // ---------- file:// 直接打开：引导层与后端存活探测 ----------
 function showFileGuard(){
