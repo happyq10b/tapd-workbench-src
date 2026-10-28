@@ -101,13 +101,40 @@ button{font-family:inherit}
 .pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
 .add-item-btn{border:1px solid #b5d4f4;background:#e6f1fb;color:#185fa5;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;transition:all .15s;white-space:nowrap;font-weight:500;font-family:inherit}
 .add-item-btn:hover{background:#d6e9fb}
-/* 事项尾部的创建日期 */
-.item-created{font-size:12px;color:var(--text3);flex-shrink:0;white-space:nowrap}
+/* 字段列：负责人 / 创建日期 / 截止日期
+   用 grid 三列定宽 → 负责人姓名长短、空值占位都不影响后续列的起始位置。
+   父事项行与子事项行共用同一套类名与同一套字段定义。 */
+.fcols{display:grid;grid-template-columns:166px 146px 178px;gap:0 10px;flex-shrink:0;align-items:center}
+.fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.fcol-owner{color:var(--text2)}
+.fcol-created{color:var(--text3)}
+.fcol-due{color:var(--text2)}
+/* 空值占位：与「截止日期」同款（灰色 + 破折号），不占额外视觉重量 */
+.fcol.empty{color:var(--text3);opacity:.85}
+/* 行尾区块：整体右对齐（margin-left:auto）→ 锚定在行的最右端。
+   区块内各可选元素用**定宽槽位** → 区块总宽恒定，
+   再配合字段列的 margin-left:auto，字段列起点在所有行上完全一致（纵向对齐）。 */
+.item-tail{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.sub-tail{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* 字段列：紧贴尾部区块左侧，自身宽度固定（三列 grid 定宽） */
+.fcols{margin-left:auto}
+/* 行尾固定槽位：可选元素（逾期 / 代办 / 状态 / 置顶 / 子事项）无论有无都占同样宽度，
+   行内结构恒定 → 字段列的起始位置在所有行上完全一致（纵向对齐）。
+   display:inline-block + 定宽，空内容时也保留占位宽度。 */
+.slot-overdue{width:46px;flex-shrink:0;display:inline-block}
+.slot-subtask{width:52px;flex-shrink:0;display:inline-block;text-align:center}
+.slot-status{width:58px;flex-shrink:0;display:inline-block;text-align:center}
+.slot-pin{width:84px;flex-shrink:0;display:inline-block;text-align:center}
+.slot-sub{width:72px;flex-shrink:0;display:inline-block;text-align:center}
+/* 标题占剩余空间并可收缩；行尾各槽位宽度固定 → 字段列纵向对齐 */
+.item-title{flex:1;min-width:0}
+.s-title{flex:1;min-width:0}
+/* 状态标签在固定槽位内居中，避免长短文案（未完成/进行中/已完成）撑破槽宽 */
+.slot-status .status-tag{display:inline-block}
+.slot-pin .pin-btn,.slot-sub .sub-toggle{display:inline-block}
 /* 事项行最前方的顺序序号：每个板块独立从 1 开始 */
 .item-seq{width:20px;height:20px;border-radius:50%;background:#eef2f7;color:var(--text2);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums}
 .item-seq.pin{background:#fff7e6;color:#d46b08;border:1px solid #ffd591}
-/* 负责人姓名：显示在标题之后 */
-.item-owner{font-size:12px;color:var(--text2);flex-shrink:0;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
 /* 事项行左侧的子事项目录展开箭头 */
 .item-chev{display:inline-flex;align-items:center;justify-content:center;width:16px;flex-shrink:0;cursor:pointer;color:var(--text3);font-size:10px;transition:transform .2s;user-select:none}
 .item-chev:hover{color:var(--primary)}
@@ -129,7 +156,13 @@ button{font-family:inherit}
 .sub-node .s-chev.leaf{visibility:hidden}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
-.sub-node .s-meta{font-size:11px;color:var(--text3);flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小） */
+.sub-node .fcols{grid-template-columns:156px 132px 168px;gap:0 8px}
+.sub-node .fcol{font-size:11px}
+/* 子事项行的尾部槽位：同样固定宽度 → 与父事项行同样的对齐逻辑 */
+.sub-node .slot-overdue{width:42px}
+.sub-node .slot-status{width:52px}
+.sub-node .slot-pin{width:76px}
 /* 子事项前的圆点：统一用品牌金，不再按负责人姓名哈希出不同颜色 */
 .s-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0}
 /* 子事项行内的置顶按钮：与主事项行共用 .pin-btn，仅在目录里用紧凑形态 */
@@ -155,8 +188,6 @@ button{font-family:inherit}
 .item-card.locked{background:#fffbe6}
 .item-title{flex:1;font-size:13.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
 .item-title:hover{color:var(--primary)}
-.owner-avatar{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#fff;flex-shrink:0;background:#1890ff}
-.item-date{font-size:12px;color:var(--text2);flex-shrink:0}
 .status-tag{font-size:11.5px;padding:2px 10px;border-radius:var(--radius-sm);font-weight:500;flex-shrink:0}
 .status-tag.done{background:#f6ffed;color:var(--success);border:1px solid #b7eb8f}
 .status-tag.progressing{background:#e6f7ff;color:var(--primary);border:1px solid #91d5ff}
@@ -381,7 +412,6 @@ body{
 .item-card{border-radius:var(--radius-sm);transition:all .2s;padding:11px 14px}
 .item-card:hover{background:#f5f8ff;box-shadow:var(--shadow-sm);transform:translateX(2px)}
 .item-title{font-weight:500}
-.owner-avatar{background:var(--primary);box-shadow:var(--shadow-sm)}
 .status-tag{border-radius:20px;box-shadow:var(--shadow-sm);font-weight:600}
 .icon-btn:hover{background:rgba(0,45,116,.06)}
 
@@ -996,8 +1026,6 @@ function setupDraggableModals(){
     mo.observe(overlay,{attributes:true,attributeFilter:['style']});
   });
 }
-function avatarColor(name){const colors=['#1890ff','#52c41a','#faad14','#722ed1','#eb2f96','#13c2c2','#fa8c16','#2f54eb'];let h=0;for(const c of name)h=(h*31+c.charCodeAt(0))>>>0;return colors[h%colors.length]}
-function initials(name){return name?name.slice(0,2):'??'}
 
 async function init(){
   if(!TOKEN){goLogin();return}
@@ -1315,12 +1343,10 @@ function srItemHtml(x){
   const board=(ME.boards||[]).find(b=>b.board_id===x.board_id);
   const badge=(x.column_name||'未分组')+(board?(' · '+board.board_name):'');
   return `<div class="sr-item">
-    <span class="owner-avatar" style="background:${avatarColor(x.owner||'?')}">${esc(initials(x.owner||'?'))}</span>
     <span class="sr-name" onclick="openDetail('${x.card_id}')" title="${esc(x.card_name)}">${esc(x.card_name)}</span>
     <span class="sr-badge" title="所属板块 / 看板">${esc(badge)}</span>
-    <span class="item-created" title="创建时间">创建 ${esc(fmtDT(x.created)||'—')}</span>
-    <span class="item-date" title="截止时间">截止 ${esc(fmtDT(x.due)||'—')}</span>
-    <span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':'pending'}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':'未完成'}</span>
+    <span class="fcols">${fieldCols({owner:x.owner,created:x.created,due:x.due})}</span>
+    <span class="slot-status"><span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':'pending'}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':'未完成'}</span></span>
   </div>`;
 }
 // 排序比较：置顶优先 → 创建时间降序 → 名称（保证同分时顺序稳定）
@@ -1355,6 +1381,38 @@ function fmtDT(v){
   if(!s)return '';
   return s.length>16?s.slice(0,16):s;
 }
+// 日期显示：只取到「年月日」，不带时分秒。
+// 输入可能是 'YYYY-MM-DD'、'YYYY-MM-DD HH:MM:SS' 或带分隔符的日期字符串，
+// 统一裁成 'YYYY-MM-DD'；无法识别时原样返回（避免把非法值显示成空）
+function fmtDate(v){
+  const s=String(v||'').trim();
+  if(!s)return '';
+  const m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(!m)return s;
+  return m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0');
+}
+// ---------- 字段列：负责人 / 创建日期 / 截止日期 ----------
+// 单一数据源：父事项与子事项共用 fieldItems()，
+// 字段集合与顺序由这里定义，渲染器只负责排版 → 两者必然一致，不会各写一份而漂移。
+// 负责人与父事项**各自独立取值**，不做任何父子关联或继承。
+function fieldItems(o){
+  return [
+    {key:'owner',   label:'负责人',   value:String(o.owner||'').trim()},
+    {key:'created', label:'创建日期', value:fmtDate(o.created)},
+    {key:'due',     label:'截止日期', value:fmtDate(o.due)},
+  ];
+}
+// 网格版（列表里的父/子事项行）：三列固定宽度，跨行纵向对齐。
+// 负责人姓名长短不影响后续列的起始位置；空值统一占位为「—」。
+function fieldCols(o){
+  return fieldItems(o).map(f=>
+    `<span class="fcol fcol-${f.key}${f.value?'':' empty'}" title="${f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label)}">${f.label}：${f.value?esc(f.value):'—'}</span>`
+  ).join('');
+}
+// 紧凑版（右侧抽屉面板，宽度有限无法并排三列）：字段集合与顺序同上，仅改为单行堆叠
+function fieldMeta(o){
+  return fieldItems(o).map(f=>`${f.label}：${f.value?esc(f.value):'—'}`).join(' · ');
+}
 function cardItem(c,seq){
   const locked=c.locked_by;
   const lockedByOther=locked&&locked!==ME.username;
@@ -1376,31 +1434,24 @@ function cardItem(c,seq){
   const subArrow=hasSubs
     ?`<span class="item-chev" data-cid="${c.card_id}" onclick="toggleSubTree('${c.card_id}')" title="展开子事项目录">▶</span>`
     :'';
-  const created=fmtDT(c.created);
-  const due=fmtDT(c.due);
   // 列表最前方只保留顺序序号（每个板块独立从 1 开始，按当前排序规则连续排列）
   const seqHtml=seq?`<span class="item-seq ${pinned?'pin':''}" title="本板块第 ${seq} 项">${seq}</span>`:'';
-  // 负责人姓名移到标题之后紧随显示，统一带「负责人：」前缀（与子事项行口径一致）
-  // 自身没填负责人时，回落到子事项负责人的汇总 —— 父事项行右侧不留空白位
-  const subOwners=c.sub_owners||[];
-  const ownerText=c.owner||subOwners.join('、');
-  const ownerFrom=c.owner?'':'（来自子事项）';
-  const ownerHtml=ownerText
-    ?`<span class="item-owner" title="负责人：${esc(ownerText)}${ownerFrom}">负责人：${esc(ownerText)}</span>`
-    :'';
+  // 负责人 / 创建日期 / 截止日期 —— 三列固定网格，跨行纵向对齐。
+  // 负责人与子事项**各自独立取值**，不做父子关联或继承。
+  const colsHtml=fieldCols({owner:c.owner,created:c.created,due:c.due});
   return `<div class="item-wrap" id="iw_${c.card_id}">
   <div class="item-card ${lockedByOther?'locked':''}">
     ${subArrow}
     ${seqHtml}
     <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)} ${lockHtml}</span>
-    ${ownerHtml}
-    ${overdue?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
-    <span class="item-created" title="创建时间">创建 ${esc(created||'—')}</span>
-    <span class="item-date" title="截止时间">截止 ${esc(due||'—')}</span>
-    ${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}
-    ${statusTag(c.card_id,c.status)}
-    ${pinBtnHtml}
-    ${subBtn}
+    <span class="fcols">${colsHtml}</span>
+    <span class="item-tail">
+      <span class="slot-overdue">${overdue?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}</span>
+      <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}</span>
+      <span class="slot-status">${statusTag(c.card_id,c.status)}</span>
+      <span class="slot-pin">${pinBtnHtml}</span>
+      <span class="slot-sub">${subBtn}</span>
+    </span>
   </div>
   <div class="sub-tree" id="subtree_${c.card_id}" style="display:none"></div>
   </div>`;
@@ -1446,17 +1497,22 @@ function subNodeHtml(n,level){
   const kids=n.children||[];
   const open=!!SUBTREE_OPEN[n.card_id];
   const od=n.due&&n.status!=='done'&&n.due<todayStr();
-  // 子事项行与主事项行同构：头像 → 标题 → 逾期/时间 → 状态标签 → 置顶 → 完成情况
+  // 子事项行与主事项行同构：圆点 → 标题 → 逾期 → 字段列 → 状态标签 → 置顶
+  // 字段列复用父事项的 fieldCols() → 字段集合与顺序天然一致
+  // 负责人与父事项**各自独立取值**，子事项不会继承父事项负责人
+  const colsHtml=fieldCols({owner:n.owner,created:n.created,due:n.due});
   return `<div class="sub-node ${n.status==='done'?'done':''}">
     ${kids.length
       ?`<span class="s-chev ${open?'open':''}" onclick="toggleSubNode('${n.card_id}')">▶</span>`
       :`<span class="s-chev leaf">▶</span>`}
     <span class="s-dot"></span>
     <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>
-    ${od?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
-    <span class="s-meta">${n.owner?('负责人：'+esc(n.owner)):''}${n.created?(' · 创建'+esc(fmtDT(n.created))):''}${n.due?(' · 截止'+esc(fmtDT(n.due))):''}</span>
-    ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
-    ${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}
+    <span class="fcols">${colsHtml}</span>
+    <span class="sub-tail">
+      <span class="slot-overdue">${od?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}</span>
+      <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
+      <span class="slot-pin">${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}</span>
+    </span>
   </div>
   ${kids.length?`<div class="sub-tree" id="subnode_${n.card_id}" style="display:${open?'block':'none'}">${kids.map(k=>subNodeHtml(k,level+1)).join('')}</div>`:''}`;
 }
@@ -1709,7 +1765,9 @@ async function applySubContext(c){
   const pBegin=p.begin||'',pDue=p.due||'';
   info.innerHTML=`父事项：<span style="color:var(--primary);cursor:pointer" onclick="openSubModal('${p.card_id}')">${esc(p.card_name)}</span>`
     +`<span style="color:var(--text3)"> · ${statusText(p.status)}</span>`
-    +(p.owner?`<span style="color:var(--text3)"> · 负责人：${esc(p.owner)}</span>`:'')
+    +`<span style="color:var(--text3)"> · 负责人：${esc(p.owner||'—')}</span>`
+    +`<span style="color:var(--text3)"> · 创建日期：${esc(fmtDate(p.created)||'—')}</span>`
+    +`<span style="color:var(--text3)"> · 截止日期：${esc(fmtDate(p.due)||'—')}</span>`
     +((pBegin||pDue)?`<span style="color:var(--text3)"> · 父时间范围：${pBegin?('开始 '+esc(fmtDT(pBegin))):''}${pBegin&&pDue?' ～ ':''}${pDue?('截止 '+esc(fmtDT(pDue))):''}</span>`:'');
   if(pBegin){beg.setAttribute('min',pBegin);beg.title='开始日期（不能早于父事项 '+pBegin+'）'}
   if(pDue){due.setAttribute('max',pDue);due.title='截止日期（不能晚于父事项 '+pDue+'）'}
@@ -2339,8 +2397,9 @@ async function renderDrawerList(parentId){
       <div style="flex:1;min-width:0">
         <h3 style="margin:0">${esc(p.card_name)}</h3>
         <div class="pmeta">${statusTag(p.card_id,p.status,'padding:1px 8px;font-size:11px')}
-          ${p.owner?`<span>负责人：${esc(p.owner)}</span>`:''}
-          ${(p.begin||p.due)?`<span>时间：${p.begin?('开始 '+esc(fmtDT(p.begin))):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(fmtDT(p.due))):''}${overdue?' <b style="color:var(--danger)">已逾期</b>':''}</span>`:''}
+          <span>负责人：${esc(p.owner||'—')}</span>
+          <span>创建日期：${esc(fmtDate(p.created)||'—')}</span>
+          <span>截止日期：${esc(fmtDate(p.due)||'—')}${overdue?' <b style="color:var(--danger)">已逾期</b>':''}</span>
           ${todo.total?`<span>代办：${tdone}/${todo.total}</span>`:''}
         </div>
         ${p.description?`<div class="pdesc">${esc(p.description)}</div>`:''}
@@ -2428,7 +2487,7 @@ function drawerSubTree(nodes,parentId,level){
       <span class="s-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0"></span>
       <div class="sl-main">
         <div class="sl-name">${esc(n.card_name)}</div>
-        <div class="sl-meta">${[n.owner?('负责人：'+esc(n.owner)):'',n.created?('创建 '+esc(fmtDT(n.created))):'',n.due?('截止 '+esc(fmtDT(n.due))):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
+        <div class="sl-meta">${fieldMeta({owner:n.owner,created:n.created,due:n.due})}${od?' · 已逾期':''}</div>
       </div>
       ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
       ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
@@ -2557,7 +2616,7 @@ async function openDetail(id){
   renderDetailOps(c);
   document.getElementById('d_meta').innerHTML=
     `看板：<b>${esc(c.board_name)}</b>　板块：<b>${esc(c.column_name||'—')}</b>　状态：<b>${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</b><br>`+
-    `负责人：<b>${esc(c.owner||'—')}</b>　创建：<b>${esc(c.created)}</b>　截止：<b>${esc(c.due||'—')}</b>`;
+    `负责人：<b>${esc(c.owner||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>`;
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
   document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${esc(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';

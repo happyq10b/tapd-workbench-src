@@ -538,15 +538,12 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
     mine = filter_rows(all_rows, boards, columns)
     # 子事项计数（全量统计 parent 指向）
     sub_count = defaultdict(int)
-    # 子事项负责人汇总：父事项行自身可能没填负责人，但下级子事项有，
-    # 汇总后由前端在父事项行上补出「责任人」，避免父事项行右侧出现空白位
-    sub_owners = defaultdict(list)
+    # 注意：父事项与子事项的负责人**各自独立存储**，不做任何关联或继承，
+    # 因此这里不汇总子事项负责人（此前 sub_owners 汇总会让父事项行
+    # 显示子事项的责任人，违背「父事项负责人单独设置」的语义，已移除）
     for r in all_rows:
         if r.get('parent_id'):
             sub_count[r['parent_id']] += 1
-            ow = (r.get('owner') or '').strip()
-            if ow and ow not in sub_owners[r['parent_id']]:
-                sub_owners[r['parent_id']].append(ow)
     # 层级过滤：parent_id 指定 → 查子事项；否则默认只看顶层（card_id 精确查询不受层级限制）
     if card_id:
         mine = [r for r in mine if r['card_id'] == card_id]
@@ -612,7 +609,6 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         d['subtask_done'] = st.get(r['card_id'], {}).get('done', 0)
         d['subtask_total'] = st.get(r['card_id'], {}).get('total', 0)
         d['sub_count'] = sub_count.get(r['card_id'], 0)
-        d['sub_owners'] = sub_owners.get(r['card_id'], [])
         out.append(d)
     return {'total': total, 'page': page, 'size': size, 'cards': out,
             'columns': cols_meta, 'column_hits': col_hits, 'q': q}
