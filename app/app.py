@@ -30,7 +30,7 @@ CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','work
     'date_status','due_time_ux','begin_date_status','begin_time_ux','comments',
     'column_sort','board_status','board_creator','parent_id','pinned']
 
-app = FastAPI(title="TAPD 看板", docs_url=None, redoc_url=None)
+app = FastAPI(title="财务工作事项平台", docs_url=None, redoc_url=None)
 
 # ---------------- 数据库 ----------------
 def get_conn():

@@ -1306,8 +1306,11 @@ function cardItem(c){
       :`<button class="icon-btn" onclick="openEdit('${c.card_id}')">✏️ 编辑</button>`)
     :(ME.can_edit?`<span style="font-size:11px;color:var(--text2)" title="成本卡仅管理员可编辑">🔒 仅管理员</span>`:'');
   const overdue=c.due && c.status!=='done' && c.due < new Date().toISOString().slice(0,10);
-  const subBtn=(ME.can_edit||c.sub_count>0)
-    ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="管理子事项">${c.sub_count>0?('子事项 '+c.sub_count):'+ 子事项'}</button>`
+  // 「添加子事项」是行内唯一的子事项入口：原来的「子事项 N」按钮已移除 ——
+  // 已有子事项时左侧展开箭头就能看到目录，计数再单独占一个操作位属于重复
+  const canAddSub=ME.can_edit&&canEditCard(c);
+  const subBtn=canAddSub
+    ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="为该事项新增子事项">＋ 添加子事项</button>`
     :'';
   // 事项置顶：与「板块置顶」完全一致 —— 按钮带文字标签，无条件渲染，
   // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶
