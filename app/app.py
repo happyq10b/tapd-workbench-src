@@ -672,7 +672,7 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_edito
     key = col_key(req.board_id, name)
     if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
         raise HTTPException(409, '该看板下已存在同名板块')
-    year = _norm_year(req.year)
+    year = _norm_year(req.year) or created[:4]   # 归属年份默认取创建年份
     new_cid = 'COL' + str(int(time.time() * 1000))
     dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
         ' VALUES (?,?,?,?,?,?,?,?,0)',
@@ -719,6 +719,7 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_edito
     created = (req.created_at or '').strip() or (old['created_at'] if old else '')
     if not created:
         created = time.strftime('%Y-%m-%d %H:%M:%S')
+    year = year or created[:4]   # 归属年份默认取创建年份
     new_key = col_key(board_id, name)
     if new_key != req.col_key and dbq('SELECT col_key FROM board_columns WHERE col_key=?', (new_key,)):
         raise HTTPException(409, '该看板下已存在同名板块')

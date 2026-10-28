@@ -283,6 +283,9 @@ def init_db(force_import=False):
     bcols = [r[1] for r in conn.execute('PRAGMA table_info(board_columns)').fetchall()]
     if 'year' not in bcols:
         conn.execute("ALTER TABLE board_columns ADD COLUMN year TEXT NOT NULL DEFAULT ''")
+    # 归属年份默认值 = 板块创建年份：老数据回填（幂等，只补空值）
+    conn.execute("UPDATE board_columns SET year=substr(created_at,1,4)"
+                 " WHERE (year IS NULL OR year='') AND created_at IS NOT NULL AND created_at<>''")
     # 索引放在 ALTER 之后建（老库要先补列才能建索引）
     conn.execute('CREATE INDEX IF NOT EXISTS idx_subtasks_parent ON card_subtasks(parent_id)')
     cols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]

@@ -16,7 +16,13 @@ button{font-family:inherit}
 .app-header{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
 .header-left{display:flex;align-items:center;gap:10px}
 .header-left h1{font-size:18px;font-weight:600;color:var(--text)}
-.year-badge{background:var(--primary);color:#fff;font-size:11px;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500;margin-left:4px}
+/* 年份筛选器：替代原来的年份徽标，按归属年份筛选当前看板下的板块 */
+.year-filter{height:30px;padding:0 26px 0 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 9px center;font-size:12.5px;color:var(--text);cursor:pointer;appearance:none;-webkit-appearance:none;outline:none;max-width:160px}
+.year-filter:hover{border-color:var(--primary)}
+.year-filter:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.12)}
+.year-filter[hidden]{display:none}
+/* 成本看板的锁标记：仅对确实受限的账号显示，含义写在 title 里 */
+.tab-lock{font-size:11px;line-height:1;opacity:.75;flex-shrink:0}
 .header-actions{display:flex;align-items:center;gap:8px}
 .header-user{display:flex;align-items:center;gap:8px;margin-right:8px;font-size:13px;color:var(--text2)}
 .header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
@@ -27,7 +33,6 @@ button{font-family:inherit}
 .role-viewer{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}
 .board-tabs{display:flex;flex-direction:column;gap:0;padding:12px 24px 0;max-width:1440px;margin:0 auto}
 /* ---- 目录树：按归属部门分组折叠 ---- */
-.tree-root{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;margin-bottom:8px}
 /* 部门层：所有部门节点排在同一行（紧凑），空部门同样占位不隐藏 */
 .tree-dept-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;margin-bottom:4px}
 .tree-dept{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:600;flex-shrink:0}
@@ -48,16 +53,11 @@ button{font-family:inherit}
 .tree-children .tab-btn:hover{background:#eef5ff;color:var(--primary)}
 .tree-children .tab-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
 .tree-children .tab-btn.active::after{display:none}
-.tree-children .tab-btn.active .tab-count{background:rgba(255,255,255,.25);color:#fff}
 .tree-empty-tip{font-size:12px;color:var(--text3);padding:2px 4px}
 .tab-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;background:#fafafa;color:var(--text2);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:500}
 .tab-btn:hover{color:var(--primary)}
 .tab-btn.active{background:#fff;color:var(--primary);border-color:var(--border);box-shadow:0 -2px 6px rgba(0,0,0,.03);font-weight:600}
-.tab-count{background:var(--border);color:var(--text2);font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
-.tab-btn.active .tab-count{background:var(--primary);color:#fff}
 /* 「＋ 新建看板」按钮：虚线描边、强调色，与管理员操作呼应 */
-.tab-add{border-style:dashed;color:var(--primary);background:transparent;border-bottom:none}
-.tab-add:hover{background:#eef5ff;transform:translateY(-1px)}
 .wrap{max-width:1440px;margin:0 auto;padding:16px 24px 60px}
 .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px}
 .toolbar-left{display:flex;gap:10px;flex-wrap:wrap;flex:1}
@@ -146,7 +146,6 @@ button{font-family:inherit}
 .sr-item .sr-name{flex:1;font-size:13.5px;color:var(--text);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sr-item .sr-name:hover{color:var(--primary)}
 .sr-item .sr-badge{font-size:11px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 9px;flex-shrink:0}
-.sr-item .sr-hit{font-size:11px;color:#d46b08;flex-shrink:0}
 /* ---- 板块行的「折叠事项 / 展开事项」---- */
 .fold-btn{border:1px solid var(--border);background:#fff;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;color:var(--text2);transition:all .15s;white-space:nowrap;font-family:inherit}
 .fold-btn:hover{border-color:var(--primary);color:var(--primary)}
@@ -222,8 +221,6 @@ button{font-family:inherit}
 .tp-box.on,.tp-box.half{background:var(--primary);border-color:var(--primary)}
 .tp-box .tp-tick{position:absolute;left:3px;top:0;width:4px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
 .tp-box .tp-bar{position:absolute;left:2px;right:2px;top:50%;height:2px;background:#fff;transform:translateY(-50%);border-radius:1px}
-.member-tag{display:inline-flex;align-items:center;gap:4px;background:#f0f5ff;color:var(--primary);border:1px solid #91d5ff;border-radius:var(--radius-sm);padding:2px 10px;font-size:12px;cursor:pointer;user-select:none}
-.member-tag.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
 .modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
 .comment-box{border-top:1px solid var(--border);padding-top:10px;margin-top:4px}
 .comment-box h4{font-size:13px;color:var(--text2);margin-bottom:8px}
@@ -254,15 +251,6 @@ button{font-family:inherit}
 .subtask-add input:focus{border-color:var(--primary)}
 .st-mini{font-size:11px;color:var(--text2);background:var(--bg);padding:1px 8px;border-radius:10px;margin-left:8px;flex-shrink:0}
 .st-mini.all{color:var(--success)}
-.subitems-row{display:flex;align-items:center;gap:8px;margin-top:12px;padding:8px 12px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)}
-.subitems-title{font-size:13px;font-weight:600;color:var(--text)}
-.subitems-count{font-size:12px;color:var(--text2)}
-.subitems-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-left:4px}
-.subitem-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;font-size:13px;background:#fafafa;border:1px solid var(--border)}
-.subitem-row:hover{background:#f0f5ff;border-color:#91d5ff}
-.subitem-name{flex:1;cursor:pointer;word-break:break-all}
-.subitem-name:hover{color:var(--primary)}
-.subitem-meta{font-size:12px;color:var(--text2);flex-shrink:0}
 .sub-toggle{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:11.5px;cursor:pointer;padding:2px 10px;border-radius:10px;border:1px solid #b5d4f4;flex-shrink:0;font-weight:500;line-height:1.6;margin:0}
 .sub-toggle:hover{background:#d0e3f5;border-color:#85b7eb}
 .item-wrap{margin-bottom:8px}
@@ -302,10 +290,7 @@ button{font-family:inherit}
 .sl-ops button.del:hover{color:var(--danger);border-color:var(--danger)}
 /* 抽屉子事项操作区与主事项行保持一致：置顶状态有明确的「已开启」形态 */
 .sl-ops button.pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
-.se-form{display:flex;flex-direction:column;gap:10px}
-.se-form .form-group{margin:0}
 .se-owner{display:flex;flex-wrap:wrap;gap:6px}
-.se-todo{border-top:1px dashed var(--border);margin-top:14px;padding-top:10px}
 .empty-hint{color:var(--text2);font-size:12px;padding:14px;text-align:center;border:1px dashed var(--border);border-radius:8px}
 .toast{position:fixed;top:70px;right:24px;background:rgba(0,0,0,.75);color:#fff;padding:10px 18px;border-radius:var(--radius-sm);font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
@@ -346,7 +331,7 @@ body{
 .app-header{position:relative;background:linear-gradient(180deg,#ffffff,#fbfcfe);box-shadow:0 1px 0 var(--border),0 6px 22px rgba(16,24,40,.05);padding:14px 24px}
 .app-header::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--primary)}
 .header-left h1{font-size:19px;letter-spacing:.2px}
-.header-left h1 .year-badge{background:var(--primary);box-shadow:0 2px 6px rgba(0,45,116,.30)}
+.year-filter{height:32px;font-size:13px}
 .header-btn{border-radius:var(--radius-sm);transition:all .2s}
 .header-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff;box-shadow:var(--shadow-sm)}
 .role-tag{box-shadow:var(--shadow-sm)}
@@ -361,7 +346,6 @@ body{
 .tab-btn:hover{background:#fff;color:var(--primary);transform:translateY(-1px)}
 .tab-btn.active{background:#fff;color:var(--primary);border-color:var(--border) var(--border) transparent;box-shadow:0 -3px 10px rgba(16,24,40,.04);position:relative}
 .tab-btn.active::after{content:'';position:absolute;left:18px;right:18px;bottom:-1px;height:2px;background:var(--gold);border-radius:2px}
-.tab-count{box-shadow:var(--shadow-sm)}
 
 /* Toolbar */
 .toolbar{box-shadow:var(--shadow);border-radius:var(--radius)}
@@ -428,7 +412,7 @@ body{
 .toast{background:rgba(16,24,40,.82);border-radius:10px;box-shadow:var(--shadow-lg);backdrop-filter:blur(4px)}
 
 /* Misc polish */
-.subtask-box,.subitems-row,.sl-row{border-radius:var(--radius)}
+.subtask-box,.sl-row{border-radius:var(--radius)}
 .comment-item{border-bottom-color:var(--border)}
 .detail-desc{border-left-width:4px;background:#f7faff}
 
@@ -505,7 +489,10 @@ function goLogin(){
   </div>
 </div>
 <header class="app-header">
-  <div class="header-left"><h1>财务工作事项平台<span class="year-badge">2026</span></h1></div>
+  <div class="header-left">
+    <h1>财务工作事项平台</h1>
+    <select class="year-filter" id="yearFilter" onchange="onYearFilter(this.value)" title="按归属年份筛选板块（切换看板后自动重置）"></select>
+  </div>
   <div class="header-actions">
     <span class="header-user"><span id="userName"></span><span class="role-tag" id="roleTag"></span></span>
     <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
@@ -609,8 +596,8 @@ function goLogin(){
     <div class="modal-body">
       <div class="form-group" id="c_board_wrap"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
       <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
-      <div class="form-group"><label>归属年份</label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，可留空）"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
-      <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）"></div>
+      <div class="form-group"><label>归属年份</label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，可留空；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
+      <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
       <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
       <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
         <div class="radio-group">
@@ -888,6 +875,7 @@ const COST_BOARD_ID='1162069797001000241';
 function isCostCard(c){return c&&c.board_id===COST_BOARD_ID}
 function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_edit}
 let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
+let curYear='';        // 年份筛选：按板块「归属年份」过滤当前看板下的板块（空 = 全部年份）
 let EDIT_IS_SUB=false;   // 当前编辑弹窗是否处于「子事项模式」（复用主事项弹窗，裁剪字段）
 let EDIT_FROM_DETAIL=''; // 从详情弹窗进入编辑时记录来源，关闭编辑后回到详情
 let DETAIL_ID=null, TEAM_MEMBERS=[], expandedAll=false;
@@ -1092,8 +1080,12 @@ function groupBoardsByDept(){
 }
 // 单个板块 tab（部门分组内）
 function boardTabHtml(b,deptLabel){
-  const lock=b.board_id===COST_BOARD_ID?' 🔒':'';
-  const title=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
+  // 成本看板仅管理员可写：只有当这个限制**对当前用户确实生效**时才显示锁。
+  // 管理员本身没有限制，还挂个锁只会让人以为"点了会被拦下来"，属于误导性占位。
+  const locked=b.board_id===COST_BOARD_ID&&!(ME&&ME.is_admin);
+  const lock=locked?`<span class="tab-lock" title="成本看板：仅管理员可编辑">🔒</span>`:'';
+  const base=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
+  const title=locked?(base+'（成本看板：仅管理员可编辑）'):base;
   return `<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')" title="${esc(title)}">${esc(b.board_name)}${lock}</button>`;
 }
 function renderTabs(){
@@ -1139,7 +1131,7 @@ function toggleDept(name){
   }
   renderTabs();
 }
-function pickBoard(bid){curBoard=bid;ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()}
+function pickBoard(bid){curBoard=bid;curYear='';ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()}
 // 选中某板块时，自动（且仅）展开其所属部门，保证该板块在目录树中始终可见
 function ensureDeptOpen(bid){
   if(!bid||!ME||!ME.boards)return;
@@ -1184,6 +1176,8 @@ async function reload(page){
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
+  // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
+  renderYearFilter(cols);
   // 有搜索词时切换到「统一搜索结果」视图
   if(q){renderSearchResults(c,cards,cols,q,colHits||[]);return}
   const cmeta={};
@@ -1203,6 +1197,14 @@ function renderBoard(cards,cols,q,colHits){
     Object.keys(groups).forEach(k=>{if(k!=='未分组'&&names.indexOf(k)<0)names.push(k)});
   }else{
     names=Object.keys(groups);
+  }
+  // 年份筛选：只保留归属年份匹配的板块（未登记年份的板块在具体年份下不显示）
+  if(curYear){
+    names=names.filter(k=>{const m=cmeta[k];return !!m&&(m.year||'')===curYear});
+    if(!names.length){
+      c.innerHTML=`<div class="empty">${esc(curYear)} 年下暂无板块</div>`;
+      return;
+    }
   }
   names.sort((a,b)=>cmpColumn(a,b,cmeta));
   c.innerHTML=names.map((k,i)=>{
@@ -1245,15 +1247,33 @@ function renderBoard(cards,cols,q,colHits){
     </div>`;
   }).join('');
 }
+// ---------- 年份筛选 ----------
+// 下拉选项 = 当前看板下各板块的「归属年份」；切换看板后选项重建、选中值按一致规则重置
+function renderYearFilter(cols){
+  const sel=document.getElementById('yearFilter');
+  if(!sel)return;
+  const years=[...new Set((cols||[]).map(x=>x.year||'').filter(Boolean))].sort().reverse();
+  // 选中的年份在当前看板不存在时（换看板 / 改年份），统一重置为「全部年份」
+  if(curYear&&!years.includes(curYear))curYear='';
+  sel.innerHTML='<option value="">全部年份</option>'
+    +years.map(y=>`<option value="${y}"${y===curYear?' selected':''}>${y} 年</option>`).join('');
+  sel.hidden=!years.length;   // 当前看板一个年份都没登记时不必显示筛选器
+}
+function onYearFilter(v){curYear=v||'';reload(1)}
 // ---------- 搜索结果：事项与板块统一展示 ----------
 // 板块名命中 → 该板块成组展示（标注「板块名匹配」）
 // 事项名/描述命中 → 逐条展示，每条标注所属板块
 function renderSearchResults(container,cards,cols,q,colHits){
   const hitByKey={};
   (colHits||[]).forEach(h=>{hitByKey[h.col_key]=h});
+  // 年份筛选在搜索视图同样生效：只保留归属年份匹配的板块与其事项
+  const cmeta={};
+  (cols||[]).forEach(x=>{cmeta[x.column_name]=x});
+  const yearOk=(colName)=>!curYear||((cmeta[colName]||{}).year||'')===curYear;
   const groups={};
   const loose=[];
   (cards||[]).forEach(card=>{
+    if(!yearOk(card.column_name))return;
     const key=card.board_id+'::'+(card.column_name||'');
     if(card.match_type==='column'&&hitByKey[key]){
       (groups[key]=groups[key]||{meta:hitByKey[key],items:[]}).items.push(card);
@@ -1261,7 +1281,7 @@ function renderSearchResults(container,cards,cols,q,colHits){
       loose.push(card);
     }
   });
-  const groupHtml=Object.keys(groups).map(k=>{
+  const groupHtml=Object.keys(groups).filter(k=>yearOk(groups[k].meta.column_name)).map(k=>{
     const g=groups[k];
     return `<div class="sr-group">
       <div class="sr-group-head">
@@ -1781,20 +1801,31 @@ async function createCard(){
 var COLUMN_MODE='create';     // create | edit
 var COLUMN_EDIT_KEY='';       // 编辑模式：原 col_key（定位板块）
 var COLUMN_EDIT_BOARD='';     // 编辑模式：所属看板（板块归属不可改）
+var YEAR_TOUCHED=false;        // 用户是否手动改过「归属年份」（改过就不再自动跟随创建日期）
 // 板块是否可编辑：成本看板仅管理员
 function canEditColumn(boardId){return !!(ME&&ME.can_edit)&&(boardId!==COST_BOARD_ID||ME.is_admin)}
+// 归属年份默认 = 板块创建年份：
+// 新建时跟随「创建日期」自动填；编辑时只在原值为空时才补（已登记的年份不被日期覆盖）
+function syncYearFromDate(){
+  const d=document.getElementById('c_created').value;
+  if(!d)return;
+  const yEl=document.getElementById('c_year');
+  const y=d.slice(0,4);
+  if(COLUMN_MODE==='edit'){ if(!yEl.value)yEl.value=y; return; }
+  if(!YEAR_TOUCHED)yEl.value=y;
+}
 function openColumnModal(){
-  COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';
+  COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
   const boards=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID);
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
   document.getElementById('c_board_wrap').style.display='';
   document.getElementById('c_name').value='';
-  // 归属年份：新建时默认当年
-  document.getElementById('c_year').value=String(new Date().getFullYear());
   // 创建日期：必填，默认当天（不限制可选范围）
   const d=new Date();
   const pad=n=>String(n).padStart(2,'0');
   document.getElementById('c_created').value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  // 归属年份：默认取创建年份
+  document.getElementById('c_year').value=String(d.getFullYear());
   // 创建人：取当前登录用户并锁定
   document.getElementById('c_creator').value=ME.username||'';
   const nat=document.querySelector('input[name="c_nature"]:checked');
@@ -1812,6 +1843,7 @@ function openColumnEdit(el){
   COLUMN_MODE='edit';
   COLUMN_EDIT_KEY=d.colkey||'';
   COLUMN_EDIT_BOARD=d.bid||'';
+  YEAR_TOUCHED=false;
   const bname=((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'';
   document.getElementById('c_board').innerHTML=`<option value="${esc(d.bid||'')}">${esc(bname)}</option>`;
   document.getElementById('c_board_wrap').style.display='none';   // 编辑时不可改归属看板（会牵动板块下全部事项）
