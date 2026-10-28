@@ -610,17 +610,35 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
     return {'total': total, 'page': page, 'size': size, 'cards': out,
             'columns': cols_meta, 'column_hits': col_hits, 'q': q}
 
-# ---------------- API：板块（新建 / 置顶）----------------
+# ---------------- API：板块（新建 / 编辑 / 置顶）----------------
 class ColumnCreate(BaseModel):
     board_id: str
     column_name: str
     created_at: str = ''     # 创建日期（必填，允许 YYYY-MM-DD 或含时分秒）
     nature: str = '日常'      # 性质：日常 / 专项
+    year: str = ''           # 归属年份（如 2026）
+
+
+class ColumnUpdate(BaseModel):
+    col_key: str             # 原 col_key（定位板块用）
+    board_id: str = ''       # 所属看板（板块尚未登记时用于定位）
+    column_name: str = ''    # 新名称
+    created_at: str = ''     # 创建日期
+    nature: str = ''         # 性质
+    year: str = ''           # 归属年份
 
 
 class ColumnPinReq(BaseModel):
     col_key: str
     pinned: bool = False
+
+
+def _norm_year(v):
+    """归属年份：留空允许（历史板块），非空必须是 4 位数字"""
+    y = (v or '').strip()
+    if y and not re.match(r'^\d{4}$', y):
+        raise HTTPException(400, '归属年份应为 4 位数字，如 2026')
+    return y
 
 
 class PinReq(BaseModel):
@@ -654,16 +672,74 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_edito
     key = col_key(req.board_id, name)
     if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
         raise HTTPException(409, '该看板下已存在同名板块')
+    year = _norm_year(req.year)
     new_cid = 'COL' + str(int(time.time() * 1000))
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, pinned)'
-        ' VALUES (?,?,?,?,?,?,?,0)',
-        (key, new_cid, req.board_id, name, created, username, req.nature))
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
+        ' VALUES (?,?,?,?,?,?,?,?,0)',
+        (key, new_cid, req.board_id, name, created, username, req.nature, year))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
-              f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，创建日期 {created}）', 'success')
+              f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year or "未填"}，创建日期 {created}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
-            'created_at': created, 'creator': username, 'nature': req.nature, 'pinned': 0}
+            'created_at': created, 'creator': username, 'nature': req.nature,
+            'year': year, 'pinned': 0}
+
+
+@app.put('/api/columns')
+async def update_column(req: ColumnUpdate, username: str = Depends(require_editor), request: Request = None):
+    """编辑板块：名称 / 归属年份 / 创建日期 / 性质。
+
+    板块尚未登记（历史数据没有 board_columns 行）时按「登记」处理，补一条元信息。
+    改名会同步该看板下该板块所有事项的 column_name —— col_key = board_id::column_name，
+    改名等于换 key，事项的 column_name 不跟着改就会掉出板块。
+    """
+    row = dbq('SELECT * FROM board_columns WHERE col_key=?', (req.col_key,))
+    old = dict(row[0]) if row else None
+    if old:
+        board_id = old['board_id']
+        old_name = old['column_name']
+    else:
+        board_id = (req.board_id or '').strip()
+        old_name = ''
+        if not board_id:
+            raise HTTPException(400, '板块不存在，且未指定所属看板')
+    name = (req.column_name or '').strip() or old_name
+    if not name:
+        raise HTTPException(400, '板块名称不能为空')
+    # 权限：看板可见 + 成本卡仅管理员
+    boards, _cols = user_allowed(username)
+    if boards is not None and board_id not in boards:
+        raise HTTPException(403, '无权编辑该板块')
+    check_cost_permission(board_id, username)
+    nature = (req.nature or '').strip() or (old['nature'] if old else '日常')
+    if nature not in COLUMN_NATURES:
+        raise HTTPException(400, '性质只能是「日常」或「专项」')
+    year = _norm_year(req.year)
+    created = (req.created_at or '').strip() or (old['created_at'] if old else '')
+    if not created:
+        created = time.strftime('%Y-%m-%d %H:%M:%S')
+    new_key = col_key(board_id, name)
+    if new_key != req.col_key and dbq('SELECT col_key FROM board_columns WHERE col_key=?', (new_key,)):
+        raise HTTPException(409, '该看板下已存在同名板块')
+    # 改名：同步该板块下所有事项的 column_name
+    if old and name != old_name:
+        dbe('UPDATE cards SET column_name=? WHERE board_id=? AND column_name=? AND deleted=0',
+            (name, board_id, old_name))
+    if old:
+        dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=? WHERE col_key=?',
+            (new_key, name, year, created, nature, req.col_key))
+    else:
+        new_cid = 'COL' + str(int(time.time() * 1000))
+        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
+            ' VALUES (?,?,?,?,?,?,?,?,0)',
+            (new_key, new_cid, board_id, name, created, username, nature, year))
+    log_action('__column__', username, 'update', f'编辑板块 {name}')
+    audit_log(username, client_ip(request), 'update', f'板块 {name}',
+              f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'col_key': new_key, 'column_name': name, 'year': year,
+            'nature': nature, 'created_at': created}
 
 
 @app.post('/api/columns/pin')

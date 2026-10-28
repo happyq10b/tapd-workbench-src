@@ -77,11 +77,16 @@ button{font-family:inherit}
 .stat-value.blue{color:var(--primary)}.stat-value.green{color:var(--success)}.stat-value.orange{color:var(--warning)}.stat-value.red{color:var(--danger)}
 .board-content{display:flex;flex-direction:column;gap:12px}
 .week-group{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
-.week-header{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;user-select:none;transition:background .15s}
+.week-header{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:default;user-select:none;transition:background .15s}
 .week-header:hover{background:#fafafa}
-.week-header .chev{transition:transform .2s;color:var(--text2);font-size:12px}
+.week-header .chev{transition:transform .2s;color:var(--text2);font-size:12px;cursor:pointer;flex-shrink:0}
 .week-group.open .chev{transform:rotate(90deg)}
 .week-title{font-size:14px;font-weight:600}
+/* 标题可点击 = 打开板块编辑界面；展开/收起只由左侧三角控制 */
+.week-title.edit{cursor:pointer}
+.week-title.edit:hover{color:var(--primary)}
+/* 归属年份徽标 */
+.week-year{font-size:11.5px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;flex-shrink:0;white-space:nowrap}
 .week-meta{font-size:12px;color:var(--text2)}
 .week-bar{flex:1;max-width:180px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
 .week-bar i{display:block;height:100%;background:var(--success)}
@@ -519,6 +524,8 @@ function goLogin(){
 </header>
 <div class="board-tabs" id="boardTabs"></div>
 <div class="wrap">
+  <!-- 布局对调：进度概览（原「事项明细」区）在上，工具栏（原「板块列表」区）在下 -->
+  <div class="progress-overview" id="progressOverview"></div>
   <div class="toolbar">
     <div class="toolbar-left">
       <input type="text" class="search-input" id="searchInput" placeholder="搜索事项 / 板块…" oninput="debounceReload()">
@@ -533,7 +540,6 @@ function goLogin(){
       <button class="btn-default" onclick="collapseAll()">折叠板块</button>
     </div>
   </div>
-  <div class="progress-overview" id="progressOverview"></div>
   <main class="board-content" id="boardContent"></main>
 </div>
 
@@ -596,13 +602,14 @@ function goLogin(){
   </div>
 </div>
 
-<!-- 新建板块弹窗 -->
+<!-- 板块弹窗：新建 / 编辑共用 -->
 <div class="modal-overlay" id="columnModal" style="display:none">
   <div class="modal" style="width:min(520px,94vw)">
-    <div class="modal-header"><h2>🗂️ 新建板块</h2><button class="modal-close" onclick="closeModal('columnModal')">✕</button></div>
+    <div class="modal-header"><h2 id="c_modal_title">🗂️ 新建板块</h2><button class="modal-close" onclick="closeModal('columnModal')">✕</button></div>
     <div class="modal-body">
-      <div class="form-group"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
+      <div class="form-group" id="c_board_wrap"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
       <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
+      <div class="form-group"><label>归属年份</label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，可留空）"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
       <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）"></div>
       <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
       <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
@@ -611,9 +618,9 @@ function goLogin(){
           <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。</div>
+      <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。</div>
     </div>
-    <div class="modal-footer"><button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" onclick="createColumn()">创建板块</button></div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" id="c_submit" onclick="saveColumn()">创建板块</button></div>
   </div>
 </div>
 
@@ -1211,9 +1218,19 @@ function renderBoard(cards,cols,q,colHits){
     const boardId=meta?meta.board_id:curBoard;
     // 板块置顶同样是**个人设置**：读当前账号自己的置顶集合
     const pinned=isPinned('column',colKey);
+    // 归属年份：板块元信息里的独立字段（板块名称里常带年份，但那是名称的一部分）
+    const year=meta?(meta.year||''):'';
+    // 标题点击 = 打开板块编辑界面；展开/收起只由左侧三角控制，两者互不干扰
+    const titleEditable=canEditColumn(boardId);
+    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}"`;
+    const titleHtml=titleEditable
+      ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnEdit(this)" title="点击编辑板块">${esc(k)}</span>`
+      :`<span class="week-title">${esc(k)}</span>`;
     return `<div class="week-group open" id="wg_${i}">
-      <div class="week-header" onclick="toggleWeek(${i})">
-        <span class="chev">▶</span><span class="week-title">${esc(k)}</span>
+      <div class="week-header">
+        <span class="chev" onclick="toggleWeek(${i});event.stopPropagation()" title="展开 / 收起该板块下的事项">▶</span>
+        ${titleHtml}
+        ${year?`<span class="week-year" title="归属年份">${esc(year)}年</span>`:''}
         <span class="week-meta">${done}/${total} 完成</span>
         <div class="week-bar"><i style="width:${rate}%"></i></div>
         <div class="week-actions" onclick="event.stopPropagation()">
@@ -1760,11 +1777,20 @@ async function createCard(){
     toast('已创建');closeModal('newModal');reload(1);renderProgress();
   }catch(e){toast(e.message)}
 }
-// ---------- 新建板块 ----------
+// ---------- 板块：新建 / 编辑（同一个弹窗，两种模式）----------
+var COLUMN_MODE='create';     // create | edit
+var COLUMN_EDIT_KEY='';       // 编辑模式：原 col_key（定位板块）
+var COLUMN_EDIT_BOARD='';     // 编辑模式：所属看板（板块归属不可改）
+// 板块是否可编辑：成本看板仅管理员
+function canEditColumn(boardId){return !!(ME&&ME.can_edit)&&(boardId!==COST_BOARD_ID||ME.is_admin)}
 function openColumnModal(){
+  COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';
   const boards=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID);
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
+  document.getElementById('c_board_wrap').style.display='';
   document.getElementById('c_name').value='';
+  // 归属年份：新建时默认当年
+  document.getElementById('c_year').value=String(new Date().getFullYear());
   // 创建日期：必填，默认当天（不限制可选范围）
   const d=new Date();
   const pad=n=>String(n).padStart(2,'0');
@@ -1773,22 +1799,56 @@ function openColumnModal(){
   document.getElementById('c_creator').value=ME.username||'';
   const nat=document.querySelector('input[name="c_nature"]:checked');
   if(nat)nat.checked=true;
+  document.getElementById('c_modal_title').textContent='🗂️ 新建板块';
+  document.getElementById('c_submit').textContent='创建板块';
+  document.getElementById('c_tip').textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。';
   document.getElementById('columnModal').style.display='flex';
 }
-async function createColumn(){
-  const board_id=document.getElementById('c_board').value;
+// 编辑板块：从板块标题点击进入。数据取自标题元素上的 data-*，
+// 避免在 onclick 里拼字符串（名称里的引号/括号会把属性截断）
+function openColumnEdit(el){
+  if(!ME||!ME.can_edit){toast('无编辑权限');return}
+  const d=(el&&el.dataset)||{};
+  COLUMN_MODE='edit';
+  COLUMN_EDIT_KEY=d.colkey||'';
+  COLUMN_EDIT_BOARD=d.bid||'';
+  const bname=((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'';
+  document.getElementById('c_board').innerHTML=`<option value="${esc(d.bid||'')}">${esc(bname)}</option>`;
+  document.getElementById('c_board_wrap').style.display='none';   // 编辑时不可改归属看板（会牵动板块下全部事项）
+  document.getElementById('c_name').value=d.cname||'';
+  document.getElementById('c_year').value=d.year||'';
+  document.getElementById('c_created').value=(d.created||'').slice(0,10);
+  document.getElementById('c_creator').value=d.creator||ME.username||'';
+  const nat=document.querySelector(`input[name="c_nature"][value="${d.nature||'日常'}"]`);
+  if(nat)nat.checked=true;
+  document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
+  document.getElementById('c_submit').textContent='保存';
+  document.getElementById('c_tip').innerHTML='保存后板块名称、归属年份等立即生效。<b>修改板块名称会同步更新该板块下所有事项的所属板块</b>。';
+  document.getElementById('columnModal').style.display='flex';
+}
+async function saveColumn(){
+  const board_id=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:document.getElementById('c_board').value;
   const column_name=document.getElementById('c_name').value.trim();
   const created_at=document.getElementById('c_created').value;
+  const year=document.getElementById('c_year').value.trim();
   const nature=(document.querySelector('input[name="c_nature"]:checked')||{}).value||'日常';
   if(!column_name){toast('板块名称不能为空');return}
   if(!board_id){toast('请选择所属看板');return}
   if(!created_at){toast('创建日期为必填项');return}
+  if(year&&!/^\d{4}$/.test(year)){toast('归属年份应为 4 位数字，如 2026');return}
   try{
-    await api('/api/columns',{method:'POST',body:JSON.stringify({board_id,column_name,created_at,nature})});
-    toast('板块已创建：'+column_name);
-    closeModal('columnModal');
-    if(curBoard!==board_id){curBoard=board_id;ensureDeptOpen(board_id)}
-    reload(1);renderProgress();
+    if(COLUMN_MODE==='edit'){
+      await api('/api/columns',{method:'PUT',body:JSON.stringify({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year})});
+      toast('板块已保存：'+column_name);
+      closeModal('columnModal');
+      reload(1);renderProgress();
+    }else{
+      await api('/api/columns',{method:'POST',body:JSON.stringify({board_id,column_name,created_at,nature,year})});
+      toast('板块已创建：'+column_name);
+      closeModal('columnModal');
+      if(curBoard!==board_id){curBoard=board_id;ensureDeptOpen(board_id)}
+      reload(1);renderProgress();
+    }
   }catch(e){toast(e.message)}
 }
 // ---------- 新建看板（管理员） ----------

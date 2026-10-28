@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS board_columns (
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     creator     TEXT NOT NULL DEFAULT '',
     nature      TEXT NOT NULL DEFAULT '日常' CHECK (nature IN ('日常','专项')),
+    year        TEXT NOT NULL DEFAULT '',
     pinned      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
@@ -278,6 +279,10 @@ def init_db(force_import=False):
     scols = [r[1] for r in conn.execute('PRAGMA table_info(card_subtasks)').fetchall()]
     if 'parent_id' not in scols:
         conn.execute('ALTER TABLE card_subtasks ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0')
+    # 板块归属年份：老库补列（新增列的索引不能写进 SCHEMA，必须放在 ALTER 之后）
+    bcols = [r[1] for r in conn.execute('PRAGMA table_info(board_columns)').fetchall()]
+    if 'year' not in bcols:
+        conn.execute("ALTER TABLE board_columns ADD COLUMN year TEXT NOT NULL DEFAULT ''")
     # 索引放在 ALTER 之后建（老库要先补列才能建索引）
     conn.execute('CREATE INDEX IF NOT EXISTS idx_subtasks_parent ON card_subtasks(parent_id)')
     cols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]
