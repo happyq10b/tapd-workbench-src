@@ -1001,7 +1001,10 @@ def get_card_children(card_id: str, username: str = Depends(require_auth)):
 
     def build(pid, depth=0):
         out = []
-        for r in sorted(by_parent.get(pid, []), key=lambda x: (x.get('created') or '', x['card_id'])):
+        # 子事项排序与主事项列表保持一致：置顶优先，其余按创建时间降序（新的在前）
+        for r in sorted(by_parent.get(pid, []),
+                        key=lambda x: (0 if x.get('pinned') else 1,
+                                       -_ts(x.get('created')), x['card_id'])):
             d = dict(r)
             d['children'] = build(r['card_id'], depth + 1) if depth < 6 else []
             d['child_count'] = len(by_parent.get(r['card_id'], []))

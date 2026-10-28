@@ -94,6 +94,10 @@ button{font-family:inherit}
 .pin-btn{border:1px solid var(--border);background:#fff;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;color:var(--text2);transition:all .15s;white-space:nowrap;font-family:inherit}
 .pin-btn:hover{border-color:var(--primary);color:var(--primary)}
 .pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
+/* 完成情况按钮：与「事项置顶」同一形态的文字按钮，「已完成」只是切换后的状态文案 */
+.done-btn{border:1px solid var(--border);background:#fff;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;color:var(--text2);transition:all .15s;white-space:nowrap;font-family:inherit}
+.done-btn:hover{border-color:var(--primary);color:var(--primary)}
+.done-btn.on{background:#f6ffed;border-color:#b7eb8f;color:var(--success);font-weight:600}
 .add-item-btn{border:1px solid #b5d4f4;background:#e6f1fb;color:#185fa5;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;transition:all .15s;white-space:nowrap;font-weight:500;font-family:inherit}
 .add-item-btn:hover{background:#d6e9fb}
 /* 事项尾部的创建日期 */
@@ -112,8 +116,13 @@ button{font-family:inherit}
 .sub-node .s-chev.leaf{visibility:hidden}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
-.sub-node .s-meta{font-size:11px;color:var(--text3);flex-shrink:0}
+.sub-node .s-meta{font-size:11px;color:var(--text3);flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node .s-dot{width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0}
+/* 子事项行内的置顶按钮：与主事项行共用 .pin-btn，仅在目录里用紧凑形态 */
+.sub-node .pin-btn{padding:0 7px;font-size:11px;flex-shrink:0}
+.sub-node .pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
+/* 子事项行的完成标记按钮 */
+.sub-node .done-btn{padding:0 8px;font-size:11px;flex-shrink:0}
 /* ---- 搜索结果视图 ---- */
 .sr-wrap{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
 .sr-head{padding:11px 16px;font-size:12.5px;color:var(--text2);border-bottom:1px solid var(--border);background:#fafbfd}
@@ -267,16 +276,18 @@ button{font-family:inherit}
 .sn-row{display:flex;gap:8px}
 .sn-row .form-select,.sn-row .form-input{flex:1}
 .sn-actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
-.sl-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--color-background-primary,#fff);cursor:pointer;transition:border-color .15s}
+.sl-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--color-background-primary,#fff);cursor:pointer;transition:border-color .15s;flex-wrap:wrap}
 .sl-row:hover{border-color:var(--primary)}
-.sl-main{flex:1;min-width:0}
+.sl-main{flex:1 1 150px;min-width:0}
 .sl-name{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sl-meta{font-size:11.5px;color:var(--text2);margin-top:2px}
-.sl-ops{display:none;gap:4px;flex-shrink:0}
-.sl-row:hover .sl-ops{display:flex}
+.sl-ops{display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
 .sl-ops button{background:none;border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;color:var(--text2);padding:2px 8px}
 .sl-ops button:hover{color:var(--primary);border-color:var(--primary)}
 .sl-ops button.del:hover{color:var(--danger);border-color:var(--danger)}
+/* 抽屉子事项操作区与主事项行保持一致：置顶/完成状态有明确的「已开启」形态 */
+.sl-ops button.pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
+.sl-ops button.done-btn.on{background:#f6ffed;border-color:#b7eb8f;color:var(--success);font-weight:600}
 .se-form{display:flex;flex-direction:column;gap:10px}
 .se-form .form-group{margin:0}
 .se-owner{display:flex;flex-wrap:wrap;gap:6px}
@@ -522,14 +533,15 @@ function goLogin(){
   <div class="modal">
     <div class="modal-header"><h2 id="editTitle">编辑事项</h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
-        <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="openDrawer(editing)" title="在右侧面板管理子事项">▤ 子事项</button>
+        <button class="btn-default" id="e_sub_btn" style="padding:4px 12px;font-size:12px" onclick="openDrawer(editing)" title="在右侧面板管理子事项">▤ 子事项</button>
         <button class="modal-close" onclick="closeEdit()">✕</button>
       </div>
     </div>
     <div class="modal-body">
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
+      <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
       <div class="form-row">
-        <div class="form-group"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
+        <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
         <div class="form-group"><label>状态</label><select class="form-select" id="e_status"><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option></select></div>
       </div>
       <div class="form-row">
@@ -538,7 +550,7 @@ function goLogin(){
       </div>
       <div class="form-row">
         <div class="form-group"><label>负责人</label><div class="member-picker" id="e_owner"></div></div>
-        <div class="form-group"><label>参与人</label><div class="member-picker" id="e_cc"></div></div>
+        <div class="form-group" id="e_cc_wrap"><label>参与人</label><div class="member-picker" id="e_cc"></div></div>
       </div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="e_desc" style="min-height:147px"></textarea></div>
       <div class="subtask-box">
@@ -855,6 +867,7 @@ const COST_BOARD_ID='1162069797001000241';
 function isCostCard(c){return c&&c.board_id===COST_BOARD_ID}
 function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_edit}
 let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
+let EDIT_IS_SUB=false;   // 当前编辑弹窗是否处于「子事项模式」（复用主事项弹窗，裁剪字段）
 let DETAIL_ID=null, TEAM_MEMBERS=[], expandedAll=false;
 
 function api(path,opts={}){
@@ -1294,7 +1307,7 @@ function cardItem(c){
     :'';
   // 事项置顶：与「板块置顶」完全一致 —— 按钮带文字标签，无条件渲染，
   // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶
-  const pinBtn=`<button class="pin-btn ${c.pinned?'on':''}" onclick="toggleCardPin('${c.card_id}',${c.pinned?0:1})" title="${c.pinned?'取消置顶':'置顶该事项（在本板块内优先显示）'}">${c.pinned?'📌 已置顶':'📌 事项置顶'}</button>`;
+  const pinBtnHtml=pinBtn(c.card_id,!!c.pinned,'toggleCardPin','📌 事项置顶');
   // 有子事项时给出目录展开箭头
   const hasSubs=(c.sub_count||0)>0;
   const subArrow=hasSubs
@@ -1311,8 +1324,8 @@ function cardItem(c){
     <span class="item-created" title="创建时间">创建 ${esc(created||'—')}</span>
     <span class="item-date" title="截止时间">截止 ${esc(due||'—')}</span>
     ${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}
-    <span class="status-tag ${c.status==='done'?'done':c.status==='progressing'?'progressing':'pending'}">${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</span>
-    ${pinBtn}
+    ${statusTag(c.status)}
+    ${pinBtnHtml}
     ${subBtn}
     ${ops}
   </div>
@@ -1360,14 +1373,18 @@ function subNodeHtml(n,level){
   const kids=n.children||[];
   const open=!!SUBTREE_OPEN[n.card_id];
   const od=n.due&&n.status!=='done'&&n.due<todayStr();
-  const st=n.status==='done'?'已完成':n.status==='progressing'?'进行中':'未完成';
+  // 子事项行与主事项行同构：头像 → 标题 → 逾期/时间 → 状态标签 → 置顶 → 完成情况
   return `<div class="sub-node ${n.status==='done'?'done':''}">
     ${kids.length
       ?`<span class="s-chev ${open?'open':''}" onclick="toggleSubNode('${n.card_id}')">▶</span>`
       :`<span class="s-chev leaf">▶</span>`}
     <span class="s-dot" style="background:${avatarColor(n.owner||'?')}"></span>
-    <span class="s-title" onclick="openDetail('${n.card_id}')" title="${esc(n.card_name)}">${esc(n.card_name)}</span>
-    <span class="s-meta">${st}${n.owner?(' · '+esc(n.owner)):''}${n.created?(' · 创建'+esc(fmtDT(n.created))):''}${n.due?(' · 截止'+esc(fmtDT(n.due))):''}${od?' · 逾期':''}</span>
+    <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>
+    ${od?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
+    <span class="s-meta">${n.owner?esc(n.owner):''}${n.created?(' · 创建'+esc(fmtDT(n.created))):''}${n.due?(' · 截止'+esc(fmtDT(n.due))):''}</span>
+    ${statusTag(n.status,'padding:1px 8px;font-size:11px')}
+    ${pinBtn(n.card_id,!!n.pinned,'toggleCardPin','📌 子事项置顶',true)}
+    ${doneBtn(n.card_id,n.status==='done','toggleCardDone',true)}
   </div>
   ${kids.length?`<div class="sub-tree" id="subnode_${n.card_id}" style="display:${open?'block':'none'}">${kids.map(k=>subNodeHtml(k,level+1)).join('')}</div>`:''}`;
 }
@@ -1406,13 +1423,57 @@ async function toggleColumnPin(colKey,pinned){
     reload(curPage);
   }catch(e){toast(e.message)}
 }
-// 事项置顶 / 取消置顶
-async function toggleCardPin(cardId,pinned){
+// 事项置顶 / 取消置顶（主事项与子事项共用同一接口与同一按钮形态）
+// isSub=true 时就地刷新目录，不整页 reload —— 否则已展开的子事项目录会被折叠掉
+async function toggleCardPin(cardId,pinned,isSub){
   try{
     await api('/api/cards/'+cardId+'/pin',{method:'POST',body:JSON.stringify({pinned:!!pinned})});
-    toast(pinned?'事项已置顶':'已取消事项置顶');
-    reload(curPage);
+    toast(pinned?'已置顶':'已取消置顶');
+    if(isSub){
+      patchSubTreeNode(cardId,{pinned:!!pinned});
+    }else{
+      reload(curPage);
+    }
+    await refreshDrawerIfOpen();
   }catch(e){toast(e.message)}
+}
+// 完成情况：标记 / 取消完成。主事项与子事项写同一套「状态」字段，展示也一致
+async function toggleCardDone(cardId,done,isSub){
+  const st=done?'done':'open';
+  try{
+    await api('/api/cards/'+cardId,{method:'PUT',body:JSON.stringify({fields:{status:st,status_name:statusText(st)}})});
+    toast(done?'已标记完成':'已取消完成');
+    if(isSub){
+      patchSubTreeNode(cardId,{status:st});
+    }else{
+      reload(curPage);
+    }
+    await refreshDrawerIfOpen();
+  }catch(e){toast(e.message)}
+}
+// 子事项在目录里改了状态/置顶后，就地更新缓存并重绘已展开的目录
+function patchSubTreeNode(cardId,patch){
+  let hit=false;
+  const walk=(nodes)=>{
+    (nodes||[]).forEach(n=>{
+      if(n.card_id===cardId){Object.assign(n,patch);hit=true}
+      if(n.children)walk(n.children);
+    });
+  };
+  Object.keys(SUBTREE_CACHE).forEach(k=>walk(SUBTREE_CACHE[k]));
+  if(!hit)return;
+  Object.keys(SUBTREE_CACHE).forEach(k=>{
+    const box=document.getElementById('subtree_'+k);
+    if(box&&box.style.display!=='none')renderSubTree(box,SUBTREE_CACHE[k]);
+  });
+}
+// 抽屉开着时，把当前面板同步刷新（子事项改完后目录/详情保持一致）
+async function refreshDrawerIfOpen(){
+  const panel=document.getElementById('drawerPanel');
+  if(!panel||!panel.classList.contains('open'))return;
+  const top=DRAWER_STACK[DRAWER_STACK.length-1];
+  if(!top||top.type!=='list')return;
+  await renderDrawerList(top.cardId);
 }
 function toggleWeek(i){const g=document.getElementById('wg_'+i);g.classList.toggle('open')}
 // 展开板块：展开所有板块，并展开各主事项下的子事项目录
@@ -1440,62 +1501,123 @@ async function lockCard(id){
 async function unlockCard(id){clearInterval(editLockTimer);try{await api('/api/cards/'+id+'/unlock',{method:'POST'})}catch(e){}}
 function renderPickers(){
   initPersonPicker('e_owner',window._editOwner=window._editOwner||[]);
-  initPersonPicker('e_cc',window._editCc=window._editCc||[]);
+  // 子事项没有「参与人」概念，隐藏时不再初始化，避免残留上一次主事项的选择
+  if(!EDIT_IS_SUB)initPersonPicker('e_cc',window._editCc=window._editCc||[]);
 }
-async function openEdit(id){
+// 打开事项弹窗。子事项复用同一套弹窗（子事项模式）：隐藏「所属看板 / 参与人」，
+// 补上父事项信息与父时间范围约束，字段布局与主事项完全一致。
+async function openEdit(id,preloaded){
   if(!ME.can_edit){toast('无编辑权限');return}
-  const d=await api('/api/cards?size=2000');
-  const c=d.cards.find(x=>x.card_id===id);
+  let c=preloaded;
+  if(!c){
+    const d=await api('/api/cards?size=2000');
+    c=d.cards.find(x=>x.card_id===id);
+  }
   if(!c){toast('卡片不存在');return}
   if(isCostCard(c)&&!ME.is_admin){toast('成本卡仅管理员可编辑');return}
   if(c.locked_by&&c.locked_by!==ME.username){toast(`已被 ${c.locked_by} 锁定`);return}
   if(!await lockCard(id))return;
   editing=id;
+  EDIT_IS_SUB=!!c.parent_id;
   window._editOwner=(c.owner||'').split(';').filter(Boolean);
-  window._editCc=(c.cc||'').split(';').filter(Boolean);
+  window._editCc=EDIT_IS_SUB?[]:(c.cc||'').split(';').filter(Boolean);
   document.getElementById('e_name').value=c.card_name||'';
-  document.getElementById('e_status').value=c.status==='done'?'done':c.status==='progressing'?'progressing':'open';
+  const curStatus=c.status==='done'?'done':c.status==='progressing'?'progressing':'open';
+  const statusSel=document.getElementById('e_status');
+  statusSel.innerHTML=statusOptions(curStatus);   // 选项与共享定义保持一致
+  statusSel.value=curStatus;
   document.getElementById('e_begin').value=c.begin||'';
   document.getElementById('e_due').value=c.due||'';
   document.getElementById('e_desc').value=c.description||'';
   document.getElementById('e_board').innerHTML=ME.boards.map(b=>`<option value="${b.board_id}" ${b.board_id===c.board_id?'selected':''}>${esc(b.board_name)}</option>`).join('');
+  // 子事项模式：隐藏「所属看板 / 参与人」（子事项继承父看板、无参与人）
+  document.getElementById('e_board_wrap').style.display=EDIT_IS_SUB?'none':'';
+  document.getElementById('e_cc_wrap').style.display=EDIT_IS_SUB?'none':'';
+  document.getElementById('editTitle').textContent=EDIT_IS_SUB?'编辑子事项':'编辑事项';
+  document.getElementById('e_sub_btn').textContent=EDIT_IS_SUB?'▤ 下级子事项':'▤ 子事项';
+  await applySubContext(c);
   renderPickers();
   document.getElementById('editModal').style.display='flex';
   loadEditSubtasks(id);
 }
+// 打开子事项弹窗：目录点击、抽屉「编辑」按钮共用这一个入口。
+// 无编辑权限时回落到只读详情弹窗（与主事项的权限表现一致）。
+async function openSubModal(id){
+  try{
+    const d=await api('/api/cards?card_id='+id);
+    const c=d.cards&&d.cards[0];
+    if(!c){toast('子事项不存在或已删除');return}
+    if(!canEditCard(c)){openDetail(id);return}
+    await openEdit(id,c);
+  }catch(e){toast(e.message)}
+}
+// 子事项的父事项上下文：展示父事项名称/状态/时间范围，并把父时间范围写进日期输入的 min/max，
+// 与后端「子事项时间不能超出父事项」的校验口径保持一致
+async function applySubContext(c){
+  const wrap=document.getElementById('e_parent_wrap');
+  const info=document.getElementById('e_parent_info');
+  const beg=document.getElementById('e_begin');
+  const due=document.getElementById('e_due');
+  beg.removeAttribute('min');due.removeAttribute('max');
+  beg.title='开始日期';due.title='截止日期';
+  if(!EDIT_IS_SUB){wrap.style.display='none';info.innerHTML='';return}
+  wrap.style.display='';
+  let p=null;
+  try{
+    const pd=await api('/api/cards?card_id='+c.parent_id);
+    p=pd.cards&&pd.cards[0]?pd.cards[0]:null;
+  }catch(e){}
+  if(!p){info.innerHTML='<span style="color:var(--text3)">父事项不可见或已删除</span>';return}
+  const pBegin=p.begin||'',pDue=p.due||'';
+  info.innerHTML=`父事项：<span style="color:var(--primary);cursor:pointer" onclick="openSubModal('${p.card_id}')">${esc(p.card_name)}</span>`
+    +`<span style="color:var(--text3)"> · ${statusText(p.status)}</span>`
+    +((pBegin||pDue)?`<span style="color:var(--text3)"> · 父时间范围：${pBegin?('开始 '+esc(fmtDT(pBegin))):''}${pBegin&&pDue?' ～ ':''}${pDue?('截止 '+esc(fmtDT(pDue))):''}</span>`:'');
+  if(pBegin){beg.setAttribute('min',pBegin);beg.title='开始日期（不能早于父事项 '+pBegin+'）'}
+  if(pDue){due.setAttribute('max',pDue);due.title='截止日期（不能晚于父事项 '+pDue+'）'}
+}
 async function saveEdit(){
   const id=editing;
+  const isSub=EDIT_IS_SUB;
+  const st=document.getElementById('e_status').value;
   const fields={
     card_name:document.getElementById('e_name').value,
-    status:document.getElementById('e_status').value,
-    status_name:document.getElementById('e_status').value==='done'?'已完成':document.getElementById('e_status').value==='progressing'?'进行中':'未完成',
+    status:st,
+    status_name:statusText(st),
     owner:(window._editOwner||[]).join(';'),
-    cc:(window._editCc||[]).join(';'),
     begin:document.getElementById('e_begin').value,
     due:document.getElementById('e_due').value,
     description:document.getElementById('e_desc').value,
   };
+  // 参与人只有主事项才有；子事项不参与人，发送会带上上一次主事项的残留值
+  if(!isSub)fields.cc=(window._editCc||[]).join(';');
   try{
-    // 跨看板移动
-    const nb=document.getElementById('e_board').value;
-    const cur=await api('/api/cards?size=2000');
-    const c=cur.cards.find(x=>x.card_id===id);
-    if(c&&nb!==c.board_id){
-      await api('/api/cards/'+id+'/move',{method:'PUT',body:JSON.stringify({board_id:nb,column_id:'',column_name:''})});
+    // 跨看板移动：只有主事项可以，子事项始终跟随父事项所在看板
+    if(!isSub){
+      const nb=document.getElementById('e_board').value;
+      const cur=await api('/api/cards?size=2000');
+      const c=cur.cards.find(x=>x.card_id===id);
+      if(c&&nb!==c.board_id){
+        await api('/api/cards/'+id+'/move',{method:'PUT',body:JSON.stringify({board_id:nb,column_id:'',column_name:''})});
+      }
     }
     await api('/api/cards/'+id,{method:'PUT',body:JSON.stringify({fields})});
     toast('已保存');closeEdit();reload(1);renderProgress();
+    await refreshDrawerIfOpen();
   }catch(e){toast(e.message)}
 }
 async function deleteCard(){
   if(!confirm('确定删除该事项？删除后不可恢复'))return;
-  try{await api('/api/cards/'+editing,{method:'DELETE'});toast('已删除');closeEdit();reload(1);renderProgress()}
+  try{
+    await api('/api/cards/'+editing,{method:'DELETE'});toast('已删除');closeEdit();reload(1);renderProgress();
+    await refreshDrawerIfOpen();
+  }
   catch(e){toast(e.message)}
 }
 function closeEdit(){
   document.getElementById('editModal').style.display='none';
   if(editing)unlockCard(editing);
   editing=null;
+  EDIT_IS_SUB=false;
 }
 // openNewModal(boardId, colKey)：从「＋ 事项」按钮进来时锁定看板与板块
 let NEW_CARD_COL=null;   // {board_id, column_id, column_name}
@@ -1670,11 +1792,34 @@ async function saveSubtaskTitle(sid,title){
   }catch(e){toast(e.message);loadEditSubtasks(editing)}
 }
 // ---------- 右侧抽屉：父事项 + 子事项 ----------
-var DRAWER_STACK=[];      // [{type:'list',cardId} | {type:'edit',cardId,parentId}]
+var DRAWER_STACK=[];      // [{type:'list',cardId}]：抽屉只有列表层，子事项编辑走共享的子事项弹窗
 var DRAWER_OWNER=[];
 var DRAWER_NEW_UNDER=null;  // 新建子事项要挂到哪个子事项下（null = 挂在主事项下）
 var DRAWER_NEW_UNDER_NAME='';
-function stBadge(s){return `<span class="status-tag ${s==='done'?'done':s==='progressing'?'progressing':'pending'}" style="padding:1px 8px;font-size:11px">${s==='done'?'已完成':s==='progressing'?'进行中':'未完成'}</span>`}
+// ---------- 状态与置顶：主事项、子事项共用的展示/操作基元 ----------
+// 状态标签：主事项行、子事项目录行、抽屉子事项行共用同一套 class 与文案，保证视觉一致
+function statusCls(s){return s==='done'?'done':s==='progressing'?'progressing':'pending'}
+function statusText(s){return s==='done'?'已完成':s==='progressing'?'进行中':'未完成'}
+function statusTag(s,style){return `<span class="status-tag ${statusCls(s)}"${style?` style="${style}"`:''}>${statusText(s)}</span>`}
+// 状态下拉选项：主事项弹窗与子事项弹窗共用同一份选项定义
+function statusOptions(cur){
+  const v=cur||'open';
+  return `<option value="open" ${v==='open'?'selected':''}>未完成</option>`
+    +`<option value="progressing" ${v==='progressing'?'selected':''}>进行中</option>`
+    +`<option value="done" ${v==='done'?'selected':''}>已完成</option>`;
+}
+// 置顶按钮：主事项行与子事项行共用同一形态（文字按钮，「已置顶」只是切换后的状态文案）
+// extra：附加参数，子事项传 true 表示就地刷新目录/抽屉而不整页重载
+function pinBtn(cardId,pinned,fn,offLabel,extra){
+  const args=`'${cardId}',${pinned?0:1}${extra!==undefined&&extra!==null?','+extra:''}`;
+  return `<button class="pin-btn ${pinned?'on':''}" onclick="${fn}(${args})" title="${pinned?'取消置顶':'置顶（在本级目录内优先显示）'}">${pinned?'📌 已置顶':(offLabel||'📌 事项置顶')}</button>`;
+}
+// 完成情况按钮：与置顶按钮同形态，点一下在「未完成 / 已完成」之间切换
+function doneBtn(cardId,done,fn,extra){
+  const args=`'${cardId}',${done?0:1}${extra!==undefined&&extra!==null?','+extra:''}`;
+  return `<button class="done-btn ${done?'on':''}" onclick="${fn}(${args})" title="${done?'取消完成标记':'标记为已完成'}">${done?'✓ 已完成':'完成'}</button>`;
+}
+function stBadge(s){return statusTag(s,'padding:1px 8px;font-size:11px')}
 function todayStr(){return new Date().toISOString().slice(0,10)}
 // ---------- 人员选择器：下拉 + 输入（输入必须命中成员名单） ----------
 var PP={};
@@ -1973,14 +2118,10 @@ async function drawerBack(){
 }
 async function renderDrawer(){
   const top=DRAWER_STACK[DRAWER_STACK.length-1];
+  // 抽屉只有「列表」一层：子事项的编辑统一走共享的子事项弹窗（与主事项弹窗同一套）
   document.getElementById('drawerBack').classList.toggle('show',DRAWER_STACK.length>1);
-  if(top.type==='list'){
-    document.getElementById('drawerTitle').textContent='子事项';
-    await renderDrawerList(top.cardId);
-  }else{
-    document.getElementById('drawerTitle').textContent='编辑子事项';
-    await renderDrawerEdit(top.cardId,top.parentId);
-  }
+  document.getElementById('drawerTitle').textContent='子事项';
+  await renderDrawerList(top.cardId);
 }
 async function renderDrawerList(parentId){
   const body=document.getElementById('drawerBody');
@@ -2005,6 +2146,11 @@ async function renderDrawerList(parentId){
         </div>
         ${p.description?`<div class="pdesc">${esc(p.description)}</div>`:''}
       </div>
+      ${ME.can_edit?`<div class="sl-ops" style="align-items:flex-start">
+        ${pinBtn(p.card_id,!!p.pinned,'toggleCardPin','📌 事项置顶')}
+        ${doneBtn(p.card_id,p.status==='done','toggleCardDone')}
+        <button onclick="openEdit('${p.card_id}')" title="打开事项弹窗">编辑</button>
+      </div>`:''}
     </div>
     ${ME.can_edit?`
     <div class="sub-new expand" id="drawerNewBox">
@@ -2012,7 +2158,7 @@ async function renderDrawerList(parentId){
       <div id="dnUnderTip" style="display:none;font-size:11.5px;color:#d46b08;padding:4px 2px"></div>
       <div class="sn-fields" id="dn_fields">
         <div class="sn-row">
-          <select class="form-select" id="dn_status"><option value="open">未完成</option><option value="progressing">进行中</option><option value="done">已完成</option></select>
+          <select class="form-select" id="dn_status">${statusOptions('open')}</select>
           <input type="date" class="form-input" id="dn_begin" title="开始日期${p.begin?('（不能早于父事项 '+esc(p.begin)+'）'):'（父事项未设起始时间，不限制）'}" ${p.begin?`min="${esc(p.begin)}"`:''}>
           <input type="date" class="form-input" id="dn_due" title="截止日期${p.due?('（不能晚于父事项 '+esc(p.due)+'）'):'（父事项未设截止时间，不限制）'}" ${p.due?`max="${esc(p.due)}"`:''}>
         </div>
@@ -2076,17 +2222,21 @@ function drawerSubTree(nodes,parentId,level){
     const od=n.due&&n.status!=='done'&&n.due<todayStr();
     const kids=n.children||[];
     const open=!!DRAWER_SUB_OPEN[n.card_id];
-    return `<div class="sl-row" onclick="openSubEdit('${n.card_id}','${parentId}')" style="padding-left:${level*16}px">
+    // 抽屉里的子事项行与主事项行同构：头像 → 标题 → 状态标签 → 置顶 → 完成情况 → 编辑
+    return `<div class="sl-row" onclick="openSubModal('${n.card_id}')" style="padding-left:${level*16}px">
       ${kids.length
         ?`<span class="s-chev ${open?'open':''}" onclick="event.stopPropagation();toggleDrawerSub('${n.card_id}')" style="cursor:pointer;flex-shrink:0">▶</span>`
         :`<span class="s-chev leaf" style="flex-shrink:0">▶</span>`}
-      ${stBadge(n.status)}
+      <span class="s-dot" style="background:${avatarColor(n.owner||'?')};width:8px;height:8px;border-radius:50%;flex-shrink:0"></span>
       <div class="sl-main">
         <div class="sl-name">${esc(n.card_name)}</div>
-        <div class="sl-meta">${[n.owner?('👤 '+esc(n.owner)):'',n.due?('截止 '+esc(fmtDT(n.due))):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
+        <div class="sl-meta">${[n.created?('创建 '+esc(fmtDT(n.created))):'',n.due?('截止 '+esc(fmtDT(n.due))):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
       </div>
+      ${statusTag(n.status,'padding:1px 8px;font-size:11px')}
       ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
-        <button onclick="openSubEdit('${n.card_id}','${parentId}')">编辑</button>
+        ${pinBtn(n.card_id,!!n.pinned,'toggleCardPin','📌 子事项置顶',true)}
+        ${doneBtn(n.card_id,n.status==='done','toggleCardDone',true)}
+        <button onclick="openSubModal('${n.card_id}')" title="打开子事项弹窗">编辑</button>
         <button onclick="startDrawerSubUnder('${n.card_id}','${esc(n.card_name)}')" title="在该子事项下再挂一级">＋下级</button>
         <button class="del" onclick="delDrawerSub('${n.card_id}','${parentId}')">删除</button>
       </div>`:''}
@@ -2118,6 +2268,27 @@ function expandDrawerNew(){
   if(b&&!b.classList.contains('expand')){b.classList.add('expand');DRAWER_OWNER=[];initPersonPicker('dn_owner',DRAWER_OWNER)}
 }
 function collapseDrawerNew(){document.getElementById('drawerNewBox').classList.remove('expand')}
+// 重置「新建子事项」表单：清空负责人选择与其它已填写的临时状态。
+// 成功与失败都必须调用 —— 创建失败时若把上一次的选择/输入留在表单里，
+// 下一次提交会把脏数据（负责人、日期、描述）一起带过去。
+function resetDrawerNewForm(){
+  const box=document.getElementById('drawerNewBox');
+  const name=document.getElementById('dn_name');
+  const desc=document.getElementById('dn_desc');
+  const begin=document.getElementById('dn_begin');
+  const due=document.getElementById('dn_due');
+  const status=document.getElementById('dn_status');
+  if(name)name.value='';
+  if(desc)desc.value='';
+  if(begin)begin.value='';
+  if(due)due.value='';
+  if(status)status.value='open';
+  // 负责人：数组与选择器都要重置，否则已选中的成员仍留在标签里
+  DRAWER_OWNER=[];
+  initPersonPicker('dn_owner',DRAWER_OWNER);
+  // 保持展开状态，方便连续录入
+  if(box)box.classList.add('expand');
+}
 async function createDrawerSub(underId){
   const mainId=DRAWER_STACK[DRAWER_STACK.length-1].cardId;
   const parentId=underId||DRAWER_NEW_UNDER||mainId;
@@ -2128,20 +2299,15 @@ async function createDrawerSub(underId){
     await api('/api/cards',{method:'POST',body:JSON.stringify({
       parent_id:parentId,board_id:'',card_name:name,
       fields:{
-        status:st,status_name:st==='done'?'已完成':st==='progressing'?'进行中':'未完成',
+        status:st,status_name:statusText(st),
         owner:DRAWER_OWNER.join(';'),
         begin:document.getElementById('dn_begin').value,
         due:document.getElementById('dn_due').value,
         description:document.getElementById('dn_desc').value
       }
     })});
-    // 连续添加模式：保持表单展开 + 清空标题 + 焦点留在输入框
-    document.getElementById('dn_name').value='';
-    document.getElementById('dn_desc').value='';
-    document.getElementById('dn_begin').value='';document.getElementById('dn_due').value='';
-    DRAWER_OWNER=[];
-    document.getElementById('drawerNewBox').classList.add('expand');
-    initPersonPicker('dn_owner',DRAWER_OWNER);
+    // 成功：清空整张表单（负责人 + 其它临时状态），保持连续添加模式
+    resetDrawerNewForm();
     toast(`已添加「${name}」${parentId!==mainId?'（挂到所选子事项下）':''}，可继续输入下一个`);
     // 展开新建出来的这一支
     if(parentId!==mainId)DRAWER_SUB_OPEN[parentId]=true;
@@ -2149,7 +2315,11 @@ async function createDrawerSub(underId){
     const inp=document.getElementById('dn_name');
     if(inp)inp.focus();
     reload(1);renderProgress();
-  }catch(e){toast(e.message)}
+  }catch(e){
+    // 失败：同样重置表单，避免上一次输入的选择（尤其负责人）残留成脏数据
+    resetDrawerNewForm();
+    toast(e.message);
+  }
 }
 // 「＋下级」：把新建表单切到「挂在指定子事项下」的模式
 function startDrawerSubUnder(cardId,name){
@@ -2165,105 +2335,13 @@ function startDrawerSubUnder(cardId,name){
   const inp=document.getElementById('dn_name');
   if(inp){inp.placeholder='输入下级子事项标题，回车添加…';inp.focus()}
 }
-async function openSubEdit(subId,parentId){
-  DRAWER_STACK.push({type:'edit',cardId:subId,parentId});
-  await renderDrawer();
-}
-async function renderDrawerEdit(subId,parentId){
-  const body=document.getElementById('drawerBody');
-  body.innerHTML='<div style="color:var(--text2);font-size:13px;padding:30px;text-align:center">加载中…</div>';
-  const d=await api('/api/cards?card_id='+subId);
-  const c=d.cards[0];
-  if(!c){body.innerHTML='<div class="empty-hint">子事项不存在或已删除</div>';return}
-  const todo=await api('/api/cards/'+subId+'/subtasks');
-  const pc=parentId?await api('/api/cards?card_id='+parentId):null;
-  const pp=pc&&pc.cards[0]?pc.cards[0]:null;
-  const pBegin=pp?(pp.begin||''):'';
-  const pDue=pp?(pp.due||''):'';
-  DRAWER_OWNER=(c.owner||'').split(';').filter(Boolean);
-  body.innerHTML=`
-    <div class="se-form">
-      <div class="form-group"><label>标题</label><input type="text" class="form-input" id="se_name" value="${esc(c.card_name)}"></div>
-      <div class="sn-row">
-        <div class="form-group" style="flex:1"><label>状态</label><select class="form-select" id="se_status"><option value="open" ${c.status==='open'?'selected':''}>未完成</option><option value="progressing" ${c.status==='progressing'?'selected':''}>进行中</option><option value="done" ${c.status==='done'?'selected':''}>已完成</option></select></div>
-      </div>
-      <div class="sn-row">
-        <div class="form-group" style="flex:1"><label>开始日期</label><input type="date" class="form-input" id="se_begin" value="${esc(c.begin||'')}" title="开始日期${pBegin?('（不能早于父事项 '+esc(pBegin)+'）'):'（父事项未设起始时间，不限制）'}" ${pBegin?`min="${esc(pBegin)}"`:''}></div>
-        <div class="form-group" style="flex:1"><label>截止日期</label><input type="date" class="form-input" id="se_due" value="${esc(c.due||'')}" title="截止日期${pDue?('（不能晚于父事项 '+esc(pDue)+'）'):'（父事项未设截止时间，不限制）'}" ${pDue?`max="${esc(pDue)}"`:''}></div>
-      </div>
-      ${(pBegin||pDue)?`<div style="font-size:11px;color:var(--text2);margin-top:-4px">父事项时间范围：${pBegin?('开始 '+esc(pBegin)):''}${pBegin&&pDue?' ～ ':''}${pDue?('截止 '+esc(pDue)):''}</div>`:''}
-      <div class="form-group"><label>负责人</label><div class="se-owner" id="se_owner"></div></div>
-      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="se_desc" rows="3">${esc(c.description||'')}</textarea></div>
-      <div class="sn-actions" style="justify-content:space-between">
-        <button class="btn-default" style="color:var(--danger);border-color:var(--danger)" onclick="delDrawerSub('${subId}','${parentId}',true)">删除子事项</button>
-        <span style="display:flex;gap:8px">
-          <button class="btn-default" onclick="drawerBack()">返回</button>
-          ${ME.can_edit?`<button class="btn-primary" onclick="saveDrawerSub('${subId}','${parentId}')">保存</button>`:''}
-        </span>
-      </div>
-      <div class="se-todo">
-        <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count">${todo.subtasks.filter(x=>x.done).length}/${todo.subtasks.length}</span></div>
-        <div id="se_todo_list" class="subtask-list"></div>
-        ${ME.can_edit?`<div class="subtask-add"><input type="text" class="form-input" id="se_todo_new" placeholder="添加代办任务，回车确认…" onkeydown="if(event.key==='Enter')addDrawerTodo('${subId}')"><button class="btn-default" onclick="addDrawerTodo('${subId}')">添加</button></div>`:''}
-      </div>
-    </div>`;
-  renderSeTodos(subId,todo.subtasks);
-  if(ME.can_edit)initPersonPicker('se_owner',DRAWER_OWNER);
-}
-function renderSeTodos(subId,list){
-  const el=document.getElementById('se_todo_list');
-  el.innerHTML=list.map(t=>`<div class="subtask-item ${t.done?'done':''}">
-    <input type="checkbox" ${t.done?'checked':''} onchange="toggleSeTodo('${subId}',${t.id},this.checked)">
-    <span class="st-text" style="cursor:default">${esc(t.title)}</span>
-    ${t.done_by?`<span class="st-who">✓ ${esc(t.done_by)}</span>`:''}
-    <button class="st-del" onclick="delSeTodo('${subId}',${t.id})">✕</button>
-  </div>`).join('')||'<div style="color:var(--text2);font-size:12px;padding:4px 0">暂无代办任务</div>';
-}
-async function addDrawerTodo(subId){
-  const v=document.getElementById('se_todo_new').value.trim();
-  if(!v){toast('请输入代办任务内容');return}
-  try{await api('/api/cards/'+subId+'/subtasks',{method:'POST',body:JSON.stringify({title:v})});document.getElementById('se_todo_new').value='';renderDrawerEdit(subId,DRAWER_STACK[DRAWER_STACK.length-1].parentId)}
-  catch(e){toast(e.message)}
-}
-async function toggleSeTodo(subId,sid,checked){
-  try{await api('/api/cards/'+subId+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({done:checked?1:0})});renderDrawerEdit(subId,DRAWER_STACK[DRAWER_STACK.length-1].parentId)}
-  catch(e){toast(e.message)}
-}
-async function delSeTodo(subId,sid){
-  if(!confirm('删除该代办任务？'))return;
-  try{await api('/api/cards/'+subId+'/subtasks/'+sid,{method:'DELETE'});renderDrawerEdit(subId,DRAWER_STACK[DRAWER_STACK.length-1].parentId)}
-  catch(e){toast(e.message)}
-}
-async function saveDrawerSub(subId,parentId){
-  const st=document.getElementById('se_status').value;
-  try{
-    await api('/api/cards/'+subId,{method:'PUT',body:JSON.stringify({fields:{
-      card_name:document.getElementById('se_name').value,
-      status:st,status_name:st==='done'?'已完成':st==='progressing'?'进行中':'未完成',
-      owner:DRAWER_OWNER.join(';'),
-      begin:document.getElementById('se_begin').value,
-      due:document.getElementById('se_due').value,
-      description:document.getElementById('se_desc').value
-    }})});
-    toast('已保存');
-    await renderDrawerList(parentId);
-    DRAWER_STACK.pop();
-    await renderDrawer();
-    reload(1);renderProgress();
-  }catch(e){toast(e.message)}
-}
-async function delDrawerSub(subId,parentId,stay){
+// 删除子事项：抽屉列表里的删除按钮走这里；子事项弹窗里的删除走 deleteCard（共用后端接口）
+async function delDrawerSub(subId,parentId){
   if(!confirm('删除该子事项？不可恢复'))return;
   try{
     await api('/api/cards/'+subId,{method:'DELETE'});
     toast('已删除');
-    if(stay){
-      DRAWER_STACK.pop();
-      await renderDrawerList(parentId);
-      await renderDrawer();
-    }else{
-      await renderDrawerList(parentId);
-    }
+    await renderDrawerList(parentId);
     reload(1);renderProgress();
   }catch(e){toast(e.message)}
 }
@@ -3227,7 +3305,6 @@ function connectWS(){
       if(DRAWER_STACK.length&&document.getElementById('drawerPanel').classList.contains('open')){
         const top=DRAWER_STACK[DRAWER_STACK.length-1];
         if(top.type==='list'&&top.cardId===cid){renderDrawerList(cid)}
-        else if(top.type==='edit'&&top.cardId===cid){renderDrawerEdit(cid,top.parentId)}
       }
     }};
   ws.onclose=()=>setTimeout(connectWS,5000);
