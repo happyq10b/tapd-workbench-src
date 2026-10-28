@@ -130,7 +130,8 @@ button{font-family:inherit}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
 .sub-node .s-meta{font-size:11px;color:var(--text3);flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sub-node .s-dot{width:6px;height:6px;border-radius:50%;background:var(--primary);flex-shrink:0}
+/* 子事项前的圆点：统一用品牌金，不再按负责人姓名哈希出不同颜色 */
+.s-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0}
 /* 子事项行内的置顶按钮：与主事项行共用 .pin-btn，仅在目录里用紧凑形态 */
 .sub-node .pin-btn{padding:0 7px;font-size:11px;flex-shrink:0}
 .sub-node .pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
@@ -875,7 +876,9 @@ const COST_BOARD_ID='1162069797001000241';
 function isCostCard(c){return c&&c.board_id===COST_BOARD_ID}
 function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_edit}
 let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
-let curYear='';        // 年份筛选：按板块「归属年份」过滤当前看板下的板块（空 = 全部年份）
+// 年份筛选默认落在「当前年份」：切换看板时统一重置回默认年份（保证各板块一致）
+const YEAR_DEFAULT=String(new Date().getFullYear());
+let curYear=YEAR_DEFAULT;   // 年份筛选：按板块「归属年份」过滤当前看板下的板块（空 = 全部年份）
 let EDIT_IS_SUB=false;   // 当前编辑弹窗是否处于「子事项模式」（复用主事项弹窗，裁剪字段）
 let EDIT_FROM_DETAIL=''; // 从详情弹窗进入编辑时记录来源，关闭编辑后回到详情
 let DETAIL_ID=null, TEAM_MEMBERS=[], expandedAll=false;
@@ -1131,7 +1134,7 @@ function toggleDept(name){
   }
   renderTabs();
 }
-function pickBoard(bid){curBoard=bid;curYear='';ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()}
+function pickBoard(bid){curBoard=bid;curYear=YEAR_DEFAULT;ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()}
 // 选中某板块时，自动（且仅）展开其所属部门，保证该板块在目录树中始终可见
 function ensureDeptOpen(bid){
   if(!bid||!ME||!ME.boards)return;
@@ -1248,13 +1251,16 @@ function renderBoard(cards,cols,q,colHits){
   }).join('');
 }
 // ---------- 年份筛选 ----------
-// 下拉选项 = 当前看板下各板块的「归属年份」；切换看板后选项重建、选中值按一致规则重置
+// 下拉选项 = 当前看板下各板块的「归属年份」；默认落在当前年份，切换看板时统一重置
 function renderYearFilter(cols){
   const sel=document.getElementById('yearFilter');
   if(!sel)return;
   const years=[...new Set((cols||[]).map(x=>x.year||'').filter(Boolean))].sort().reverse();
-  // 选中的年份在当前看板不存在时（换看板 / 改年份），统一重置为「全部年份」
-  if(curYear&&!years.includes(curYear))curYear='';
+  // 选中的年份在当前看板不存在时（换看板 / 改年份）：
+  // 先回落到当前年份，当前年份也没有则退回「全部年份」，避免筛出空列表
+  if(curYear&&!years.includes(curYear)){
+    curYear=years.includes(YEAR_DEFAULT)?YEAR_DEFAULT:'';
+  }
   sel.innerHTML='<option value="">全部年份</option>'
     +years.map(y=>`<option value="${y}"${y===curYear?' selected':''}>${y} 年</option>`).join('');
   sel.hidden=!years.length;   // 当前看板一个年份都没登记时不必显示筛选器
@@ -1358,7 +1364,7 @@ function cardItem(c,seq){
   // 已有子事项时左侧展开箭头就能看到目录，计数再单独占一个操作位属于重复
   const canAddSub=ME.can_edit&&canEditCard(c);
   const subBtn=canAddSub
-    ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="为该事项新增子事项">＋ 添加子事项</button>`
+    ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="为该事项新增子事项">＋ 子事项</button>`
     :'';
   // 事项置顶：与「板块置顶」完全一致 —— 按钮带文字标签，无条件渲染，
   // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶。
@@ -1374,9 +1380,13 @@ function cardItem(c,seq){
   const due=fmtDT(c.due);
   // 列表最前方只保留顺序序号（每个板块独立从 1 开始，按当前排序规则连续排列）
   const seqHtml=seq?`<span class="item-seq ${pinned?'pin':''}" title="本板块第 ${seq} 项">${seq}</span>`:'';
-  // 负责人姓名移到标题之后紧随显示
-  const ownerHtml=c.owner
-    ?`<span class="item-owner" title="负责人：${esc(c.owner)}">👤 ${esc(c.owner)}</span>`
+  // 负责人姓名移到标题之后紧随显示，统一带「负责人：」前缀（与子事项行口径一致）
+  // 自身没填负责人时，回落到子事项负责人的汇总 —— 父事项行右侧不留空白位
+  const subOwners=c.sub_owners||[];
+  const ownerText=c.owner||subOwners.join('、');
+  const ownerFrom=c.owner?'':'（来自子事项）';
+  const ownerHtml=ownerText
+    ?`<span class="item-owner" title="负责人：${esc(ownerText)}${ownerFrom}">负责人：${esc(ownerText)}</span>`
     :'';
   return `<div class="item-wrap" id="iw_${c.card_id}">
   <div class="item-card ${lockedByOther?'locked':''}">
@@ -1441,10 +1451,10 @@ function subNodeHtml(n,level){
     ${kids.length
       ?`<span class="s-chev ${open?'open':''}" onclick="toggleSubNode('${n.card_id}')">▶</span>`
       :`<span class="s-chev leaf">▶</span>`}
-    <span class="s-dot" style="background:${avatarColor(n.owner||'?')}"></span>
+    <span class="s-dot"></span>
     <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>
     ${od?'<span class="lock-tag" style="color:var(--danger);background:#fff1f0;border-color:#ffa39e">逾期</span>':''}
-    <span class="s-meta">${n.owner?esc(n.owner):''}${n.created?(' · 创建'+esc(fmtDT(n.created))):''}${n.due?(' · 截止'+esc(fmtDT(n.due))):''}</span>
+    <span class="s-meta">${n.owner?('负责人：'+esc(n.owner)):''}${n.created?(' · 创建'+esc(fmtDT(n.created))):''}${n.due?(' · 截止'+esc(fmtDT(n.due))):''}</span>
     ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
     ${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}
   </div>
@@ -1699,6 +1709,7 @@ async function applySubContext(c){
   const pBegin=p.begin||'',pDue=p.due||'';
   info.innerHTML=`父事项：<span style="color:var(--primary);cursor:pointer" onclick="openSubModal('${p.card_id}')">${esc(p.card_name)}</span>`
     +`<span style="color:var(--text3)"> · ${statusText(p.status)}</span>`
+    +(p.owner?`<span style="color:var(--text3)"> · 负责人：${esc(p.owner)}</span>`:'')
     +((pBegin||pDue)?`<span style="color:var(--text3)"> · 父时间范围：${pBegin?('开始 '+esc(fmtDT(pBegin))):''}${pBegin&&pDue?' ～ ':''}${pDue?('截止 '+esc(fmtDT(pDue))):''}</span>`:'');
   if(pBegin){beg.setAttribute('min',pBegin);beg.title='开始日期（不能早于父事项 '+pBegin+'）'}
   if(pDue){due.setAttribute('max',pDue);due.title='截止日期（不能晚于父事项 '+pDue+'）'}
@@ -2414,10 +2425,10 @@ function drawerSubTree(nodes,parentId,level){
       ${kids.length
         ?`<span class="s-chev ${open?'open':''}" onclick="event.stopPropagation();toggleDrawerSub('${n.card_id}')" style="cursor:pointer;flex-shrink:0">▶</span>`
         :`<span class="s-chev leaf" style="flex-shrink:0">▶</span>`}
-      <span class="s-dot" style="background:${avatarColor(n.owner||'?')};width:8px;height:8px;border-radius:50%;flex-shrink:0"></span>
+      <span class="s-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0"></span>
       <div class="sl-main">
         <div class="sl-name">${esc(n.card_name)}</div>
-        <div class="sl-meta">${[n.created?('创建 '+esc(fmtDT(n.created))):'',n.due?('截止 '+esc(fmtDT(n.due))):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
+        <div class="sl-meta">${[n.owner?('负责人：'+esc(n.owner)):'',n.created?('创建 '+esc(fmtDT(n.created))):'',n.due?('截止 '+esc(fmtDT(n.due))):'',od?'已逾期':''].filter(Boolean).join(' · ')}</div>
       </div>
       ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
       ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
