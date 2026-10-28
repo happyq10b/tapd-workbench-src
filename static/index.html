@@ -104,20 +104,19 @@ button{font-family:inherit}
 /* 字段列：负责人 / 创建日期 / 截止日期
    用 grid 三列定宽 → 负责人姓名长短、空值占位都不影响后续列的起始位置。
    父事项行与子事项行共用同一套类名与同一套字段定义。 */
-.fcols{display:grid;grid-template-columns:166px 146px 178px;gap:0 10px;flex-shrink:0;align-items:center}
+.fcols{display:grid;grid-template-columns:166px 146px 178px;gap:0 10px;align-items:center;
+  width:520px;flex:0 0 520px}
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .fcol-owner{color:var(--text2)}
 .fcol-created{color:var(--text3)}
 .fcol-due{color:var(--text2)}
 /* 空值占位：与「截止日期」同款（灰色 + 破折号），不占额外视觉重量 */
-.fcol.empty{color:var(--text3);opacity:.85}
+.fcol-empty{color:var(--text3);opacity:.85}
 /* 行尾区块：整体右对齐（margin-left:auto）→ 锚定在行的最右端。
    区块内各可选元素用**定宽槽位** → 区块总宽恒定，
    再配合字段列的 margin-left:auto，字段列起点在所有行上完全一致（纵向对齐）。 */
 .item-tail{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
 .sub-tail{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
-/* 字段列：紧贴尾部区块左侧，自身宽度固定（三列 grid 定宽） */
-.fcols{margin-left:auto}
 /* 行尾固定槽位：可选元素（逾期 / 代办 / 状态 / 置顶 / 子事项）无论有无都占同样宽度，
    行内结构恒定 → 字段列的起始位置在所有行上完全一致（纵向对齐）。
    display:inline-block + 定宽，空内容时也保留占位宽度。 */
@@ -157,7 +156,7 @@ button{font-family:inherit}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
 /* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小） */
-.sub-node .fcols{grid-template-columns:156px 132px 168px;gap:0 8px}
+.sub-node .fcols{grid-template-columns:156px 132px 168px;gap:0 8px;width:472px;flex:0 0 472px}
 .sub-node .fcol{font-size:11px}
 /* 子事项行的尾部槽位：同样固定宽度 → 与父事项行同样的对齐逻辑 */
 .sub-node .slot-overdue{width:42px}
@@ -1406,7 +1405,7 @@ function fieldItems(o){
 // 负责人姓名长短不影响后续列的起始位置；空值统一占位为「—」。
 function fieldCols(o){
   return fieldItems(o).map(f=>
-    `<span class="fcol fcol-${f.key}${f.value?'':' empty'}" title="${f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label)}">${f.label}：${f.value?esc(f.value):'—'}</span>`
+    `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}" title="${f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label)}">${f.label}：${f.value?esc(f.value):'—'}</span>`
   ).join('');
 }
 // 紧凑版（右侧抽屉面板，宽度有限无法并排三列）：字段集合与顺序同上，仅改为单行堆叠
