@@ -10,6 +10,7 @@ TAPD 看板 Web 应用 v2 - 多人协作编辑版
 """
 import json, os, time, hmac, hashlib, base64, secrets, sqlite3, threading, re
 from collections import defaultdict
+from datetime import datetime
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, Response
@@ -23,6 +24,28 @@ TOKEN_TTL = 7 * 24 * 3600
 LOCK_TIMEOUT = 300
 LOCK_HEARTBEAT = 60
 SUPER_ADMIN = 'admin'   # 内置超级管理员（不可删/改密码/改角色/换绑）
+# 「无负责人」筛选的哨兵值：前端下拉用它表示「负责人为空」。
+# 不能用空字符串（那是「全部负责人」），也不能与真实负责人重名（负责人是中文姓名）。
+OWNER_NONE = '__no_owner__'
+
+
+def _norm_date(s):
+    """归一化日期筛选参数 → 'YYYY-MM-DD'；空值或非法格式返回 None（该条件不参与筛选）。
+
+    接受 'YYYY-MM-DD' / 'YYYY-MM-DD HH:MM' / 'YYYY-MM-DD HH:MM:SS' / 'YYYY/MM/DD'。
+    非法值一律忽略而不报错 —— 避免一个脏参数让整个列表接口 500。
+    """
+    if s is None:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    for f in ('%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(s, f).strftime('%Y-%m-%d')
+        except ValueError:
+            pass
+    return None
 CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','workspace_id',
     'card_name','status','status_name','priority','creator','owner','cc','follower',
     'begin','due','completed','created','modified','description','attachment_count',
@@ -530,12 +553,31 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
           owner: Optional[str] = None, column: Optional[str] = None,
           q: Optional[str] = None, page: int = 1, size: int = 50,
           parent_id: Optional[str] = None, card_id: Optional[str] = None,
+          created_start: Optional[str] = None, created_end: Optional[str] = None,
           username: str = Depends(require_auth), request: Request = None):
     if card_id:
         audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
     boards, columns = user_allowed(username)
+    # 全量行：子事项计数（sub_count）必须看到所有卡片，不能被筛选条件裁剪
     all_rows = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
-    mine = filter_rows(all_rows, boards, columns)
+    # 创建日期区间：条件下推到 SQL。用 substr(created,1,10) 取日期部分比较，
+    # 这样 created 里带时分秒时也不会与纯日期做字符串比较而出错
+    cf = _norm_date(created_start)
+    ct = _norm_date(created_end)
+    if cf and ct and cf > ct:
+        cf, ct = ct, cf          # 起止颠倒时自动纠正，避免查出一片空结果
+    if cf or ct:
+        w, p = ['deleted=0'], []
+        if cf:
+            w.append('substr(created,1,10) >= ?')
+            p.append(cf)
+        if ct:
+            w.append('substr(created,1,10) <= ?')
+            p.append(ct)
+        pool = [dict(r) for r in dbq('SELECT * FROM cards WHERE ' + ' AND '.join(w), p)]
+    else:
+        pool = all_rows
+    mine = filter_rows(pool, boards, columns)
     # 子事项计数（全量统计 parent 指向）
     sub_count = defaultdict(int)
     # 注意：父事项与子事项的负责人**各自独立存储**，不做任何关联或继承，
@@ -559,7 +601,11 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         mine = [r for r in mine if r['status'] == 'progressing']
     elif status == 'open':
         mine = [r for r in mine if r['status'] != 'done' and r['status'] != 'progressing']
-    if owner:
+    if owner == OWNER_NONE:
+        # 「无负责人」：负责人为空或纯空白（负责人字段多人时以 ; 分隔）
+        mine = [r for r in mine if not (r.get('owner') or '').strip()]
+    elif owner:
+        # 普通负责人：保持既有的子串匹配语义（多人负责人以 ; 分隔，名字互为前缀时仍能命中）
         mine = [r for r in mine if owner in (r.get('owner') or '')]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]

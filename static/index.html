@@ -60,10 +60,24 @@ button{font-family:inherit}
 /* 「＋ 新建看板」按钮：虚线描边、强调色，与管理员操作呼应 */
 .wrap{max-width:1440px;margin:0 auto;padding:16px 24px 60px}
 .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px}
-.toolbar-left{display:flex;gap:10px;flex-wrap:wrap;flex:1}
+.toolbar-left{display:flex;gap:10px;flex-wrap:wrap;flex:1;align-items:center;min-width:0}
 .search-input,.filter-select{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text)}
 .search-input:focus,.filter-select:focus{border-color:var(--primary)}
-.search-input{min-width:220px;flex:1}
+/* 搜索框限宽：给右侧的创建日期区间腾出空间，避免独占整行把工具栏撑成两行 */
+.search-input{min-width:140px;flex:1;max-width:280px}
+/* 创建日期区间筛选：紧凑排布，起止各一个日期框。
+   容器高度显式锁定为 33px（与 .filter-select 实测同高），内部日期框 31px
+   （与 .search-input 实测同高）—— Chrome 的 input[type=date] 有固有内高，
+   不锁高的话工具栏会比改动前高 3~4px。 */
+.date-filter{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;height:33px;padding:0 8px;border:1px dashed var(--border);border-radius:var(--radius-sm);background:#fafbfc}
+.date-filter.active{border-style:solid;border-color:var(--primary);background:#f2f7fc}
+.filter-date{box-sizing:border-box;height:31px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text);font-family:inherit;width:140px}
+.filter-date:focus{border-color:var(--primary);box-shadow:var(--ring)}
+.date-sep{color:var(--text2);font-size:12px;user-select:none}
+.filter-clear{width:20px;height:20px;border:1px solid var(--border);background:#fff;color:var(--text2);border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center}
+.filter-clear:hover{border-color:var(--danger);color:var(--danger)}
+/* [hidden] 的浏览器默认 display:none 会被上面的 inline-flex 覆盖，必须显式兜底 */
+.filter-clear[hidden]{display:none}
 .btn-primary{background:var(--primary);color:#fff;border:none;padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;font-weight:500;transition:opacity .15s}
 .btn-primary:hover{opacity:.85}
 .btn-default{border:1px solid var(--border);background:#fff;color:var(--text);padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;transition:all .15s}
@@ -561,7 +575,15 @@ function goLogin(){
       <select class="filter-select" id="statusFilter" onchange="reload(1)">
         <option value="">全部状态</option><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option>
       </select>
-      <select class="filter-select" id="ownerFilter" onchange="reload(1)"><option value="">全部负责人</option></select>
+      <select class="filter-select" id="ownerFilter" onchange="reload(1)">
+        <option value="">全部负责人</option><option value="__no_owner__">无负责人</option>
+      </select>
+      <span class="date-filter" id="dateFilterBox" title="按创建日期区间筛选（起止都留空 = 不限；只填一端 = 单边区间）">
+        <input type="date" class="filter-date" id="createdStart" onchange="onDateFilterChange()" aria-label="创建日期 起">
+        <span class="date-sep">~</span>
+        <input type="date" class="filter-date" id="createdEnd" onchange="onDateFilterChange()" aria-label="创建日期 止">
+        <button type="button" class="filter-clear" id="dateClearBtn" onclick="clearDateFilter()" title="清除创建日期筛选" hidden>✕</button>
+      </span>
     </div>
     <div class="toolbar-right" style="display:flex;gap:8px">
       <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
@@ -1200,10 +1222,13 @@ async function renderProgress(){
     <div class="stat-card"><div class="stat-label">已完成</div><div class="stat-value green">${ov.done}</div></div>
     <div class="stat-card"><div class="stat-label">进行中</div><div class="stat-value blue">${ov.progressing||0}</div></div>
     <div class="stat-card"><div class="stat-label">未完成</div><div class="stat-value orange">${ov.open}</div></div>`;
-  // 负责人下拉
+  // 负责人下拉：选项 = 「全部负责人」+「无负责人」（静态 option）+ 各负责人（动态填充）
+  // 用 dataset.filled 标记是否填过，不能再用 options.length 判断 ——
+  // 「无负责人」是静态 option，options.length 恒 ≥2，会导致负责人列表永远填不进去
   const os_=document.getElementById('ownerFilter');
-  if(os_.options.length<=1){
+  if(!os_.dataset.filled){
     ov.owners.forEach(o=>{const op=document.createElement('option');op.value=o.owner;op.textContent=o.owner;os_.appendChild(op)});
+    os_.dataset.filled='1';
   }
 }
 async function reload(page){
@@ -1211,10 +1236,37 @@ async function reload(page){
   const ps=new URLSearchParams({page:curPage,size:pageSize});
   const s=document.getElementById('statusFilter').value,o=document.getElementById('ownerFilter').value,
         q=document.getElementById('searchInput').value.trim();
+  // 创建日期区间：两端都空 = 不筛选；只填一端 = 单边区间（从某天起 / 到某天止）
+  const ds=document.getElementById('createdStart').value,de=document.getElementById('createdEnd').value;
   if(curBoard)ps.set('board_id',curBoard);
   if(s)ps.set('status',s);if(o)ps.set('owner',o);if(q)ps.set('q',q);
+  if(ds)ps.set('created_start',ds);
+  if(de)ps.set('created_end',de);
   const d=await api('/api/cards?'+ps);
   renderBoard(d.cards,d.columns,q,d.column_hits);
+}
+// ---------- 创建日期区间筛选 ----------
+// 起止颠倒时自动交换，避免查出空结果；空值与非法值一律忽略（后端也会再兜一层）
+function onDateFilterChange(){
+  const s=document.getElementById('createdStart'),e=document.getElementById('createdEnd');
+  if(s.value&&e.value&&s.value>e.value){const t=s.value;s.value=e.value;e.value=t;}
+  syncDateFilterUI();
+  reload(1);
+}
+// 清空创建日期区间（取消该筛选）
+function clearDateFilter(){
+  document.getElementById('createdStart').value='';
+  document.getElementById('createdEnd').value='';
+  syncDateFilterUI();
+  reload(1);
+}
+// 任一端有值时：日期区间的容器高亮，并显示清除按钮
+function syncDateFilterUI(){
+  const on=!!(document.getElementById('createdStart').value||document.getElementById('createdEnd').value);
+  const box=document.getElementById('dateFilterBox');
+  if(box)box.classList.toggle('active',on);
+  const btn=document.getElementById('dateClearBtn');
+  if(btn)btn.hidden=!on;
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
