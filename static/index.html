@@ -221,6 +221,33 @@ button{font-family:inherit}
 .status-tag-act{cursor:pointer;user-select:none;transition:transform .12s,box-shadow .15s,filter .15s}
 .status-tag-act:hover{box-shadow:0 0 0 2px rgba(22,119,255,.16);filter:brightness(.97)}
 .status-tag-act:active{transform:scale(.93)}
+/* 详情弹窗的状态按钮：当前状态的唯一呈现，也是本弹窗里唯一的状态设置入口。
+   点击展开状态菜单（未完成 / 进行中 / 已完成），选择后立即生效并收起。
+   配色沿用 .status-tag 的同一套 AntD 色阶（绿=已完成 / 蓝=进行中 / 红=未完成），
+   文字取同色系深色变体以保证可读性。 */
+.status-picker{position:relative;display:inline-flex;flex-shrink:0}
+.status-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;
+  border-radius:16px;font-size:12px;padding:4px 12px;cursor:pointer;color:var(--text);font-weight:500;
+  transition:all .18s;white-space:nowrap;font-family:inherit}
+.status-btn:hover{box-shadow:0 0 0 2px rgba(0,45,116,.12)}
+.status-btn .status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-btn .status-caret{font-size:8px;opacity:.5;margin-left:1px;line-height:1}
+.status-btn.done{background:#f6ffed;border-color:#b7eb8f;color:#389e0d}
+.status-btn.done .status-dot{background:#52c41a;box-shadow:0 0 0 3px rgba(82,196,26,.18)}
+.status-btn.progressing{background:#e6f7ff;border-color:#91d5ff;color:#0958d9}
+.status-btn.progressing .status-dot{background:#1890ff;box-shadow:0 0 0 3px rgba(24,144,255,.18)}
+.status-btn.open{background:#fff1f0;border-color:#ffa39e;color:#cf1322}
+.status-btn.open .status-dot{background:#ff4d4d;box-shadow:0 0 0 3px rgba(255,77,77,.16)}
+.status-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:60;min-width:134px;background:#fff;
+  border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);
+  padding:4px;display:flex;flex-direction:column;gap:1px}
+.status-menu[hidden]{display:none}
+.status-menu button{display:flex;align-items:center;gap:9px;border:none;background:none;width:100%;text-align:left;
+  padding:7px 10px;border-radius:var(--radius-sm);font-size:12.5px;color:var(--text);cursor:pointer;
+  font-family:inherit;transition:background .12s}
+.status-menu button:hover{background:#f0f5fb}
+.status-menu button.cur{background:#e6f1fb;color:var(--primary);font-weight:600}
+.status-menu .status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .lock-tag{font-size:11px;color:#d48806;background:#fffbe6;border:1px solid #ffe58f;padding:2px 8px;border-radius:var(--radius-sm);flex-shrink:0}
 .icon-btn{border:none;background:none;cursor:pointer;font-size:13px;color:var(--text2);padding:4px 8px;border-radius:var(--radius-sm);transition:all .15s}
 .pwd-wrap{display:inline-flex;align-items:center;gap:4px;width:100%;max-width:100%}
@@ -599,6 +626,7 @@ function goLogin(){
   <div class="modal">
     <div class="modal-header"><h2 id="editTitle">编辑事项</h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <span id="e_status_ops" style="display:flex;gap:6px;align-items:center"></span>
         <button class="btn-default" id="e_sub_btn" style="padding:4px 12px;font-size:12px" onclick="openDrawer(editing)" title="在右侧面板管理子事项">▤ 子事项</button>
         <button class="modal-close" onclick="closeEdit()">✕</button>
       </div>
@@ -606,9 +634,8 @@ function goLogin(){
     <div class="modal-body">
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
       <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
-      <div class="form-row" id="e_status_row">
+      <div class="form-row" id="e_meta_row">
         <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
-        <div class="form-group" id="e_status_group"><label>状态</label><select class="form-select" id="e_status"><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option></select></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin"></div>
@@ -1762,10 +1789,10 @@ async function openEdit(id,preloaded){
   window._editOwner=(c.owner||'').split(';').filter(Boolean);
   window._editCc=EDIT_IS_SUB?[]:(c.cc||'').split(';').filter(Boolean);
   document.getElementById('e_name').value=c.card_name||'';
+  // 状态不在表单里设置 —— 统一由弹窗头部的状态按钮承载（见 statusPickerHtml）
   const curStatus=c.status==='done'?'done':c.status==='progressing'?'progressing':'open';
-  const statusSel=document.getElementById('e_status');
-  statusSel.innerHTML=statusOptions(curStatus);   // 选项与共享定义保持一致
-  statusSel.value=curStatus;
+  const esOps=document.getElementById('e_status_ops');
+  if(esOps)esOps.innerHTML=statusPickerHtml(curStatus,'e');
   document.getElementById('e_begin').value=c.begin||'';
   document.getElementById('e_due').value=c.due||'';
   document.getElementById('e_desc').value=c.description||'';
@@ -1781,16 +1808,16 @@ async function openEdit(id,preloaded){
   document.getElementById('editModal').style.display='flex';
   loadEditSubtasks(id);
 }
-// 「负责人」字段的位置：子事项模式下搬到「状态」右侧同一行（与状态并列，填满原本的空白格），
+// 「负责人」字段的位置：子事项模式下搬到「所属看板」所在行（填满原本的空白格），
 // 并标注为选填；主事项模式还原成原来的「负责人 / 参与人」独立行。
 // 用 DOM 搬移而不是另建一份，保证两处永远是同一个元素、不会出现两份输入框或错位。
 function applyOwnerSlot(isSub){
   const ownerRow=document.getElementById('e_owner_row');
   const ownerGroup=document.getElementById('e_owner_group');
-  const statusRow=document.getElementById('e_status_row');
+  const metaRow=document.getElementById('e_meta_row');
   const opt=document.getElementById('e_owner_opt');
   if(isSub){
-    if(ownerGroup.parentNode!==statusRow)statusRow.appendChild(ownerGroup);
+    if(ownerGroup.parentNode!==metaRow)metaRow.appendChild(ownerGroup);
     ownerRow.style.display='none';       // 参与人已隐藏，这一行整体不再占位
     if(opt)opt.style.display='';
   }else{
@@ -1840,11 +1867,10 @@ async function applySubContext(c){
 async function saveEdit(){
   const id=editing;
   const isSub=EDIT_IS_SUB;
-  const st=document.getElementById('e_status').value;
+  // 状态不在这里提交 —— 状态由弹窗头部的状态按钮单独设置。
+  // 后端 PUT 只更新传入的字段（fields 里没有 status 就不会动状态），避免两处入口互相覆盖。
   const fields={
     card_name:document.getElementById('e_name').value,
-    status:st,
-    status_name:statusText(st),
     owner:(window._editOwner||[]).join(';'),
     begin:document.getElementById('e_begin').value,
     due:document.getElementById('e_due').value,
@@ -2679,8 +2705,9 @@ async function openDetail(id){
   document.getElementById('d_title').textContent=c.card_name||'';
   // 编辑入口已从列表行移到这里：编辑按钮 + 置顶 + 完成情况
   renderDetailOps(c);
+  // 状态不在元信息里重复呈现 —— 由头部的状态按钮统一承载，避免多处出现导致不一致
   document.getElementById('d_meta').innerHTML=
-    `看板：<b>${esc(c.board_name)}</b>　板块：<b>${esc(c.column_name||'—')}</b>　状态：<b>${c.status==='done'?'已完成':c.status==='progressing'?'进行中':'未完成'}</b><br>`+
+    `看板：<b>${esc(c.board_name)}</b>　板块：<b>${esc(c.column_name||'—')}</b><br>`+
     `负责人：<b>${esc(c.owner||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>`;
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
@@ -2702,19 +2729,18 @@ async function addComment(){
   try{await api('/api/cards/'+DETAIL_ID+'/comments',{method:'POST',body:JSON.stringify({content:v})});openDetail(DETAIL_ID)}
   catch(e){toast(e.message)}
 }
-// ---------- 详情弹窗的操作区：编辑入口 + 置顶 + 完成情况 ----------
+// ---------- 详情弹窗的操作区：状态 + 编辑入口 ----------
 // 列表行里的「✏️ 编辑」已移除，编辑改从这里进入
+// 「📌 事项置顶」已从本弹窗移除（该功能不再需要；列表行的置顶仍保留）
 function renderDetailOps(c){
   const box=document.getElementById('d_ops');
   if(!box)return;
   const lockedByOther=c.locked_by&&c.locked_by!==ME.username;
-  const pinned=isPinned('card',c.card_id);
-  const done=c.status==='done';
   const parts=[];
   if(lockedByOther)parts.push(`<span class="lock-tag">🔒 ${esc(c.locked_by)} 已锁定</span>`);
   else if(!canEditCard(c)&&ME.can_edit)parts.push(`<span style="font-size:12px;color:var(--text2)" title="成本卡仅管理员可编辑">🔒 仅管理员</span>`);
-  parts.push(`<button class="pin-btn ${pinned?'on':''}" onclick="detailTogglePin()" title="${pinned?'取消置顶':'置顶该事项（个人设置）'}">${pinned?'📌 已置顶':'📌 事项置顶'}</button>`);
-  parts.push(`<button class="done-btn ${done?'on':''}" onclick="detailToggleDone()" title="${done?'取消完成标记':'标记为已完成'}">${done?'✓ 已完成':'完成'}</button>`);
+  // 状态按钮：弹窗里状态的唯一呈现，也是唯一的状态设置入口
+  parts.push(statusPickerHtml(c.status,'d'));
   parts.push(`<button class="btn-primary" style="padding:4px 12px;font-size:12px" onclick="openDetailEdit()" title="打开编辑弹窗">✏️ 编辑</button>`);
   box.innerHTML=parts.join('');
 }
@@ -2727,26 +2753,62 @@ async function openDetailEdit(){
   closeModal('detailModal');
   await openEdit(id);
 }
-// 详情弹窗里的置顶（个人设置）
-async function detailTogglePin(){
-  const id=DETAIL_ID;
-  if(!id)return;
-  const on=!isPinned('card',id);
-  setPinned('card',id,on);
-  toast(on?'已置顶':'已取消置顶');
-  await reload(curPage);
-  await openDetail(id);
+// ---------- 弹窗的状态按钮 ----------
+// 状态在弹窗里只出现这一处：按钮本身显示当前状态，点击展开状态菜单完成设置。
+// 编辑弹窗内部（表单区）不再有状态下拉 —— 状态设置统一收敛到弹窗主界面（头部）。
+// 详情弹窗与编辑弹窗共用这套渲染与交互，仅菜单 id 不同（ctx='d' / 'e'）。
+function statusDotColor(v){return v==='done'?'#52c41a':v==='progressing'?'#1890ff':'#ff4d4d'}
+function statusPickerHtml(status,ctx){
+  const st=status==='done'?'done':status==='progressing'?'progressing':'open';
+  const pid=ctx==='e'?'e_status_picker':'d_status_picker';
+  const mid=ctx==='e'?'e_status_menu':'d_status_menu';
+  return `<span class="status-picker" id="${pid}">`
+    +`<button class="status-btn ${st}" onclick="toggleStatusMenu(event,'${ctx}')" title="点击更改状态">`
+    +`<span class="status-dot"></span>${statusText(st)}<span class="status-caret">▼</span></button>`
+    +`<div class="status-menu" id="${mid}" hidden>`
+    +['open','progressing','done'].map(v=>`<button class="${v===st?'cur':''}" onclick="setCardStatus('${ctx}','${v}')">`
+      +`<span class="status-dot" style="background:${statusDotColor(v)}"></span>${statusText(v)}</button>`).join('')
+    +`</div></span>`;
 }
-// 详情弹窗里的完成情况
-async function detailToggleDone(){
-  const id=DETAIL_ID;
+// 展开/收起状态菜单：先记下目标状态，再统一收起，最后按目标状态设置（避免"收起后又被打开"）
+function toggleStatusMenu(ev,ctx){
+  ev.stopPropagation();
+  const mid=ctx==='e'?'e_status_menu':'d_status_menu';
+  const m=document.getElementById(mid);
+  if(!m)return;
+  const willOpen=m.hidden;
+  closeStatusMenu();
+  m.hidden=!willOpen;
+}
+function closeStatusMenu(){
+  ['d_status_menu','e_status_menu'].forEach(id=>{
+    const m=document.getElementById(id);if(m)m.hidden=true;
+  });
+}
+// 点击菜单外部时收起状态菜单（委托到 document，详情弹窗与编辑弹窗共用一条）
+document.addEventListener('click',e=>{
+  const t=e.target;
+  if(t&&t.closest&&t.closest('.status-picker'))return;   // 点在按钮或菜单内部，不处理
+  closeStatusMenu();
+});
+// 设置状态：状态字段与状态名称一起写回，状态文案由 statusText 统一生成
+async function setCardStatus(ctx,st){
+  const id=ctx==='e'?editing:DETAIL_ID;
   if(!id)return;
-  const d=await api('/api/cards?card_id='+id);
-  const c=d.cards&&d.cards[0];
-  if(!c)return;
-  const done=c.status!=='done';
-  await toggleCardDone(id,done,false);
-  await openDetail(id);
+  closeStatusMenu();
+  try{
+    await api('/api/cards/'+id,{method:'PUT',body:JSON.stringify({fields:{status:st,status_name:statusText(st)}})});
+    toast('状态已更新为「'+statusText(st)+'」');
+    if(ctx==='e'){
+      // 编辑弹窗内：只刷新按钮与列表，不关闭弹窗（避免打断正在编辑的内容）
+      const box=document.getElementById('e_status_ops');
+      if(box)box.innerHTML=statusPickerHtml(st,'e');
+      await reload(curPage);
+    }else{
+      await reload(curPage);
+      await openDetail(id);
+    }
+  }catch(e){toast(e.message)}
 }
 // ---------- 团队 ----------
 var TM_ALL=[];  // [{id,name,workgroups:[...]}]
