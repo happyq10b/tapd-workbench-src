@@ -163,6 +163,142 @@ def _leader_boards(username: str):
             return _LEADER_ALL
     return merged
 
+
+# ---------------- 归属部门（架构层级）与板块归属 ----------------
+# 看板的「归属部门」不再用固定枚举，而是绑定到 org_nodes 的中心/部门节点：
+#   中心级部门（如财务中心）= 全部板块，其板块对全员展示；
+#   部门级节点 = 该部门拥有的板块，挂靠该部门的成员可见。
+# 看板管理（board_config.dept_node_id）是唯一真相，架构管理里的
+# 「板块绑定」按此联动展示，避免两处口径不一致。
+def _dept_nodes():
+    """架构中的部门层级节点（中心 + 部门），中心在前、按 id 排序。"""
+    rows = dbq("SELECT id, name, node_type, parent_id FROM org_nodes "
+               "WHERE node_type IN ('center','dept') ORDER BY id")
+    return [dict(r) for r in rows]
+
+
+def _dept_options():
+    """归属部门下拉选项（供看板管理使用）。"""
+    return [{'id': r['id'], 'name': r['name'], 'node_type': r['node_type'],
+             'is_center': 1 if r['node_type'] == 'center' else 0} for r in _dept_nodes()]
+
+
+def _dept_names():
+    """架构中的部门名称集合（架构为空时回退到历史固定清单）。"""
+    names = {r['name'] for r in _dept_nodes()}
+    return names or set(DEPT_ORDER)
+
+
+def _dept_order():
+    """目录树展示用的部门顺序：历史顺序在前（仅保留架构里仍存在的），新增部门追加在后。"""
+    exist = {r['name'] for r in _dept_nodes()}
+    if not exist:
+        return list(DEPT_ORDER)
+    ordered = [d for d in DEPT_ORDER if d in exist]
+    ordered += [n for n in sorted(exist) if n not in ordered]
+    return ordered
+
+
+def _center_node_ids():
+    return {r['id'] for r in _dept_nodes() if r['node_type'] == 'center'}
+
+
+def _dept_owned_boards():
+    """{部门节点 id: set(board_id)} —— 看板按「归属部门」的归属关系。"""
+    out = defaultdict(set)
+    for r in dbq('SELECT board_id, dept_node_id FROM board_config WHERE dept_node_id > 0'):
+        out[r['dept_node_id']].add(r['board_id'])
+    return out
+
+
+def _org_node_map():
+    return {r['id']: dict(r) for r in
+            dbq('SELECT id, name, node_type, parent_id, wg_id FROM org_nodes')}
+
+
+def _dept_ancestor_of_node(node_id, nmap=None):
+    """节点的最近部门层级祖先（自身若是中心/部门则取自身）。找不到返回 None。"""
+    nmap = nmap or _org_node_map()
+    cur = nmap.get(node_id)
+    guard = 0
+    while cur and guard < 20:
+        guard += 1
+        if cur['node_type'] in ('center', 'dept'):
+            return cur
+        cur = nmap.get(cur['parent_id']) if cur.get('parent_id') else None
+    return None
+
+
+def _member_dept_scope(username):
+    """成员的归属部门范围（部门层级节点 id 集合）。
+
+    来源：
+      1) org_appointments（新模型的任职/挂靠）
+      2) team_members.workgroups（旧字段的分组归属）
+    小组归属向上取最近的部门/中心祖先。
+    """
+    nmap = _org_node_map()
+    node_ids = set()
+    member_ids = [r['id'] for r in
+                  dbq('SELECT id FROM team_members WHERE account=? OR name=?', (username, username))]
+    if member_ids:
+        marks = ','.join('?' * len(member_ids))
+        for r in dbq(f'SELECT DISTINCT node_id FROM org_appointments WHERE member_id IN ({marks})',
+                     member_ids):
+            node_ids.add(r['node_id'])
+    # 旧字段：分组名 → 架构节点
+    wg_by_name = {r['name']: r['id'] for r in dbq('SELECT id, name FROM workgroups')}
+    node_by_wg = {n['wg_id']: n['id'] for n in nmap.values() if n.get('wg_id')}
+    for r in dbq('SELECT workgroups FROM team_members WHERE account=? OR name=?', (username, username)):
+        for nm in (r['workgroups'] or '').split(';'):
+            nm = nm.strip()
+            if not nm:
+                continue
+            nid = node_by_wg.get(wg_by_name.get(nm, 0))
+            if nid:
+                node_ids.add(nid)
+    scope = set()
+    for nid in node_ids:
+        anc = _dept_ancestor_of_node(nid, nmap)
+        if anc:
+            scope.add(anc['id'])
+    return scope
+
+
+def _dept_stage_boards(username):
+    """第一层过滤（归属部门）：成员可见的板块集合。
+
+    规则：
+      1) 成员挂靠部门的板块 —— 该部门拥有的板块对成员可见；
+      2) 中心级归属的板块 —— 对全员展示（财务中心 = 全部板块）；
+      3) 未归属部门的板块 —— 全员可见（对应目录树里的「未配置」节点）。
+    返回 None 表示本层不收窄：
+      - 成员没有挂靠任何部门（无任职、无工作组归属）；
+      - 成员挂靠的是中心（中心 = 管理层全范围，不做部门收窄）。
+    """
+    scope = _member_dept_scope(username)
+    if not scope:
+        return None                      # 无部门归属 → 不按部门收窄
+    centers = _center_node_ids()
+    if scope & centers:
+        return None                      # 中心 = 管理层全范围
+    owned = _dept_owned_boards()
+    owner = {}                          # board_id → 归属部门节点 id
+    for r in dbq('SELECT board_id, dept_node_id FROM board_config'):
+        owner[r['board_id']] = r['dept_node_id']
+    visible = set()
+    for b in _all_boards():
+        bid = b['board_id']
+        nid = owner.get(bid, 0)
+        if not nid:
+            visible.add(bid)             # 未归属 → 全员可见
+        elif nid in centers:
+            visible.add(bid)             # 中心归属 → 对全员展示
+    for nid in scope:                    # 挂靠部门拥有的板块
+        visible |= owned.get(nid, set())
+    return visible
+
+
 def _group_boards(username: str):
     """成员所属工作组的板块绑定并集（白名单），含祖先部门传导。
     返回 set(board_id) 表示受限板块；None 表示不限制（未绑定/绑定'*'/超管/负责人）。"""
@@ -177,6 +313,10 @@ def _group_boards(username: str):
     all_rows = dbq('SELECT id, name, parent_id, boards FROM workgroups')
     by_id = {r['id']: r for r in all_rows}
     by_name = {r['name']: r for r in all_rows}
+    # 部门节点：叠加「归属部门」自动归属的板块（看板管理 → 架构管理的联动）
+    owned = _dept_owned_boards()
+    nmap = _org_node_map()
+    node_by_wg = {n['wg_id']: n['id'] for n in nmap.values() if n.get('wg_id')}
     merged = set()
     for nm in names:
         cur = by_name.get(nm)
@@ -188,6 +328,9 @@ def _group_boards(username: str):
                 return None  # 任一节点绑定全部 → 该用户不限制
             if b:
                 merged |= set(x for x in b.split(',') if x)
+            nid = node_by_wg.get(cur['id'])
+            if nid:
+                merged |= owned.get(nid, set())
             cur = by_id.get(cur['parent_id']) if cur['parent_id'] else None
     return merged or None
 
@@ -197,7 +340,14 @@ def user_allowed(username: str):
     columns=None=全部板块，否则 dict {board_id: set(column_id)}（缺省=该看板全部板块）
     超级管理员(admin)自动拥有全部板块；
     部门长/组长自动拥有其负责范围（节点+后代）绑定的全部板块，且不受工作组白名单限制；
-    普通成员：可见 = 账号权限 ∩ 所属工作组绑定并集。"""
+    普通成员：可见 = 账号权限 ∩ 所属工作组绑定并集。
+
+    判定流程（自外向内三层）：
+      ① 归属部门层：看板的「归属部门」（board_config.dept_node_id）决定谁能看到它 ——
+         挂靠该部门的成员可见该部门拥有的全部板块；归属中心的板块对全员展示。
+      ② 负责范围层：部门长/组长额外拥有其负责范围（节点+后代）绑定的全部板块。
+      ③ 工作组绑定层：普通成员再按所属工作组的板块绑定白名单收窄。
+    """
     u = get_user(username)
     if not u:
         return set(), {}
@@ -219,6 +369,10 @@ def user_allowed(username: str):
         gb = _group_boards(username)
         if gb is not None:
             boards = gb if boards is None else boards & gb
+    # 归属部门层（硬过滤）：看板归属部门决定可见范围，与账号/工作组权限取交集
+    dept_boards = _dept_stage_boards(username)
+    if dept_boards is not None:
+        boards = dept_boards if boards is None else boards & dept_boards
     raw_c = u.get('allowed_columns') or '*'
     if raw_c == '*':
         return boards, None
@@ -499,11 +653,14 @@ def me(username: str = Depends(require_auth)):
         allb = [b for b in allb if b['board_id'] in boards]
     # 归属部门（board_config）：目录树按部门分组折叠用。
     # 未在「看板管理」里配置归属的看板 dept=''，前端归入「未配置」节点，不会丢失。
-    dept_map = {r['board_id']: r['dept'] for r in dbq('SELECT board_id, dept FROM board_config')}
+    dept_map = {r['board_id']: (r['dept'], r['dept_node_id'])
+                for r in dbq('SELECT board_id, dept, dept_node_id FROM board_config')}
     boards_out = []
     for b in allb:
         item = dict(b)
-        item['dept'] = dept_map.get(b['board_id'], '')
+        dn, dnode = dept_map.get(b['board_id'], ('', 0))
+        item['dept'] = dn
+        item['dept_node_id'] = dnode or 0
         boards_out.append(item)
     # 板块级权限信息（供前端配置/展示）
     col_info = None
@@ -512,7 +669,7 @@ def me(username: str = Depends(require_auth)):
     return {'username': username, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'allowed_columns': col_info,
-            'depts': DEPT_ORDER}   # 有序部门清单：空部门同样占位，前端据此渲染树顶层节点
+            'depts': _dept_order()}   # 有序部门清单（随架构层级动态变化）：空部门同样占位
 
 @app.get('/api/overview')
 def overview(username: str = Depends(require_auth)):
@@ -1499,7 +1656,7 @@ def del_team(mid: int, username: str = Depends(require_admin), request: Request 
 
 # ---------------- API：工作组管理（工作组树形架构） ----------------
 def _wg_rows():
-    rows = [dict(r) for r in dbq('SELECT id, name, parent_id, leader, function, description, boards FROM workgroups ORDER BY id')]
+    rows = [dict(r) for r in dbq('SELECT id, name, parent_id, leader, function, boards FROM workgroups ORDER BY id')]
     # 最顶层（财务中心）：板块强制锁定为全部看板
     for r in rows:
         if r['parent_id'] == 0:
@@ -1552,7 +1709,6 @@ class WgNodeReq(BaseModel):
     parent_id: int = 0
     leader: str = ''
     function: str = ''
-    description: str = ''
     boards: str = ''
 
 def _check_leader(leader):
@@ -1636,8 +1792,8 @@ def add_wg_node(req: WgNodeReq, username: str = Depends(require_admin), request:
     boards = _norm_boards(req.boards)
     _check_child_boards(req.parent_id, boards)
     try:
-        dbe('INSERT INTO workgroups (name, parent_id, leader, function, description, boards) VALUES (?,?,?,?,?,?)',
-            (name, req.parent_id, req.leader.strip(), req.function.strip(), req.description.strip(), boards))
+        dbe('INSERT INTO workgroups (name, parent_id, leader, function, boards) VALUES (?,?,?,?,?)',
+            (name, req.parent_id, req.leader.strip(), req.function.strip(), boards))
     except sqlite3.IntegrityError:
         raise HTTPException(409, '同级下已存在同名工作组')
     audit_log(username, client_ip(request), 'group_create', f'工作组 {name}', f'新增工作组节点（上级 id={req.parent_id}，板块绑定：{boards or "未绑定"}）', 'success')
@@ -1683,8 +1839,8 @@ def update_wg_node(gid: int, req: WgNodeReq, username: str = Depends(require_adm
     else:
         boards = _norm_boards(req.boards)
     _check_child_boards(req.parent_id, boards)
-    dbe('UPDATE workgroups SET name=?, parent_id=?, leader=?, function=?, description=?, boards=? WHERE id=?',
-        (name, req.parent_id, req.leader.strip(), req.function.strip(), req.description.strip(), boards, gid))
+    dbe('UPDATE workgroups SET name=?, parent_id=?, leader=?, function=?, boards=? WHERE id=?',
+        (name, req.parent_id, req.leader.strip(), req.function.strip(), boards, gid))
     # 父级板块收缩 → 级联清理后代超范围看板
     cascade = _cascade_boards(gid, boards)
     audit_log(username, client_ip(request), 'group_update', f'工作组 {name} (id={gid})',
@@ -1769,7 +1925,7 @@ ORG_CHILD_RULES = {
 }
 
 def _org_node(node_id: int):
-    rows = dbq('SELECT id, name, node_type, parent_id, wg_id, is_anchor, function, description'
+    rows = dbq('SELECT id, name, node_type, parent_id, wg_id, is_anchor, function'
                ' FROM org_nodes WHERE id=?', (node_id,))
     return dict(rows[0]) if rows else None
 
@@ -1923,7 +2079,6 @@ class OrgNodeReq(BaseModel):
     node_type: str = 'group'
     parent_id: int = 0
     function: str = ''
-    description: str = ''
 
 class OrgAppointmentReq(BaseModel):
     node_id: int
@@ -1935,7 +2090,7 @@ class OrgAppointmentReq(BaseModel):
 def get_org_tree(username: str = Depends(require_auth)):
     """组织架构树：节点 + 类型 + 岗位定义 + 任职明细（含多归属标记）"""
     nodes = [dict(r) for r in dbq(
-        'SELECT id, name, node_type, parent_id, wg_id, is_anchor, function, description'
+        'SELECT id, name, node_type, parent_id, wg_id, is_anchor, function'
         ' FROM org_nodes ORDER BY sort, id')]
     node_type_of = {n['id']: n['node_type'] for n in nodes}
     # 每节点的岗位清单
@@ -1967,6 +2122,8 @@ def get_org_tree(username: str = Depends(require_auth)):
     by_parent = defaultdict(list)
     for n in nodes:
         by_parent[n['parent_id']].append(n)
+    # 归属部门拥有的板块（看板管理 → 架构管理的联动）
+    owned = _dept_owned_boards()
 
     def build(pid):
         out = []
@@ -1975,6 +2132,7 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['type_name'] = ORG_TYPE_NAMES.get(n['node_type'], n['node_type'])
             node['roles'] = roles_by_type.get(n['node_type'], [])
             node['appointments'] = appts.get(n['id'], [])
+            node['owned_boards'] = sorted(owned.get(n['id'], set()))
             node['children'] = build(n['id'])
             out.append(node)
         return out
@@ -1992,9 +2150,9 @@ def create_org_node(req: OrgNodeReq, username: str = Depends(require_admin), req
     _check_parent_ok(node_type, req.parent_id)
     if dbq('SELECT 1 FROM org_nodes WHERE parent_id=? AND name=?', (req.parent_id, name)):
         raise HTTPException(409, f'同级下已存在同名节点「{name}」')
-    cur = dbe('INSERT INTO org_nodes (name, node_type, parent_id, function, description)'
-              ' VALUES (?,?,?,?,?)',
-              (name, node_type, req.parent_id, (req.function or '').strip(), (req.description or '').strip()))
+    cur = dbe('INSERT INTO org_nodes (name, node_type, parent_id, function)'
+              ' VALUES (?,?,?,?)',
+              (name, node_type, req.parent_id, (req.function or '').strip()))
     nid = cur.lastrowid
     # 同步旧表 workgroups（保持旧权限逻辑可见）
     pid = req.parent_id
@@ -2012,7 +2170,7 @@ def create_org_node(req: OrgNodeReq, username: str = Depends(require_admin), req
 
 @app.put('/api/org/nodes/{nid}')
 def update_org_node(nid: int, req: OrgNodeReq, username: str = Depends(require_admin), request: Request = None):
-    """修改节点：名称 / 类型 / 上级 / 职能说明。
+    """修改节点：名称 / 类型 / 上级。
        改类型或上级时会校验子节点是否仍满足层级规则（层级完整性）。"""
     node = _org_node(nid)
     if not node:
@@ -2032,8 +2190,8 @@ def update_org_node(nid: int, req: OrgNodeReq, username: str = Depends(require_a
             raise HTTPException(400, f'子节点「{k["name"]}」的类型（{ORG_TYPE_NAMES.get(k["node_type"], k["node_type"])}）'
                                     f'不允许挂在「{ORG_TYPE_NAMES.get(node_type, node_type)}」下，'
                                     f'请先调整子节点')
-    dbe('UPDATE org_nodes SET name=?, node_type=?, parent_id=?, function=?, description=? WHERE id=?',
-        (name, node_type, parent_id, (req.function or '').strip(), (req.description or '').strip(), nid))
+    dbe('UPDATE org_nodes SET name=?, node_type=?, parent_id=?, function=? WHERE id=?',
+        (name, node_type, parent_id, (req.function or '').strip(), nid))
     # 同步旧表
     if node.get('wg_id'):
         pwg = dbq('SELECT wg_id FROM org_nodes WHERE id=?', (parent_id,)) if parent_id else []
@@ -2208,7 +2366,8 @@ def move_org_appointment(req: OrgMoveApptReq, username: str = Depends(require_ad
 # 枚举可选值（与 DB CHECK 约束保持一致，应用层二次校验，越界即 400）
 ALLOWED_YEARS = {'2025', '2026', '2027', '2028', '2029', '2030'}
 # 部门的**有序**列表：目录树按此顺序渲染顶层部门节点（空部门同样占位）。
-# ALLOWED_DEPTS 仅为校验用的集合，顺序无意义，故另设此有序列表。
+# 实际可选部门以【架构管理】的部门层级为准（_dept_names()/_dept_order()），
+# 这里的固定清单仅作为架构为空时的历史回退。
 DEPT_ORDER = ['财务中心', '核算部', '总账部', '管理部', '资金部', '商务部']
 ALLOWED_DEPTS = set(DEPT_ORDER)
 ALLOWED_ATTRS = {'日常', '专项'}
@@ -2217,16 +2376,38 @@ ALLOWED_STATUSES = {'启用', '封存'}
 class BoardConfigReq(BaseModel):
     board_id: str = ''      # 关联的真实看板 id（boards ∪ cards 派生的 board_id）
     year: str
-    dept: str
+    dept: str              # 归属部门名称（须是架构中的中心/部门）
+    dept_node_id: int = 0  # 归属部门对应的 org_nodes.id（0=未指定，按名称解析）
     attr: str
     status: str = '启用'
     remark: str = ''
 
+def _resolve_dept_node(dept, dept_node_id=0):
+    """归属部门 → 架构节点。优先按 dept_node_id 解析，其次按名称解析。
+
+    返回 (node_id, name, is_center)。找不到对应部门节点时返回 (0, dept, 0)，
+    由调用方决定是否放行（历史数据里可能存在已删除的部门名）。
+    """
+    kinds = ('center', 'dept')
+    if dept_node_id:
+        row = dbq('SELECT id, name, node_type FROM org_nodes WHERE id=? AND node_type IN (?,?)',
+                  (dept_node_id,) + kinds)
+        if row:
+            return row[0]['id'], row[0]['name'], 1 if row[0]['node_type'] == 'center' else 0
+    name = (dept or '').strip()
+    if name:
+        row = dbq('SELECT id, name, node_type FROM org_nodes WHERE name=? AND node_type IN (?,?)'
+                  ' ORDER BY id LIMIT 1', (name,) + kinds)
+        if row:
+            return row[0]['id'], row[0]['name'], 1 if row[0]['node_type'] == 'center' else 0
+    return 0, name, 0
+
 def _validate_board_config(year, dept, attr, status):
     if year not in ALLOWED_YEARS:
         raise HTTPException(400, '年份必须是 ' + '/'.join(sorted(ALLOWED_YEARS)) + ' 之一')
-    if dept not in ALLOWED_DEPTS:
-        raise HTTPException(400, '归属部门必须是 ' + '/'.join(sorted(ALLOWED_DEPTS)) + ' 之一')
+    if dept not in _dept_names():
+        raise HTTPException(400, '归属部门必须是架构中的中心或部门，当前可选：'
+                            + '/'.join(sorted(_dept_names())))
     if attr not in ALLOWED_ATTRS:
         raise HTTPException(400, '属性必须是 ' + '/'.join(ALLOWED_ATTRS) + ' 之一')
     if status not in ALLOWED_STATUSES:
@@ -2241,7 +2422,8 @@ def list_boards(username: str = Depends(require_auth)):
     for r in dbq('SELECT board_id, COUNT(*) AS cnt FROM cards WHERE deleted=0 GROUP BY board_id'):
         counts[r['board_id']] = r['cnt']
     cfgs = {}
-    for r in dbq('SELECT id, board_id, year, dept, attr, status, remark, created_at FROM board_config'):
+    for r in dbq('SELECT id, board_id, year, dept, dept_node_id, attr, status, remark, created_at'
+                 ' FROM board_config'):
         cfgs[r['board_id']] = dict(r)
     out = []
     for b in boards:
@@ -2255,11 +2437,12 @@ def list_boards(username: str = Depends(require_auth)):
             'config_id': c.get('id'),
             'year': c.get('year', ''),
             'dept': c.get('dept', ''),
+            'dept_node_id': c.get('dept_node_id', 0) or 0,
             'attr': c.get('attr', ''),
             'status': c.get('status', ''),
             'remark': c.get('remark', ''),
         })
-    return {'boards': out}
+    return {'boards': out, 'depts': _dept_options()}
 
 @app.get('/api/board-config')
 def list_board_config(username: str = Depends(require_auth)):
@@ -2280,34 +2463,86 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_adm
     if not dbq('SELECT 1 FROM boards WHERE board_id=?', (bid,)) and \
        not dbq('SELECT 1 FROM cards WHERE board_id=? AND deleted=0', (bid,)):
         raise HTTPException(404, '关联看板不存在')
-    year = req.year.strip(); dept = req.dept.strip(); attr = req.attr.strip()
+    year = req.year.strip(); attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
+    dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
     if not (year and dept and attr):
         raise HTTPException(400, '年份 / 归属部门 / 属性 均必填')
     _validate_board_config(year, dept, attr, status)
     if dbq('SELECT 1 FROM board_config WHERE board_id=?', (bid,)):
         raise HTTPException(409, '该看板已存在配置，请勿重复添加')
     try:
-        dbe('INSERT INTO board_config (board_id, year, dept, attr, status, remark) VALUES (?,?,?,?,?,?)',
-            (bid, year, dept, attr, status, remark))
+        dbe('INSERT INTO board_config (board_id, year, dept, dept_node_id, attr, status, remark)'
+            ' VALUES (?,?,?,?,?,?,?)',
+            (bid, year, dept, dept_node_id, attr, status, remark))
     except sqlite3.IntegrityError:
         raise HTTPException(409, '该看板已存在配置')
     audit_log(username, client_ip(request), 'board_config_create', f'{bid}/{year}/{dept}/{attr}',
               f'状态={status}', 'success')
     return {'ok': True}
 
+class BoardConfigBulkReq(BaseModel):
+    board_ids: List[str] = []   # 批量应用的板块（board_id 列表）
+    year: str = ''
+    dept: str = ''
+    dept_node_id: int = 0
+    attr: str = ''
+    status: str = '启用'
+    remark: str = ''
+
+@app.post('/api/board-config/bulk')
+def bulk_board_config(req: BoardConfigBulkReq, username: str = Depends(require_admin), request: Request = None):
+    """批量应用看板配置（仅管理员）。
+
+    用于「看板管理」中多选板块后统一设置归属部门等维度：
+    归属部门取自【架构管理】的部门层级（中心 + 部门），
+    归属中心的板块视为全部板块、对全员展示。
+    """
+    ids = []
+    for b in (req.board_ids or []):
+        b = (b or '').strip()
+        if b and b not in ids:
+            ids.append(b)
+    if not ids:
+        raise HTTPException(400, '未选择任何板块')
+    year = req.year.strip(); attr = req.attr.strip()
+    status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
+    dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
+    if not (year and dept and attr):
+        raise HTTPException(400, '年份 / 归属部门 / 属性 均必填')
+    _validate_board_config(year, dept, attr, status)
+    created = updated = skipped = 0
+    for bid in ids:
+        if not dbq('SELECT 1 FROM boards WHERE board_id=?', (bid,)) and \
+           not dbq('SELECT 1 FROM cards WHERE board_id=? AND deleted=0', (bid,)):
+            skipped += 1
+            continue
+        row = dbq('SELECT id FROM board_config WHERE board_id=?', (bid,))
+        if row:
+            dbe('UPDATE board_config SET year=?, dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
+                (year, dept, dept_node_id, attr, status, remark, row[0]['id']))
+            updated += 1
+        else:
+            dbe('INSERT INTO board_config (board_id, year, dept, dept_node_id, attr, status, remark)'
+                ' VALUES (?,?,?,?,?,?,?)', (bid, year, dept, dept_node_id, attr, status, remark))
+            created += 1
+    audit_log(username, client_ip(request), 'board_config_bulk', f'{len(ids)} 个板块',
+              f'{year}/{dept}/{attr} 状态={status}（新建 {created} / 更新 {updated}）', 'success')
+    return {'ok': True, 'created': created, 'updated': updated, 'skipped': skipped}
+
 @app.put('/api/board-config/{cid}')
 def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(require_admin), request: Request = None):
     """更新看板配置（仅管理员）。board_id 创建后锁定，不可改挂其他看板。"""
     if not dbq('SELECT 1 FROM board_config WHERE id=?', (cid,)):
         raise HTTPException(404, '配置不存在')
-    year = req.year.strip(); dept = req.dept.strip(); attr = req.attr.strip()
+    year = req.year.strip(); attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
+    dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
     if not (year and dept and attr):
         raise HTTPException(400, '年份 / 归属部门 / 属性 均必填')
     _validate_board_config(year, dept, attr, status)
-    dbe('UPDATE board_config SET year=?, dept=?, attr=?, status=?, remark=? WHERE id=?',
-        (year, dept, attr, status, remark, cid))
+    dbe('UPDATE board_config SET year=?, dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
+        (year, dept, dept_node_id, attr, status, remark, cid))
     audit_log(username, client_ip(request), 'board_config_update', f'id={cid}',
               f'{year}/{dept}/{attr} 状态={status}', 'success')
     return {'ok': True}
@@ -2366,7 +2601,7 @@ class DeptHonorReq(BaseModel):
 def get_dept_page(dept: str, username: str = Depends(require_auth)):
     """部门主页数据：文化资料 + 标杆/模范 + 事项统计 + 成员/工作组。
     统计口径与「事项统计」模块一致：按当前用户可见范围过滤。"""
-    if dept not in ALLOWED_DEPTS:
+    if dept not in _dept_names():
         raise HTTPException(404, '部门不存在')
     boards, columns = user_allowed(username)
     prof = dbq('SELECT dept, slogan, intro, photo, updated_at FROM dept_profile WHERE dept=?', (dept,))
@@ -2402,7 +2637,7 @@ def get_dept_page(dept: str, username: str = Depends(require_auth)):
             for n in names:
                 owner_cnt[n] += 1
     # 部门成员与工作组（来自 workgroups / team_members，用于介绍页的组织架构）
-    wgs = dbq('SELECT id, name, parent_id, leader, function, description FROM workgroups ORDER BY id')
+    wgs = dbq('SELECT id, name, parent_id, leader, function FROM workgroups ORDER BY id')
     members = dbq('SELECT id, name, account, workgroups FROM team_members ORDER BY id')
     member_names = {m['name'] for m in members}
     # 顶层部门 → 其下的工作组（按 workgroups 的 parent_id 关系）
@@ -2412,7 +2647,7 @@ def get_dept_page(dept: str, username: str = Depends(require_auth)):
         if t['name'] == dept or (t['parent_id'] and any(p['id'] == t['parent_id'] and p['name'] == dept for p in wgs)):
             tree.append({
                 'id': t['id'], 'name': t['name'], 'leader': t['leader'],
-                'function': t['function'], 'description': t['description'],
+                'function': t['function'],
                 'members': sorted([m['name'] for m in members if t['name'] and t['name'] in (m['workgroups'] or '')]),
             })
     return {
@@ -2429,7 +2664,7 @@ def get_dept_page(dept: str, username: str = Depends(require_auth)):
 @app.put('/api/dept/{dept}/profile')
 def update_dept_profile(dept: str, req: DeptProfileReq, username: str = Depends(require_admin), request: Request = None):
     """保存部门文化资料（仅管理员可编辑）"""
-    if dept not in ALLOWED_DEPTS:
+    if dept not in _dept_names():
         raise HTTPException(404, '部门不存在')
     photo = _check_image_data_url(req.photo)
     slogan = (req.slogan or '').strip()[:200]
@@ -2447,7 +2682,7 @@ def update_dept_profile(dept: str, req: DeptProfileReq, username: str = Depends(
 @app.post('/api/dept/{dept}/honors')
 def create_dept_honor(dept: str, req: DeptHonorReq, username: str = Depends(require_admin), request: Request = None):
     """新增标杆部门 / 模范个人（仅管理员）"""
-    if dept not in ALLOWED_DEPTS:
+    if dept not in _dept_names():
         raise HTTPException(404, '部门不存在')
     if req.kind not in ('dept', 'person'):
         raise HTTPException(400, '类型必须是标杆部门(dept)或模范个人(person)')
@@ -2490,7 +2725,7 @@ def delete_dept_honor(hid: int, username: str = Depends(require_admin), request:
 @app.get('/api/dept/{dept}/posts')
 def get_dept_posts(dept: str, username: str = Depends(require_auth)):
     """部门介绍页的发文列表（部门文化内容区）"""
-    if dept not in ALLOWED_DEPTS:
+    if dept not in _dept_names():
         raise HTTPException(404, '部门不存在')
     rows = dbq('''SELECT id, dept, title, content, images, author, created_at
                    FROM dept_posts WHERE dept=? ORDER BY id DESC LIMIT 100''', (dept,))
@@ -2504,7 +2739,7 @@ class DeptPostReq(BaseModel):
 @app.post('/api/dept/{dept}/posts')
 def create_dept_post(dept: str, req: DeptPostReq, username: str = Depends(require_admin), request: Request = None):
     """发布部门文章（仅管理员；支持发图）"""
-    if dept not in ALLOWED_DEPTS:
+    if dept not in _dept_names():
         raise HTTPException(404, '部门不存在')
     title = (req.title or '').strip()[:100]
     content = (req.content or '').strip()[:4000]
@@ -2548,8 +2783,8 @@ def get_notices(username: str = Depends(require_auth)):
 def create_notice(req: NoticeReq, username: str = Depends(require_admin), request: Request = None):
     """新增公告（仅管理员）"""
     scope = (req.scope or 'all').strip() or 'all'
-    if scope != 'all' and scope not in ALLOWED_DEPTS:
-        raise HTTPException(400, '公告范围必须是 all 或 ' + '/'.join(sorted(ALLOWED_DEPTS)))
+    if scope != 'all' and scope not in _dept_names():
+        raise HTTPException(400, '公告范围必须是 all 或 ' + '/'.join(sorted(_dept_names())))
     title = (req.title or '').strip()[:100]
     content = (req.content or '').strip()[:2000]
     if not title and not content:
@@ -2565,8 +2800,8 @@ def update_notice(nid: int, req: NoticeReq, username: str = Depends(require_admi
     if not cur:
         raise HTTPException(404, '公告不存在')
     scope = (req.scope or 'all').strip() or 'all'
-    if scope != 'all' and scope not in ALLOWED_DEPTS:
-        raise HTTPException(400, '公告范围必须是 all 或 ' + '/'.join(sorted(ALLOWED_DEPTS)))
+    if scope != 'all' and scope not in _dept_names():
+        raise HTTPException(400, '公告范围必须是 all 或 ' + '/'.join(sorted(_dept_names())))
     dbe('''UPDATE notices SET scope=?, title=?, content=?, enabled=?, sort=? WHERE id=?''',
         (scope, (req.title or '').strip()[:100], (req.content or '').strip()[:2000],
          1 if req.enabled else 0, req.sort, nid))

@@ -685,7 +685,8 @@ body{
 .combo-opt:hover{background:rgba(0,45,116,.07);color:var(--primary)}
 .combo-empty{padding:8px 10px;color:var(--text3);font-size:12px}
 /* 组织架构：节点行（可点击选中查看岗位）+ 任职人员 chip */
-.org-node-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
+.org-node-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s;background:#fff}
+.org-node-row.root{background:#fafafa}
 .org-node-row:hover{background:#f5f8fc}
 .org-node-row.sel{background:#f0f7ff!important;box-shadow:inset 2px 0 0 var(--primary)}
 .org-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;font-size:11.5px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:10px;color:#0050b3;white-space:nowrap}
@@ -1126,7 +1127,6 @@ function goLogin(){
             <div class="form-group" style="flex-shrink:0"><label>名称 *</label><input type="text" class="form-input" id="g_new_name" placeholder="如：核算部 / 收入组 / 成本优化专项组"></div>
             <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>节点类型 *</label><select class="form-select" id="g_new_type" onchange="onOrgTypeChange()"></select></div>
             <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>上级节点</label><select class="form-select" id="g_new_parent" onchange="onWgParentChange()"></select></div>
-            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>职能说明（可选）</label><textarea class="form-textarea" id="g_new_desc" rows="2" placeholder="描述该节点的职责或功能" style="width:100%"></textarea></div>
             <!-- 岗位与任职：选中节点后展示 -->
             <div class="form-group" style="margin-top:10px;display:flex;flex-direction:column;min-height:0;flex:1">
               <label style="flex-shrink:0">岗位与任职</label>
@@ -1166,6 +1166,9 @@ function goLogin(){
 .bc-item .nm{font-size:13.5px;font-weight:500;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:8px}
 .bc-item .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2)}
 .bc-item .cnt{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:0 8px;font-size:11px}
+.bc-pick-wrap{display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0}
+.bc-pick{cursor:pointer;width:14px;height:14px;margin:0}
+.bc-hint{font-size:11.5px;color:var(--text3);line-height:1.6}
 .bc-right{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
 .bc-edit{margin:0 auto;padding:20px 22px;display:flex;flex-direction:column;gap:18px;max-width:640px;width:100%;box-sizing:border-box}
 .bc-edit-title{font-size:15px;font-weight:600;color:var(--text);display:flex;align-items:baseline;gap:8px}
@@ -1203,6 +1206,11 @@ function goLogin(){
             <div class="bc-filter-row"><span class="lab">归属部门</span><select id="bcf_dept" onchange="bcFilterChange('dept',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">属性</span><select id="bcf_attr" onchange="bcFilterChange('attr',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">状态</span><select id="bcf_status" onchange="bcFilterChange('status',this.value)"></select></div>
+            <div class="bc-filter-row" style="grid-column:1/-1;display:flex;align-items:center;gap:8px">
+              <button class="btn-default" style="padding:4px 10px;font-size:12px" onclick="bcPickAll(true)" title="勾选当前筛选下的全部板块">全选</button>
+              <button class="btn-default" style="padding:4px 10px;font-size:12px" onclick="bcPickAll(false)" title="取消勾选">取消全选</button>
+              <span style="font-size:11.5px;color:var(--text2)">已勾选 <b id="bcPickCount">0</b> 个板块</span>
+            </div>
           </div>
           <div class="bc-list" id="bcList"></div>
         </div>
@@ -2029,7 +2037,6 @@ async function openDeptIntroModal(){
           +(w.leader?`<span class="org-leader">负责人：${esc(w.leader)}</span>`:'')
           +(w.function?`<span class="org-func">${esc(w.function)}</span>`:'')
           +`</div>`;
-        if(w.description)html+=`<div class="org-func" style="margin-top:4px">${esc(w.description)}</div>`;
         if(w.members&&w.members.length){
           html+='<div class="org-members">';
           w.members.forEach(m=>html+=`<span class="org-member"><i>${esc(m.slice(0,1))}</i>${esc(m)}</span>`);
@@ -4430,7 +4437,7 @@ function renderAuditPager(){
 }
 
 // ---------- 架构管理（原工作组管理：树形工作组 + 板块绑定） ----------
-var WG_ALL=[];    // 树形 [{id,name,parent_id,leader,function,description,boards,children:[]}]
+var WG_ALL=[];    // 树形 [{id,name,parent_id,leader,function,boards,children:[]}]
 var WG_FLAT=[];   // 平铺（含 children）
 var WG_BOARDS=[]; // 全部看板 [{board_id,board_name}]
 var WG_EDIT_ID=0; // 0=新增模式，>0=编辑节点 id
@@ -4605,6 +4612,14 @@ async function removeOrgAppt(apptId,name){
     await openWgModal();
   }catch(e){toast(e.message)}
 }
+// 选中态同步：ORG_SELECTED 是唯一真相，树内底色高亮统一由此刷新
+function paintOrgSelection(){
+  const box=document.getElementById('wgList');
+  if(!box)return;
+  box.querySelectorAll('.org-node-row').forEach(el=>{
+    el.classList.toggle('sel', Number(el.dataset.orgId)===ORG_SELECTED);
+  });
+}
 // 选中节点 → 右侧展示该节点的岗位槽位
 function selectOrgNode(nid){
   ORG_SELECTED=nid;
@@ -4614,14 +4629,16 @@ function selectOrgNode(nid){
   document.getElementById('g_submit_btn').textContent='保存修改';
   document.getElementById('g_cancel_edit').style.display='';
   document.getElementById('g_new_name').value=node?node.name:'';
-  document.getElementById('g_new_desc').value=node?(node.description||''):'';
   document.getElementById('g_new_type').value=node?node.node_type:'';
   document.getElementById('g_new_parent').value=node?String(node.parent_id||0):'0';
   // 类型下拉要按「上级节点」过滤 —— 上级变了必须重算
   if(node)fillOrgTypeOptions(node.node_type,node.parent_id||0);
   const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display=''}
-  renderBoardChecks(node?(node.wg_boards||''):'', parentBoardLimit(node?node.parent_id:0));
+  const isDeptNode=!!node&&(node.node_type==='center'||node.node_type==='dept');
+  const scope=isDeptNode?nodeBoardScope(node):(node?(node.wg_boards||''):'');
+  renderBoardChecks(isDeptNode?((scope||[]).join(',')):scope, parentBoardLimit(node?node.parent_id:0), undefined, isDeptNode);
   renderOrgRoles();
+  paintOrgSelection();
 }
 function wgDescendants(n){
   const out=[];
@@ -4654,36 +4671,53 @@ function rebuildWgParentOptions(exceptId, selected){
   })(ORG_TREE,1);
   sel.innerHTML=opts.join('');
 }
+// 节点可见板块范围：
+//   中心（center）= 全部板块；部门（dept）= 看板管理里归属该部门的板块；
+//   小组（group/专项）= 手动绑定（受上级范围限制）。
+function nodeBoardScope(node){
+  if(!node) return null;
+  if(node.node_type==='center') return null;          // null = 不限制（全部板块）
+  if(node.node_type==='dept'){
+    const owned=(node.owned_boards||[]);
+    return owned.length?owned:[];                      // 空数组 = 该部门暂无归属板块
+  }
+  const b=(node.wg_boards||'').trim();
+  if(!b || b==='*') return null;
+  return b.split(',');
+}
 function parentBoardLimit(parentId){
   /* 返回所选上级的板块限制：null=不限制；array=受限看板ID列表 */
   if(!parentId) return null;
   // parentId 可能是新模型 org 节点 id，也可能是旧 workgroups id —— 两者都支持
-  let b='';
   const on=ORG_FLAT.find(x=>x.id===parentId);
-  if(on) b=(on.wg_boards||'').trim();
-  else{
-    const w=WG_FLAT.find(x=>x.id===parentId);
-    if(w) b=(w.boards||'').trim();
+  if(on) return nodeBoardScope(on);
+  const w=WG_FLAT.find(x=>x.id===parentId);
+  if(w){
+    const b=(w.boards||'').trim();
+    if(!b || b==='*') return null;
+    return b.split(',');
   }
-  if(!b || b==='*') return null;
-  return b.split(',');
+  return null;
 }
-function renderBoardChecks(boards, limit, searchTerm){
+function renderBoardChecks(boards, limit, searchTerm, readonly){
   const wrap=document.getElementById('g_new_boards');
   const hint=document.getElementById('g_boards_hint');
   const input=document.getElementById('g_boards_search');
   const search=(searchTerm!==undefined?searchTerm:(input?input.value:'')).trim().toLowerCase();
-  if(input) input.style.display='';
+  if(input) input.style.display=readonly?'none':'';
   const sel=boards==='*'?[]:(boards||'').split(',').filter(Boolean);
   wrap.dataset.boards=sel.join(',');
   wrap.dataset.limit=JSON.stringify(limit||[]);
+  wrap.dataset.readonly=readonly?'1':'';
   let pool=WG_BOARDS;
   if(limit) pool=WG_BOARDS.filter(b=>limit.includes(b.board_id));
   const totalPool=pool.length;
   if(search) pool=pool.filter(b=>((b.board_name||'').toLowerCase().includes(search))||((b.board_id||'').toLowerCase().includes(search)));
-  const chk=pool.map(b=>`<label class="tm-grp-opt" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}><span style="font-size:12.5px">${esc(b.board_name)}</span></label>`).join('');
+  const chk=pool.map(b=>`<label class="tm-grp-opt" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}${readonly?' disabled':''}><span style="font-size:12.5px">${esc(b.board_name)}</span></label>`).join('');
   wrap.innerHTML=(chk||'<span style="color:var(--text3);font-size:12px">'+(search?'无匹配板块':(limit?'上级部门未绑定看板，暂无可用选项':'暂无看板数据'))+'</span>');
-  if(limit){
+  if(readonly){
+    hint.textContent='部门/中心节点的板块由「看板管理 · 归属部门」统一决定（当前 '+sel.length+' 个）；小组级节点仍可在此手动勾选。';
+  }else if(limit){
     hint.textContent='上级部门已绑定 '+totalPool+' 个看板，子级仅能选择其中部分（或留空不限制）。';
   }else{
     hint.textContent='勾选该工作组可访问的看板；子级只能选择父级范围内的看板；留空=不限制。';
@@ -4691,11 +4725,14 @@ function renderBoardChecks(boards, limit, searchTerm){
 }
 document.getElementById('g_boards_search').addEventListener('input',e=>{
   const wrap=document.getElementById('g_new_boards');
+  if(wrap.dataset.readonly==='1') return;
   const limit=JSON.parse(wrap.dataset.limit||'[]');
   const checked=[...document.querySelectorAll('.g_brd_chk:checked')].map(c=>c.value).join(',');
   renderBoardChecks(checked, limit, e.target.value);
 });
 function collectBoardChecks(){
+  const wrap=document.getElementById('g_new_boards');
+  if(wrap&&wrap.dataset.readonly==='1') return '';   // 部门级绑定由看板管理维护
   return [...document.querySelectorAll('.g_brd_chk:checked')].map(c=>c.value).join(',');
 }
 function onWgParentChange(){
@@ -4711,7 +4748,6 @@ function resetWgForm(){
   document.getElementById('g_submit_btn').textContent='添加';
   document.getElementById('g_cancel_edit').style.display='none';
   document.getElementById('g_new_name').value='';
-  document.getElementById('g_new_desc').value='';
   const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
   const top=ORG_FLAT.find(x=>x.node_type==='center');
   rebuildWgParentOptions(0, top?top.id:0);
@@ -4764,13 +4800,13 @@ function renderWgList(){
     const st=ORG_TYPE_STYLE[n.node_type]||ORG_TYPE_STYLE.group;
     const sel=ORG_SELECTED===n.id;
     return `
-    <div class="org-node-row${sel?' sel':''}" style="padding-left:${10+dep*20}px;background:${sel?'#f0f7ff':(n.parent_id?'#fff':'#fafafa')}" onclick="selectOrgNode(${n.id})">
+    <div class="org-node-row${sel?' sel':''}${n.parent_id?'':' root'}" data-org-id="${n.id}" style="padding-left:${10+dep*20}px" onclick="selectOrgNode(${n.id})">
       ${(n.children&&n.children.length)?`<button class="icon-btn" onclick="event.stopPropagation();toggleWg(${n.id})" style="padding:0;width:20px;height:20px;flex-shrink:0" title="展开/折叠">${WG_COLLAPSED.has(n.id)?'▶':'▼'}</button>`:'<span style="width:20px;flex-shrink:0"></span>'}
       <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:76px">${st.icon} ${esc(n.name)}</span>
       <span style="font-size:10.5px;color:${st.color};background:${st.bg};border:1px solid ${st.bd};border-radius:3px;padding:0 5px;flex-shrink:0">${esc(n.type_name||'')}</span>
       <span style="color:var(--text2);font-size:11.5px;width:66px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(()=>{const l=leaderOf(n);return l?esc(l):'<span style="color:var(--text3)">未任命</span>'})()}</span>
       <span style="font-size:11.5px;color:var(--text3);flex-shrink:0;min-width:44px;text-align:right" title="任职人数">${apptCount(n)} 人</span>
-      <span style="color:${n.wg_boards?'var(--primary)':'var(--text3)'};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;padding-left:8px">${n.node_type==='center'?'🔒 全部看板（锁定）':(n.wg_boards?('板块：'+boardNames(n.wg_boards)):'未绑定板块')}</span>
+      <span style="color:${(n.node_type==='dept'||n.node_type==='center')?(n.owned_boards&&n.owned_boards.length?'var(--primary)':'var(--text3)'):(n.wg_boards?'var(--primary)':'var(--text3)')};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;padding-left:8px">${n.node_type==='center'?'🔒 全部看板（中心）':(n.node_type==='dept'?((n.owned_boards&&n.owned_boards.length)?('板块：'+boardNames(n.owned_boards.join(','))):'未归属板块（看板管理中指定）'):(n.wg_boards?('板块：'+boardNames(n.wg_boards)):'未绑定板块'))}</span>
       ${canEdit?`<span style="flex-shrink:0" onclick="event.stopPropagation()">
         <button class="icon-btn" onclick="addWgChild(${n.id})" title="在此节点下新增子节点">+ 子节点</button>
         <button class="icon-btn" onclick="editWg(${n.id})">编辑</button>
@@ -4813,7 +4849,6 @@ function editWg(gid){
   document.getElementById('g_submit_btn').textContent='保存修改';
   document.getElementById('g_cancel_edit').style.display='';
   document.getElementById('g_new_name').value=g.name;
-  document.getElementById('g_new_desc').value=g.description||'';
   const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
   rebuildWgParentOptions(gid, g.parent_id||0);
   // 类型下拉：编辑时列出该类型自身 + 上级允许的其他类型（供调整层级）
@@ -4837,28 +4872,30 @@ function editWg(gid){
     document.getElementById('g_boards_hint').textContent='';
     const s=document.getElementById('g_boards_search'); if(s) s.style.display='none';
   }else{
-    renderBoardChecks(g.wg_boards||'', parentBoardLimit(pid));
+    const isDeptNode=(g.node_type==='center'||g.node_type==='dept');
+    const scope=isDeptNode?nodeBoardScope(g):(g.wg_boards||'');
+    renderBoardChecks(isDeptNode?((scope||[]).join(',')):scope, parentBoardLimit(pid), undefined, isDeptNode);
   }
   renderOrgRoles();
+  paintOrgSelection();
 }
 async function submitWgForm(){
   const name=document.getElementById('g_new_name').value.trim();
   const parent=parseInt(document.getElementById('g_new_parent').value||'0',10);
-  const desc=document.getElementById('g_new_desc').value.trim();
   const type=document.getElementById('g_new_type').value;
   if(!name){toast('请输入节点名称');return}
   if(!type){toast('请选择节点类型');return}
   const node=ORG_FLAT.find(x=>x.id===WG_EDIT_ID);
   const isCenter=type==='center';
   const boards=isCenter?'*':collectBoardChecks();
-  const body={name,node_type:type,parent_id:parent,function:'',description:desc};
+  const body={name,node_type:type,parent_id:parent,function:''};
   try{
     if(WG_EDIT_ID){
       await api('/api/org/nodes/'+WG_EDIT_ID,{method:'PUT',body:JSON.stringify(body)});
       // 板块绑定走旧接口（workgroups），与新模型节点一一对应
       if(node&&!isCenter){
         const wg=WG_FLAT.find(x=>x.name===node.name);
-        if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id,leader:wg.leader||'',function:node.function||'',description:desc,boards})});
+        if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id,leader:wg.leader||'',function:node.function||'',boards})});
       }
       toast('已更新');
     }else{
@@ -4868,7 +4905,7 @@ async function submitWgForm(){
       if(nid&&!isCenter&&boards){
         const fresh=await api('/api/org/tree');
         const nn=(function find(ns,id){for(const x of ns||[]){if(x.id===id)return x;const rr=find(x.children,id);if(rr)return rr}return null})(fresh.tree,nid);
-        if(nn){const wg=WG_FLAT.find(x=>x.name===nn.name);if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id||0,leader:'',function:'',description:desc,boards})})}
+        if(nn){const wg=WG_FLAT.find(x=>x.name===nn.name);if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id||0,leader:'',function:'',boards})})}
       }
       toast('已添加');
     }
@@ -5168,14 +5205,35 @@ if(window.__IS_FILE__){showFileGuard();probeBackend();}
 var BC_EDIT_ID=0;
 var BC_BOARDS=[];
 var BC_SELECTED=null;
-var BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+var BC_SEL=new Set();     // 批量选中的板块（进入看板管理时默认全选可见板块）
+var BC_FORM={year:'2026',dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:''};
 var BC_FILTER={year:'',dept:'',attr:'',status:''};
 var BC_YEARS=['2025','2026','2027','2028','2029','2030'];
-var BC_DEPTS=['财务中心','核算部','总账部','管理部','资金部','商务部'];
+var BC_DEPTS=[];          // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
+var BC_DEPTS_LOADED=false;
+// 归属部门下拉：中心级部门（财务中心）视为「全部板块」，对全员展示
+function bcDeptLabel(d){
+  return d&&d.is_center?(d.name+'（全部板块 · 对全员展示）'):(d?d.name:'');
+}
+function bcDeptName(id){
+  const d=BC_DEPTS.find(x=>String(x.id)===String(id));
+  return d?d.name:'';
+}
+function bcDeptNodeId(name){
+  const d=BC_DEPTS.find(x=>x.name===name);
+  return d?d.id:0;
+}
 function initBcListEvents(){
   const box=document.getElementById('bcList');
   if(!box||box._bcEvtBound)return;
   box.addEventListener('click',function(e){
+    // 勾选框：只切换多选状态，不切换右侧编辑对象
+    if(e.target.classList.contains('bc-pick')){
+      const bid=e.target.getAttribute('data-bid');
+      if(bid)bcTogglePick(bid,e.target.checked);
+      e.stopPropagation();
+      return;
+    }
     const item=e.target.closest('.bc-item');
     if(!item)return;
     const bid=item.getAttribute('data-bid');
@@ -5183,25 +5241,60 @@ function initBcListEvents(){
   });
   box._bcEvtBound=true;
 }
+// 多选状态（可见板块默认全选）
+function bcTogglePick(bid,checked){
+  if(checked)BC_SEL.add(bid);else BC_SEL.delete(bid);
+  bcPaintPick();
+}
+function bcPickAll(checked){
+  BC_SEL=new Set(checked?bcVisibleBoards().map(function(b){return b.board_id}):[]);
+  bcPaintPick();
+}
+function bcVisibleBoards(){
+  return BC_BOARDS.filter(function(b){
+    if(BC_FILTER.year && b.year!==BC_FILTER.year)return false;
+    if(BC_FILTER.dept && b.dept!==BC_FILTER.dept)return false;
+    if(BC_FILTER.attr && b.attr!==BC_FILTER.attr)return false;
+    if(BC_FILTER.status){
+      if(BC_FILTER.status==='未配置'){if(b.status)return false;}
+      else if(b.status!==BC_FILTER.status)return false;
+    }
+    return true;
+  });
+}
+function bcPaintPick(){
+  const box=document.getElementById('bcList');
+  if(!box)return;
+  box.querySelectorAll('.bc-pick').forEach(function(el){
+    el.checked=BC_SEL.has(el.getAttribute('data-bid'));
+  });
+  const n=document.getElementById('bcPickCount');
+  if(n)n.textContent=BC_SEL.size;
+}
 async function openBoardConfigModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
   await loadBoardConfig();
   initBcListEvents();
   BC_SELECTED=null; BC_EDIT_ID=0;
-  BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+  BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+  // 默认选中全部可见板块
+  BC_SEL=new Set(bcVisibleBoards().map(function(b){return b.board_id}));
+  renderBoardList();
   renderEditArea();
   document.getElementById('boardConfigModal').style.display='flex';
 }
 async function loadBoardConfig(){
   const res=await api('/api/boards');
   BC_BOARDS=res.boards||[];
+  // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
+  BC_DEPTS=(res.depts||[]).slice();
   renderFilters();
   renderBoardList();
 }
 function renderFilters(){
   const all='<option value="">全部</option>';
   document.getElementById('bcf_year').innerHTML=all+BC_YEARS.map(function(y){return '<option value="'+y+'"'+(BC_FILTER.year===y?' selected':'')+'>'+y+'</option>'}).join('');
-  document.getElementById('bcf_dept').innerHTML=all+BC_DEPTS.map(function(d){return '<option value="'+esc(d)+'"'+(BC_FILTER.dept===d?' selected':'')+'>'+esc(d)+'</option>'}).join('');
+  document.getElementById('bcf_dept').innerHTML=all+BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FILTER.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>'}).join('');
   document.getElementById('bcf_attr').innerHTML=all+['日常','专项'].map(function(a){return '<option value="'+a+'"'+(BC_FILTER.attr===a?' selected':'')+'>'+a+'</option>'}).join('');
   document.getElementById('bcf_status').innerHTML=all
     +'<option value="启用"'+(BC_FILTER.status==='启用'?' selected':'')+'>启用</option>'
@@ -5221,19 +5314,23 @@ function renderBoardList(){
   });
   const cnt=document.getElementById('bcLeftCount'); if(cnt)cnt.textContent=list.length;
   const box=document.getElementById('bcList');
-  if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';return}
+  if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';bcPaintPick();return}
   box.innerHTML=list.map(function(b){
     const st = b.status==='封存' ? '<span class="badge-locked">封存</span>'
             : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
     const sel = (BC_SELECTED && BC_SELECTED.board_id===b.board_id) ? ' active':'';
+    const deptTip = b.dept?('归属：'+esc(b.dept)):'';
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
-      +'<div class="nm"><span>'+esc(b.board_name||b.board_id)+'</span>'+st+'</div>'
+      +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
+      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+'</div>'
       +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
       +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
+      +(deptTip?'<span>'+deptTip+'</span>':'')
       +'<span style="margin-left:auto;color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span></div>'
       +'</div>';
   }).join('');
   setBcListScroll(list.length);
+  bcPaintPick();
 }
 function setBcListScroll(n){
   const box=document.getElementById('bcList');
@@ -5262,6 +5359,8 @@ function setBcListScroll(n){
 }
 function bcFilterChange(dim,val){
   BC_FILTER[dim]=val;
+  // 过滤后可见板块集合变化 → 默认全选可见板块
+  BC_SEL=new Set(bcVisibleBoards().map(function(b){return b.board_id}));
   renderBoardList();
 }
 function bcSelect(bid){
@@ -5269,7 +5368,7 @@ function bcSelect(bid){
   if(!b)return;
   BC_SELECTED=b;
   BC_EDIT_ID=b.config_id||0;
-  BC_FORM={year:b.year||'2026',dept:b.dept||'财务中心',attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};
+  BC_FORM={year:b.year||'2026',dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};
   renderBoardList();
   renderEditArea();
 }
@@ -5278,12 +5377,50 @@ function configBoard(){
   if(!unconf.length){toast('所有看板均已配置');return;}
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
-  BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+  BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+  renderBoardList();
   renderEditArea();
 }
 function bcChangeBoard(bid){
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
-  if(b){BC_SELECTED=b;BC_EDIT_ID=0;BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};}
+  if(b){
+    BC_SELECTED=b;BC_EDIT_ID=0;
+    BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+    renderBoardList();
+    renderEditArea();
+  }
+}
+// 归属部门变更：同步部门节点 id（看板管理 ↔ 架构管理层级联动）
+function bcSetDept(name){
+  BC_FORM.dept=name||'';
+  BC_FORM.dept_node_id=bcDeptNodeId(name||'');
+  const h=document.getElementById('bc_dept_hint');
+  if(h)h.textContent=bcDeptHint(BC_FORM.dept);
+}
+function bcDeptHint(name){
+  if(!name)return '归属部门取自【架构管理】的部门层级';
+  const d=BC_DEPTS.find(function(x){return x.name===name;});
+  if(d&&d.is_center)return '中心级归属：该板块对全员展示（全部板块）';
+  return '该部门下的成员可见此板块；其余成员按工作组绑定进一步过滤';
+}
+// 批量应用：把当前表单维度应用到左侧勾选的板块
+async function applyBulkConfig(){
+  const ids=Array.from(BC_SEL);
+  if(!ids.length){toast('请先在左侧勾选板块');return;}
+  if(!BC_FORM.dept){toast('请选择归属部门');return;}
+  try{
+    const r=await api('/api/board-config/bulk',{method:'POST',body:JSON.stringify({
+      board_ids:ids, year:BC_FORM.year, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id,
+      attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark})});
+    await loadBoardConfig();
+    ME=await api('/api/me');
+    renderTabs();
+    const b=BC_BOARDS.find(function(x){return x.board_id===BC_SELECTED&&BC_SELECTED.board_id});
+    if(b){BC_FORM={year:b.year||'2026',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
+    renderBoardList();
+    renderEditArea();
+    toast('已应用到 '+(r.updated||0)+' 个板块（新建 '+(r.created||0)+'）');
+  }catch(e){}
 }
 function bcPick(dim,val){
   BC_FORM[dim]=val;
@@ -5313,18 +5450,21 @@ function renderEditArea(){
       +'<select class="form-select" id="bc_board" onchange="bcChangeBoard(this.value)">'+opts+'</select></div>';
   }
   const yearPills=BC_YEARS.map(function(y){return '<span class="bc-pill'+(BC_FORM.year===y?' on':'')+'" data-dim="year" data-val="'+y+'" onclick="bcPick(\'year\',\''+y+'\')">'+y+'</span>';}).join('');
-  const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d)+'"'+(BC_FORM.dept===d?' selected':'')+'>'+esc(d)+'</option>';}).join('');
+  const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FORM.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>';}).join('');
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
   const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
   let footer='<div class="bc-footer">';
   if(isEdit){footer+='<button class="btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteBoardConfig('+BC_EDIT_ID+')">删除配置</button>';}
-  footer+='<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
+  footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个板块</button>'
+    +'<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
     +'<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
   area.innerHTML='<div class="bc-edit">'
     +'<div class="bc-edit-title">'+(isEdit?'✏️ 编辑看板配置':'➕ 新建看板配置')+'<span class="sub">'+(isEdit?'修改该看板的维度属性':'为真实看板登记维度属性')+'</span></div>'
     +boardBlock
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>年份</div><div class="bc-pills">'+yearPills+'</div></div>'
-    +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div><select class="form-select" id="bc_dept" onchange="BC_FORM.dept=this.value" style="max-width:240px">'+deptOpts+'</select></div>'
+    +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div>'
+    +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="max-width:320px">'+deptOpts+'</select>'
+    +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+'</div></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills">'+attrPills+'</div></div>'
     +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills">'+statusPills+'</div></div>'
     +'<div class="bc-section"><div class="lab">备注（可选）</div><textarea class="form-textarea" id="bc_remark" rows="2" placeholder="如：年度预算看板" oninput="BC_FORM.remark=this.value">'+esc(BC_FORM.remark||'')+'</textarea></div>'
@@ -5333,13 +5473,14 @@ function renderEditArea(){
 }
 function resetBoardConfigForm(){
   BC_EDIT_ID=0; BC_SELECTED=null;
-  BC_FORM={year:'2026',dept:'财务中心',attr:'日常',status:'启用',remark:''};
+  BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+  renderBoardList();
   renderEditArea();
 }
 async function submitBoardConfigForm(){
   if(!BC_SELECTED){toast('请选择看板');return;}
   const bid=BC_SELECTED.board_id;
-  const payload={board_id:bid, year:BC_FORM.year, dept:BC_FORM.dept, attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
+  const payload={board_id:bid, year:BC_FORM.year, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept), attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
   try{
     if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
     else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
@@ -5348,7 +5489,8 @@ async function submitBoardConfigForm(){
     ME=await api('/api/me');
     renderTabs();
     const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
-    if(b){BC_SELECTED=b;BC_EDIT_ID=b.config_id||0;BC_FORM={year:b.year||'2026',dept:b.dept||'财务中心',attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
+    if(b){BC_SELECTED=b;BC_EDIT_ID=b.config_id||0;BC_FORM={year:b.year||'2026',dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
+    renderBoardList();
     renderEditArea();
     toast('已保存');
   }catch(e){ /* api 内部已 toast 错误 */ }

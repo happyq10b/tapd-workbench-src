@@ -78,7 +78,6 @@ CREATE TABLE IF NOT EXISTS workgroups (
     parent_id   INTEGER NOT NULL DEFAULT 0,    -- 上级工作组 id，0=顶层部门
     leader      TEXT NOT NULL DEFAULT '',      -- 组长，必须存在于 team_members.name
     function    TEXT NOT NULL DEFAULT '',      -- 职能（非必填）
-    description TEXT NOT NULL DEFAULT '',      -- 职能说明（长文本，非必填）
     boards      TEXT NOT NULL DEFAULT '',      -- 板块绑定：'*'=全部，逗号分隔 board_id，空=未绑定（跟随账号权限）
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE(parent_id, name)
@@ -94,18 +93,26 @@ CREATE TABLE IF NOT EXISTS boards (
 );
 CREATE INDEX IF NOT EXISTS idx_boards_sort ON boards(sort, board_id);
 
--- 看板管理（配置板块）：年份 / 归属部门 / 属性 / 状态 四维配置，枚举值由 CHECK 约束限定
+-- 看板管理（配置板块）：年份 / 归属部门 / 属性 / 状态 四维配置
+-- 归属部门不再用固定枚举，改由【架构管理】的部门层级决定：
+--   dept         归属部门名称（冗余存储，便于按名称分组展示）
+--   dept_node_id 归属部门对应的 org_nodes.id（权威关联；0=未配置）
+-- 年份/属性/状态的枚举仍由 CHECK 约束限定。
 CREATE TABLE IF NOT EXISTS board_config (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id    TEXT NOT NULL DEFAULT '',
     year        TEXT NOT NULL CHECK (year IN ('2025','2026','2027','2028','2029','2030')),
-    dept        TEXT NOT NULL CHECK (dept IN ('财务中心','核算部','总账部','管理部','资金部','商务部')),
+    dept        TEXT NOT NULL DEFAULT '',
+    dept_node_id INTEGER NOT NULL DEFAULT 0,
     attr        TEXT NOT NULL CHECK (attr IN ('日常','专项')),
     status      TEXT NOT NULL DEFAULT '启用' CHECK (status IN ('启用','封存')),
     remark      TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-    UNIQUE(year, dept, attr)   -- 同一（年份,归属部门,属性）仅一条配置，状态为其当前态
+    UNIQUE(board_id)
 );
 CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(year, dept, attr);
+-- 注：idx_board_config_dept 依赖 dept_node_id，老库需先补列才能建索引，
+--     统一放在 _migrate_schema() 的 ALTER/重建之后创建。
 
 -- ============================================================
 -- 组织架构（新模型）
@@ -142,7 +149,6 @@ CREATE TABLE IF NOT EXISTS org_nodes (
     wg_id       INTEGER NOT NULL DEFAULT 0,   -- 关联 workgroups.id（兼容视图），0=未关联
     is_anchor   INTEGER NOT NULL DEFAULT 0,   -- 1=主架构锚点节点（与 workgroups 一一对应）
     function    TEXT NOT NULL DEFAULT '',
-    description TEXT NOT NULL DEFAULT '',
     sort        INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE(parent_id, name)
@@ -329,6 +335,23 @@ CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(username);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
 """
 
+def _drop_description_columns(conn):
+    """删除 org_nodes / workgroups 上的「职能说明」（description）遗留列。
+
+    「职能说明」已从架构管理模块整体下线（表单、渲染、提交、接口模型全部清理），
+    存量库里残留的列不再被任何代码读写，一并清掉以免留下死字段。
+    仅当列存在时才执行，幂等；SQLite < 3.35 不支持 DROP COLUMN 时跳过（旧库兼容）。
+    """
+    for table in ('org_nodes', 'workgroups'):
+        cols = [r[1] for r in conn.execute(f'PRAGMA table_info({table})').fetchall()]
+        if 'description' not in cols:
+            continue
+        try:
+            conn.execute(f'ALTER TABLE {table} DROP COLUMN description')
+        except sqlite3.OperationalError:
+            pass  # 老版本 SQLite 不支持 DROP COLUMN，保留空列（无任何读写，不影响运行）
+
+
 def _migrate_schema(conn):
     """增量迁移（幂等，仅列缺失时执行）：
     1) boards 表增加自增 id 主键，board_id 保留为 UNIQUE 业务键继续关联 cards；
@@ -355,21 +378,51 @@ def _migrate_schema(conn):
         conn.execute('CREATE INDEX IF NOT EXISTS idx_boards_sort ON boards(sort, board_id)')
     # ---- board_config：重构为按 board_id 关联真实看板 ----
     ccols = [r[1] for r in conn.execute('PRAGMA table_info(board_config)').fetchall()]
+    csql = (conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='board_config'")
+                .fetchone() or [''])[0] or ''
+    # 归属部门改为联动架构管理层级：
+    #   1) 去掉 dept 的固定枚举 CHECK（部门集合随架构层级动态变化）
+    #   2) 新增 dept_node_id 指向 org_nodes.id
+    # 需要重建表时：CHECK 约束在 SQLite 中无法直接修改，只能建新表拷贝数据。
+    need_rebuild = ('dept_node_id' not in ccols) or ('CHECK (dept IN' in csql)
     if 'board_id' not in ccols:
         conn.execute('ALTER TABLE board_config RENAME TO board_config_old')
         conn.execute("""CREATE TABLE board_config (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            board_id TEXT NOT NULL DEFAULT '',
-            year TEXT NOT NULL CHECK (year IN ('2025','2026','2027','2028','2029','2030')),
-            dept TEXT NOT NULL CHECK (dept IN ('财务中心','核算部','总账部','管理部','资金部','商务部')),
-            attr TEXT NOT NULL CHECK (attr IN ('日常','专项')),
-            status TEXT NOT NULL DEFAULT '启用' CHECK (status IN ('启用','封存')),
-            remark TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            board_id    TEXT NOT NULL DEFAULT '',
+            year        TEXT NOT NULL CHECK (year IN ('2025','2026','2027','2028','2029','2030')),
+            dept        TEXT NOT NULL DEFAULT '',
+            dept_node_id INTEGER NOT NULL DEFAULT 0,
+            attr        TEXT NOT NULL CHECK (attr IN ('日常','专项')),
+            status      TEXT NOT NULL DEFAULT '启用' CHECK (status IN ('启用','封存')),
+            remark      TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             UNIQUE(board_id)
         )""")
         conn.execute('DROP TABLE board_config_old')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config_board ON board_config(board_id)')
+    elif need_rebuild:
+        # 保留原有行，仅放宽 dept 约束并补 dept_node_id
+        conn.execute('ALTER TABLE board_config RENAME TO board_config_old')
+        conn.execute("""CREATE TABLE board_config (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            board_id    TEXT NOT NULL DEFAULT '',
+            year        TEXT NOT NULL CHECK (year IN ('2025','2026','2027','2028','2029','2030')),
+            dept        TEXT NOT NULL DEFAULT '',
+            dept_node_id INTEGER NOT NULL DEFAULT 0,
+            attr        TEXT NOT NULL CHECK (attr IN ('日常','专项')),
+            status      TEXT NOT NULL DEFAULT '启用' CHECK (status IN ('启用','封存')),
+            remark      TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            UNIQUE(board_id)
+        )""")
+        conn.execute("""INSERT INTO board_config (id, board_id, year, dept, attr, status, remark, created_at)
+                        SELECT id, board_id, year, dept, attr, status, remark, created_at FROM board_config_old""")
+        conn.execute('DROP TABLE board_config_old')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config_board ON board_config(board_id)')
+    # 索引统一在重建后补建（重建会丢索引）
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(year, dept, attr)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config_dept ON board_config(dept_node_id)')
 
     # ---- groups -> workgroups（组织概念改为工作组，字段同步更名） ----
     tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
@@ -380,13 +433,12 @@ def _migrate_schema(conn):
             parent_id INTEGER NOT NULL DEFAULT 0,
             leader TEXT NOT NULL DEFAULT '',
             function TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
             boards TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             UNIQUE(parent_id, name)
         )''')
-        conn.execute('''INSERT INTO workgroups (id, name, parent_id, leader, function, description, boards, created_at)
-                        SELECT id, name, parent_id, leader, function, description, boards, created_at FROM groups''')
+        conn.execute('''INSERT INTO workgroups (id, name, parent_id, leader, function, boards, created_at)
+                        SELECT id, name, parent_id, leader, function, boards, created_at FROM groups''')
         conn.execute('DROP TABLE groups')
     elif 'groups' in tables and 'workgroups' in tables:
         # 两个表同时存在：以 workgroups 为准，删除旧表
@@ -445,8 +497,8 @@ def _migrate_org(conn):
                      ' VALUES (?,?,?,?,?)', (nt, rk, rn, us, so))
 
     # ---------- 2) 节点转换 ----------
-    wgs = [dict(zip(('id', 'name', 'parent_id', 'leader', 'function', 'description'), r))
-           for r in conn.execute('SELECT id, name, parent_id, leader, function, description'
+    wgs = [dict(zip(('id', 'name', 'parent_id', 'leader', 'function'), r))
+           for r in conn.execute('SELECT id, name, parent_id, leader, function'
                                  ' FROM workgroups ORDER BY id')]
     if not wgs:
         return
@@ -481,14 +533,14 @@ def _migrate_org(conn):
         if row:
             id_map[w['id']] = row[0]
             conn.execute('UPDATE org_nodes SET name=?, node_type=?, is_anchor=1,'
-                         ' function=?, description=? WHERE id=?',
-                         (w['name'], _node_type(w), w['function'] or '', w['description'] or '', row[0]))
+                         ' function=? WHERE id=?',
+                         (w['name'], _node_type(w), w['function'] or '', row[0]))
             continue
         # 新建：父级先建（按 parent_id 递增顺序，父 id 更小）
         pid = id_map.get(w['parent_id'], 0)
         cur = conn.execute('INSERT INTO org_nodes (name, node_type, parent_id, wg_id, is_anchor,'
-                            ' function, description) VALUES (?,?,?,?,1,?,?)',
-                            (w['name'], _node_type(w), pid, w['id'], w['function'] or '', w['description'] or ''))
+                            ' function) VALUES (?,?,?,?,1,?)',
+                            (w['name'], _node_type(w), pid, w['id'], w['function'] or ''))
         id_map[w['id']] = cur.lastrowid
         existing.add(cur.lastrowid)
 
@@ -616,10 +668,11 @@ def init_db(force_import=False):
     for c, ddl in (('parent_id', "ALTER TABLE workgroups ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0"),
                    ('boards', "ALTER TABLE workgroups ADD COLUMN boards TEXT NOT NULL DEFAULT ''"),
                    ('leader', "ALTER TABLE workgroups ADD COLUMN leader TEXT NOT NULL DEFAULT ''"),
-                   ('function', "ALTER TABLE workgroups ADD COLUMN function TEXT NOT NULL DEFAULT ''"),
-                   ('description', "ALTER TABLE workgroups ADD COLUMN description TEXT NOT NULL DEFAULT ''")):
+                   ('function', "ALTER TABLE workgroups ADD COLUMN function TEXT NOT NULL DEFAULT ''")):
         if c not in wcols:
             conn.execute(ddl)
+    # 「职能说明」（description）已从架构管理模块整体下线：清掉存量库里的遗留列
+    _drop_description_columns(conn)
     # 首次导入：cards 为空才导入
     cnt = conn.execute("SELECT COUNT(*) FROM cards WHERE deleted=0").fetchone()[0]
     if cnt == 0 or force_import:
@@ -690,6 +743,12 @@ def init_db(force_import=False):
     # 之后新建的节点直接写 org_nodes（并同步 workgroups 兼容视图）。
     # ============================================================
     _migrate_org(conn)
+    # 看板归属部门 → 架构部门节点（按名称匹配中心/部门节点；匹配不到则保持 0=未配置）
+    conn.execute("""UPDATE board_config SET dept_node_id = COALESCE((
+                            SELECT n.id FROM org_nodes n
+                            WHERE n.name = board_config.dept AND n.node_type IN ('center','dept')
+                            ORDER BY n.id LIMIT 1), 0)
+                     WHERE dept_node_id = 0 AND dept <> ''""")
     # 看板表：从现有 cards 派生已存在的看板，保证历史看板不丢失（全新看板由 /api/boards 写入）
     for r in conn.execute('SELECT DISTINCT board_id, board_name, workspace_id FROM cards WHERE deleted=0'):
         conn.execute('INSERT OR IGNORE INTO boards (board_id, board_name, workspace_id) VALUES (?,?,?)',
