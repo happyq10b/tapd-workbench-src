@@ -262,6 +262,10 @@ def require_admin(username: str = Depends(require_auth)):
 
 # ---------------- 审计日志 ----------------
 def client_ip(request: Request) -> str:
+    # request 可能为 None（内部调用 / 测试直调函数时）→ 兜底返回空串，
+    # 否则访问 request.headers 会抛 AttributeError，导致整个写接口 500
+    if request is None:
+        return ''
     fwd = request.headers.get('x-forwarded-for')
     if fwd:
         return fwd.split(',')[0].strip()
@@ -843,6 +847,7 @@ class CardCreate(BaseModel):
 
 class CommentReq(BaseModel):
     content: str
+    mentions: list[str] = []      # 被 @ 的成员姓名列表（分号分隔落库）
 
 def log_action(card_id, username, action, detail=''):
     dbe('INSERT INTO actions (card_id, username, action, detail) VALUES (?,?,?,?)',
@@ -909,6 +914,10 @@ async def create_card(req: CardCreate, username: str = Depends(require_editor), 
         boards, columns = user_allowed(username)
         if not perm_pass(dict(parent[0]), boards, columns):
             raise HTTPException(403, '父事项不可见，无法创建子事项')
+        # 层级限制：本期只支持「主事项 → 子事项」两层。
+        # 父事项自身已有父级 → 说明它已经是子事项，不能再往下挂（防止出现第三层）。
+        if (parent[0]['parent_id'] or ''):
+            raise HTTPException(400, '本期不支持更深层级：子事项下不能再创建子事项')
         req.board_id = parent[0]['board_id']
         req.column_id = ''
         # 时间约束：子事项起始 ≥ 父起始，截止 ≤ 父截止，且起始 ≤ 截止
@@ -1038,19 +1047,96 @@ def heartbeat(card_id: str, username: str = Depends(require_editor)):
 # ---------------- API：评论 / 日志 ----------------
 @app.get('/api/cards/{card_id}/comments')
 def get_comments(card_id: str, username: str = Depends(require_auth)):
-    rows = dbq('SELECT id, card_id, username, content, created_at FROM comments WHERE card_id=? ORDER BY id', (card_id,))
+    rows = dbq('SELECT id, card_id, username, content, mentions, created_at FROM comments WHERE card_id=? ORDER BY id', (card_id,))
     return {'comments': [dict(r) for r in rows]}
 
 @app.post('/api/cards/{card_id}/comments')
 async def add_comment(card_id: str, req: CommentReq, username: str = Depends(require_auth), request: Request = None):
     if not req.content or not req.content.strip():
         raise HTTPException(400, '评论不能为空')
-    dbe('INSERT INTO comments (card_id, username, content) VALUES (?,?,?)',
-        (card_id, username, req.content.strip()))
+    # @ 提及：mentions 是被提及的成员姓名列表（与 owner 字段同口径）
+    mentions = [m.strip() for m in (req.mentions or []) if m and m.strip()]
+    # 去重且保序
+    seen = set(); ms = []
+    for m in mentions:
+        if m not in seen:
+            seen.add(m); ms.append(m)
+    dbe('INSERT INTO comments (card_id, username, content, mentions) VALUES (?,?,?,?)',
+        (card_id, username, req.content.strip(), ';'.join(ms)))
     log_action(card_id, username, 'comment', req.content.strip()[:200])
     audit_log(username, client_ip(request), 'comment', f'卡片 {card_id}', '发表评论', 'success')
+    # 为每个被提及的成员投递一条消息（收件人 = 成员对应的登录账号；没有账号的成员按姓名记录）
+    if ms:
+        card_name = ''
+        crow = dbq('SELECT card_name FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+        if crow:
+            card_name = crow[0]['card_name'] or ''
+        for m in ms:
+            recv = _mention_receiver(m)
+            if not recv or recv == username:
+                continue   # 不给自己发消息
+            dbe('INSERT INTO messages (receiver, sender, card_id, kind, content) VALUES (?,?,?,?,?)',
+                (recv, username, card_id, 'mention',
+                 (req.content.strip()[:200] if req.content.strip() else '提及了你')))
     await ws_mgr.broadcast({'type': 'comment', 'card_id': card_id,
         'by': username}, exclude=username)
+    return {'ok': True}
+
+# ---------------- API：消息中心 ----------------
+def _mention_receiver(member_name):
+    """把被提及的成员姓名映射到收件人标识。
+    优先用该成员绑定的登录账号（team_members.account）；
+    没有绑定账号时退回姓名本身（前端匹配当前用户名）。
+    返回空串表示无法投递。"""
+    name = (member_name or '').strip()
+    if not name:
+        return ''
+    rows = dbq('SELECT account FROM team_members WHERE name=?', (name,))
+    if rows and (rows[0]['account'] or '').strip():
+        return rows[0]['account'].strip()
+    return name
+
+@app.get('/api/messages')
+def get_messages(username: str = Depends(require_auth)):
+    """当前用户的消息列表 + 未读数。
+    收件人匹配：账号本身、以及该账号绑定的成员姓名（两种都收，避免绑定遗漏）。"""
+    names = [username]
+    rows = dbq('SELECT name FROM team_members WHERE account=?', (username,))
+    for r in rows:
+        if r['name'] and r['name'] not in names:
+            names.append(r['name'])
+    marks = ','.join('?' * len(names))
+    msgs = dbq(f'''SELECT id, receiver, sender, card_id, kind, content, read_at, created_at
+                    FROM messages WHERE receiver IN ({marks}) ORDER BY id DESC LIMIT 200''', tuple(names))
+    unread = dbq(f'SELECT COUNT(*) c FROM messages WHERE receiver IN ({marks}) AND read_at=\'\'', tuple(names))
+    return {'messages': [dict(r) for r in msgs], 'unread': unread[0]['c'] if unread else 0}
+
+@app.post('/api/messages/{mid}/read')
+def read_message(mid: int, username: str = Depends(require_auth)):
+    names = [username]
+    rows = dbq('SELECT name FROM team_members WHERE account=?', (username,))
+    for r in rows:
+        if r['name'] and r['name'] not in names:
+            names.append(r['name'])
+    marks = ','.join('?' * len(names))
+    cur = dbq(f'SELECT id, read_at FROM messages WHERE id=? AND receiver IN ({marks})', (mid,) + tuple(names))
+    if not cur:
+        raise HTTPException(404, '消息不存在或不属于当前用户')
+    if not cur[0]['read_at']:
+        dbe("UPDATE messages SET read_at=datetime('now','localtime') WHERE id=?", (mid,))
+    return {'ok': True}
+
+@app.post('/api/messages/read-all')
+def read_all_messages(username: str = Depends(require_auth)):
+    """一键标记当前用户的全部消息为已读。"""
+    names = [username]
+    rows = dbq('SELECT name FROM team_members WHERE account=?', (username,))
+    for r in rows:
+        if r['name'] and r['name'] not in names:
+            names.append(r['name'])
+    marks = ','.join('?' * len(names))
+    dbe(f"UPDATE messages SET read_at=datetime('now','localtime') WHERE receiver IN ({marks}) AND read_at=''",
+        tuple(names))
     return {'ok': True}
 
 @app.get('/api/cards/{card_id}/actions')
@@ -1755,6 +1841,211 @@ def delete_board_config(cid: int, username: str = Depends(require_admin), reques
     row = r[0]
     audit_log(username, client_ip(request), 'board_config_delete',
               f'{row["year"]}/{row["dept"]}/{row["attr"]}', f'id={cid}', 'success')
+    return {'ok': True}
+
+# ---------------- API：部门主页（文化展示区 / 标杆部门 / 模范个人 / 部门介绍） ----------------
+# 图片一律以 data URL 存进数据库：同步脚本只传代码不传数据文件，
+# 存文件系统会在同步后指向服务器上不存在的路径（图片直接失效）。
+MAX_IMAGE_BYTES = 512 * 1024        # 单张图片上限 512KB（data URL 后的实际字节数）
+ALLOWED_IMAGE_TYPES = ('image/jpeg', 'image/png', 'image/gif', 'image/webp')
+
+def _check_image_data_url(data_url: str) -> str:
+    """校验图片 data URL：类型必须是常见图片格式，大小不得超过上限。
+    返回去掉前缀的纯 base64 载荷（入库用）。不合规则抛 400。"""
+    s = (data_url or '').strip()
+    if not s:
+        return ''
+    if not s.startswith('data:'):
+        raise HTTPException(400, '图片格式不正确')
+    head, _, payload = s.partition(',')
+    if not payload:
+        raise HTTPException(400, '图片数据为空')
+    mime = head[5:].split(';')[0].strip().lower()
+    if mime not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, '仅支持 JPG / PNG / GIF / WebP 格式的图片')
+    # base64 长度 → 原始字节数（约 3/4）
+    approx = len(payload) * 3 // 4
+    if approx > MAX_IMAGE_BYTES:
+        raise HTTPException(400, f'图片过大（{approx//1024}KB），请压缩到 {MAX_IMAGE_BYTES//1024}KB 以内')
+    return s
+
+class DeptProfileReq(BaseModel):
+    slogan: str = ''       # 文化标语
+    intro: str = ''        # 部门职能介绍
+    photo: str = ''        # 团队合照（data URL）
+
+class DeptHonorReq(BaseModel):
+    kind: str = 'dept'                       # 'dept'=标杆部门 / 'person'=模范个人
+    target_name: str = ''                    # 标杆部门名 / 模范个人姓名
+    photo: str = ''                          # 照片（data URL）
+    remark: str = ''                         # 备注
+    sort: int = 0
+
+@app.get('/api/dept/{dept}/page')
+def get_dept_page(dept: str, username: str = Depends(require_auth)):
+    """部门主页数据：文化资料 + 标杆/模范 + 事项统计 + 成员/工作组。
+    统计口径与「事项统计」模块一致：按当前用户可见范围过滤。"""
+    if dept not in ALLOWED_DEPTS:
+        raise HTTPException(404, '部门不存在')
+    boards, columns = user_allowed(username)
+    prof = dbq('SELECT dept, slogan, intro, photo, updated_at FROM dept_profile WHERE dept=?', (dept,))
+    honors = dbq('''SELECT id, dept, kind, target_name, photo, remark, sort, created_at
+                    FROM dept_honors WHERE dept=? ORDER BY kind, sort, id''', (dept,))
+    # 该部门下的看板（看板管理里配置的归属部门）
+    dept_boards = [b['board_id'] for b in dbq('SELECT board_id FROM board_config WHERE dept=?', (dept,))]
+    # 事项统计：只看该部门的看板，且是主事项（parent_id=''）
+    stat = {'total': 0, 'done': 0, 'progressing': 0, 'open': 0, 'overdue': 0, 'owner_missing': 0}
+    owner_cnt = defaultdict(int)
+    if dept_boards:
+        marks = ','.join('?' * len(dept_boards))
+        rows = dbq(f"""SELECT c.* FROM cards c
+                       WHERE c.deleted=0 AND c.parent_id='' AND c.board_id IN ({marks})""",
+                    tuple(dept_boards))
+        today = time.strftime('%Y-%m-%d')
+        for r in rows:
+            if not perm_pass(dict(r), boards, columns):
+                continue
+            stat['total'] += 1
+            st = r['status'] or 'open'
+            if st == 'done':
+                stat['done'] += 1
+            elif st == 'progressing':
+                stat['progressing'] += 1
+            else:
+                stat['open'] += 1
+            if r['due'] and st != 'done' and r['due'] < today:
+                stat['overdue'] += 1
+            names = [n.strip() for n in (r['owner'] or '').split(';') if n.strip()]
+            if not names:
+                stat['owner_missing'] += 1
+            for n in names:
+                owner_cnt[n] += 1
+    # 部门成员与工作组（来自 workgroups / team_members，用于介绍页的组织架构）
+    wgs = dbq('SELECT id, name, parent_id, leader, function, description FROM workgroups ORDER BY id')
+    members = dbq('SELECT id, name, account, workgroups FROM team_members ORDER BY id')
+    member_names = {m['name'] for m in members}
+    # 顶层部门 → 其下的工作组（按 workgroups 的 parent_id 关系）
+    top = [w for w in wgs if not w['name'] or w['name'] == dept]
+    tree = []
+    for t in wgs:
+        if t['name'] == dept or (t['parent_id'] and any(p['id'] == t['parent_id'] and p['name'] == dept for p in wgs)):
+            tree.append({
+                'id': t['id'], 'name': t['name'], 'leader': t['leader'],
+                'function': t['function'], 'description': t['description'],
+                'members': sorted([m['name'] for m in members if t['name'] and t['name'] in (m['workgroups'] or '')]),
+            })
+    return {
+        'dept': dept,
+        'profile': dict(prof[0]) if prof else {'dept': dept, 'slogan': '', 'intro': '', 'photo': '', 'updated_at': ''},
+        'honors': [dict(h) for h in honors],
+        'stats': stat,
+        'owner_stats': [{'owner': k, 'count': v} for k, v in
+                        sorted(owner_cnt.items(), key=lambda kv: (-kv[1], kv[0]))],
+        'workgroups': tree,
+        'boards': dept_boards,
+    }
+
+@app.put('/api/dept/{dept}/profile')
+def update_dept_profile(dept: str, req: DeptProfileReq, username: str = Depends(require_admin), request: Request = None):
+    """保存部门文化资料（仅管理员可编辑）"""
+    if dept not in ALLOWED_DEPTS:
+        raise HTTPException(404, '部门不存在')
+    photo = _check_image_data_url(req.photo)
+    slogan = (req.slogan or '').strip()[:200]
+    intro = (req.intro or '').strip()[:4000]
+    dbe('''INSERT INTO dept_profile (dept, slogan, intro, photo, updated_at)
+           VALUES (?,?,?,?,datetime('now','localtime'))
+           ON CONFLICT(dept) DO UPDATE SET
+             slogan=excluded.slogan, intro=excluded.intro,
+             photo=excluded.photo, updated_at=excluded.updated_at''',
+        (dept, slogan, intro, photo))
+    audit_log(username, client_ip(request), 'dept_profile_update', dept,
+              f'更新部门文化资料（标语 {len(slogan)} 字）', 'success')
+    return {'ok': True}
+
+@app.post('/api/dept/{dept}/honors')
+def create_dept_honor(dept: str, req: DeptHonorReq, username: str = Depends(require_admin), request: Request = None):
+    """新增标杆部门 / 模范个人（仅管理员）"""
+    if dept not in ALLOWED_DEPTS:
+        raise HTTPException(404, '部门不存在')
+    if req.kind not in ('dept', 'person'):
+        raise HTTPException(400, '类型必须是标杆部门(dept)或模范个人(person)')
+    name = (req.target_name or '').strip()[:60]
+    if not name:
+        raise HTTPException(400, '名称不能为空')
+    photo = _check_image_data_url(req.photo)
+    dbe('''INSERT INTO dept_honors (dept, kind, target_name, photo, remark, sort)
+           VALUES (?,?,?,?,?,?)''',
+        (dept, req.kind, name, photo, (req.remark or '').strip()[:200], req.sort))
+    audit_log(username, client_ip(request), 'dept_honor_create', dept,
+              f'新增{"标杆部门" if req.kind=="dept" else "模范个人"} {name}', 'success')
+    return {'ok': True}
+
+@app.put('/api/dept/honors/{hid}')
+def update_dept_honor(hid: int, req: DeptHonorReq, username: str = Depends(require_admin), request: Request = None):
+    if req.kind not in ('dept', 'person'):
+        raise HTTPException(400, '类型必须是标杆部门(dept)或模范个人(person)')
+    cur = dbq('SELECT id, dept, target_name FROM dept_honors WHERE id=?', (hid,))
+    if not cur:
+        raise HTTPException(404, '记录不存在')
+    photo = _check_image_data_url(req.photo)
+    dbe('''UPDATE dept_honors SET kind=?, target_name=?, photo=?, remark=?, sort=? WHERE id=?''',
+        (req.kind, (req.target_name or '').strip()[:60], photo,
+         (req.remark or '').strip()[:200], req.sort, hid))
+    audit_log(username, client_ip(request), 'dept_honor_update', cur[0]['dept'],
+              f'更新 id={hid}', 'success')
+    return {'ok': True}
+
+@app.delete('/api/dept/honors/{hid}')
+def delete_dept_honor(hid: int, username: str = Depends(require_admin), request: Request = None):
+    cur = dbq('SELECT id, dept FROM dept_honors WHERE id=?', (hid,))
+    if not cur:
+        raise HTTPException(404, '记录不存在')
+    dbe('DELETE FROM dept_honors WHERE id=?', (hid,))
+    audit_log(username, client_ip(request), 'dept_honor_delete', cur[0]['dept'],
+              f'删除 id={hid}', 'success')
+    return {'ok': True}
+
+@app.get('/api/dept/{dept}/posts')
+def get_dept_posts(dept: str, username: str = Depends(require_auth)):
+    """部门介绍页的发文列表（部门文化内容区）"""
+    if dept not in ALLOWED_DEPTS:
+        raise HTTPException(404, '部门不存在')
+    rows = dbq('''SELECT id, dept, title, content, images, author, created_at
+                   FROM dept_posts WHERE dept=? ORDER BY id DESC LIMIT 100''', (dept,))
+    return {'posts': [dict(r) for r in rows]}
+
+class DeptPostReq(BaseModel):
+    title: str = ''
+    content: str = ''
+    images: list[str] = []      # 图片 data URL 列表
+
+@app.post('/api/dept/{dept}/posts')
+def create_dept_post(dept: str, req: DeptPostReq, username: str = Depends(require_admin), request: Request = None):
+    """发布部门文章（仅管理员；支持发图）"""
+    if dept not in ALLOWED_DEPTS:
+        raise HTTPException(404, '部门不存在')
+    title = (req.title or '').strip()[:100]
+    content = (req.content or '').strip()[:4000]
+    if not title and not content and not req.images:
+        raise HTTPException(400, '内容不能为空')
+    imgs = []
+    for u in (req.images or [])[:9]:
+        imgs.append(_check_image_data_url(u))
+    dbe('INSERT INTO dept_posts (dept, title, content, images, author) VALUES (?,?,?,?,?)',
+        (dept, title, content, ';'.join(imgs), username))
+    audit_log(username, client_ip(request), 'dept_post_create', dept,
+              f'发布部门文章「{title or "无标题"}」', 'success')
+    return {'ok': True}
+
+@app.delete('/api/dept/posts/{pid}')
+def delete_dept_post(pid: int, username: str = Depends(require_admin), request: Request = None):
+    cur = dbq('SELECT id, dept FROM dept_posts WHERE id=?', (pid,))
+    if not cur:
+        raise HTTPException(404, '文章不存在')
+    dbe('DELETE FROM dept_posts WHERE id=?', (pid,))
+    audit_log(username, client_ip(request), 'dept_post_delete', cur[0]['dept'],
+              f'删除文章 id={pid}', 'success')
     return {'ok': True}
 
 # ---------------- API：管理员账号管理 ----------------

@@ -16,11 +16,18 @@ button{font-family:inherit}
 .app-header{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
 .header-left{display:flex;align-items:center;gap:10px}
 .header-left h1{font-size:18px;font-weight:600;color:var(--text)}
-/* 年份筛选器：替代原来的年份徽标，按归属年份筛选当前看板下的板块 */
-.year-filter{height:30px;padding:0 26px 0 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 9px center;font-size:12.5px;color:var(--text);cursor:pointer;appearance:none;-webkit-appearance:none;outline:none;max-width:160px}
-.year-filter:hover{border-color:var(--primary)}
-.year-filter:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.12)}
+/* 年份筛选器（多选）：替代原来的年份徽标，按归属年份筛选当前看板下的板块。
+   形态：chips 标签组 —— 每个已选年份是一个可 ✕ 移除的标签，右侧「全部年份」一键清空。
+   下拉已废弃（多选下拉在窄屏里难以表达"已选哪些"，chips 一眼可见且逐个可移除）。 */
+.year-filter{display:flex;align-items:center;gap:6px;flex-wrap:wrap;height:30px}
 .year-filter[hidden]{display:none}
+.year-chip{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 6px 0 10px;border:1px solid var(--primary);border-radius:13px;background:#eef5ff;color:var(--primary);font-size:12.5px;font-weight:500;cursor:default;white-space:nowrap}
+.year-chip .yc-x{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;font-size:11px;line-height:1;color:var(--primary);cursor:pointer;transition:background .15s}
+.year-chip .yc-x:hover{background:var(--primary);color:#fff}
+/* 「全部年份」= 清空全部已选 */
+.year-chip.all{border-style:dashed;border-color:var(--border);background:#fff;color:var(--text2);font-weight:400;cursor:pointer;padding:0 10px}
+.year-chip.all:hover{border-color:var(--primary);color:var(--primary)}
+.year-chip.all.on{border-style:solid;border-color:var(--primary);background:#eef5ff;color:var(--primary)}
 /* 成本看板的锁标记：仅对确实受限的账号显示，含义写在 title 里 */
 .tab-lock{font-size:11px;line-height:1;opacity:.75;flex-shrink:0}
 .header-actions{display:flex;align-items:center;gap:8px}
@@ -36,8 +43,13 @@ button{font-family:inherit}
 /* 部门层：所有部门节点排在同一行（紧凑），空部门同样占位不隐藏 */
 .tree-dept-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;margin-bottom:4px}
 .tree-dept{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:600;flex-shrink:0}
+.tree-dept .dept-name{cursor:pointer}
+.tree-dept .dept-count{cursor:pointer}
 .tree-dept:hover{border-color:var(--primary);color:var(--primary)}
 .tree-dept.open{background:#eef5ff;border-color:var(--primary);color:var(--primary)}
+/* 当前打开的部门页（部门名可点击进入主页后，该节点高亮） */
+.tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
+.tree-dept.cur .dept-name{color:var(--primary);font-weight:700}
 .tree-dept .chev{display:inline-block;transition:transform .2s;color:var(--text2);font-size:11px}
 .tree-dept.open .chev{transform:rotate(90deg)}
 .tree-dept .dept-count{background:var(--border);color:var(--text2);font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
@@ -89,6 +101,98 @@ button{font-family:inherit}
 .stat-label{font-size:12px;color:var(--text2)}
 .stat-value{font-size:26px;font-weight:600;margin-top:2px}
 .stat-value.blue{color:var(--primary)}.stat-value.green{color:var(--success)}.stat-value.orange{color:var(--warning)}.stat-value.red{color:var(--danger)}
+/* ---------------- 部门主页面 ----------------
+   布局：左右分栏。
+   分栏一（culture）：部门文化展示区 —— 文化标语 / 部门职能介绍 / 团队合照
+   分栏二（work）：原有事项统计与列表
+   桌面端左右并列；移动端折叠为上下堆叠（见 @media）。
+   事项统计压缩：3-5 个核心指标同屏，其余折叠进「更多」展开区。 */
+.dept-page{display:grid;grid-template-columns:minmax(300px,360px) minmax(0,1fr);gap:16px;align-items:start;margin-bottom:16px}
+.dept-col{background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.dept-col-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#fff,#fbfcfe)}
+.dept-col-head h3{margin:0;font-size:14px;font-weight:600;color:var(--primary);flex:1}
+.dept-col-body{padding:14px 16px}
+/* 文化标语：视觉层级最高 —— 部门名称大字号 + 标语突出 */
+.dept-slogan{font-size:17px;font-weight:600;color:var(--primary);line-height:1.6;letter-spacing:.3px;padding:12px 14px;background:linear-gradient(135deg,#eef5ff,#f8fbff);border-left:3px solid var(--primary);border-radius:var(--radius-sm)}
+.dept-slogan:empty{display:none}
+.dept-intro{font-size:13px;color:var(--text2);line-height:1.85;margin-top:12px;white-space:pre-wrap}
+.dept-intro:empty{display:none}
+/* 团队合照 */
+.dept-photo-wrap{margin-top:14px}
+.dept-photo{width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;background:#fafafa;object-fit:cover;max-height:220px}
+.dept-photo-empty{width:100%;height:120px;border:1px dashed var(--border);border-radius:var(--radius-sm);background:#fafafa;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:12.5px}
+/* 部门统计：核心指标同屏（3-5 个），次要指标折叠进「更多」 */
+.dept-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px}
+.dept-stat{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:11px 13px;box-shadow:var(--shadow);position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s}
+.dept-stat:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
+.dept-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--primary);opacity:.9}
+.dept-stat .ds-label{font-size:11.5px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dept-stat .ds-value{font-size:22px;font-weight:600;margin-top:1px;line-height:1.3}
+.dept-stat .ds-value.blue{color:var(--primary)}.dept-stat .ds-value.green{color:var(--success)}
+.dept-stat .ds-value.orange{color:var(--warning)}.dept-stat .ds-value.red{color:var(--danger)}
+/* 「更多」折叠区 */
+.dept-more-toggle{margin-top:10px;font-size:12.5px;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;user-select:none}
+.dept-more-toggle:hover{text-decoration:underline}
+.dept-more{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin-top:10px}
+.dept-more[hidden]{display:none}
+/* 标杆部门 / 模范个人：两块并列，切块交界处展示小锦旗 */
+.honors-wrap{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:14px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
+.honor-block{padding:12px 13px;position:relative;background:#fff}
+/* 标杆块的小锦旗探向交界处 → 右侧留出空间，避免压住条目 */
+.honor-block.bench{padding-right:24px}
+.honor-block+.honor-block{border-left:1px solid var(--border)}
+.honor-block h5{margin:0 0 9px;font-size:12.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px}
+/* 小锦旗：挂在被选为标杆的条目上，位于【标杆部门】与【模范个人】两块切块的交界处。
+   标杆块在左，因此锦旗定位到该块的**右边缘**（即交界线），向外探出一半，不遮挡条目内容。 */
+.honor-flag{position:absolute;top:9px;right:-11px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;z-index:2;filter:drop-shadow(0 1px 2px rgba(0,0,0,.18))}
+.honor-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--border)}
+.honor-item:last-child{border-bottom:none}
+.honor-avatar{width:30px;height:30px;border-radius:50%;background:#eef5ff;color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:600;flex-shrink:0;overflow:hidden}
+.honor-avatar img{width:100%;height:100%;object-fit:cover}
+.honor-name{font-size:12.5px;color:var(--text);font-weight:500;line-height:1.4}
+.honor-remark{font-size:11px;color:var(--text3);line-height:1.4}
+.honor-empty{font-size:12px;color:var(--text3);padding:6px 0}
+.honors-wrap+.honors-wrap{margin-top:12px}
+/* 加载态 / 空态 */
+.dept-loading{display:flex;align-items:center;justify-content:center;gap:8px;padding:40px;color:var(--text2);font-size:13px}
+.dept-loading .spin{width:15px;height:15px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.dept-empty{padding:28px 16px;text-align:center;color:var(--text3);font-size:12.5px;line-height:1.8}
+/* 部门介绍页（弹窗） */
+.dept-intro-page{max-height:70vh;overflow-y:auto}
+.dept-org{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.org-group{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;background:#fafbfc}
+.org-group-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.org-group-name{font-size:13.5px;font-weight:600;color:var(--text)}
+.org-leader{font-size:12px;color:var(--primary);background:#eef5ff;padding:1px 8px;border-radius:10px}
+.org-func{font-size:11.5px;color:var(--text3)}
+.org-members{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.org-member{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);background:#fff;border:1px solid var(--border);border-radius:12px;padding:2px 9px 2px 3px}
+.org-member i{width:18px;height:18px;border-radius:50%;background:#eef5ff;color:var(--primary);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:10px;font-weight:600}
+/* 部门文章（发文与发图） */
+.post-item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 13px;margin-bottom:10px;background:#fff}
+.post-title{font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:4px}
+.post-content{font-size:12.5px;color:var(--text2);line-height:1.8;white-space:pre-wrap}
+.post-imgs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.post-imgs img{width:96px;height:96px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);cursor:pointer}
+.post-meta{font-size:11px;color:var(--text3);margin-top:6px}
+/* 图片上传：占位图 + 重试 */
+.upload-preview{position:relative;display:inline-block;margin:6px 6px 0 0}
+.upload-preview img{width:84px;height:84px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);display:block}
+.upload-retry{position:absolute;inset:0;background:rgba(0,0,0,.55);color:#fff;border-radius:var(--radius-sm);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;cursor:pointer;text-align:center;padding:4px}
+.upload-status{font-size:12px;margin-top:8px;display:flex;align-items:center;gap:6px}
+.upload-status.saving{color:var(--primary)}
+.upload-status.ok{color:var(--success)}
+.upload-status.fail{color:var(--danger)}
+/* 响应式：桌面左右分栏 → 移动端上下堆叠 */
+@media(max-width:1024px){
+  .dept-page{grid-template-columns:1fr}
+  .honors-wrap{grid-template-columns:1fr}
+  .honor-block+.honor-block{border-left:none;border-top:1px solid var(--border)}
+  /* 上下排列时切块交界线变成横线 → 小锦旗改挂到区块左上角，不再探出右侧 */
+  .honor-block.bench{padding-right:13px}
+  .honor-flag{top:9px;right:auto;left:9px}
+}
 .board-content{display:flex;flex-direction:column;gap:12px}
 .week-group{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
 .week-header{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:default;user-select:none;transition:background .15s}
@@ -313,6 +417,46 @@ button{font-family:inherit}
 .comment-item .when{color:var(--text2);font-size:11px;margin-left:6px}
 .comment-form{display:flex;gap:8px;margin-top:8px}
 .comment-form input{flex:1;padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none}
+/* 评论 @ 提及：输入框是「输入态」（纯文本），已插入的提及以 chip 单独展示，两态可区分 */
+.comment-box{position:relative}
+/* 消息中心：顶部铃铛 + 侧边抽屉式消息栏 */
+.msg-btn{position:relative}
+.msg-badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--danger);color:#fff;font-size:10px;line-height:16px;text-align:center;font-weight:600}
+.msg-badge[hidden]{display:none}
+.msg-panel{position:fixed;top:0;right:0;bottom:0;width:380px;max-width:92vw;background:#fff;border-left:1px solid var(--border);box-shadow:-8px 0 32px rgba(0,0,0,.12);z-index:320;transform:translateX(100%);transition:transform .25s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column}
+.msg-panel.open{transform:translateX(0)}
+.msg-mask{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:319;opacity:0;pointer-events:none;transition:opacity .2s}
+.msg-mask.show{opacity:1;pointer-events:auto}
+.msg-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.msg-head h3{margin:0;font-size:15px;font-weight:600;color:var(--text);flex:1}
+.msg-head .btn-default{padding:4px 10px;font-size:12px}
+.msg-list{flex:1;overflow-y:auto;padding:6px 0}
+.msg-item{display:flex;gap:10px;padding:11px 16px;border-bottom:1px dashed var(--border);cursor:pointer;transition:background .15s}
+.msg-item:hover{background:#f7f9fc}
+.msg-item.unread{background:#f0f7ff}
+.msg-item.unread .mi-title{font-weight:600}
+.msg-dot{width:7px;height:7px;border-radius:50%;background:var(--primary);margin-top:6px;flex-shrink:0}
+.msg-item.read .msg-dot{background:transparent}
+.mi-body{flex:1;min-width:0}
+.mi-title{font-size:13px;color:var(--text);margin-bottom:2px}
+.mi-title b{font-weight:600}
+.mi-text{font-size:12.5px;color:var(--text2);line-height:1.6;word-break:break-word}
+.mi-meta{font-size:11px;color:var(--text3);margin-top:3px}
+.msg-empty{text-align:center;color:var(--text3);font-size:12.5px;padding:40px 16px}
+.mention-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.mention-bar:empty{display:none}
+.mention-chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 4px 0 8px;border:1px solid var(--primary);border-radius:11px;background:#eef5ff;color:var(--primary);font-size:12px;font-weight:500}
+.mention-chip .mc-x{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;font-size:10px;color:var(--primary);cursor:pointer}
+.mention-chip .mc-x:hover{background:var(--primary);color:#fff}
+/* @ 触发时的成员候选下拉 */
+.mention-drop{position:absolute;z-index:20;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);max-height:200px;overflow-y:auto;min-width:150px;padding:4px 0}
+.mention-drop[hidden]{display:none}
+.mention-opt{padding:6px 12px;font-size:13px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px}
+.mention-opt:hover,.mention-opt.on{background:#eef5ff;color:var(--primary)}
+.mention-empty{padding:8px 12px;font-size:12px;color:var(--text3)}
+/* 评论正文里渲染出的 @提及：高亮且可点击跳转 */
+.at-name{color:var(--primary);font-weight:500;cursor:pointer;border-radius:3px;padding:0 1px}
+.at-name:hover{background:#eef5ff}
 .detail-desc{background:#fafafa;border-left:3px solid var(--primary);padding:10px 14px;font-size:13px;color:var(--text);white-space:pre-wrap;border-radius:0 6px 6px 0;margin-top:10px}
 .detail-meta{font-size:13px;color:var(--text2);line-height:2}
 .detail-meta b{color:var(--text);font-weight:500}
@@ -338,18 +482,6 @@ button{font-family:inherit}
 .sub-toggle{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:11.5px;cursor:pointer;padding:2px 10px;border-radius:10px;border:1px solid #b5d4f4;flex-shrink:0;font-weight:500;line-height:1.6;margin:0}
 .sub-toggle:hover{background:#d0e3f5;border-color:#85b7eb}
 .item-wrap{margin-bottom:8px}
-.drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;opacity:0;pointer-events:none;transition:opacity .25s}
-.drawer-mask.show{opacity:1;pointer-events:auto}
-.drawer{position:fixed;top:0;right:0;bottom:0;width:440px;max-width:92vw;background:var(--color-background-primary,#fff);border-left:1px solid var(--border);box-shadow:-8px 0 32px rgba(0,0,0,.12);z-index:301;transform:translateX(100%);transition:transform .28s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column}
-.drawer.open{transform:translateX(0)}
-.drawer-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
-.drawer-back{background:none;border:1px solid var(--border);border-radius:6px;width:28px;height:28px;cursor:pointer;color:var(--text2);font-size:13px;line-height:1;display:none}
-.drawer-back.show{display:inline-block}
-.drawer-back:hover{background:var(--bg);color:var(--primary)}
-.drawer-title{flex:1;font-size:15px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.drawer-close{background:none;border:none;font-size:15px;cursor:pointer;color:var(--text2);width:28px;height:28px;border-radius:6px}
-.drawer-close:hover{background:var(--bg);color:var(--text)}
-.drawer-body{flex:1;overflow-y:auto;padding:14px 16px}
 .pcard{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg);margin-bottom:12px}
 .pcard h3{font-size:14px;font-weight:500;margin:0 0 6px;color:var(--text)}
 .pcard .pmeta{font-size:12px;color:var(--text2);display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
@@ -467,12 +599,10 @@ body{
 .status-tag{border-radius:20px;box-shadow:var(--shadow-sm);font-weight:600}
 .icon-btn:hover{background:rgba(0,45,116,.06)}
 
-/* Modal & drawer */
+/* Modal */
 .modal-overlay{backdrop-filter:blur(3px);background:rgba(16,24,40,.45)}
 .modal{border-radius:14px;box-shadow:var(--shadow-lg);animation:modalIn .25s ease both}
 .modal-header h2{color:var(--primary);background:none;-webkit-text-fill-color:initial}
-.drawer{box-shadow:-12px 0 40px rgba(16,24,40,.18)}
-.drawer-head{background:linear-gradient(180deg,#fff,#fbfcfe)}
 .pcard{box-shadow:var(--shadow-sm);border-radius:12px}
 
 /* Team modal - group chips (replace inline labels) */
@@ -574,10 +704,11 @@ function goLogin(){
 <header class="app-header">
   <div class="header-left">
     <h1>财务工作事项平台</h1>
-    <select class="year-filter" id="yearFilter" onchange="onYearFilter(this.value)" title="按归属年份筛选板块（切换看板后自动重置）"></select>
+    <div class="year-filter" id="yearFilter" title="按归属年份筛选板块（可多选；切换看板后自动重置）"></div>
   </div>
   <div class="header-actions">
     <span class="header-user"><span id="userName"></span><span class="role-tag" id="roleTag"></span></span>
+    <button class="header-btn msg-btn" id="msgBtn" onclick="openMsgPanel()" title="消息中心">🔔<span class="msg-badge" id="msgBadge" hidden>0</span></button>
     <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
     <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
     <button class="header-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>
@@ -592,8 +723,44 @@ function goLogin(){
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
 </header>
+<!-- 消息中心（消息栏）：@ 提及与相关消息 -->
+<div class="msg-mask" id="msgMask" onclick="closeMsgPanel()"></div>
+<aside class="msg-panel" id="msgPanel">
+  <div class="msg-head">
+    <h3>消息中心</h3>
+    <button class="btn-default" onclick="readAllMessages()" title="全部标记为已读">全部已读</button>
+    <button class="drawer-close" onclick="closeMsgPanel()" title="关闭">✕</button>
+  </div>
+  <div class="msg-list" id="msgList"></div>
+</aside>
 <div class="board-tabs" id="boardTabs"></div>
-<div class="wrap">
+<!-- 部门主页面（与「事项列表」视图互斥显示：点部门名进部门页，点板块进事项列表） -->
+<div class="wrap" id="deptPageWrap" style="display:none">
+  <div class="dept-page">
+    <!-- 分栏一：部门文化展示区 -->
+    <section class="dept-col" id="deptCultureCol">
+      <div class="dept-col-head">
+        <h3 id="deptCultureTitle">部门文化</h3>
+        <button class="btn-default" id="deptEditBtn" style="padding:3px 10px;font-size:12px" onclick="openDeptEditModal()" title="编辑部门文化内容">编辑</button>
+        <button class="btn-default" id="deptIntroBtn" style="padding:3px 10px;font-size:12px" onclick="openDeptIntroModal()" title="部门介绍页（发文发图 / 组织架构）">介绍页</button>
+      </div>
+      <div class="dept-col-body" id="deptCultureBody">
+        <div class="dept-loading"><span class="spin"></span>加载中…</div>
+      </div>
+    </section>
+    <!-- 分栏二：事项统计与列表 -->
+    <section class="dept-col" id="deptWorkCol">
+      <div class="dept-col-head">
+        <h3 id="deptWorkTitle">事项统计</h3>
+        <button class="btn-default" id="deptBackBtn" style="padding:3px 10px;font-size:12px" onclick="backToBoardList()">返回事项列表</button>
+      </div>
+      <div class="dept-col-body" id="deptStatsBody">
+        <div class="dept-loading"><span class="spin"></span>加载中…</div>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="wrap" id="boardListWrap">
   <!-- 布局对调：进度概览（原「事项明细」区）在上，工具栏（原「板块列表」区）在下 -->
   <div class="progress-overview" id="progressOverview"></div>
   <div class="toolbar">
@@ -621,13 +788,62 @@ function goLogin(){
   <main class="board-content" id="boardContent"></main>
 </div>
 
+<!-- 部门文化编辑弹窗（仅管理员）：标语 / 职能介绍 / 团队合照 / 标杆与模范 -->
+<div class="modal-overlay" id="deptEditModal" style="display:none">
+  <div class="modal" style="width:640px;max-width:94vw">
+    <div class="modal-header"><h2 id="deptEditTitle">编辑部门文化</h2>
+      <button class="modal-close" onclick="closeDeptEditModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group"><label>文化标语</label>
+        <input type="text" class="form-input" id="de_slogan" maxlength="200" placeholder="例如：精益核算，专业致远">
+      </div>
+      <div class="form-group"><label>部门职能介绍</label>
+        <textarea class="form-textarea" id="de_intro" maxlength="4000" placeholder="介绍本部门的职责范围、日常工作内容与协作方式…"></textarea>
+      </div>
+      <div class="form-group"><label>团队合照</label>
+        <input type="file" id="de_photo_file" accept="image/jpeg,image/png,image/gif,image/webp" style="font-size:12.5px" onchange="pickDeptPhoto(this)">
+        <div id="de_photo_box" style="margin-top:8px"></div>
+        <div class="upload-status" id="de_photo_status"></div>
+      </div>
+      <div class="form-group"><label>标杆部门 / 模范个人</label>
+        <div style="font-size:11.5px;color:var(--text3);margin-bottom:6px">添加后会在部门主页的对应区块展示；标杆部门条目会挂小锦旗</div>
+        <div id="de_honors_box"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <select class="form-select" id="de_honor_kind" style="width:130px"><option value="dept">标杆部门</option><option value="person">模范个人</option></select>
+          <input type="text" class="form-input" id="de_honor_name" placeholder="名称" style="flex:1;min-width:120px">
+          <input type="text" class="form-input" id="de_honor_remark" placeholder="备注（选填）" style="flex:1;min-width:120px">
+          <button class="btn-default" onclick="addDeptHonor()">添加</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span class="upload-status" id="de_save_status" style="margin-right:auto"></span>
+      <button class="btn-default" onclick="closeDeptEditModal()">取消</button>
+      <button class="btn-primary" id="de_save_btn" onclick="saveDeptProfile()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 部门介绍页：发文发图 + 组织架构 + 个人信息 -->
+<div class="modal-overlay" id="deptIntroModal" style="display:none">
+  <div class="modal" style="width:760px;max-width:94vw">
+    <div class="modal-header"><h2 id="deptIntroTitle">部门介绍</h2>
+      <button class="modal-close" onclick="closeDeptIntroModal()">✕</button>
+    </div>
+    <div class="modal-body dept-intro-page" id="deptIntroBody"></div>
+    <div class="modal-footer" id="deptIntroFooter">
+      <button class="btn-default" onclick="closeDeptIntroModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- 编辑弹窗 -->
 <div class="modal-overlay" id="editModal" style="display:none">
   <div class="modal">
     <div class="modal-header"><h2 id="editTitle">编辑事项</h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
         <span id="e_status_ops" style="display:flex;gap:6px;align-items:center"></span>
-        <button class="btn-default" id="e_sub_btn" style="padding:4px 12px;font-size:12px" onclick="openDrawer(editing)" title="在右侧面板管理子事项">▤ 子事项</button>
         <button class="modal-close" onclick="closeEdit()">✕</button>
       </div>
     </div>
@@ -744,7 +960,13 @@ function goLogin(){
         <div id="d_subtask_list" class="subtask-list"></div>
       </div>
       <div class="comment-box"><h4>评论</h4><div id="d_comments"></div>
-        <div class="comment-form"><input id="d_new_comment" placeholder="写评论…"><button class="btn-default" onclick="addComment()">发送</button></div>
+        <div class="comment-form">
+          <input id="d_new_comment" placeholder="写评论…（输入 @ 可提及成员）" oninput="onCommentInput(this)" autocomplete="off">
+          <button class="btn-default" onclick="toggleMentionMenu()" title="提及成员">@</button>
+          <button class="btn-default" onclick="addComment()">发送</button>
+        </div>
+        <div class="mention-bar" id="d_mention_bar"></div>
+        <div class="mention-drop" id="d_mention_drop" hidden></div>
       </div>
       <div class="comment-box"><h4>操作记录</h4><div id="d_actions"></div></div>
     </div>
@@ -960,17 +1182,6 @@ function goLogin(){
 </div>
 <div class="toast" id="toast"></div>
 
-<!-- 右侧抽屉：父事项 + 子事项 -->
-<div class="drawer-mask" id="drawerMask" onclick="closeDrawer()"></div>
-<aside class="drawer" id="drawerPanel">
-  <div class="drawer-head">
-    <button class="drawer-back" id="drawerBack" onclick="drawerBack()" title="返回">←</button>
-    <span class="drawer-title" id="drawerTitle">子事项</span>
-    <button class="drawer-close" onclick="closeDrawer()" title="关闭">✕</button>
-  </div>
-  <div class="drawer-body" id="drawerBody"></div>
-</aside>
-
 <script>
 let TOKEN=localStorage.getItem('tk')||'';
 const COST_BOARD_ID='1162069797001000241';
@@ -979,7 +1190,8 @@ function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_
 let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
 // 年份筛选默认落在「当前年份」：切换看板时统一重置回默认年份（保证各板块一致）
 const YEAR_DEFAULT=String(new Date().getFullYear());
-let curYear=YEAR_DEFAULT;   // 年份筛选：按板块「归属年份」过滤当前看板下的板块（空 = 全部年份）
+// 年份筛选（多选）：curYears 是一组被选中的归属年份；空集合 = 全部年份
+let curYears=new Set([YEAR_DEFAULT]);
 let EDIT_IS_SUB=false;   // 当前编辑弹窗是否处于「子事项模式」（复用主事项弹窗，裁剪字段）
 let EDIT_FROM_DETAIL=''; // 从详情弹窗进入编辑时记录来源，关闭编辑后回到详情
 let DETAIL_ID=null, DETAIL_CARD=null, TEAM_MEMBERS=[], expandedAll=false;
@@ -1001,6 +1213,97 @@ function logout(){
   localStorage.removeItem('tk');goLogin()
 }
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+// ---------- 消息中心 ----------
+let MSG_UNREAD=0;
+let MSG_LOADED=false;
+// 拉取消息并刷新铃铛未读数
+async function refreshMessages(){
+  try{
+    const d=await api('/api/messages');
+    MSG_UNREAD=d.unread||0;
+    const b=document.getElementById('msgBadge');
+    if(b){b.textContent=MSG_UNREAD>99?'99+':String(MSG_UNREAD);b.hidden=!MSG_UNREAD}
+    if(MSG_LOADED)renderMsgList(d.messages||[]);
+    return d;
+  }catch(e){return {messages:[],unread:0}}
+}
+// 打开消息栏
+async function openMsgPanel(){
+  document.getElementById('msgMask').classList.add('show');
+  document.getElementById('msgPanel').classList.add('open');
+  const d=await refreshMessages();
+  MSG_LOADED=true;
+  renderMsgList(d.messages||[]);
+}
+function closeMsgPanel(){
+  document.getElementById('msgMask').classList.remove('show');
+  document.getElementById('msgPanel').classList.remove('open');
+}
+// 渲染消息列表
+function renderMsgList(list){
+  const box=document.getElementById('msgList');
+  if(!box)return;
+  if(!list.length){
+    box.innerHTML='<div class="msg-empty">暂无消息<br><span style="font-size:11.5px">在事项评论里 @ 某人，就会出现在这里</span></div>';
+    return;
+  }
+  box.innerHTML=list.map(m=>{
+    const unread=!m.read_at;
+    const title=m.kind==='mention'
+      ?`<b>${esc(m.sender||'系统')}</b> 提及了你`
+      :`<b>${esc(m.sender||'系统')}</b> 的消息`;
+    return `<div class="msg-item ${unread?'unread':'read'}" data-id="${m.id}" data-card="${esc(m.card_id||'')}" title="${unread?'未读 · 点击查看并标记已读':'点击查看详情'}">
+      <span class="msg-dot"></span>
+      <div class="mi-body">
+        <div class="mi-title">${title}</div>
+        <div class="mi-text">${esc(m.content||'')}</div>
+        <div class="mi-meta">${esc(m.created_at||'')}${m.card_id?' · 点击跳转对应事项':''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+// 点击一条消息：查看详情（标记已读）并跳转到对应事项
+async function openMessage(id){
+  const el=document.querySelector(`.msg-item[data-id="${id}"]`);
+  const cardId=el?el.getAttribute('data-card'):'';
+  try{await api('/api/messages/'+id+'/read',{method:'POST'})}catch(e){}
+  await refreshMessages();
+  if(MSG_LOADED){
+    const box=document.getElementById('msgList');
+    const row=box.querySelector(`.msg-item[data-id="${id}"]`);
+    if(row)row.classList.remove('unread');
+  }
+  if(cardId){
+    closeMsgPanel();
+    // 跳转到对应事项：先定位到它所在的看板，再打开详情弹窗
+    await jumpToCard(cardId);
+  }else{
+    toast('已标记为已读');
+  }
+}
+// 跳转到一个事项（跨看板时先切换看板）
+async function jumpToCard(cardId){
+  try{
+    const d=await api('/api/cards?card_id='+cardId);
+    const c=d.cards&&d.cards[0];
+    if(!c){toast('事项不存在或无权查看');return}
+    if(c.board_id&&c.board_id!==curBoard){
+      curBoard=c.board_id;
+      ensureDeptOpen(c.board_id);
+      renderTabs();
+      await reload(1);
+    }
+    await openDetail(cardId);
+  }catch(e){toast(e.message)}
+}
+// 全部标记为已读
+async function readAllMessages(){
+  try{
+    await api('/api/messages/read-all',{method:'POST'});
+    await refreshMessages();
+    toast('已全部标记为已读');
+  }catch(e){toast(e.message)}
+}
 // 密码可见性切换（小眼睛）
 const EYE_ON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
@@ -1119,6 +1422,8 @@ async function init(){
     updateNewBtn();
     const team=await api('/api/team');
     TEAM_MEMBERS=(team.members||[]).map(m=>m.name);
+    // 消息中心未读数（异步，不阻塞首屏）
+    refreshMessages();
     renderTabs();renderProgress();reload(1);connectWS();setupDraggableModals();
   }catch(e){toast(e.message)}
 }
@@ -1200,9 +1505,12 @@ function renderTabs(){
     const open=!!DEPT_OPEN[d.name];
     const cnt=d.boards.length;
     const emptyCls=cnt?'':' empty';
-    const tip=cnt?('展开 '+d.name+' 下的 '+cnt+' 个板块'):(d.name+' 下暂无板块（可在「看板管理」中把板块挂载到该部门）');
-    html+=`<button class="tree-dept${open?' open':''}${emptyCls}" onclick="toggleDept('${esc(d.name)}')" title="${esc(tip)}" aria-expanded="${open}">`
-      +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span></button>`;
+    const tip=cnt?('点击进入「'+d.name+'」部门主页；点箭头展开该部门的板块'):(d.name+' 下暂无板块（可在「看板管理」中把板块挂载到该部门）');
+    // 箭头 = 展开/收起板块；部门名 = 进入部门主页（两个动作分开，避免误触）
+    html+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}">`
+      +`<span class="chev" onclick="toggleDept('${esc(d.name)}')" style="cursor:pointer" title="展开/收起板块">▶</span>`
+      +`<span class="dept-name" onclick="openDeptPage('${esc(d.name)}')" style="cursor:pointer" title="进入部门主页">${esc(d.name)}</span>`
+      +`<span class="dept-count" onclick="toggleDept('${esc(d.name)}')" style="cursor:pointer" title="板块数">${cnt}</span></span>`;
   });
   if(g.unassigned.length){
     const open=!!DEPT_OPEN[UNASSIGNED_KEY];
@@ -1233,7 +1541,499 @@ function toggleDept(name){
   }
   renderTabs();
 }
-function pickBoard(bid){curBoard=bid;curYear=YEAR_DEFAULT;ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()}
+// ---------------- 部门主页面 ----------------
+// 视图切换：部门页与事项列表页互斥显示（同一时刻只显示一个）
+let CUR_DEPT='';            // 当前打开的部门（空 = 不在部门页）
+let DEPT_DATA=null;         // 当前部门页数据缓存
+let DEPT_MORE_OPEN=false;   // 「更多」折叠区是否展开
+// 打开部门主页面
+async function openDeptPage(dept){
+  if(!dept)return;
+  CUR_DEPT=dept;
+  DEPT_DATA=null;
+  DEPT_MORE_OPEN=false;
+  // 切换视图：隐藏事项列表页，显示部门页
+  const bw=document.getElementById('boardListWrap'),pw=document.getElementById('deptPageWrap');
+  if(bw)bw.style.display='none';
+  if(pw)pw.style.display='';
+  // 标题
+  const ct=document.getElementById('deptCultureTitle');
+  const wt=document.getElementById('deptWorkTitle');
+  if(ct)ct.textContent=dept+' · 部门文化';
+  if(wt)wt.textContent=dept+' · 事项统计';
+  // 加载态：先清空旧数据，避免上一个部门的内容残留闪现
+  const cb=document.getElementById('deptCultureBody');
+  const sb=document.getElementById('deptStatsBody');
+  if(cb)cb.innerHTML='<div class="dept-loading"><span class="spin"></span>加载中…</div>';
+  if(sb)sb.innerHTML='<div class="dept-loading"><span class="spin"></span>加载中…</div>';
+  // 权限：只有管理员能编辑部门文化内容
+  const eb=document.getElementById('deptEditBtn');
+  if(eb)eb.style.display=ME&&ME.is_admin?'':'none';
+  renderTabs();   // 刷新部门节点的高亮态（当前在哪个部门的页面）
+  try{
+    const d=await api('/api/dept/'+encodeURIComponent(dept)+'/page');
+    // 切换期间用户可能已经点了别的部门 → 丢弃过期响应，避免旧数据覆盖新部门
+    if(CUR_DEPT!==dept)return;
+    DEPT_DATA=d;
+    renderDeptCulture(d);
+    renderDeptStats(d);
+  }catch(e){
+    if(CUR_DEPT!==dept)return;
+    if(cb)cb.innerHTML=`<div class="dept-empty">加载失败：${esc(e.message||'')}</div>`;
+    if(sb)sb.innerHTML=`<div class="dept-empty">加载失败：${esc(e.message||'')}</div>`;
+  }
+}
+// 返回事项列表页
+function backToBoardList(){
+  CUR_DEPT='';
+  DEPT_DATA=null;
+  const bw=document.getElementById('boardListWrap'),pw=document.getElementById('deptPageWrap');
+  if(bw)bw.style.display='';
+  if(pw)pw.style.display='none';
+  renderTabs();   // 清除部门节点的高亮态
+}
+// 分栏一：部门文化展示区（标语 → 职能介绍 → 团队合照 → 标杆/模范）
+function renderDeptCulture(d){
+  const box=document.getElementById('deptCultureBody');
+  if(!box)return;
+  const p=d.profile||{};
+  const honors=d.honors||[];
+  const bench=honors.filter(h=>h.kind==='dept');
+  const stars=honors.filter(h=>h.kind==='person');
+  let html='';
+  // 文化标语（视觉层级最高）
+  html+=`<div class="dept-slogan">${esc(p.slogan||'（尚未设置文化标语）')}</div>`;
+  // 部门职能介绍
+  html+=`<div class="dept-intro">${esc(p.intro||'（尚未填写部门职能介绍）')}</div>`;
+  // 团队合照
+  html+='<div class="dept-photo-wrap">';
+  if(p.photo){
+    html+=`<img class="dept-photo" src="${p.photo}" alt="团队合照" onerror="deptPhotoError(this)">`;
+  }else{
+    html+='<div class="dept-photo-empty">尚未上传团队合照</div>';
+  }
+  html+='</div>';
+  // 【标杆部门】与【模范个人】并列两块 —— 切块交界处由被选为标杆的条目展示小锦旗
+  html+='<div class="honors-wrap">';
+  html+=honorBlockHtml('标杆部门',bench,'dept');
+  html+=honorBlockHtml('模范个人',stars,'person');
+  html+='</div>';
+  box.innerHTML=html;
+}
+// 标杆/模范区块。被选为标杆的条目 → 在切块交界处挂小锦旗（🚩）
+function honorBlockHtml(title,list,kind){
+  let h=`<div class="honor-block${kind==='dept'?' bench':''}"><h5>${title}${list.length?`<span style="color:var(--text3);font-weight:400">（${list.length}）</span>`:''}</h5>`;
+  if(!list.length){
+    h+='<div class="honor-empty">暂无记录</div>';
+  }else{
+    // 标杆区块：小锦旗贴在【标杆部门】与【模范个人】两块切块的交界线上
+    if(kind==='dept')h+=`<span class="honor-flag" title="标杆部门">🚩</span>`;
+    list.forEach(it=>{
+      const nm=it.target_name||'';
+      const initial=nm?nm.slice(0,1):'?';
+      const avatar=it.photo
+        ?`<span class="honor-avatar"><img src="${it.photo}" alt="${esc(nm)}" onerror="honorImgError(this)"></span>`
+        :`<span class="honor-avatar">${esc(initial)}</span>`;
+      h+=`<div class="honor-item">${avatar}`
+        +`<div><div class="honor-name">${esc(nm)}</div>`
+        +(it.remark?`<div class="honor-remark">${esc(it.remark)}</div>`:'')
+        +`</div></div>`;
+    });
+  }
+  h+='</div>';
+  return h;
+}
+// 图片加载失败 → 退化为占位图（不留破图）
+function deptPhotoError(img){
+  const w=document.createElement('div');
+  w.className='dept-photo-empty';
+  w.textContent='图片加载失败';
+  if(img.parentNode)img.parentNode.replaceChild(w,img);
+}
+function honorImgError(img){
+  const w=document.createElement('span');
+  w.className='honor-avatar';
+  w.textContent='?';
+  if(img.parentNode)img.parentNode.replaceChild(w,img);
+}
+// 分栏二：事项统计 —— 核心指标 3-5 个同屏，其余折叠进「更多」
+function renderDeptStats(d){
+  const box=document.getElementById('deptStatsBody');
+  if(!box)return;
+  const s=d.stats||{};
+  // 核心指标（4 个）：总事项 / 已完成 / 进行中 / 未完成 —— 同屏展示
+  const core=[
+    {k:'总事项',v:s.total||0,c:'blue'},
+    {k:'已完成',v:s.done||0,c:'green'},
+    {k:'进行中',v:s.progressing||0,c:'blue'},
+    {k:'未完成',v:s.open||0,c:'orange'},
+  ];
+  // 次要指标：逾期 / 未分配负责人 —— 折叠进「更多」
+  const more=[
+    {k:'已逾期',v:s.overdue||0,c:'red'},
+    {k:'未分配负责人',v:s.owner_missing||0,c:'orange'},
+  ];
+  const owners=(d.owner_stats||[]).slice(0,5);
+  let html='<div class="dept-stats">';
+  html+=core.map(x=>`<div class="dept-stat"><div class="ds-label">${x.k}</div><div class="ds-value ${x.c}">${x.v}</div></div>`).join('');
+  html+='</div>';
+  // 「更多」展开区
+  html+='<div class="dept-more-toggle" onclick="toggleDeptMore()">'+(DEPT_MORE_OPEN?'▲ 收起更多':'▼ 更多指标')+'</div>';
+  html+=`<div class="dept-more"${DEPT_MORE_OPEN?'':' hidden'}>`;
+  html+=more.map(x=>`<div class="dept-stat"><div class="ds-label">${x.k}</div><div class="ds-value ${x.c}">${x.v}</div></div>`).join('');
+  html+='</div>';
+  // 负责人承担量：同属次要信息，一并折叠进「更多」区（默认不展开）
+  if(owners.length){
+    html+=`<div class="dept-more-toggle" onclick="toggleDeptMore()" style="margin-top:8px">负责人承担量</div>`;
+    html+=`<div class="dept-more"${DEPT_MORE_OPEN?'':' hidden'} style="margin-top:8px">`;
+    html+=owners.map(o=>`<div class="dept-stat"><div class="ds-label">${esc(o.owner)}</div><div class="ds-value blue">${o.count}</div></div>`).join('');
+    html+='</div>';
+  }else{
+    html+='<div class="dept-empty" style="padding:18px 0">该部门暂无可统计的事项</div>';
+  }
+  box.innerHTML=html;
+}
+// 展开/收起「更多」
+function toggleDeptMore(){
+  DEPT_MORE_OPEN=!DEPT_MORE_OPEN;
+  if(DEPT_DATA)renderDeptStats(DEPT_DATA);
+}
+// ---------------- 部门文化编辑（仅管理员） ----------------
+const DEPT_MAX_IMG_BYTES=512*1024;       // 与后端 MAX_IMAGE_BYTES 保持一致
+const DEPT_IMG_TYPES=['image/jpeg','image/png','image/gif','image/webp'];
+let DEPT_EDIT_PHOTO='';                   // 当前合照（data URL）
+let DEPT_EDIT_HONORS=[];                  // 待保存的标杆/模范列表
+let DEPT_SAVING=false;                    // 保存中（防重复提交）
+// 打开编辑弹窗
+function openDeptEditModal(){
+  if(!CUR_DEPT){toast('请先进入部门主页');return}
+  if(!ME||!ME.is_admin){toast('仅管理员可编辑部门文化内容');return}
+  const d=DEPT_DATA||{profile:{},honors:[]};
+  const p=d.profile||{};
+  document.getElementById('deptEditTitle').textContent='编辑部门文化 · '+CUR_DEPT;
+  document.getElementById('de_slogan').value=p.slogan||'';
+  document.getElementById('de_intro').value=p.intro||'';
+  DEPT_EDIT_PHOTO=p.photo||'';
+  DEPT_EDIT_HONORS=(d.honors||[]).map(h=>({...h}));
+  renderDeptPhotoBox();
+  renderDeptHonorBox();
+  setDeptStatus('de_save_status','');
+  document.getElementById('deptEditModal').style.display='flex';
+  updateScrollLock();
+}
+function closeDeptEditModal(){
+  document.getElementById('deptEditModal').style.display='none';
+  updateScrollLock();
+}
+// 上传状态提示（saving / ok / fail）
+function setDeptStatus(id,msg,kind){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.className='upload-status'+(kind?' '+kind:'');
+  el.textContent=msg||'';
+}
+// 团队合照的预览区（含失败占位与重试）
+function renderDeptPhotoBox(){
+  const box=document.getElementById('de_photo_box');
+  if(!box)return;
+  if(!DEPT_EDIT_PHOTO){
+    box.innerHTML='<div class="dept-photo-empty">尚未选择图片</div>';
+    return;
+  }
+  box.innerHTML=`<div class="upload-preview"><img id="de_photo_img" src="${DEPT_EDIT_PHOTO}" alt="合照预览">`
+    +`<span class="upload-retry" id="de_photo_retry" onclick="retryDeptPhoto()" title="点击重新选择图片">上传失败<br>点击重试</span></div>`;
+}
+// 选择合照文件：前端先校验类型与大小，再读成 data URL
+function pickDeptPhoto(inp){
+  const f=inp&&inp.files&&inp.files[0];
+  if(!f)return;
+  setDeptStatus('de_photo_status','');
+  if(DEPT_IMG_TYPES.indexOf(f.type)<0){
+    setDeptStatus('de_photo_status','仅支持 JPG / PNG / GIF / WebP 格式','fail');
+    inp.value='';
+    return;
+  }
+  if(f.size>DEPT_MAX_IMG_BYTES){
+    setDeptStatus('de_photo_status',`图片过大（${Math.round(f.size/1024)}KB），请压缩到 ${DEPT_MAX_IMG_BYTES/1024}KB 以内`,'fail');
+    inp.value='';
+    return;
+  }
+  const fr=new FileReader();
+  fr.onload=()=>{
+    DEPT_EDIT_PHOTO=String(fr.result||'');
+    renderDeptPhotoBox();
+    setDeptStatus('de_photo_status','图片已选择，保存后生效','ok');
+  };
+  fr.onerror=()=>{
+    // 读取失败：保留占位图并提供重试入口
+    DEPT_EDIT_PHOTO='';
+    renderDeptPhotoBox();
+    setDeptStatus('de_photo_status','图片读取失败，请重新选择','fail');
+  };
+  fr.readAsDataURL(f);
+}
+// 重试：重新打开文件选择框
+function retryDeptPhoto(){
+  const inp=document.getElementById('de_photo_file');
+  if(inp){inp.value='';inp.click()}
+}
+// 标杆/模范列表渲染（可删除）
+function renderDeptHonorBox(){
+  const box=document.getElementById('de_honors_box');
+  if(!box)return;
+  if(!DEPT_EDIT_HONORS.length){
+    box.innerHTML='<div style="font-size:12px;color:var(--text3);padding:6px 0">暂无记录，用下方表单添加</div>';
+    return;
+  }
+  box.innerHTML=DEPT_EDIT_HONORS.map((h,i)=>{
+    const kindTxt=h.kind==='person'?'模范个人':'标杆部门';
+    return `<div class="honor-item"><span class="honor-avatar">${h.photo?`<img src="${h.photo}" alt="">`:esc((h.target_name||'?').slice(0,1))}</span>`
+      +`<div style="flex:1"><div class="honor-name">${esc(h.target_name||'')}</div>`
+      +`<div class="honor-remark">${kindTxt}${h.remark?' · '+esc(h.remark):''}</div></div>`
+      +`<button class="btn-default" style="padding:2px 8px;font-size:11.5px" onclick="removeDeptHonor(${i})">移除</button></div>`;
+  }).join('');
+}
+function removeDeptHonor(i){
+  DEPT_EDIT_HONORS.splice(i,1);
+  renderDeptHonorBox();
+}
+// 添加一条标杆/模范（暂存，点保存才落库）
+function addDeptHonor(){
+  const name=document.getElementById('de_honor_name').value.trim();
+  const kind=document.getElementById('de_honor_kind').value;
+  const remark=document.getElementById('de_honor_remark').value.trim();
+  if(!name){toast('名称不能为空');return}
+  DEPT_EDIT_HONORS.push({kind,target_name:name,remark,photo:'',sort:DEPT_EDIT_HONORS.length});
+  document.getElementById('de_honor_name').value='';
+  document.getElementById('de_honor_remark').value='';
+  renderDeptHonorBox();
+}
+// 保存部门文化：保存中 / 成功 / 失败 三态提示
+async function saveDeptProfile(){
+  if(DEPT_SAVING)return;
+  if(!CUR_DEPT)return;
+  DEPT_SAVING=true;
+  const btn=document.getElementById('de_save_btn');
+  if(btn){btn.disabled=true;btn.textContent='保存中…'}
+  setDeptStatus('de_save_status','保存中…','saving');
+  try{
+    await api('/api/dept/'+encodeURIComponent(CUR_DEPT)+'/profile',{
+      method:'PUT',
+      body:JSON.stringify({
+        slogan:document.getElementById('de_slogan').value,
+        intro:document.getElementById('de_intro').value,
+        photo:DEPT_EDIT_PHOTO
+      })
+    });
+    // 标杆/模范：全量对齐（先删后建，顺序按暂存顺序）
+    const existing=(DEPT_DATA&&DEPT_DATA.honors)||[];
+    for(const h of existing){
+      if(h.id)await api('/api/dept/honors/'+h.id,{method:'DELETE'});
+    }
+    for(const h of DEPT_EDIT_HONORS){
+      await api('/api/dept/'+encodeURIComponent(CUR_DEPT)+'/honors',{
+        method:'POST',
+        body:JSON.stringify({kind:h.kind,target_name:h.target_name,remark:h.remark||'',photo:h.photo||'',sort:h.sort||0})
+      });
+    }
+    setDeptStatus('de_save_status','保存成功','ok');
+    toast('已保存');
+    // 重新拉取部门页数据（体现最新内容）
+    await openDeptPage(CUR_DEPT);
+    setTimeout(()=>closeDeptEditModal(),400);
+  }catch(e){
+    setDeptStatus('de_save_status','保存失败：'+(e.message||''),'fail');
+    toast('保存失败：'+(e.message||''));
+  }finally{
+    DEPT_SAVING=false;
+    if(btn){btn.disabled=false;btn.textContent='保存'}
+  }
+}
+// ---------------- 部门介绍页 ----------------
+async function openDeptIntroModal(){
+  if(!CUR_DEPT){toast('请先进入部门主页');return}
+  document.getElementById('deptIntroTitle').textContent=CUR_DEPT+' · 部门介绍';
+  const body=document.getElementById('deptIntroBody');
+  body.innerHTML='<div class="dept-loading"><span class="spin"></span>加载中…</div>';
+  document.getElementById('deptIntroModal').style.display='flex';
+  updateScrollLock();
+  try{
+    const [pg,posts]=await Promise.all([
+      api('/api/dept/'+encodeURIComponent(CUR_DEPT)+'/page'),
+      api('/api/dept/'+encodeURIComponent(CUR_DEPT)+'/posts')
+    ]);
+    const p=pg.profile||{};
+    let html='';
+    // 部门职能
+    html+=`<div class="dept-slogan">${esc(p.slogan||'（尚未设置文化标语）')}</div>`;
+    html+=`<div class="dept-intro">${esc(p.intro||'（尚未填写部门职能介绍）')}</div>`;
+    // 团队合照
+    html+='<div class="dept-photo-wrap">';
+    html+=p.photo?`<img class="dept-photo" src="${p.photo}" alt="团队合照" onerror="deptPhotoError(this)">`
+                :'<div class="dept-photo-empty">尚未上传团队合照</div>';
+    html+='</div>';
+    // 组织架构
+    html+='<div style="margin-top:16px;font-size:13.5px;font-weight:600;color:var(--text)">组织架构</div>';
+    const wgs=pg.workgroups||[];
+    if(!wgs.length){
+      html+='<div class="dept-empty">尚未配置工作组</div>';
+    }else{
+      html+='<div class="dept-org">';
+      wgs.forEach(w=>{
+        html+=`<div class="org-group"><div class="org-group-head"><span class="org-group-name">${esc(w.name)}</span>`
+          +(w.leader?`<span class="org-leader">负责人：${esc(w.leader)}</span>`:'')
+          +(w.function?`<span class="org-func">${esc(w.function)}</span>`:'')
+          +`</div>`;
+        if(w.description)html+=`<div class="org-func" style="margin-top:4px">${esc(w.description)}</div>`;
+        if(w.members&&w.members.length){
+          html+='<div class="org-members">';
+          w.members.forEach(m=>html+=`<span class="org-member"><i>${esc(m.slice(0,1))}</i>${esc(m)}</span>`);
+          html+='</div>';
+        }else{
+          html+='<div class="org-func" style="margin-top:6px">暂无成员</div>';
+        }
+        html+='</div>';
+      });
+      html+='</div>';
+    }
+    // 部门文章（发文与发图）
+    html+='<div style="margin-top:18px;font-size:13.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px">部门动态'
+      +(ME&&ME.is_admin?'<button class="btn-primary" style="padding:3px 10px;font-size:12px" onclick="openDeptPostEditor()">+ 发文</button>':'')
+      +`</div>`;
+    const ps=posts.posts||[];
+    if(!ps.length){
+      html+='<div class="dept-empty">暂无文章</div>';
+    }else{
+      ps.forEach(x=>{
+        html+=`<div class="post-item"><div class="post-title">${esc(x.title||'（无标题）')}</div>`
+          +(x.content?`<div class="post-content">${esc(x.content)}</div>`:'')
+          +(x.images?`<div class="post-imgs">${x.images.split(';').filter(Boolean).map(u=>`<img src="${u}" alt="配图" onerror="this.style.display='none'">`).join('')}</div>`:'')
+          +`<div class="post-meta">${esc(x.author||'')} · ${esc(x.created_at||'')}`
+          +(ME&&ME.is_admin?` · <a href="javascript:void(0)" onclick="deleteDeptPost(${x.id})" style="color:var(--danger)">删除</a>`:'')
+          +`</div></div>`;
+      });
+    }
+    body.innerHTML=html;
+  }catch(e){
+    body.innerHTML=`<div class="dept-empty">加载失败：${esc(e.message||'')}</div>`;
+  }
+}
+function closeDeptIntroModal(){
+  document.getElementById('deptIntroModal').style.display='none';
+  updateScrollLock();
+}
+// 发文弹窗（复用编辑弹窗的模态样式）
+async function openDeptPostEditor(){
+  if(!CUR_DEPT)return;
+  const images=[];
+  const html=`<div class="modal-overlay" id="deptPostModal" style="display:none">
+    <div class="modal" style="width:560px;max-width:94vw">
+      <div class="modal-header"><h2>发布部门文章</h2><button class="modal-close" onclick="closeDeptPostEditor()">✕</button></div>
+      <div class="modal-body">
+        <div class="form-group"><label>标题</label><input type="text" class="form-input" id="dp_title" maxlength="100" placeholder="文章标题"></div>
+        <div class="form-group"><label>正文</label><textarea class="form-textarea" id="dp_content" maxlength="4000" placeholder="正文内容…"></textarea></div>
+        <div class="form-group"><label>配图（最多 9 张）</label>
+          <input type="file" id="dp_files" accept="image/jpeg,image/png,image/gif,image/webp" multiple style="font-size:12.5px" onchange="pickDeptPostImages(this)">
+          <div id="dp_img_box" style="margin-top:8px"></div>
+          <div class="upload-status" id="dp_img_status"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <span class="upload-status" id="dp_save_status" style="margin-right:auto"></span>
+        <button class="btn-default" onclick="closeDeptPostEditor()">取消</button>
+        <button class="btn-primary" id="dp_save_btn" onclick="saveDeptPost()">发布</button>
+      </div>
+    </div>
+  </div>`;
+  if(!document.getElementById('deptPostModal')){
+    const d=document.createElement('div');
+    d.innerHTML=html;
+    document.body.appendChild(d.firstElementChild);
+  }
+  document.getElementById('dp_title').value='';
+  document.getElementById('dp_content').value='';
+  document.getElementById('dp_img_box').innerHTML='';
+  window._DEPT_POST_IMAGES=images;
+  setDeptStatus('dp_save_status','');
+  setDeptStatus('dp_img_status','');
+  document.getElementById('deptPostModal').style.display='flex';
+  updateScrollLock();
+}
+function closeDeptPostEditor(){
+  const m=document.getElementById('deptPostModal');
+  if(m)m.style.display='none';
+  updateScrollLock();
+}
+// 选择配图（逐个校验类型与大小）
+function pickDeptPostImages(inp){
+  const files=[...(inp.files||[])];
+  const arr=window._DEPT_POST_IMAGES||[];
+  setDeptStatus('dp_img_status','');
+  for(const f of files){
+    if(arr.length>=9)break;
+    if(DEPT_IMG_TYPES.indexOf(f.type)<0){
+      setDeptStatus('dp_img_status','已跳过不支持的文件类型（仅 JPG/PNG/GIF/WebP）','fail');continue;
+    }
+    if(f.size>DEPT_MAX_IMG_BYTES){
+      setDeptStatus('dp_img_status',`已跳过 ${f.name}（${Math.round(f.size/1024)}KB 超过 ${DEPT_MAX_IMG_BYTES/1024}KB）`,'fail');continue;
+    }
+    const fr=new FileReader();
+    fr.onload=()=>{arr.push(String(fr.result||''));renderDeptPostImages()};
+    fr.onerror=()=>setDeptStatus('dp_img_status',`${f.name} 读取失败，请重试`,'fail');
+    fr.readAsDataURL(f);
+  }
+  inp.value='';
+}
+function renderDeptPostImages(){
+  const box=document.getElementById('dp_img_box');
+  const arr=window._DEPT_POST_IMAGES||[];
+  if(!box)return;
+  box.innerHTML=arr.map((u,i)=>`<span class="upload-preview"><img src="${u}" alt=""><span class="upload-retry" onclick="removeDeptPostImage(${i})" title="移除">移除</span></span>`).join('');
+}
+function removeDeptPostImage(i){
+  const arr=window._DEPT_POST_IMAGES||[];
+  arr.splice(i,1);
+  renderDeptPostImages();
+}
+// 发布部门文章
+async function saveDeptPost(){
+  if(!CUR_DEPT)return;
+  const btn=document.getElementById('dp_save_btn');
+  if(btn){btn.disabled=true;btn.textContent='发布中…'}
+  setDeptStatus('dp_save_status','发布中…','saving');
+  try{
+    await api('/api/dept/'+encodeURIComponent(CUR_DEPT)+'/posts',{
+      method:'POST',
+      body:JSON.stringify({
+        title:document.getElementById('dp_title').value,
+        content:document.getElementById('dp_content').value,
+        images:window._DEPT_POST_IMAGES||[]
+      })
+    });
+    setDeptStatus('dp_save_status','发布成功','ok');
+    closeDeptPostEditor();
+    await openDeptIntroModal();
+  }catch(e){
+    setDeptStatus('dp_save_status','发布失败：'+(e.message||''),'fail');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='发布'}
+  }
+}
+// 删除部门文章
+async function deleteDeptPost(pid){
+  if(!confirm('删除该文章？不可恢复'))return;
+  try{
+    await api('/api/dept/posts/'+pid,{method:'DELETE'});
+    toast('已删除');
+    await openDeptIntroModal();
+  }catch(e){toast(e.message)}
+}
+function pickBoard(bid){
+  curBoard=bid;curYears=new Set([YEAR_DEFAULT]);
+  // 从部门页进入事项列表时，先切回列表视图
+  if(CUR_DEPT)backToBoardList();
+  ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()
+}
 // 选中某板块时，自动（且仅）展开其所属部门，保证该板块在目录树中始终可见
 function ensureDeptOpen(bid){
   if(!bid||!ME||!ME.boards)return;
@@ -1308,6 +2108,8 @@ function syncDateFilterUI(){
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
+  // 缓存板块元信息：年份筛选器重渲染（移除/清空单个年份）时要用它取选项
+  _curColsCache=cols||[];
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
   renderYearFilter(cols);
   // 有搜索词时切换到「统一搜索结果」视图
@@ -1330,11 +2132,11 @@ function renderBoard(cards,cols,q,colHits){
   }else{
     names=Object.keys(groups);
   }
-  // 年份筛选：只保留归属年份匹配的板块（未登记年份的板块在具体年份下不显示）
-  if(curYear){
-    names=names.filter(k=>{const m=cmeta[k];return !!m&&(m.year||'')===curYear});
+  // 年份筛选（多选）：只保留归属年份命中任一已选年份的板块（未登记年份的板块不显示）
+  if(curYears.size){
+    names=names.filter(k=>{const m=cmeta[k];return !!m&&curYears.has(m.year||'')});
     if(!names.length){
-      c.innerHTML=`<div class="empty">${esc(curYear)} 年下暂无板块</div>`;
+      c.innerHTML=`<div class="empty">${esc([...curYears].join(' / '))} 年下暂无板块</div>`;
       return;
     }
   }
@@ -1379,22 +2181,53 @@ function renderBoard(cards,cols,q,colHits){
     </div>`;
   }).join('');
 }
-// ---------- 年份筛选 ----------
-// 下拉选项 = 当前看板下各板块的「归属年份」；默认落在当前年份，切换看板时统一重置
+// ---------- 年份筛选（多选） ----------
+// 形态：chips 标签组。每个已选年份渲染成一个带 ✕ 的标签（点 ✕ 移除该年份），
+// 右侧固定一个「全部年份」标签（点它 = 清空全部已选）。
+// 选项来源 = 当前看板下各板块的「归属年份」；默认落在当前年份，切换看板时统一重置。
 function renderYearFilter(cols){
-  const sel=document.getElementById('yearFilter');
-  if(!sel)return;
+  const box=document.getElementById('yearFilter');
+  if(!box)return;
   const years=[...new Set((cols||[]).map(x=>x.year||'').filter(Boolean))].sort().reverse();
-  // 选中的年份在当前看板不存在时（换看板 / 改年份）：
-  // 先回落到当前年份，当前年份也没有则退回「全部年份」，避免筛出空列表
-  if(curYear&&!years.includes(curYear)){
-    curYear=years.includes(YEAR_DEFAULT)?YEAR_DEFAULT:'';
+  // 已选年份在当前看板不存在时（换看板 / 改年份）：先回落到当前年份，
+  // 当前年份也没有则退回「全部年份」，避免筛出空列表
+  if(curYears.size&&!years.some(y=>curYears.has(y))){
+    curYears=new Set(years.includes(YEAR_DEFAULT)?[YEAR_DEFAULT]:[]);
   }
-  sel.innerHTML='<option value="">全部年份</option>'
-    +years.map(y=>`<option value="${y}"${y===curYear?' selected':''}>${y} 年</option>`).join('');
-  sel.hidden=!years.length;   // 当前看板一个年份都没登记时不必显示筛选器
+  // 丢弃当前看板已不存在的年份（保留集合里其它仍然有效的年份）
+  if(curYears.size){
+    const keep=[...curYears].filter(y=>years.includes(y));
+    curYears=new Set(keep);
+  }
+  if(!years.length){box.hidden=true;box.innerHTML='';return}
+  box.hidden=false;
+  const chips=[];
+  [...curYears].sort().reverse().forEach(y=>{
+    chips.push(`<span class="year-chip" title="已选年份 ${y}，点 × 移除">${esc(y)} 年<span class="yc-x" data-year="${esc(y)}" title="移除该年份">✕</span></span>`);
+  });
+  // 「全部年份」：清空全部已选（空集合 = 不过滤）
+  chips.push(`<span class="year-chip all${curYears.size?'':' on'}" data-all="1" title="清空全部已选年份">全部年份</span>`);
+  box.innerHTML=chips.join('');
 }
-function onYearFilter(v){curYear=v||'';reload(1)}
+// 点击 ✕ 移除单个年份；点击「全部年份」清空全部
+function onYearFilterClick(ev){
+  const t=ev.target;
+  if(!t)return;
+  if(t.dataset&&t.dataset.year){
+    curYears.delete(t.dataset.year);
+    renderYearFilter(currentCols());
+    reload(1);
+    return;
+  }
+  if(t.dataset&&t.dataset.all){
+    curYears=new Set();
+    renderYearFilter(currentCols());
+    reload(1);
+  }
+}
+// 当前看板的板块元信息（供年份筛选器重渲染时取选项）
+let _curColsCache=[];
+function currentCols(){return _curColsCache||[]}
 // ---------- 搜索结果：事项与板块统一展示 ----------
 // 板块名命中 → 该板块成组展示（标注「板块名匹配」）
 // 事项名/描述命中 → 逐条展示，每条标注所属板块
@@ -1404,7 +2237,7 @@ function renderSearchResults(container,cards,cols,q,colHits){
   // 年份筛选在搜索视图同样生效：只保留归属年份匹配的板块与其事项
   const cmeta={};
   (cols||[]).forEach(x=>{cmeta[x.column_name]=x});
-  const yearOk=(colName)=>!curYear||((cmeta[colName]||{}).year||'')===curYear;
+  const yearOk=(colName)=>!curYears.size||curYears.has((cmeta[colName]||{}).year||'');
   const groups={};
   const loose=[];
   (cards||[]).forEach(card=>{
@@ -1521,9 +2354,10 @@ function cardItem(c,seq){
   const overdue=c.due && c.status!=='done' && c.due < new Date().toISOString().slice(0,10);
   // 「添加子事项」是行内唯一的子事项入口：原来的「子事项 N」按钮已移除 ——
   // 已有子事项时左侧展开箭头就能看到目录，计数再单独占一个操作位属于重复
+  // 点击直接打开「新建子事项」弹窗完成输入与保存（不再经过右侧抽屉）
   const canAddSub=ME.can_edit&&canEditCard(c);
   const subBtn=canAddSub
-    ?`<button class="sub-toggle" onclick="openDrawer('${c.card_id}')" title="为该事项新增子事项">＋ 子事项</button>`
+    ?`<button class="sub-toggle" onclick="openNewSubModal('${c.card_id}')" title="为该事项新增子事项">＋ 子事项</button>`
     :'';
   // 事项置顶：与「板块置顶」完全一致 —— 按钮带文字标签，无条件渲染，
   // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶。
@@ -1595,7 +2429,8 @@ function renderSubTree(box,nodes,level){
   box.innerHTML=nodes.map(n=>subNodeHtml(n,level)).join('');
 }
 function subNodeHtml(n,level){
-  const kids=n.children||[];
+  // 本期只支持「主事项 → 子事项」两层：子事项不再渲染自己的子节点（也不给展开箭头）
+  const kids=[];
   const open=!!SUBTREE_OPEN[n.card_id];
   const od=n.due&&n.status!=='done'&&n.due<todayStr();
   // 子事项行与主事项行同构：圆点 → 标题 → 逾期 → 字段列 → 状态标签 → 置顶
@@ -1603,9 +2438,7 @@ function subNodeHtml(n,level){
   // 负责人与父事项**各自独立取值**，子事项不会继承父事项负责人
   const colsHtml=fieldCols({owner:n.owner,created:n.created,due:n.due});
   return `<div class="sub-node ${n.status==='done'?'done':''}">
-    ${kids.length
-      ?`<span class="s-chev ${open?'open':''}" onclick="toggleSubNode('${n.card_id}')">▶</span>`
-      :`<span class="s-chev leaf">▶</span>`}
+    <span class="s-chev leaf">▶</span>
     <span class="s-dot"></span>
     <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>
     <span class="fcols">${colsHtml}</span>
@@ -1616,8 +2449,7 @@ function subNodeHtml(n,level){
       <span class="slot-pin">${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}</span>
       <span class="slot-sub"></span>
     </span>
-  </div>
-  ${kids.length?`<div class="sub-tree" id="subnode_${n.card_id}" style="display:${open?'block':'none'}">${kids.map(k=>subNodeHtml(k,level+1)).join('')}</div>`:''}`;
+  </div>`;
 }
 function toggleSubNode(cardId){
   const box=document.getElementById('subnode_'+cardId);
@@ -1687,7 +2519,6 @@ function toggleCardPin(cardId,pinned,isSub){
   }else{
     reload(curPage);
   }
-  refreshDrawerIfOpen();
 }
 // 完成情况：标记 / 取消完成。主事项与子事项写同一套「状态」字段，展示也一致
 async function toggleCardDone(cardId,done,isSub){
@@ -1700,7 +2531,6 @@ async function toggleCardDone(cardId,done,isSub){
     }else{
       reload(curPage);
     }
-    await refreshDrawerIfOpen();
   }catch(e){toast(e.message)}
 }
 // 子事项在目录里改了状态/置顶后，就地更新缓存并重绘已展开的目录
@@ -1722,14 +2552,6 @@ function refreshSubTrees(){
     const box=document.getElementById('subtree_'+k);
     if(box&&box.style.display!=='none')renderSubTree(box,SUBTREE_CACHE[k]);
   });
-}
-// 抽屉开着时，把当前面板同步刷新（子事项改完后目录/详情保持一致）
-async function refreshDrawerIfOpen(){
-  const panel=document.getElementById('drawerPanel');
-  if(!panel||!panel.classList.contains('open'))return;
-  const top=DRAWER_STACK[DRAWER_STACK.length-1];
-  if(!top||top.type!=='list')return;
-  await renderDrawerList(top.cardId);
 }
 // 点击涟漪反馈：从点击点扩散一圈水波，让用户明确感知"点到了"。
 // 事件委托挂在容器上 —— 容器内内容会频繁重绘，挂在容器上就不用反复绑监听。
@@ -1902,7 +2724,6 @@ async function saveEdit(){
     }
     await api('/api/cards/'+id,{method:'PUT',body:JSON.stringify({fields})});
     toast('已保存');closeEdit();reload(1);renderProgress();
-    await refreshDrawerIfOpen();
   }catch(e){toast(e.message)}
 }
 async function deleteCard(){
@@ -1911,7 +2732,6 @@ async function deleteCard(){
     await api('/api/cards/'+editing,{method:'DELETE'});toast('已删除');
     EDIT_FROM_DETAIL='';   // 卡片已删除，不用再回详情
     closeEdit();reload(1);renderProgress();
-    await refreshDrawerIfOpen();
   }
   catch(e){toast(e.message)}
 }
@@ -2050,11 +2870,6 @@ async function createSubCard(card_name){
     })});
     toast('已创建子事项');
     closeModal('newModal');
-    // 抽屉还开着时同步刷新子事项目录
-    if(document.getElementById('drawerPanel').classList.contains('open')){
-      const rootId=DRAWER_STACK.length?DRAWER_STACK[DRAWER_STACK.length-1].cardId:p.parent_id;
-      await renderDrawerList(rootId);
-    }
     reload(1);renderProgress();
   }catch(e){toast(e.message)}
 }
@@ -2241,7 +3056,6 @@ async function saveSubtaskTitle(sid,title){
   }catch(e){toast(e.message);loadEditSubtasks(editing)}
 }
 // ---------- 右侧抽屉：父事项 + 子事项 ----------
-var DRAWER_STACK=[];      // [{type:'list',cardId}]：抽屉只有列表层，子事项编辑走共享的子事项弹窗
 // ---------- 状态与置顶：主事项、子事项共用的展示/操作基元 ----------
 // 状态标签：主事项行、子事项目录行、抽屉子事项行共用同一套 class 与文案，保证视觉一致
 // 同时它就是行内**唯一的状态切换入口**（点击在「未完成 ⇄ 已完成」间切换），
@@ -2545,162 +3359,6 @@ function ppRemove(containerId,n){
   const i=o.arr.indexOf(n);if(i>=0)o.arr.splice(i,1);
   ppSyncTags(containerId);
 }
-async function openDrawer(cardId){
-  DRAWER_STACK=[{type:'list',cardId}];
-  document.getElementById('drawerMask').classList.add('show');
-  document.getElementById('drawerPanel').classList.add('open');
-  await renderDrawer();
-}
-function closeDrawer(){
-  document.getElementById('drawerMask').classList.remove('show');
-  document.getElementById('drawerPanel').classList.remove('open');
-  DRAWER_STACK=[];
-}
-async function drawerBack(){
-  DRAWER_STACK.pop();
-  if(!DRAWER_STACK.length){closeDrawer();return}
-  await renderDrawer();
-}
-async function renderDrawer(){
-  const top=DRAWER_STACK[DRAWER_STACK.length-1];
-  // 抽屉只有「列表」一层：子事项的编辑统一走共享的子事项弹窗（与主事项弹窗同一套）
-  document.getElementById('drawerBack').classList.toggle('show',DRAWER_STACK.length>1);
-  document.getElementById('drawerTitle').textContent='子事项';
-  await renderDrawerList(top.cardId);
-}
-async function renderDrawerList(parentId){
-  const body=document.getElementById('drawerBody');
-  body.innerHTML='<div style="color:var(--text2);font-size:13px;padding:30px;text-align:center">加载中…</div>';
-  const pc=await api('/api/cards?card_id='+parentId);
-  const p=pc.cards[0];
-  if(!p){body.innerHTML='<div class="empty-hint">父事项不存在或已删除</div>';return}
-  const d=await api('/api/cards/'+parentId+'/children');
-  const subs=d.children||[];
-  const todo=await api('/api/cards/'+parentId+'/subtasks');
-  const tdone=todo.done||0;
-  const overdue=p.due&&p.status!=='done'&&p.due<todayStr();
-  body.innerHTML=`
-    <div class="pcard" style="display:flex;align-items:flex-start;gap:8px">
-      <span class="s-chev open" id="drawerMainChev" onclick="toggleDrawerMain()" title="折叠 / 展开主事项" style="cursor:pointer;margin-top:5px">▶</span>
-      <div style="flex:1;min-width:0">
-        <h3 style="margin:0">${esc(p.card_name)}</h3>
-        <div class="pmeta">${statusTag(p.card_id,p.status,'padding:1px 8px;font-size:11px')}
-          <span>负责人：${esc(p.owner||'—')}</span>
-          <span>创建日期：${esc(fmtDate(p.created)||'—')}</span>
-          <span>截止日期：${esc(fmtDate(p.due)||'—')}${overdue?' <b style="color:var(--danger)">已逾期</b>':''}</span>
-          ${todo.total?`<span>代办：${tdone}/${todo.total}</span>`:''}
-        </div>
-        ${p.description?`<div class="pdesc">${esc(p.description)}</div>`:''}
-      </div>
-      ${ME.can_edit?`<div class="sl-ops" style="align-items:flex-start">
-        ${pinBtn(p.card_id,isPinned('card',p.card_id),'toggleCardPin','📌 事项置顶')}
-        <button onclick="openEdit('${p.card_id}')" title="打开事项弹窗">编辑</button>
-      </div>`:''}
-    </div>
-    ${ME.can_edit?`
-    <button class="btn-default" style="width:100%;margin-bottom:10px" onclick="openNewSubModal('${p.card_id}')" title="新建子事项（与主事项共用同一个新建弹窗）">＋ 创建子事项</button>`:''}
-    <div id="drawerSubSec">
-      ${todo.total?`<div class="sub-sec">代办清单 · ${tdone}/${todo.total}</div>${drawerTodoTree(todo.subtasks,0)}`:''}
-      <div class="sub-sec">子事项目录 · ${subs.length} 个顶层 / ${d.total} 个合计</div>
-      ${drawerSubTree(subs,parentId,0)||'<div class="empty-hint">暂无子事项，点上方「＋ 创建子事项」新建第一个</div>'}
-    </div>`;
-}
-// 弹窗内的子事项目录（树形层级）
-let DRAWER_SUB_OPEN={};
-let DRAWER_TODO_OPEN={};
-// 代办清单（card_subtasks）也按树形展示
-function drawerTodoTree(nodes,level){
-  return (nodes||[]).map(n=>{
-    const kids=n.children||[];
-    const open=!!DRAWER_TODO_OPEN[n.id];
-    return `<div class="sl-row" style="padding-left:${level*16}px" onclick="event.stopPropagation()">
-      ${kids.length
-        ?`<span class="s-chev ${open?'open':''}" onclick="toggleDrawerTodo('${n.id}')" style="cursor:pointer;flex-shrink:0">▶</span>`
-        :`<span class="s-chev leaf" style="flex-shrink:0">▶</span>`}
-      <input type="checkbox" ${n.done?'checked':''} onchange="toggleDrawerTodoDone('${n.id}',this.checked)" style="width:15px;height:15px;accent-color:var(--primary);cursor:pointer;flex-shrink:0">
-      <div class="sl-main"><div class="sl-name" style="${n.done?'color:var(--text2);text-decoration:line-through':''}">${esc(n.title)}</div></div>
-    </div>
-    ${kids.length?`<div id="dtodo_${n.id}" style="display:${open?'block':'none'}">${drawerTodoTree(kids,level+1)}</div>`:''}`;
-  }).join('');
-}
-function toggleDrawerTodo(id){
-  const box=document.getElementById('dtodo_'+id);
-  if(!box)return;
-  const open=box.style.display==='none';
-  box.style.display=open?'block':'none';
-  DRAWER_TODO_OPEN[id]=open;
-  const prev=box.previousElementSibling;
-  const chev=prev?prev.querySelector('.s-chev'):null;
-  if(chev)chev.classList.toggle('open',open);
-}
-async function toggleDrawerTodoDone(sid,done){
-  const parentId=DRAWER_STACK[DRAWER_STACK.length-1].cardId;
-  try{
-    await api('/api/cards/'+parentId+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({done:done?1:0})});
-    await renderDrawerList(parentId);
-  }catch(e){toast(e.message)}
-}
-function drawerSubTree(nodes,parentId,level){
-  return (nodes||[]).map(n=>{
-    const od=n.due&&n.status!=='done'&&n.due<todayStr();
-    const kids=n.children||[];
-    const open=!!DRAWER_SUB_OPEN[n.card_id];
-    // 抽屉里的子事项行与主事项行同构：头像 → 标题 → 状态标签 → 置顶 → 完成情况 → 编辑
-    return `<div class="sl-row" onclick="openSubModal('${n.card_id}')" style="padding-left:${level*16}px">
-      ${kids.length
-        ?`<span class="s-chev ${open?'open':''}" onclick="event.stopPropagation();toggleDrawerSub('${n.card_id}')" style="cursor:pointer;flex-shrink:0">▶</span>`
-        :`<span class="s-chev leaf" style="flex-shrink:0">▶</span>`}
-      <span class="s-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0"></span>
-      <div class="sl-main">
-        <div class="sl-name">${esc(n.card_name)}</div>
-        <div class="sl-meta">${fieldMeta({owner:n.owner,created:n.created,due:n.due})}${od?' · 已逾期':''}</div>
-      </div>
-      ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
-      ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
-        ${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}
-        <button onclick="openSubModal('${n.card_id}')" title="打开子事项详情弹窗（与主事项同构）">详情</button>
-        <button onclick="startDrawerSubUnder('${n.card_id}','${esc(n.card_name)}')" title="在该子事项下再挂一级">＋下级</button>
-        <button class="del" onclick="delDrawerSub('${n.card_id}','${parentId}')">删除</button>
-      </div>`:''}
-    </div>
-    ${kids.length?`<div id="dsub_${n.card_id}" style="display:${open?'block':'none'}">${drawerSubTree(kids,parentId,level+1)}</div>`:''}`;
-  }).join('');
-}
-function toggleDrawerSub(cardId){
-  const box=document.getElementById('dsub_'+cardId);
-  if(!box)return;
-  const open=box.style.display==='none';
-  box.style.display=open?'block':'none';
-  DRAWER_SUB_OPEN[cardId]=open;
-  const prev=box.previousElementSibling;
-  const chev=prev?prev.querySelector('.s-chev'):null;
-  if(chev)chev.classList.toggle('open',open);
-}
-// 弹窗内折叠/展开主事项（连同其下的子事项目录）
-function toggleDrawerMain(){
-  const box=document.getElementById('drawerSubSec');
-  const chev=document.getElementById('drawerMainChev');
-  if(!box)return;
-  const folded=box.style.display!=='none';
-  box.style.display=folded?'none':'block';
-  if(chev)chev.classList.toggle('open',!folded);
-}
-// 「＋下级」：直接打开新建弹窗，并把新子事项挂到指定的父事项下
-// （创建子事项已改为与主事项共用新建弹窗，不再有抽屉内的内联表单）
-function startDrawerSubUnder(cardId,name){
-  openNewSubModal(cardId);
-}
-// 删除子事项：抽屉列表里的删除按钮走这里；子事项弹窗里的删除走 deleteCard（共用后端接口）
-async function delDrawerSub(subId,parentId){
-  if(!confirm('删除该子事项？不可恢复'))return;
-  try{
-    await api('/api/cards/'+subId,{method:'DELETE'});
-    toast('已删除');
-    await renderDrawerList(parentId);
-    reload(1);renderProgress();
-  }catch(e){toast(e.message)}
-}
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
 // ---------- 详情 + 评论 ----------
 async function openDetail(id){
   DETAIL_ID=id;
@@ -2732,9 +3390,12 @@ async function openDetail(id){
     `负责人：<b>${esc(c.owner||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>`;
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
-  document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${esc(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
+  document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
   document.getElementById('d_actions').innerHTML=acts.actions.slice(0,10).map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(a.action)}<span class="when">${esc(a.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
   document.getElementById('d_new_comment').value='';
+  // 切换事项时清空上一次残留的提及（否则会把上一条评论的 @ 提到新事项上）
+  COMMENT_MENTIONS=[];
+  renderMentionBar();
   // 详情弹窗子事项（只读展示；editor 可勾选）
   const st=await api('/api/cards/'+id+'/subtasks');
   const box=document.getElementById('d_subtask_box');
@@ -2745,10 +3406,126 @@ async function openDetail(id){
   document.getElementById('detailModal').style.display='flex';
 }
 async function addComment(){
-  const v=document.getElementById('d_new_comment').value.trim();
-  if(!v||!DETAIL_ID)return;
-  try{await api('/api/cards/'+DETAIL_ID+'/comments',{method:'POST',body:JSON.stringify({content:v})});openDetail(DETAIL_ID)}
+  const inp=document.getElementById('d_new_comment');
+  const v=inp.value.trim();
+  if(!v&&!COMMENT_MENTIONS.length)return;
+  if(!DETAIL_ID)return;
+  // 提交时把已插入的提及拼到正文末尾（chip 是「已插入态」，正文里的 @姓名 是最终形态）
+  const mentions=COMMENT_MENTIONS.slice();
+  const text=mentions.length?(v?(v+' '):'')+mentions.map(m=>'@'+m).join(' '):v;
+  if(!text.trim())return;
+  try{
+    await api('/api/cards/'+DETAIL_ID+'/comments',{method:'POST',body:JSON.stringify({content:text,mentions})});
+    COMMENT_MENTIONS=[];
+    await openDetail(DETAIL_ID);
+  }
   catch(e){toast(e.message)}
+}
+// ---------- 评论 @ 提及 ----------
+// 两态分离（需求）：
+//   「输入态」= 输入框里的纯文本（用户正在打字）
+//   「已插入态」= 从候选里选中的成员，以 chip 单独展示（可单独移除）
+// 提交时才把 chip 合并成正文里的 "@姓名"。
+let COMMENT_MENTIONS=[];      // 已插入的提及成员名
+let MENTION_QUERY='';         // 当前 @ 后的搜索词
+let MENTION_INDEX=0;          // 候选列表的键盘高亮位
+// 渲染已插入的提及 chip（与输入态视觉上明确区分）
+function renderMentionBar(){
+  const bar=document.getElementById('d_mention_bar');
+  if(!bar)return;
+  bar.innerHTML=COMMENT_MENTIONS.map((m,i)=>
+    `<span class="mention-chip">@${esc(m)}<i class="mc-x" data-i="${i}" title="移除该提及">✕</i></span>`).join('');
+}
+// 移除一个已插入的提及
+function removeMention(i){
+  if(i<0||i>=COMMENT_MENTIONS.length)return;
+  COMMENT_MENTIONS.splice(i,1);
+  renderMentionBar();
+}
+// 候选成员（排除已提及的）
+function mentionCandidates(){
+  const q=(MENTION_QUERY||'').trim();
+  const all=ppMembers();
+  return all.filter(n=>!COMMENT_MENTIONS.includes(n)&&(!q||n.includes(q)));
+}
+// 渲染 @ 候选下拉
+function renderMentionDrop(){
+  const drop=document.getElementById('d_mention_drop');
+  if(!drop)return;
+  const list=mentionCandidates();
+  if(!list.length){
+    drop.innerHTML='<div class="mention-empty">无匹配成员</div>';
+    drop.hidden=false;
+    MENTION_INDEX=0;
+    return;
+  }
+  if(MENTION_INDEX>=list.length)MENTION_INDEX=0;
+  drop.innerHTML=list.map((n,i)=>
+    `<div class="mention-opt${i===MENTION_INDEX?' on':''}" data-name="${esc(n)}">@${esc(n)}</div>`).join('');
+  drop.hidden=false;
+}
+// 输入框内容变化：检测光标前的 "@词" 决定是否显示候选
+function onCommentInput(el){
+  const pos=el.selectionStart==null?el.value.length:el.selectionStart;
+  const before=el.value.slice(0,pos);
+  // 找最后一个 @ 起始位置，且其后不允许出现空白（避免误判邮箱等）
+  const at=before.lastIndexOf('@');
+  if(at<0){hideMentionDrop();return}
+  const frag=before.slice(at+1);
+  if(/\s/.test(frag)){hideMentionDrop();return}
+  MENTION_QUERY=frag;
+  MENTION_INDEX=0;
+  renderMentionDrop();
+}
+function hideMentionDrop(){
+  const drop=document.getElementById('d_mention_drop');
+  if(drop)drop.hidden=true;
+}
+// 点 @ 按钮：把 "@" 插入输入框并展开候选
+function toggleMentionMenu(){
+  const inp=document.getElementById('d_new_comment');
+  if(!inp)return;
+  const pos=inp.selectionStart==null?inp.value.length:inp.selectionStart;
+  const v=inp.value;
+  const before=v.slice(0,pos), after=v.slice(pos);
+  // 光标前已经有未闭合的 @ → 直接展开候选；否则插入一个 @
+  const at=before.lastIndexOf('@');
+  const frag=at>=0?before.slice(at+1):'';
+  if(at>=0&&!/\s/.test(frag)){
+    MENTION_QUERY=frag;MENTION_INDEX=0;renderMentionDrop();inp.focus();return;
+  }
+  inp.value=before+'@'+after;
+  const np=pos+1;
+  inp.setSelectionRange(np,np);
+  inp.focus();
+  MENTION_QUERY='';MENTION_INDEX=0;
+  renderMentionDrop();
+}
+// 选中一个候选 → 插入 chip（输入框内容保持为「输入态」，chip 是「已插入态」）
+function pickMention(name){
+  if(!name)return;
+  if(!COMMENT_MENTIONS.includes(name))COMMENT_MENTIONS.push(name);
+  // 输入框里把刚输入的 "@词" 去掉（chip 已经承担了提及的展示）
+  const inp=document.getElementById('d_new_comment');
+  if(inp){
+    const pos=inp.selectionStart==null?inp.value.length:inp.selectionStart;
+    const before=inp.value.slice(0,pos);
+    const at=before.lastIndexOf('@');
+    if(at>=0){
+      const np=at;
+      inp.value=inp.value.slice(0,np)+inp.value.slice(pos);
+      inp.setSelectionRange(np,np);
+    }
+  }
+  renderMentionBar();
+  hideMentionDrop();
+  if(inp)inp.focus();
+}
+// 渲染评论正文：把 "@姓名" 高亮成可点击的提及
+function renderCommentText(text){
+  const s=esc(text||'');
+  // 成员名里的特殊字符已在 esc 处理过；@ 后接中文名 → 高亮
+  return s.replace(/@([一-龥A-Za-z0-9_]{1,20})/g,'<span class="at-name" title="提及 @$1">@$1</span>');
 }
 // ---------- 详情弹窗的操作区：状态 + 编辑入口 ----------
 // 列表行里的「✏️ 编辑」已移除，编辑改从这里进入
@@ -2813,6 +3590,45 @@ document.addEventListener('click',e=>{
   const t=e.target;
   if(t&&t.closest&&t.closest('.status-picker'))return;   // 点在按钮或菜单内部，不处理
   closeStatusMenu();
+});
+// 年份筛选 chips 的点击（移除单个年份 / 清空全部）—— 事件委托到 document，
+// 因为 chips 是 innerHTML 重建的，直接绑在元素上会在重建后失效
+document.addEventListener('click',e=>{
+  const t=e.target;
+  if(!t||!t.closest)return;
+  if(t.closest('#yearFilter'))onYearFilterClick(e);
+});
+// 评论 @ 提及：候选项点击 + 已插入 chip 的移除
+document.addEventListener('click',e=>{
+  const t=e.target;
+  if(!t||!t.closest)return;
+  // 点候选成员 → 插入提及
+  const opt=t.closest('#d_mention_drop .mention-opt');
+  if(opt){pickMention(opt.getAttribute('data-name'));return}
+  // 点 chip 的 ✕ → 移除该提及
+  const x=t.closest('#d_mention_bar .mc-x');
+  if(x){removeMention(parseInt(x.getAttribute('data-i'),10));return}
+  // 其它位置点击 → 收起候选
+  if(!t.closest('#d_mention_drop')&&!t.closest('#d_new_comment')&&!t.closest('.comment-form'))hideMentionDrop();
+  // 点击消息条目 → 查看详情 + 跳转对应事项
+  const mi=t.closest('#msgList .msg-item');
+  if(mi)openMessage(parseInt(mi.getAttribute('data-id'),10));
+});
+// 评论输入框的键盘操作：↑↓ 切换候选，Enter 选中，Esc 收起
+document.addEventListener('keydown',e=>{
+  const inp=document.getElementById('d_new_comment');
+  if(!inp||document.activeElement!==inp)return;
+  const drop=document.getElementById('d_mention_drop');
+  if(!drop||drop.hidden)return;
+  const list=mentionCandidates();
+  if(e.key==='ArrowDown'){e.preventDefault();MENTION_INDEX=Math.min(MENTION_INDEX+1,list.length-1);renderMentionDrop();return}
+  if(e.key==='ArrowUp'){e.preventDefault();MENTION_INDEX=Math.max(MENTION_INDEX-1,0);renderMentionDrop();return}
+  if(e.key==='Enter'){
+    e.preventDefault();
+    if(list[MENTION_INDEX])pickMention(list[MENTION_INDEX]);
+    return;
+  }
+  if(e.key==='Escape'){hideMentionDrop();return}
 });
 // 状态选择的统一入口：新建弹窗只记录选择（事项还没创建），详情/编辑弹窗则立即写回
 function pickStatus(ctx,st){
@@ -3768,19 +4584,13 @@ function connectWS(){
           });
         }
       }
-      // 抽屉开着 → 刷新抽屉视图（子事项实时同步）
-      if(DRAWER_STACK.length&&document.getElementById('drawerPanel').classList.contains('open')){
-        const top=DRAWER_STACK[DRAWER_STACK.length-1];
-        if(top.type==='list'&&top.cardId===cid){renderDrawerList(cid)}
-      }
     }};
   ws.onclose=()=>setTimeout(connectWS,5000);
   setInterval(()=>{if(ws.readyState===1)ws.send('ping')},25000);
 }
 init();
-// 点击涟漪：子事项目录项（看板内的子事项树 + 右侧抽屉的子事项行）
+// 点击涟漪：子事项目录项（看板内的子事项树）
 attachRipple(document.getElementById('boardContent'),'.sub-node');
-attachRipple(document.getElementById('drawerBody'),'.sl-row');
 
 // ---------- file:// 直接打开：引导层与后端存活探测 ----------
 function showFileGuard(){

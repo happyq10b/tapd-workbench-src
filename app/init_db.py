@@ -107,6 +107,44 @@ CREATE TABLE IF NOT EXISTS board_config (
 );
 CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(year, dept, attr);
 
+-- 部门主页：文化展示区（标语 / 职能介绍 / 团队合照）
+-- dept 与 DEPT_ORDER 的部门名一一对应；一个部门一条记录
+CREATE TABLE IF NOT EXISTS dept_profile (
+    dept        TEXT PRIMARY KEY,              -- 部门名（财务中心 / 核算部 / 总账部 / 管理部 / 资金部 / 商务部）
+    slogan      TEXT NOT NULL DEFAULT '',      -- 文化标语
+    intro       TEXT NOT NULL DEFAULT '',      -- 部门职能介绍
+    photo       TEXT NOT NULL DEFAULT '',      -- 团队合照（data URL）
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+-- 部门主页：标杆部门 / 模范个人
+-- kind: 'dept' 标杆部门 / 'person' 模范个人
+-- target_name: 标杆部门名或模范个人姓名
+CREATE TABLE IF NOT EXISTS dept_honors (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    dept         TEXT NOT NULL,                 -- 归属部门（挂在哪个部门的页面上）
+    kind         TEXT NOT NULL DEFAULT 'dept',  -- 'dept'=标杆部门 / 'person'=模范个人
+    target_name  TEXT NOT NULL DEFAULT '',      -- 标杆部门名 / 模范个人姓名
+    photo        TEXT NOT NULL DEFAULT '',      -- 照片（data URL）
+    remark       TEXT NOT NULL DEFAULT '',      -- 备注说明
+    sort         INTEGER NOT NULL DEFAULT 0,   -- 排序权重（小在前）
+    created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_dept_honors ON dept_honors(dept, kind, sort);
+
+-- 部门介绍页：发文（支持发图）
+-- images 是图片 data URL 的分号分隔串（与 mentions 同口径）
+CREATE TABLE IF NOT EXISTS dept_posts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    dept        TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    content     TEXT NOT NULL DEFAULT '',
+    images      TEXT NOT NULL DEFAULT '',
+    author      TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_dept_posts ON dept_posts(dept, id);
+
 -- 板块元信息（看板内的分组，如「成本组（第1周）」）
 -- 板块本身此前只隐含在 cards.column_name 中，没有独立记录，
 -- 导致「创建日期 / 性质 / 置顶」无处存放。这里补一张表：
@@ -144,9 +182,26 @@ CREATE TABLE IF NOT EXISTS comments (
     card_id     TEXT NOT NULL,
     username    TEXT NOT NULL,
     content     TEXT NOT NULL DEFAULT '',
+    mentions    TEXT NOT NULL DEFAULT '',      -- 被 @ 的成员名，分号分隔（与 owner 字段同口径）
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_comments_card ON comments(card_id);
+
+-- 消息中心：@ 提及与相关消息的收件箱
+-- kind: 'mention'（被 @ 提及） / 'system'（系统消息）
+-- 状态：unread 未读 / read 已读
+CREATE TABLE IF NOT EXISTS messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    receiver    TEXT NOT NULL,                  -- 接收人（登录账号）
+    sender      TEXT NOT NULL DEFAULT '',       -- 发送人
+    card_id     TEXT NOT NULL DEFAULT '',       -- 关联事项（可空，如部门通知）
+    kind        TEXT NOT NULL DEFAULT 'mention',
+    content     TEXT NOT NULL DEFAULT '',
+    read_at     TEXT NOT NULL DEFAULT '',       -- 空 = 未读
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver, read_at, id);
+CREATE INDEX IF NOT EXISTS idx_messages_card ON messages(card_id);
 
 CREATE TABLE IF NOT EXISTS card_subtasks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,6 +348,42 @@ def init_db(force_import=False):
         conn.execute("ALTER TABLE team_members ADD COLUMN workgroups TEXT NOT NULL DEFAULT ''")
     if 'account' not in cols:
         conn.execute("ALTER TABLE team_members ADD COLUMN account TEXT NOT NULL DEFAULT ''")
+    # 评论 @ 提及：老库补列（mentions 与 owner 字段同口径，分号分隔成员名）
+    ccols = [r[1] for r in conn.execute('PRAGMA table_info(comments)').fetchall()]
+    if 'mentions' not in ccols:
+        conn.execute("ALTER TABLE comments ADD COLUMN mentions TEXT NOT NULL DEFAULT ''")
+    # 消息中心：老库补表（SCHEMA 里的 CREATE TABLE IF NOT EXISTS 已覆盖新库，这里只兜底）
+    conn.execute('''CREATE TABLE IF NOT EXISTS messages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        receiver    TEXT NOT NULL,
+        sender      TEXT NOT NULL DEFAULT '',
+        card_id     TEXT NOT NULL DEFAULT '',
+        kind        TEXT NOT NULL DEFAULT 'mention',
+        content     TEXT NOT NULL DEFAULT '',
+        read_at     TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver, read_at, id)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_messages_card ON messages(card_id)')
+    # 部门主页相关表（老库兜底）
+    conn.execute('''CREATE TABLE IF NOT EXISTS dept_profile (
+        dept TEXT PRIMARY KEY, slogan TEXT NOT NULL DEFAULT '',
+        intro TEXT NOT NULL DEFAULT '', photo TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS dept_honors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dept TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'dept',
+        target_name TEXT NOT NULL DEFAULT '', photo TEXT NOT NULL DEFAULT '',
+        remark TEXT NOT NULL DEFAULT '', sort INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_dept_honors ON dept_honors(dept, kind, sort)')
+    conn.execute('''CREATE TABLE IF NOT EXISTS dept_posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dept TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '', images TEXT NOT NULL DEFAULT '',
+        author TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_dept_posts ON dept_posts(dept, id)')
     # workgroups 表兼容（防御旧库缺列）
     wcols = [r[1] for r in conn.execute('PRAGMA table_info(workgroups)').fetchall()]
     for c, ddl in (('parent_id', "ALTER TABLE workgroups ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0"),
