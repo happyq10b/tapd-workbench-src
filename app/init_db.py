@@ -145,6 +145,21 @@ CREATE TABLE IF NOT EXISTS dept_posts (
 );
 CREATE INDEX IF NOT EXISTS idx_dept_posts ON dept_posts(dept, id);
 
+-- 公告栏：工作台顶部横幅位置展示的平台公告
+-- scope: 'all' 全局公告 | 部门名（按部门显示各自的公告）
+-- enabled: 0 = 暂停展示（保留内容，便于下次启用）
+CREATE TABLE IF NOT EXISTS notices (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope       TEXT NOT NULL DEFAULT 'all',   -- 'all' 或部门名
+    title       TEXT NOT NULL DEFAULT '',
+    content     TEXT NOT NULL DEFAULT '',
+    author      TEXT NOT NULL DEFAULT '',
+    enabled     INTEGER NOT NULL DEFAULT 1,    -- 0 暂停 / 1 展示
+    sort        INTEGER NOT NULL DEFAULT 0,    -- 排序权重（小在前）
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_notices ON notices(scope, enabled, sort);
+
 -- 板块元信息（看板内的分组，如「成本组（第1周）」）
 -- 板块本身此前只隐含在 cards.column_name 中，没有独立记录，
 -- 导致「创建日期 / 性质 / 置顶」无处存放。这里补一张表：
@@ -384,6 +399,14 @@ def init_db(force_import=False):
         author TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_dept_posts ON dept_posts(dept, id)')
+    # 公告栏（老库兜底）
+    conn.execute('''CREATE TABLE IF NOT EXISTS notices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scope TEXT NOT NULL DEFAULT 'all', title TEXT NOT NULL DEFAULT '',
+        content TEXT NOT NULL DEFAULT '', author TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1, sort INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_notices ON notices(scope, enabled, sort)')
     # workgroups 表兼容（防御旧库缺列）
     wcols = [r[1] for r in conn.execute('PRAGMA table_info(workgroups)').fetchall()]
     for c, ddl in (('parent_id', "ALTER TABLE workgroups ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0"),

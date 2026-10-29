@@ -29,6 +29,17 @@ button{font-family:inherit}
    下拉已废弃（多选下拉在窄屏里难以表达"已选哪些"，chips 一眼可见且逐个可移除）。 */
 .year-filter{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;max-width:420px;overflow-x:auto;overflow-y:hidden;padding-bottom:1px}
 .year-filter[hidden]{display:none}
+/* 「＋ 年份」入口：新增选择年份的下拉触发器 */
+.year-chip.add{border-style:dashed;border-color:var(--primary);background:#fff;color:var(--primary);font-weight:500;cursor:pointer;padding:0 10px}
+.year-chip.add:hover,.year-chip.add.on{background:#eef5ff;border-style:solid}
+/* 「＋ 年份」下拉：勾选式年份列表 */
+.year-picker{position:relative;flex-shrink:0;min-width:0}
+.year-drop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;min-width:132px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);padding:4px 0}
+.year-drop[hidden]{display:none}
+.year-opt{display:flex;align-items:center;gap:7px;padding:6px 12px;font-size:12.5px;color:var(--text);cursor:pointer;white-space:nowrap}
+.year-opt:hover{background:#f0f5ff;color:var(--primary)}
+.year-opt input{width:14px;height:14px;accent-color:var(--primary);cursor:pointer;margin:0}
+.year-opt .yo-tick{width:12px;text-align:center;color:var(--primary);font-size:12px;font-weight:600}
 .year-chip{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 6px 0 10px;border:1px solid var(--primary);border-radius:13px;background:#eef5ff;color:var(--primary);font-size:12.5px;font-weight:500;cursor:default;white-space:nowrap}
 .year-chip .yc-x{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;font-size:11px;line-height:1;color:var(--primary);cursor:pointer;transition:background .15s}
 .year-chip .yc-x:hover{background:var(--primary);color:#fff}
@@ -115,10 +126,32 @@ button{font-family:inherit}
 .btn-default:hover{border-color:var(--primary);color:var(--primary)}
 .btn-secondary{border:1px solid var(--border);background:#fff;color:var(--text);padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;font-weight:500;transition:all .15s}
 .btn-secondary:hover{border-color:var(--primary);color:var(--primary)}
-.progress-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
-.stat-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;box-shadow:var(--shadow)}
-.stat-label{font-size:12px;color:var(--text2)}
-.stat-value{font-size:26px;font-weight:600;margin-top:2px}
+/* 顶部统计区：左右分栏 —— 左侧 2 张核心指标卡（压缩），右侧公告栏（长条形）。
+   用户反馈「统计卡片太占地方」→ 卡片数从 4 压到 2，空出来的位置做公告栏。 */
+.progress-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:10px;margin-bottom:12px;align-items:stretch}
+.progress-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-content:start}
+/* 公告栏：横向长条，承载平台公告 */
+.notice-bar{background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:10px 14px;display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden}
+.notice-tag{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 9px;border-radius:11px;background:#fff7e6;color:#d46b08;font-size:11.5px;font-weight:600}
+.notice-body{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:1px}
+.notice-title{font-size:12.5px;font-weight:600;color:var(--text);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notice-text{font-size:11.5px;color:var(--text2);line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notice-empty{flex:1;min-width:0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text3)}
+.notice-mgr{flex-shrink:0;padding:3px 10px;font-size:11.5px}
+/* 公告管理弹窗里的公告条目 */
+.notice-item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:8px;background:#fcfdff}
+.notice-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--text)}
+.notice-item-text{font-size:12.5px;color:var(--text2);line-height:1.7;margin-top:5px;white-space:pre-wrap}
+.notice-item-meta{font-size:11.5px;color:var(--text3);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+@media(max-width:1024px){
+  .progress-overview{grid-template-columns:1fr}
+}
+/* 统计卡片：紧凑版。原先 padding:14px 18px + 26px 字号，一行 4 张要吃掉
+   近 120px 高度，用户反馈「太占地方」。压缩后仍保持左主色竖条与 hover 反馈，
+   只降低高度与字号，不改视觉语言。 */
+.stat-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;box-shadow:var(--shadow)}
+.stat-label{font-size:11.5px;color:var(--text2);line-height:1.4}
+.stat-value{font-size:20px;font-weight:600;margin-top:0;line-height:1.25}
 .stat-value.blue{color:var(--primary)}.stat-value.green{color:var(--success)}.stat-value.orange{color:var(--warning)}.stat-value.red{color:var(--danger)}
 /* 部门页顶部切换条：只在部门主页面显示 */
 .dept-switch-bar{display:flex;align-items:center;gap:10px;max-width:1440px;margin:0 auto;padding:12px 24px 0;flex-wrap:wrap}
@@ -388,6 +421,13 @@ button{font-family:inherit}
 .empty{padding:48px;text-align:center;color:var(--text2);font-size:13px}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center}
 .modal{background:#fff;border-radius:12px;width:640px;max-width:94vw;max-height:94vh;overflow:auto;padding:20px 24px;box-shadow:0 8px 24px rgba(0,0,0,.15)}
+/* 宽版弹窗：详情弹窗（描述 + 评论 + 操作记录 + 代办任务）内容多，
+   默认 640px 显得拥挤（用户反馈「目录进入后的弹窗太小」）。
+   改为 900px，并把左右留白收窄，让内容区更舒展。 */
+.modal-wide{width:900px;max-width:96vw;padding:22px 28px}
+.modal-wide .modal-body{gap:14px}
+.modal-wide .comment-form input{padding:9px 12px}
+.modal-wide .comment-item{padding:7px 0;font-size:13px}
 .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;cursor:move;user-select:none}
 .modal-header h2{font-size:16px;font-weight:600}
 .modal-close{border:none;background:none;font-size:18px;color:var(--text2);cursor:pointer;line-height:1}
@@ -600,7 +640,7 @@ body{
 .btn-default:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff;box-shadow:var(--shadow-sm)}
 
 /* Progress stat cards */
-.progress-overview{gap:16px}
+.progress-overview{gap:10px}
 .stat-card{position:relative;overflow:hidden;border-radius:var(--radius);box-shadow:var(--shadow);transition:transform .25s,box-shadow .25s;animation:fadeUp .35s ease both}
 .stat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--primary);opacity:.92}
 .stat-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md)}
@@ -728,7 +768,10 @@ function goLogin(){
 <header class="app-header">
   <div class="header-left">
     <h1>财务工作事项平台</h1>
-    <div class="year-filter" id="yearFilter" title="按归属年份筛选板块（可多选；切换看板后自动重置）"></div>
+    <div class="year-picker">
+      <div class="year-filter" id="yearFilter" title="按归属年份筛选板块（可多选；点「＋ 年份」选择，点 ✕ 移除）"></div>
+      <div class="year-drop" id="yearDrop" hidden></div>
+    </div>
   </div>
   <div class="header-actions">
     <span class="header-user"><span id="userName"></span><span class="role-tag" id="roleTag"></span></span>
@@ -754,6 +797,17 @@ function goLogin(){
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
 </header>
+<!-- 公告管理弹窗（仅管理员） -->
+<div class="modal-overlay" id="noticeModal" style="display:none">
+  <div class="modal modal-wide">
+    <div class="modal-header"><h2>公告管理</h2>
+      <button class="modal-close" onclick="closeNoticeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="noticeBody"></div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeNoticeModal()">关闭</button></div>
+  </div>
+</div>
+
 <!-- 消息中心（消息栏）：@ 提及与相关消息 -->
 <div class="msg-mask" id="msgMask" onclick="closeMsgPanel()"></div>
 <aside class="msg-panel" id="msgPanel">
@@ -938,6 +992,7 @@ function goLogin(){
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="n_due"></div>
       </div>
       <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
+      <div class="form-group" id="n_cc_group"><label>参与人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_cc"></div></div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('newModal')">取消</button><button class="btn-primary" onclick="createCard()">创建</button></div>
@@ -982,7 +1037,7 @@ function goLogin(){
 
 <!-- 详情弹窗 -->
 <div class="modal-overlay" id="detailModal" style="display:none">
-  <div class="modal">
+  <div class="modal modal-wide">
     <div class="modal-header"><h2 id="d_title"></h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
         <span id="d_ops" style="display:flex;gap:6px;align-items:center"></span>
@@ -2130,11 +2185,15 @@ function updateNewBtn(){
 async function renderProgress(){
   const ov=await api('/api/overview');
   const rate=ov.total?Math.round(ov.done/ov.total*100):0;
+  // 顶部统计区：左侧只保留 2 张核心指标卡（压缩后不占地方），
+  // 右侧是长条形的公告栏。其余指标（进行中/未完成）在部门主页的统计区里有。
   document.getElementById('progressOverview').innerHTML=`
-    <div class="stat-card"><div class="stat-label">总事项</div><div class="stat-value blue">${ov.total}</div></div>
-    <div class="stat-card"><div class="stat-label">已完成</div><div class="stat-value green">${ov.done}</div></div>
-    <div class="stat-card"><div class="stat-label">进行中</div><div class="stat-value blue">${ov.progressing||0}</div></div>
-    <div class="stat-card"><div class="stat-label">未完成</div><div class="stat-value orange">${ov.open}</div></div>`;
+    <div class="progress-cards">
+      <div class="stat-card"><div class="stat-label">总事项</div><div class="stat-value blue">${ov.total}</div></div>
+      <div class="stat-card"><div class="stat-label">已完成</div><div class="stat-value green">${ov.done}</div></div>
+    </div>
+    <div class="notice-bar" id="noticeBar"></div>`;
+  await renderNoticeBar();
   // 负责人下拉：选项 = 「全部负责人」+「无负责人」（静态 option）+ 各负责人（动态填充）
   // 用 dataset.filled 标记是否填过，不能再用 options.length 判断 ——
   // 「无负责人」是静态 option，options.length 恒 ≥2，会导致负责人列表永远填不进去
@@ -2143,6 +2202,137 @@ async function renderProgress(){
     ov.owners.forEach(o=>{const op=document.createElement('option');op.value=o.owner;op.textContent=o.owner;os_.appendChild(op)});
     os_.dataset.filled='1';
   }
+}
+// ---------- 公告栏 ----------
+// 长条形横幅，展示平台公告（scope='all'）与当前部门的公告。
+// 管理入口仅管理员可见；非管理员看到的是纯展示。
+let NOTICE_LIST=[];
+// 渲染公告栏
+async function renderNoticeBar(){
+  const box=document.getElementById('noticeBar');
+  if(!box)return;
+  let list=[];
+  try{const d=await api('/api/notices');list=d.notices||[]}catch(e){list=[]}
+  NOTICE_LIST=list;
+  // 当前部门的公告 scope = 部门名；部门页打开时优先展示部门公告
+  const dept=CUR_DEPT||'';
+  const usable=list.filter(n=>n.enabled&&(n.scope==='all'||(dept&&n.scope===dept)));
+  const n=usable[0];
+  const canEdit=ME&&ME.is_admin;
+  if(!n){
+    box.innerHTML=`<span class="notice-empty">📢 暂无公告${canEdit?' · 可点击右侧「管理公告」发布':''}</span>`
+      +(canEdit?`<button class="btn-default notice-mgr" onclick="openNoticeModal()">管理公告</button>`:'');
+    return;
+  }
+  box.innerHTML=`<span class="notice-tag">📢 公告</span>`
+    +`<div class="notice-body">`
+    +`<div class="notice-title" title="${esc(n.title||'')}">${esc(n.title||'（无标题）')}</div>`
+    +(n.content?`<div class="notice-text" title="${esc(n.content)}">${esc(n.content)}</div>`:'')
+    +`</div>`
+    +(n.author?`<span class="notice-text" style="flex-shrink:0">${esc(n.author)}</span>`:'')
+    +(canEdit?`<button class="btn-default notice-mgr" onclick="openNoticeModal()">管理公告</button>`:'');
+}
+// 公告管理弹窗：列出全部公告，可新增/编辑/删除/启停
+async function openNoticeModal(){
+  const body=document.getElementById('noticeBody');
+  if(!body)return;
+  document.getElementById('noticeModal').style.display='flex';
+  updateScrollLock();
+  body.innerHTML='<div class="dept-loading"><span class="spin"></span>加载中…</div>';
+  try{
+    const d=await api('/api/notices');
+    const list=d.notices||[];
+    let h='';
+    if(!list.length){
+      h='<div class="dept-empty">暂无公告，点下方表单新增</div>';
+    }else{
+      h=list.map(n=>`<div class="notice-item">
+        <div class="notice-item-head">
+          <span class="notice-tag" style="background:#eef5ff;color:var(--primary)">${esc(n.scope==='all'?'全局':n.scope)}</span>
+          <b>${esc(n.title||'（无标题）')}</b>
+          ${n.enabled?'':'<span class="lock-tag" style="color:var(--text3)">已暂停</span>'}
+        </div>
+        ${n.content?`<div class="notice-item-text">${esc(n.content)}</div>`:''}
+        <div class="notice-item-meta">${esc(n.author||'')} · ${esc(n.created_at||'')}
+          <button class="btn-default" style="padding:2px 8px;font-size:11.5px" onclick="editNotice(${n.id})">编辑</button>
+          <button class="btn-default" style="padding:2px 8px;font-size:11.5px" onclick="toggleNotice(${n.id})">${n.enabled?'暂停':'启用'}</button>
+          <button class="btn-default" style="padding:2px 8px;font-size:11.5px;color:var(--danger)" onclick="deleteNotice(${n.id})">删除</button>
+        </div></div>`).join('');
+    }
+    h+=`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">新增公告</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <select class="form-select" id="nt_scope" style="width:140px">
+          <option value="all">全局公告</option>
+          ${(ME.depts||[]).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}
+        </select>
+        <input type="text" class="form-input" id="nt_title" placeholder="公告标题" style="flex:1;min-width:160px">
+      </div>
+      <textarea class="form-textarea" id="nt_content" rows="3" placeholder="公告内容…" style="margin-bottom:8px"></textarea>
+      <button class="btn-primary" onclick="addNotice()">发布公告</button>
+      <span class="upload-status" id="nt_status" style="margin-left:10px"></span>
+    </div>`;
+    body.innerHTML=h;
+  }catch(e){
+    body.innerHTML=`<div class="dept-empty">加载失败：${esc(e.message||'')}</div>`;
+  }
+}
+function closeNoticeModal(){
+  document.getElementById('noticeModal').style.display='none';
+  updateScrollLock();
+}
+function setNoticeStatus(msg,kind){
+  const el=document.getElementById('nt_status');
+  if(!el)return;
+  el.className='upload-status'+(kind?' '+kind:'');
+  el.textContent=msg||'';
+}
+// 新增公告
+async function addNotice(){
+  const title=document.getElementById('nt_title').value.trim();
+  const content=document.getElementById('nt_content').value.trim();
+  const scope=document.getElementById('nt_scope').value;
+  if(!title&&!content){setNoticeStatus('标题与内容不能都为空','fail');return}
+  setNoticeStatus('发布中…','saving');
+  try{
+    await api('/api/notices',{method:'POST',body:JSON.stringify({scope,title,content,enabled:1,sort:0})});
+    setNoticeStatus('发布成功','ok');
+    document.getElementById('nt_title').value='';
+    document.getElementById('nt_content').value='';
+    await openNoticeModal();
+    await renderNoticeBar();
+  }catch(e){setNoticeStatus('发布失败：'+(e.message||''),'fail')}
+}
+// 编辑公告：把内容回填到表单（复用新增区）
+async function editNotice(id){
+  const n=NOTICE_LIST.find(x=>x.id===id);
+  if(!n)return;
+  document.getElementById('nt_scope').value=n.scope||'all';
+  document.getElementById('nt_title').value=n.title||'';
+  document.getElementById('nt_content').value=n.content||'';
+  window._noticeEditId=id;
+  setNoticeStatus('正在编辑公告 #'+id+'（修改后点「发布公告」覆盖）','saving');
+  document.getElementById('nt_title').focus();
+}
+// 启停公告
+async function toggleNotice(id){
+  const n=NOTICE_LIST.find(x=>x.id===id);
+  if(!n)return;
+  try{
+    await api('/api/notices/'+id,{method:'PUT',body:JSON.stringify({
+      scope:n.scope,title:n.title,content:n.content,enabled:n.enabled?0:1,sort:n.sort||0})});
+    await openNoticeModal();
+    await renderNoticeBar();
+  }catch(e){toast(e.message)}
+}
+// 删除公告
+async function deleteNotice(id){
+  if(!confirm('删除该公告？不可恢复'))return;
+  try{
+    await api('/api/notices/'+id,{method:'DELETE'});
+    await openNoticeModal();
+    await renderNoticeBar();
+  }catch(e){toast(e.message)}
 }
 async function reload(page){
   curPage=page;
@@ -2255,9 +2445,12 @@ function renderBoard(cards,cols,q,colHits){
   }).join('');
 }
 // ---------- 年份筛选（多选） ----------
-// 形态：chips 标签组。每个已选年份渲染成一个带 ✕ 的标签（点 ✕ 移除该年份），
-// 右侧固定一个「全部年份」标签（点它 = 清空全部已选）。
-// 选项来源 = 当前看板下各板块的「归属年份」；默认落在当前年份，切换看板时统一重置。
+// 形态：chips 标签组。完整的多选体验包含三个动作：
+//   ① 「+ 年份」下拉 → 从当前看板的可用年份里**新增**选择（勾选式，可多选）
+//   ② 已选年份 chip 上的 ✕ → **移除**该年份
+//   ③ 「全部年份」chip → 清空全部已选（= 不过滤）
+// 早期版本只有 ②③，没有 ① —— 用户看到一个孤零零的「全部年份」标签，
+// 完全不知道还能选别的年份（反馈：「顶部年份没有选择的地方」）。
 //
 // 🔴 关键拆分（踩过的坑）：「校验年份有效性」与「重绘 chips」必须分开。
 // 之前移除单个年份后调的是 renderYearFilter(currentCols())，而该函数内含
@@ -2266,6 +2459,7 @@ function renderBoard(cards,cols,q,colHits){
 // 现在：移除/清空只调 paintYearChips()（纯重绘，不做校验）；
 // 只有看板切换等场景才走 renderYearFilter(cols)（带校验）。
 let _yearOptions=[];        // 当前看板可用的年份列表（选项来源）
+let _yearDropOpen=false;    // 「+ 年份」下拉是否展开
 function renderYearFilter(cols){
   const box=document.getElementById('yearFilter');
   if(!box)return;
@@ -2293,18 +2487,62 @@ function paintYearChips(){
   [...curYears].sort().reverse().forEach(y=>{
     chips.push(`<span class="year-chip" title="已选年份 ${y}，点 × 移除">${esc(y)} 年<span class="yc-x" data-year="${esc(y)}" title="移除该年份">✕</span></span>`);
   });
+  // 「+ 年份」：展开可选年份列表（这是**新增**选择的入口）
+  chips.push(`<span class="year-chip add${_yearDropOpen?' on':''}" data-add="1" title="选择年份（可多选）">＋ 年份</span>`);
   // 「全部年份」：清空全部已选（空集合 = 不过滤）
   chips.push(`<span class="year-chip all${curYears.size?'':' on'}" data-all="1" title="清空全部已选年份">全部年份</span>`);
   box.innerHTML=chips.join('');
+  paintYearDrop();
 }
-// 点击 ✕ 移除单个年份；点击「全部年份」清空全部
+// 「+ 年份」下拉：列出当前看板可用年份，已选的打勾
+function paintYearDrop(){
+  const drop=document.getElementById('yearDrop');
+  if(!drop)return;
+  if(!_yearDropOpen||!_yearOptions.length){drop.hidden=true;drop.innerHTML='';return}
+  drop.hidden=false;
+  drop.innerHTML=_yearOptions.map(y=>{
+    const on=curYears.has(y);
+    return `<label class="year-opt${on?' on':''}"><input type="checkbox"${on?' checked':''} data-pick-year="${esc(y)}">`
+      +`<span class="yo-tick">${on?'✓':''}</span><span>${esc(y)} 年</span></label>`;
+  }).join('');
+}
+// 展开/收起「+ 年份」下拉
+function toggleYearDrop(ev){
+  if(ev)ev.stopPropagation();
+  if(!_yearOptions.length)return;
+  _yearDropOpen=!_yearDropOpen;
+  paintYearChips();
+}
+// 在下拉里勾选/取消某个年份
+function toggleYearPick(y){
+  if(!y)return;
+  if(curYears.has(y))curYears.delete(y);
+  else curYears.add(y);
+  paintYearChips();
+  reload(1);
+}
+function closeYearDrop(){
+  if(!_yearDropOpen)return;
+  _yearDropOpen=false;
+  paintYearChips();
+}
+// 点击 ✕ 移除单个年份；点击「全部年份」清空全部；点「＋ 年份」展开可选列表
 function onYearFilterClick(ev){
   const t=ev.target;
   if(!t)return;
+  // 下拉里的复选框 → 切换该年份的选中状态
+  if(t.dataset&&t.dataset.pickYear){
+    toggleYearPick(t.dataset.pickYear);
+    return;
+  }
   if(t.dataset&&t.dataset.year){
     curYears.delete(t.dataset.year);
     paintYearChips();     // 只重绘，不校验（否则会连其它年份一起清掉）
     reload(1);
+    return;
+  }
+  if(t.dataset&&t.dataset.add){
+    toggleYearDrop(ev);
     return;
   }
   if(t.dataset&&t.dataset.all){
@@ -2686,10 +2924,11 @@ async function lockCard(id){
 async function unlockCard(id){clearInterval(editLockTimer);try{await api('/api/cards/'+id+'/unlock',{method:'POST'})}catch(e){}}
 function renderPickers(){
   initPersonPicker('e_owner',window._editOwner=window._editOwner||[]);
-  // 子事项没有「参与人」概念，隐藏时不再初始化，避免残留上一次主事项的选择
-  if(!EDIT_IS_SUB)initPersonPicker('e_cc',window._editCc=window._editCc||[]);
+  // 子事项同样支持「参与人」（与主事项对标）：cc 是 cards 表的标准字段，
+  // 父子事项共用同一张表，无需后端改动 —— 之前是前端主动隐藏了。
+  initPersonPicker('e_cc',window._editCc=window._editCc||[]);
 }
-// 打开事项弹窗。子事项复用同一套弹窗（子事项模式）：隐藏「所属看板 / 参与人」，
+// 打开事项弹窗。子事项复用同一套弹窗（子事项模式）：隐藏「所属看板」，
 // 补上父事项信息与父时间范围约束，字段布局与主事项完全一致。
 async function openEdit(id,preloaded){
   if(!ME.can_edit){toast('无编辑权限');return}
@@ -2705,7 +2944,8 @@ async function openEdit(id,preloaded){
   editing=id;
   EDIT_IS_SUB=!!c.parent_id;
   window._editOwner=(c.owner||'').split(';').filter(Boolean);
-  window._editCc=EDIT_IS_SUB?[]:(c.cc||'').split(';').filter(Boolean);
+  // 子事项同样有参与人（与主事项对标）：cc 是 cards 表的标准字段，父子共用一张表
+  window._editCc=(c.cc||'').split(';').filter(Boolean);
   document.getElementById('e_name').value=c.card_name||'';
   // 状态不在表单里设置 —— 统一由弹窗头部的状态按钮承载（见 statusPickerHtml）
   const curStatus=c.status==='done'?'done':c.status==='progressing'?'progressing':'open';
@@ -2715,11 +2955,9 @@ async function openEdit(id,preloaded){
   document.getElementById('e_due').value=c.due||'';
   document.getElementById('e_desc').value=c.description||'';
   document.getElementById('e_board').innerHTML=ME.boards.map(b=>`<option value="${b.board_id}" ${b.board_id===c.board_id?'selected':''}>${esc(b.board_name)}</option>`).join('');
-  // 子事项模式：隐藏「所属看板 / 参与人」（子事项继承父看板、无参与人）
+  // 子事项模式：只隐藏「所属看板」（子事项继承父看板）；「参与人」与主事项一样保留
   document.getElementById('e_board_wrap').style.display=EDIT_IS_SUB?'none':'';
-  document.getElementById('e_cc_wrap').style.display=EDIT_IS_SUB?'none':'';
   document.getElementById('editTitle').textContent=EDIT_IS_SUB?'编辑子事项':'编辑事项';
-  document.getElementById('e_sub_btn').textContent=EDIT_IS_SUB?'▤ 下级子事项':'▤ 子事项';
   applyOwnerSlot(EDIT_IS_SUB);
   await applySubContext(c);
   renderPickers();
@@ -2795,8 +3033,8 @@ async function saveEdit(){
     due:document.getElementById('e_due').value,
     description:document.getElementById('e_desc').value,
   };
-  // 参与人只有主事项才有；子事项不参与人，发送会带上上一次主事项的残留值
-  if(!isSub)fields.cc=(window._editCc||[]).join(';');
+  // 参与人：主事项与子事项都有（对标主事项，cc 是 cards 表的标准字段）
+  fields.cc=(window._editCc||[]).join(';');
   try{
     // 跨看板移动：只有主事项可以，子事项始终跟随父事项所在看板
     if(!isSub){
@@ -2835,6 +3073,7 @@ let NEW_CARD_COL=null;   // {board_id, column_id, column_name}
 let NEW_CARD_MODE='card';      // 'card' 主事项 | 'sub' 子事项
 let NEW_CARD_STATUS='open';    // 新建时选定的状态（由头部状态按钮承载）
 let NEW_CARD_OWNER=[];         // 新建时选定的负责人
+let NEW_CARD_CC=[];            // 新建时选定的参与人（主/子事项一致）
 let NEW_SUB_PARENT=null;       // 子事项模式：父事项的归属与时间范围
 async function openNewModal(boardId,colKey){
   NEW_CARD_MODE='card';NEW_CARD_COL=null;NEW_SUB_PARENT=null;
@@ -2846,6 +3085,7 @@ async function openNewModal(boardId,colKey){
   NEW_CARD_STATUS='open';
   document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
   NEW_CARD_OWNER=[];initPersonPicker('n_owner',NEW_CARD_OWNER);
+  NEW_CARD_CC=[];initPersonPicker('n_cc',NEW_CARD_CC);
   const wrap=document.getElementById('n_col_wrap'),colInp=document.getElementById('n_col');
   NEW_CARD_COL=null;
   if(colKey){
@@ -2905,6 +3145,7 @@ async function openNewSubModal(parentId){
   NEW_CARD_STATUS='open';
   document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
   NEW_CARD_OWNER=[];initPersonPicker('n_owner',NEW_CARD_OWNER);
+  NEW_CARD_CC=[];initPersonPicker('n_cc',NEW_CARD_CC);
   // 日期受父事项约束：与后端「子事项时间不能超出父事项」的校验口径保持一致
   const beg=document.getElementById('n_begin'),due=document.getElementById('n_due');
   beg.removeAttribute('min');due.removeAttribute('max');
@@ -2927,6 +3168,7 @@ async function createCard(){
       description:document.getElementById('n_desc').value,
       status:NEW_CARD_STATUS,status_name:statusText(NEW_CARD_STATUS),
       owner:NEW_CARD_OWNER.join(';'),
+      cc:NEW_CARD_CC.join(';'),
       begin:nb,due:nd,
     };
     const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:fields};
@@ -2948,6 +3190,7 @@ async function createSubCard(card_name){
       fields:{
         status:NEW_CARD_STATUS,status_name:statusText(NEW_CARD_STATUS),
         owner:NEW_CARD_OWNER.join(';'),
+        cc:NEW_CARD_CC.join(';'),
         begin:document.getElementById('n_begin').value,
         due:document.getElementById('n_due').value,
         description:document.getElementById('n_desc').value
@@ -3689,12 +3932,14 @@ function closeHeaderMore(){
   const m=document.getElementById('headerMoreMenu');
   if(m)m.hidden=true;
 }
-// 年份筛选 chips 的点击（移除单个年份 / 清空全部）—— 事件委托到 document，
+// 年份筛选 chips 的点击（移除单个年份 / 展开可选列表 / 清空全部）—— 事件委托到 document，
 // 因为 chips 是 innerHTML 重建的，直接绑在元素上会在重建后失效
 document.addEventListener('click',e=>{
   const t=e.target;
   if(!t||!t.closest)return;
-  if(t.closest('#yearFilter'))onYearFilterClick(e);
+  if(t.closest('#yearFilter')||t.closest('#yearDrop')){onYearFilterClick(e);return}
+  // 点其它地方 → 收起「＋ 年份」下拉
+  closeYearDrop();
 });
 // 评论 @ 提及：候选项点击 + 已插入 chip 的移除
 document.addEventListener('click',e=>{

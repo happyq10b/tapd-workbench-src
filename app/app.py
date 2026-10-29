@@ -2048,6 +2048,59 @@ def delete_dept_post(pid: int, username: str = Depends(require_admin), request: 
               f'删除文章 id={pid}', 'success')
     return {'ok': True}
 
+# ---------------- API：公告栏 ----------------
+class NoticeReq(BaseModel):
+    scope: str = 'all'          # 'all' 或部门名
+    title: str = ''
+    content: str = ''
+    enabled: int = 1
+    sort: int = 0
+
+@app.get('/api/notices')
+def get_notices(username: str = Depends(require_auth)):
+    """公告列表：全部公告 + 部门公告。登录即可读。"""
+    rows = dbq('''SELECT id, scope, title, content, author, enabled, sort, created_at
+                   FROM notices ORDER BY sort, id DESC''')
+    return {'notices': [dict(r) for r in rows]}
+
+@app.post('/api/notices')
+def create_notice(req: NoticeReq, username: str = Depends(require_admin), request: Request = None):
+    """新增公告（仅管理员）"""
+    scope = (req.scope or 'all').strip() or 'all'
+    if scope != 'all' and scope not in ALLOWED_DEPTS:
+        raise HTTPException(400, '公告范围必须是 all 或 ' + '/'.join(sorted(ALLOWED_DEPTS)))
+    title = (req.title or '').strip()[:100]
+    content = (req.content or '').strip()[:2000]
+    if not title and not content:
+        raise HTTPException(400, '公告内容不能为空')
+    dbe('INSERT INTO notices (scope, title, content, author, enabled, sort) VALUES (?,?,?,?,?,?)',
+        (scope, title, content, username, 1 if req.enabled else 0, req.sort))
+    audit_log(username, client_ip(request), 'notice_create', scope, title[:60], 'success')
+    return {'ok': True}
+
+@app.put('/api/notices/{nid}')
+def update_notice(nid: int, req: NoticeReq, username: str = Depends(require_admin), request: Request = None):
+    cur = dbq('SELECT id, scope FROM notices WHERE id=?', (nid,))
+    if not cur:
+        raise HTTPException(404, '公告不存在')
+    scope = (req.scope or 'all').strip() or 'all'
+    if scope != 'all' and scope not in ALLOWED_DEPTS:
+        raise HTTPException(400, '公告范围必须是 all 或 ' + '/'.join(sorted(ALLOWED_DEPTS)))
+    dbe('''UPDATE notices SET scope=?, title=?, content=?, enabled=?, sort=? WHERE id=?''',
+        (scope, (req.title or '').strip()[:100], (req.content or '').strip()[:2000],
+         1 if req.enabled else 0, req.sort, nid))
+    audit_log(username, client_ip(request), 'notice_update', scope, f'id={nid}', 'success')
+    return {'ok': True}
+
+@app.delete('/api/notices/{nid}')
+def delete_notice(nid: int, username: str = Depends(require_admin), request: Request = None):
+    cur = dbq('SELECT id, scope FROM notices WHERE id=?', (nid,))
+    if not cur:
+        raise HTTPException(404, '公告不存在')
+    dbe('DELETE FROM notices WHERE id=?', (nid,))
+    audit_log(username, client_ip(request), 'notice_delete', cur[0]['scope'], f'id={nid}', 'success')
+    return {'ok': True}
+
 # ---------------- API：管理员账号管理 ----------------
 class UserCreate(BaseModel):
     username: str
