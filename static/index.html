@@ -13,13 +13,21 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
 button{font-family:inherit}
-.app-header{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
-.header-left{display:flex;align-items:center;gap:10px}
-.header-left h1{font-size:18px;font-weight:600;color:var(--text)}
+.app-header{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:50}
+/* 头部布局：左侧（标题 + 年份筛选）与右侧（操作按钮）各自成组。
+   约束说明（踩过的坑）：
+   - .header-left 必须 flex-shrink:0，否则右侧按钮一多，标题会被挤成竖排单字
+   - h1 必须 white-space:nowrap，否则「财务工作事项平台」会逐字换行
+   - .header-actions 必须允许换行（flex-wrap:wrap），窄屏时按钮整体换到第二行，
+     而不是把左侧压扁
+   - .year-filter 不换行（nowrap）+ 不设固定高度：chips 多了就横向撑开，
+     换行会导致超出 height 被裁掉 */
+.header-left{display:flex;align-items:center;gap:10px;flex-shrink:0;min-width:0}
+.header-left h1{font-size:18px;font-weight:600;color:var(--text);white-space:nowrap}
 /* 年份筛选器（多选）：替代原来的年份徽标，按归属年份筛选当前看板下的板块。
    形态：chips 标签组 —— 每个已选年份是一个可 ✕ 移除的标签，右侧「全部年份」一键清空。
    下拉已废弃（多选下拉在窄屏里难以表达"已选哪些"，chips 一眼可见且逐个可移除）。 */
-.year-filter{display:flex;align-items:center;gap:6px;flex-wrap:wrap;height:30px}
+.year-filter{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;flex-shrink:0;max-width:420px;overflow-x:auto;overflow-y:hidden;padding-bottom:1px}
 .year-filter[hidden]{display:none}
 .year-chip{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 6px 0 10px;border:1px solid var(--primary);border-radius:13px;background:#eef5ff;color:var(--primary);font-size:12.5px;font-weight:500;cursor:default;white-space:nowrap}
 .year-chip .yc-x{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;font-size:11px;line-height:1;color:var(--primary);cursor:pointer;transition:background .15s}
@@ -30,9 +38,18 @@ button{font-family:inherit}
 .year-chip.all.on{border-style:solid;border-color:var(--primary);background:#eef5ff;color:var(--primary)}
 /* 成本看板的锁标记：仅对确实受限的账号显示，含义写在 title 里 */
 .tab-lock{font-size:11px;line-height:1;opacity:.75;flex-shrink:0}
-.header-actions{display:flex;align-items:center;gap:8px}
+/* header-actions 用 margin-left:auto 始终靠右。
+   之前靠 .app-header 的 justify-content:space-between 撑开左右，
+   一旦右侧按钮换行（窄屏），整组就会跑到左边与标题挤在一起。 */
+.header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;min-width:0;margin-left:auto}
 .header-user{display:flex;align-items:center;gap:8px;margin-right:8px;font-size:13px;color:var(--text2)}
 .header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
+/* 头部「更多」下拉：低频操作收在这里，避免按钮平铺把标题挤扁 */
+.header-more{position:relative}
+.header-more-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:60;min-width:168px;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);padding:4px 0;display:flex;flex-direction:column}
+.header-more-menu[hidden]{display:none}
+.header-more-menu button{border:none;background:none;text-align:left;padding:7px 14px;font-size:13px;color:var(--text);cursor:pointer;white-space:nowrap}
+.header-more-menu button:hover{background:#f0f5ff;color:var(--primary)}
 .header-btn:hover{border-color:var(--primary);color:var(--primary)}
 .role-tag{font-size:11px;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500}
 .role-admin{background:#fff7e6;color:#d46b08;border:1px solid #ffd591}
@@ -43,13 +60,15 @@ button{font-family:inherit}
 /* 部门层：所有部门节点排在同一行（紧凑），空部门同样占位不隐藏 */
 .tree-dept-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;margin-bottom:4px}
 .tree-dept{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:600;flex-shrink:0}
-.tree-dept .dept-name{cursor:pointer}
-.tree-dept .dept-count{cursor:pointer}
+/* 部门主页入口：独立的「🏠 主页」小按钮，与「点击展开板块」区分开。
+   stopPropagation 阻止冒泡到外层 .tree-dept（否则会同时触发展开/收起）。 */
+.dept-home{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:1px 7px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text2);font-size:11.5px;font-weight:400;cursor:pointer;white-space:nowrap;transition:all .15s}
+.dept-home:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
+/* 当前打开的部门页（进入部门主页后，该节点高亮） */
+.tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
+.tree-dept.cur .dept-home{border-color:var(--primary);color:var(--primary);background:#eef5ff}
 .tree-dept:hover{border-color:var(--primary);color:var(--primary)}
 .tree-dept.open{background:#eef5ff;border-color:var(--primary);color:var(--primary)}
-/* 当前打开的部门页（部门名可点击进入主页后，该节点高亮） */
-.tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
-.tree-dept.cur .dept-name{color:var(--primary);font-weight:700}
 .tree-dept .chev{display:inline-block;transition:transform .2s;color:var(--text2);font-size:11px}
 .tree-dept.open .chev{transform:rotate(90deg)}
 .tree-dept .dept-count{background:var(--border);color:var(--text2);font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
@@ -101,6 +120,11 @@ button{font-family:inherit}
 .stat-label{font-size:12px;color:var(--text2)}
 .stat-value{font-size:26px;font-weight:600;margin-top:2px}
 .stat-value.blue{color:var(--primary)}.stat-value.green{color:var(--success)}.stat-value.orange{color:var(--warning)}.stat-value.red{color:var(--danger)}
+/* 部门页顶部切换条：只在部门主页面显示 */
+.dept-switch-bar{display:flex;align-items:center;gap:10px;max-width:1440px;margin:0 auto;padding:12px 24px 0;flex-wrap:wrap}
+.dept-switch-bar .dsw-label{font-size:12.5px;color:var(--text2)}
+.dept-switch-bar .dsw-count{font-size:12px;color:var(--text3)}
+.dept-switch-bar .filter-select{height:30px}
 /* ---------------- 部门主页面 ----------------
    布局：左右分栏。
    分栏一（culture）：部门文化展示区 —— 文化标语 / 部门职能介绍 / 团队合照
@@ -547,7 +571,7 @@ body{
 .app-header{position:relative;background:linear-gradient(180deg,#ffffff,#fbfcfe);box-shadow:0 1px 0 var(--border),0 6px 22px rgba(16,24,40,.05);padding:14px 24px}
 .app-header::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--primary)}
 .header-left h1{font-size:19px;letter-spacing:.2px}
-.year-filter{height:32px;font-size:13px}
+.year-filter{font-size:13px}
 .header-btn{border-radius:var(--radius-sm);transition:all .2s}
 .header-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff;box-shadow:var(--shadow-sm)}
 .role-tag{box-shadow:var(--shadow-sm)}
@@ -713,13 +737,20 @@ function goLogin(){
     <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
     <button class="header-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>
     <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
-    <button class="header-btn" onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
-    <button class="header-btn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复">📥 恢复</button>
+    <!-- 低频操作收进「更多」下拉：11 个按钮平铺会把标题挤扁（实测标题被压成竖排单字），
+         且窄屏时按钮换行占满整屏。这里按主次分层，常用按钮常驻、其余收起。 -->
+    <div class="header-more" id="headerMore">
+      <button class="header-btn" onclick="toggleHeaderMore(event)" title="更多操作">⋯ 更多</button>
+      <div class="header-more-menu" id="headerMoreMenu" hidden>
+        <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
+        <button onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复">📥 恢复</button>
+        <button id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
+        <button id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
+        <button onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
+      </div>
+    </div>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
-    <button class="header-btn" id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
-    <button class="header-btn" id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
     <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="importXlsx(event)">
-    <button class="header-btn" onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
 </header>
@@ -734,6 +765,13 @@ function goLogin(){
   <div class="msg-list" id="msgList"></div>
 </aside>
 <div class="board-tabs" id="boardTabs"></div>
+<!-- 部门页顶部切换条：只在部门主页面显示（部门之间切换 + 返回事项列表） -->
+<div class="dept-switch-bar" id="deptSwitchBar" style="display:none">
+  <button class="btn-default" onclick="backToBoardList()" title="返回事项列表">← 返回事项列表</button>
+  <span class="dsw-label">当前部门</span>
+  <select class="filter-select" id="deptSwitchSel" onchange="onDeptSwitch(this.value)" title="切换部门"></select>
+  <span class="dsw-count" id="deptSwitchCount"></span>
+</div>
 <!-- 部门主页面（与「事项列表」视图互斥显示：点部门名进部门页，点板块进事项列表） -->
 <div class="wrap" id="deptPageWrap" style="display:none">
   <div class="dept-page">
@@ -752,7 +790,6 @@ function goLogin(){
     <section class="dept-col" id="deptWorkCol">
       <div class="dept-col-head">
         <h3 id="deptWorkTitle">事项统计</h3>
-        <button class="btn-default" id="deptBackBtn" style="padding:3px 10px;font-size:12px" onclick="backToBoardList()">返回事项列表</button>
       </div>
       <div class="dept-col-body" id="deptStatsBody">
         <div class="dept-loading"><span class="spin"></span>加载中…</div>
@@ -1505,12 +1542,14 @@ function renderTabs(){
     const open=!!DEPT_OPEN[d.name];
     const cnt=d.boards.length;
     const emptyCls=cnt?'':' empty';
-    const tip=cnt?('点击进入「'+d.name+'」部门主页；点箭头展开该部门的板块'):(d.name+' 下暂无板块（可在「看板管理」中把板块挂载到该部门）');
-    // 箭头 = 展开/收起板块；部门名 = 进入部门主页（两个动作分开，避免误触）
-    html+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}">`
-      +`<span class="chev" onclick="toggleDept('${esc(d.name)}')" style="cursor:pointer" title="展开/收起板块">▶</span>`
-      +`<span class="dept-name" onclick="openDeptPage('${esc(d.name)}')" style="cursor:pointer" title="进入部门主页">${esc(d.name)}</span>`
-      +`<span class="dept-count" onclick="toggleDept('${esc(d.name)}')" style="cursor:pointer" title="板块数">${cnt}</span></span>`;
+    // 两个独立入口，避免歧义（之前「点名字进部门页」导致用户只是想展开板块却误入）：
+    //   ① 部门块本身 = 展开/收起该部门的板块（保持原有行为）
+    //   ② 「主页」按钮 = 进入该部门的部门主页
+    const tip=cnt?('点击展开/收起该部门的板块'):(d.name+' 下暂无板块（可在「看板管理」中把板块挂载到该部门）');
+    html+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
+      +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span>`
+      +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">🏠 主页</span>`
+      +`</span>`;
   });
   if(g.unassigned.length){
     const open=!!DEPT_OPEN[UNASSIGNED_KEY];
@@ -1546,21 +1585,43 @@ function toggleDept(name){
 let CUR_DEPT='';            // 当前打开的部门（空 = 不在部门页）
 let DEPT_DATA=null;         // 当前部门页数据缓存
 let DEPT_MORE_OPEN=false;   // 「更多」折叠区是否展开
+// 切换视图：同时接管顶部导航条（#boardTabs）。
+// 之前只切了两个 wrap 容器，导致部门节点 + 板块 tab 仍然留在屏幕上，
+// 与部门页内容同时出现 —— 用户看到的"切换混乱"就是这个。
+function switchView(toDept){
+  const bw=document.getElementById('boardListWrap');
+  const pw=document.getElementById('deptPageWrap');
+  const tabs=document.getElementById('boardTabs');
+  const deptBar=document.getElementById('deptSwitchBar');
+  if(toDept){
+    if(bw)bw.style.display='none';
+    if(pw)pw.style.display='';
+    if(tabs)tabs.style.display='none';       // 隐藏顶部导航条
+    if(deptBar)deptBar.style.display='';      // 显示部门切换条
+  }else{
+    if(bw)bw.style.display='';
+    if(pw)pw.style.display='none';
+    if(tabs)tabs.style.display='';
+    if(deptBar)deptBar.style.display='none';
+  }
+  // 部门节点的「当前部门」高亮跟着视图走：进部门页时标出当前部门，
+  // 回列表页时清掉（否则返回后仍留着高亮，看着像还在部门页里）
+  renderTabs();
+}
 // 打开部门主页面
 async function openDeptPage(dept){
   if(!dept)return;
   CUR_DEPT=dept;
   DEPT_DATA=null;
   DEPT_MORE_OPEN=false;
-  // 切换视图：隐藏事项列表页，显示部门页
-  const bw=document.getElementById('boardListWrap'),pw=document.getElementById('deptPageWrap');
-  if(bw)bw.style.display='none';
-  if(pw)pw.style.display='';
+  switchView(true);
   // 标题
   const ct=document.getElementById('deptCultureTitle');
   const wt=document.getElementById('deptWorkTitle');
   if(ct)ct.textContent=dept+' · 部门文化';
   if(wt)wt.textContent=dept+' · 事项统计';
+  // 部门切换条：选项 = 全部部门（含无板块的），当前部门选中
+  renderDeptSwitchBar(dept);
   // 加载态：先清空旧数据，避免上一个部门的内容残留闪现
   const cb=document.getElementById('deptCultureBody');
   const sb=document.getElementById('deptStatsBody');
@@ -1569,7 +1630,6 @@ async function openDeptPage(dept){
   // 权限：只有管理员能编辑部门文化内容
   const eb=document.getElementById('deptEditBtn');
   if(eb)eb.style.display=ME&&ME.is_admin?'':'none';
-  renderTabs();   // 刷新部门节点的高亮态（当前在哪个部门的页面）
   try{
     const d=await api('/api/dept/'+encodeURIComponent(dept)+'/page');
     // 切换期间用户可能已经点了别的部门 → 丢弃过期响应，避免旧数据覆盖新部门
@@ -1583,14 +1643,29 @@ async function openDeptPage(dept){
     if(sb)sb.innerHTML=`<div class="dept-empty">加载失败：${esc(e.message||'')}</div>`;
   }
 }
+// 部门页顶部的部门切换条：下拉切换部门 + 一键返回事项列表
+function renderDeptSwitchBar(cur){
+  const bar=document.getElementById('deptSwitchBar');
+  const sel=document.getElementById('deptSwitchSel');
+  if(!bar||!sel)return;
+  const g=groupBoardsByDept();
+  const names=g.depts.map(d=>d.name);
+  sel.innerHTML=names.map(n=>`<option value="${esc(n)}"${n===cur?' selected':''}>${esc(n)}</option>`).join('');
+  const cnt=document.getElementById('deptSwitchCount');
+  if(cnt){
+    const hit=g.depts.find(d=>d.name===cur);
+    cnt.textContent=hit?(hit.boards.length+' 个板块'):'';
+  }
+}
+// 切换条上下拉：换部门
+function onDeptSwitch(v){
+  if(v&&v!==CUR_DEPT)openDeptPage(v);
+}
 // 返回事项列表页
 function backToBoardList(){
   CUR_DEPT='';
   DEPT_DATA=null;
-  const bw=document.getElementById('boardListWrap'),pw=document.getElementById('deptPageWrap');
-  if(bw)bw.style.display='';
-  if(pw)pw.style.display='none';
-  renderTabs();   // 清除部门节点的高亮态
+  switchView(false);
 }
 // 分栏一：部门文化展示区（标语 → 职能介绍 → 团队合照 → 标杆/模范）
 function renderDeptCulture(d){
@@ -2030,7 +2105,7 @@ async function deleteDeptPost(pid){
 }
 function pickBoard(bid){
   curBoard=bid;curYears=new Set([YEAR_DEFAULT]);
-  // 从部门页进入事项列表时，先切回列表视图
+  // 从部门页进入事项列表时，先切回列表视图（switchView 内部会 renderTabs）
   if(CUR_DEPT)backToBoardList();
   ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()
 }
@@ -2108,8 +2183,6 @@ function syncDateFilterUI(){
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
-  // 缓存板块元信息：年份筛选器重渲染（移除/清空单个年份）时要用它取选项
-  _curColsCache=cols||[];
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
   renderYearFilter(cols);
   // 有搜索词时切换到「统一搜索结果」视图
@@ -2185,10 +2258,19 @@ function renderBoard(cards,cols,q,colHits){
 // 形态：chips 标签组。每个已选年份渲染成一个带 ✕ 的标签（点 ✕ 移除该年份），
 // 右侧固定一个「全部年份」标签（点它 = 清空全部已选）。
 // 选项来源 = 当前看板下各板块的「归属年份」；默认落在当前年份，切换看板时统一重置。
+//
+// 🔴 关键拆分（踩过的坑）：「校验年份有效性」与「重绘 chips」必须分开。
+// 之前移除单个年份后调的是 renderYearFilter(currentCols())，而该函数内含
+// 「丢弃当前看板不存在的年份」的校验 —— 一旦传入的板块元信息为空或过期，
+// 整个 curYears 会被重置掉，用户点一个 ✕ 结果**所有**年份都被清空。
+// 现在：移除/清空只调 paintYearChips()（纯重绘，不做校验）；
+// 只有看板切换等场景才走 renderYearFilter(cols)（带校验）。
+let _yearOptions=[];        // 当前看板可用的年份列表（选项来源）
 function renderYearFilter(cols){
   const box=document.getElementById('yearFilter');
   if(!box)return;
   const years=[...new Set((cols||[]).map(x=>x.year||'').filter(Boolean))].sort().reverse();
+  _yearOptions=years;
   // 已选年份在当前看板不存在时（换看板 / 改年份）：先回落到当前年份，
   // 当前年份也没有则退回「全部年份」，避免筛出空列表
   if(curYears.size&&!years.some(y=>curYears.has(y))){
@@ -2199,7 +2281,13 @@ function renderYearFilter(cols){
     const keep=[...curYears].filter(y=>years.includes(y));
     curYears=new Set(keep);
   }
-  if(!years.length){box.hidden=true;box.innerHTML='';return}
+  paintYearChips();
+}
+// 纯重绘：按当前 curYears 渲染 chips，**不做任何校验**（移除/清空后走这里）
+function paintYearChips(){
+  const box=document.getElementById('yearFilter');
+  if(!box)return;
+  if(!_yearOptions.length){box.hidden=true;box.innerHTML='';return}
   box.hidden=false;
   const chips=[];
   [...curYears].sort().reverse().forEach(y=>{
@@ -2215,19 +2303,16 @@ function onYearFilterClick(ev){
   if(!t)return;
   if(t.dataset&&t.dataset.year){
     curYears.delete(t.dataset.year);
-    renderYearFilter(currentCols());
+    paintYearChips();     // 只重绘，不校验（否则会连其它年份一起清掉）
     reload(1);
     return;
   }
   if(t.dataset&&t.dataset.all){
     curYears=new Set();
-    renderYearFilter(currentCols());
+    paintYearChips();
     reload(1);
   }
 }
-// 当前看板的板块元信息（供年份筛选器重渲染时取选项）
-let _curColsCache=[];
-function currentCols(){return _curColsCache||[]}
 // ---------- 搜索结果：事项与板块统一展示 ----------
 // 板块名命中 → 该板块成组展示（标注「板块名匹配」）
 // 事项名/描述命中 → 逐条展示，每条标注所属板块
@@ -3590,7 +3675,20 @@ document.addEventListener('click',e=>{
   const t=e.target;
   if(t&&t.closest&&t.closest('.status-picker'))return;   // 点在按钮或菜单内部，不处理
   closeStatusMenu();
+  // 头部「更多」下拉：点外部收起
+  if(!(t&&t.closest&&t.closest('#headerMore')))closeHeaderMore();
 });
+// 头部「更多」下拉的开关
+function toggleHeaderMore(ev){
+  if(ev)ev.stopPropagation();
+  const m=document.getElementById('headerMoreMenu');
+  if(!m)return;
+  m.hidden=!m.hidden;
+}
+function closeHeaderMore(){
+  const m=document.getElementById('headerMoreMenu');
+  if(m)m.hidden=true;
+}
 // 年份筛选 chips 的点击（移除单个年份 / 清空全部）—— 事件委托到 document，
 // 因为 chips 是 innerHTML 重建的，直接绑在元素上会在重建后失效
 document.addEventListener('click',e=>{
