@@ -1723,6 +1723,487 @@ def del_org_alias(gid: int, username: str = Depends(require_admin), request: Req
     """兼容别名：/api/org 映射到 /api/workgroups"""
     return del_wg_node(gid, username, request)
 
+
+# ================================================================
+# ---------------- API：组织架构（新模型） ----------------
+#
+# 三层实体：
+#   org_nodes        架构节点（中心 / 部门 / 常规小组 / 专项小组）
+#   org_roles        岗位定义（节点类型 → 可设岗位，唯一槽位 vs 可多人）
+#   org_appointments 任职关系（人 × 节点 × 岗位，支持一人多岗、多组织任职）
+#
+# 层级规则（_check_parent_ok）：
+#   center  → parent_id 必须为 0，且全局唯一
+#   dept    → parent 必须是 center
+#   group   → parent 必须是 dept
+#   special → parent 可以是 center 或 dept（跨部门专项组）
+#
+# 角色唯一性：
+#   unique_slot=1 的岗位（中心负责人/总经理/部门长/组长）在节点内至多一人，
+#   由 DB 的 partial unique index ux_org_unique_slot 强制兜底，
+#   应用层再校验一次给出友好错误（DB 报错是英文）。
+#
+# 多重归属：
+#   org_appointments 是 (node_id, member_id, role_key) 的组合，
+#   同一人可在多个节点任职（多组织），也可在同一节点兼任多个岗位（一人多岗）。
+# ================================================================
+ORG_TYPES = ('center', 'dept', 'group', 'special')
+ORG_TYPE_NAMES = {'center': '中心', 'dept': '部门', 'group': '常规小组', 'special': '专项小组'}
+# 各节点类型允许的**父节点类型**
+#   center  → 无父（parent_id=0）
+#   dept    → center
+#   group   → dept
+#   special → center / dept（专项组可挂中心或部门，跨部门协作）
+ORG_PARENT_RULES = {
+    'center':  set(),
+    'dept':    {'center'},
+    'group':   {'dept'},
+    'special': {'center', 'dept'},
+}
+# 父节点类型 → 该父节点下允许挂的子节点类型（用于「父级视角」的提示与校验）
+ORG_CHILD_RULES = {
+    'center':  {'dept', 'special'},
+    'dept':    {'group', 'special'},
+    'group':   set(),
+    'special': set(),
+}
+
+def _org_node(node_id: int):
+    rows = dbq('SELECT id, name, node_type, parent_id, wg_id, is_anchor, function, description'
+               ' FROM org_nodes WHERE id=?', (node_id,))
+    return dict(rows[0]) if rows else None
+
+def _org_role_defs(node_type: str):
+    """该节点类型可设的岗位清单 [{role_key, role_name, unique_slot}]"""
+    return [dict(r) for r in dbq(
+        'SELECT role_key, role_name, unique_slot FROM org_roles WHERE node_type=? ORDER BY sort, id',
+        (node_type,))]
+
+def _org_appointments_of(node_id: int):
+    """节点的任职明细（含成员姓名与岗位显示名）"""
+    rows = dbq('''SELECT a.id, a.node_id, a.member_id, a.role_key, a.is_primary,
+                         m.name AS member_name, m.account,
+                         COALESCE(r.role_name, a.role_key) AS role_name
+                  FROM org_appointments a
+                  JOIN team_members m ON m.id = a.member_id
+                  LEFT JOIN org_nodes n ON n.id = a.node_id
+                  LEFT JOIN org_roles r ON r.node_type = n.node_type AND r.role_key = a.role_key
+                  WHERE a.node_id=? ORDER BY a.role_key, m.name''', (node_id,))
+    out = []
+    for r in rows:
+        d = dict(r)
+        d['is_primary'] = 1 if d.get('is_primary') else 0
+        out.append(d)
+    return out
+
+def _org_node_descendants(node_id: int, rows=None):
+    """返回 node_id 的全部后代 id 集合（不含自身）"""
+    if rows is None:
+        rows = [dict(r) for r in dbq('SELECT id, parent_id FROM org_nodes')]
+    children = defaultdict(list)
+    for r in rows:
+        children[r['parent_id']].append(r['id'])
+    out = set()
+    stack = list(children.get(node_id, []))
+    while stack:
+        cur = stack.pop()
+        if cur in out:
+            continue
+        out.add(cur)
+        stack.extend(children.get(cur, []))
+    return out
+
+def _check_parent_ok(node_type: str, parent_id: int, self_id: int = 0):
+    """层级完整性校验：
+       1) 父节点类型必须在该节点类型的允许集合内（ORG_PARENT_RULES）
+       2) 父节点必须存在
+       3) 不能挂到自己的后代下（防环）
+       4) center 全局唯一
+    """
+    if node_type not in ORG_TYPES:
+        raise HTTPException(400, f'节点类型必须是 {"/".join(ORG_TYPES)} 之一')
+    allowed = ORG_PARENT_RULES[node_type]
+    # center 是顶级节点：parent_id 必须为 0
+    if node_type == 'center':
+        if parent_id:
+            raise HTTPException(400, '中心是顶级节点，不能有上级')
+    else:
+        if not parent_id:
+            hint = '、'.join(ORG_TYPE_NAMES[t] for t in sorted(allowed))
+            raise HTTPException(400, f'{ORG_TYPE_NAMES[node_type]}必须挂在「{hint}」下')
+        p = _org_node(parent_id)
+        if not p:
+            raise HTTPException(404, '上级节点不存在')
+        if p['node_type'] not in allowed:
+            can = '、'.join(ORG_TYPE_NAMES[t] for t in sorted(allowed))
+            raise HTTPException(400, f'{ORG_TYPE_NAMES[node_type]}只能挂在「{can}」下，'
+                                    f'「{p["name"]}」是{ORG_TYPE_NAMES.get(p["node_type"], p["node_type"])}')
+        if self_id and parent_id == self_id:
+            raise HTTPException(400, '上级节点不能是自身')
+        if self_id:
+            rows = [dict(r) for r in dbq('SELECT id, parent_id FROM org_nodes')]
+            if parent_id in _org_node_descendants(self_id, rows):
+                raise HTTPException(400, '上级节点不能是自己的下级（会造成层级环）')
+    # center 全局唯一
+    if node_type == 'center':
+        others = dbq('SELECT id FROM org_nodes WHERE node_type=? AND id!=?', ('center', self_id or 0))
+        if others:
+            raise HTTPException(409, '中心节点全局只能有一个')
+
+def _check_role_allowed(node_type: str, role_key: str):
+    """岗位必须在该节点类型的岗位清单内"""
+    defs = _org_role_defs(node_type)
+    if not any(d['role_key'] == role_key for d in defs):
+        names = '、'.join(d['role_name'] for d in defs) or '（未配置）'
+        raise HTTPException(400, f'「{ORG_TYPE_NAMES.get(node_type, node_type)}」不可设置该岗位；'
+                                f'可用岗位：{names}')
+
+def _check_unique_slot(node_id: int, role_key: str, member_id: int, exclude_id: int = 0):
+    """唯一槽位岗位校验（节点内至多一人），给出友好错误"""
+    defs = _org_role_defs(_org_node(node_id)['node_type'])
+    d = next((x for x in defs if x['role_key'] == role_key), None)
+    if not d or not d['unique_slot']:
+        return
+    rows = dbq('SELECT a.id, m.name FROM org_appointments a JOIN team_members m ON m.id=a.member_id'
+               ' WHERE a.node_id=? AND a.role_key=? AND a.member_id!=? AND a.id!=?',
+               (node_id, role_key, member_id, exclude_id))
+    if rows:
+        raise HTTPException(409, f'「{d["role_name"]}」在一个节点内只能有一人，'
+                                f'当前已由 {rows[0]["name"]} 担任')
+
+def _org_sync_legacy(node_id: int):
+    """把新模型的任职关系回写到旧表 workgroups.leader 与 team_members.workgroups。
+    旧权限逻辑（_leader_boards / _group_boards）读的是这两个字段，
+    回写保证新旧模型在权限判定上完全一致。"""
+    node = _org_node(node_id)
+    if not node:
+        return
+    # 1) leader：取该节点的唯一槽位岗位任职人（组长/部门长/中心负责人）
+    leader = ''
+    rows = dbq('''SELECT m.name FROM org_appointments a
+                  JOIN team_members m ON m.id=a.member_id
+                  WHERE a.node_id=? AND a.role_key IN ('group_leader','dept_head','center_head','gm')
+                  ORDER BY CASE a.role_key WHEN 'center_head' THEN 0 WHEN 'dept_head' THEN 1
+                                           WHEN 'gm' THEN 2 ELSE 3 END LIMIT 1''', (node_id,))
+    if rows:
+        leader = rows[0]['name']
+    wg_id = node.get('wg_id') or 0
+    if wg_id:
+        dbe('UPDATE workgroups SET leader=? WHERE id=?', (leader, wg_id))
+    # 2) team_members.workgroups：把「组员/骨干」任职回写成分号串
+    #    仅回写常规小组/专项小组节点（与旧语义一致：成员归属到组，部门靠父链传导）
+    if node['node_type'] in ('group', 'special'):
+        for m in dbq('''SELECT a.member_id, t.name FROM org_appointments a
+                        JOIN team_members t ON t.id=a.member_id
+                        WHERE a.node_id=? AND a.role_key IN ('member','dept_backbone','center_backbone')''',
+                     (node_id,)):
+            row = dbq('SELECT workgroups FROM team_members WHERE id=?', (m['member_id'],))
+            if not row:
+                continue
+            gs = [x.strip() for x in (row[0]['workgroups'] or '').split(';') if x.strip()]
+            if node['name'] not in gs:
+                gs.append(node['name'])
+                dbe('UPDATE team_members SET workgroups=? WHERE id=?', (';'.join(gs), m['member_id']))
+
+def _org_sync_member_legacy(member_id: int):
+    """成员侧回写：移除某成员在指定节点的全部任职时，同步清理 workgroups 串"""
+    rows = dbq('''SELECT n.name FROM org_appointments a JOIN org_nodes n ON n.id=a.node_id
+                  WHERE a.member_id=? AND n.node_type IN ('group','special')''', (member_id,))
+    names = set(r['name'] for r in rows)
+    row = dbq('SELECT workgroups FROM team_members WHERE id=?', (member_id,))
+    if not row:
+        return
+    gs = [x.strip() for x in (row[0]['workgroups'] or '').split(';') if x.strip()]
+    keep = [g for g in gs if g not in names]
+    if keep != gs:
+        dbe('UPDATE team_members SET workgroups=? WHERE id=?', (';'.join(keep), member_id))
+
+class OrgNodeReq(BaseModel):
+    name: str
+    node_type: str = 'group'
+    parent_id: int = 0
+    function: str = ''
+    description: str = ''
+
+class OrgAppointmentReq(BaseModel):
+    node_id: int
+    member_id: int
+    role_key: str
+    is_primary: int = 0
+
+@app.get('/api/org/tree')
+def get_org_tree(username: str = Depends(require_auth)):
+    """组织架构树：节点 + 类型 + 岗位定义 + 任职明细（含多归属标记）"""
+    nodes = [dict(r) for r in dbq(
+        'SELECT id, name, node_type, parent_id, wg_id, is_anchor, function, description'
+        ' FROM org_nodes ORDER BY sort, id')]
+    node_type_of = {n['id']: n['node_type'] for n in nodes}
+    # 每节点的岗位清单
+    roles_by_type = {}
+    for r in dbq('SELECT node_type, role_key, role_name, unique_slot, sort FROM org_roles ORDER BY sort, id'):
+        roles_by_type.setdefault(r['node_type'], []).append(
+            {'role_key': r['role_key'], 'role_name': r['role_name'], 'unique_slot': r['unique_slot']})
+    # 全部任职（按节点分组）
+    appts = {}
+    role_names = {}
+    for r in dbq('SELECT node_type, role_key, role_name FROM org_roles'):
+        role_names[(r['node_type'], r['role_key'])] = r['role_name']
+    for r in dbq('''SELECT a.id, a.node_id, a.member_id, a.role_key, a.is_primary,
+                           m.name AS member_name, m.account
+                    FROM org_appointments a JOIN team_members m ON m.id=a.member_id
+                    ORDER BY m.name'''):
+        d = dict(r)
+        d['is_primary'] = 1 if d.get('is_primary') else 0
+        d['role_name'] = role_names.get((node_type_of.get(d['node_id'], ''), d['role_key']), d['role_key'])
+        appts.setdefault(d['node_id'], []).append(d)
+    # 成员的任职总数（用于「多归属」提示）
+    member_nodes = defaultdict(set)
+    for nid, lst in appts.items():
+        for a in lst:
+            member_nodes[a['member_id']].add(nid)
+    for nid, lst in appts.items():
+        for a in lst:
+            a['other_org_count'] = len(member_nodes[a['member_id']]) - 1
+    by_parent = defaultdict(list)
+    for n in nodes:
+        by_parent[n['parent_id']].append(n)
+
+    def build(pid):
+        out = []
+        for n in by_parent.get(pid, []):
+            node = dict(n)
+            node['type_name'] = ORG_TYPE_NAMES.get(n['node_type'], n['node_type'])
+            node['roles'] = roles_by_type.get(n['node_type'], [])
+            node['appointments'] = appts.get(n['id'], [])
+            node['children'] = build(n['id'])
+            out.append(node)
+        return out
+
+    return {'tree': build(0), 'roles_by_type': roles_by_type,
+            'type_names': ORG_TYPE_NAMES}
+
+@app.post('/api/org/nodes')
+def create_org_node(req: OrgNodeReq, username: str = Depends(require_admin), request: Request = None):
+    """新增架构节点（中心/部门/常规小组/专项小组）"""
+    name = (req.name or '').strip()
+    if not name:
+        raise HTTPException(400, '节点名称不能为空')
+    node_type = (req.node_type or '').strip()
+    _check_parent_ok(node_type, req.parent_id)
+    if dbq('SELECT 1 FROM org_nodes WHERE parent_id=? AND name=?', (req.parent_id, name)):
+        raise HTTPException(409, f'同级下已存在同名节点「{name}」')
+    cur = dbe('INSERT INTO org_nodes (name, node_type, parent_id, function, description)'
+              ' VALUES (?,?,?,?,?)',
+              (name, node_type, req.parent_id, (req.function or '').strip(), (req.description or '').strip()))
+    nid = cur.lastrowid
+    # 同步旧表 workgroups（保持旧权限逻辑可见）
+    pid = req.parent_id
+    pwg = dbq('SELECT wg_id FROM org_nodes WHERE id=?', (pid,)) if pid else []
+    parent_wg = pwg[0]['wg_id'] if pwg and pwg[0]['wg_id'] else 0
+    if node_type == 'center':
+        w = dbe('INSERT INTO workgroups (name, parent_id) VALUES (?,0)', (name,))
+    else:
+        w = dbe('INSERT INTO workgroups (name, parent_id) VALUES (?,?)', (name, parent_wg))
+    dbe('UPDATE org_nodes SET wg_id=? WHERE id=?', (w.lastrowid, nid))
+    audit_log(username, client_ip(request), 'org_node_create',
+              f'节点 {name}（{ORG_TYPE_NAMES.get(node_type, node_type)}）',
+              f'新增架构节点，id={nid}，上级 id={req.parent_id}', 'success')
+    return {'ok': True, 'id': nid}
+
+@app.put('/api/org/nodes/{nid}')
+def update_org_node(nid: int, req: OrgNodeReq, username: str = Depends(require_admin), request: Request = None):
+    """修改节点：名称 / 类型 / 上级 / 职能说明。
+       改类型或上级时会校验子节点是否仍满足层级规则（层级完整性）。"""
+    node = _org_node(nid)
+    if not node:
+        raise HTTPException(404, '节点不存在')
+    name = (req.name or '').strip()
+    if not name:
+        raise HTTPException(400, '节点名称不能为空')
+    node_type = (req.node_type or node['node_type']).strip()
+    parent_id = req.parent_id
+    _check_parent_ok(node_type, parent_id, self_id=nid)
+    if dbq('SELECT 1 FROM org_nodes WHERE parent_id=? AND name=? AND id!=?', (parent_id, name, nid)):
+        raise HTTPException(409, f'同级下已存在同名节点「{name}」')
+    # 子节点类型约束：改类型后，子节点的上级类型必须仍被允许
+    kids = dbq('SELECT id, name, node_type FROM org_nodes WHERE parent_id=?', (nid,))
+    for k in kids:
+        if node_type not in ORG_PARENT_RULES.get(k['node_type'], set()):
+            raise HTTPException(400, f'子节点「{k["name"]}」的类型（{ORG_TYPE_NAMES.get(k["node_type"], k["node_type"])}）'
+                                    f'不允许挂在「{ORG_TYPE_NAMES.get(node_type, node_type)}」下，'
+                                    f'请先调整子节点')
+    dbe('UPDATE org_nodes SET name=?, node_type=?, parent_id=?, function=?, description=? WHERE id=?',
+        (name, node_type, parent_id, (req.function or '').strip(), (req.description or '').strip(), nid))
+    # 同步旧表
+    if node.get('wg_id'):
+        pwg = dbq('SELECT wg_id FROM org_nodes WHERE id=?', (parent_id,)) if parent_id else []
+        parent_wg = pwg[0]['wg_id'] if pwg and pwg[0]['wg_id'] else 0
+        dbe('UPDATE workgroups SET name=?, parent_id=? WHERE id=?', (name, parent_wg, node['wg_id']))
+    audit_log(username, client_ip(request), 'org_node_update',
+              f'节点 {name} (id={nid})', '更新架构节点', 'success')
+    return {'ok': True}
+
+@app.delete('/api/org/nodes/{nid}')
+def delete_org_node(nid: int, username: str = Depends(require_admin), request: Request = None):
+    """删除节点：级联删除其任职关系与子节点；节点有关联看板时拒绝。"""
+    node = _org_node(nid)
+    if not node:
+        raise HTTPException(404, '节点不存在')
+    if node['node_type'] == 'center':
+        raise HTTPException(403, '中心节点不可删除')
+    # 有看板绑定时拒绝（避免成员突然失去访问权限）
+    if node.get('wg_id'):
+        w = dbq('SELECT boards FROM workgroups WHERE id=?', (node['wg_id'],))
+        if w and (w[0]['boards'] or '').strip():
+            raise HTTPException(409, '该节点仍绑定着板块，请先解除板块绑定再删除')
+    desc = _org_node_descendants(nid)
+    # 先收集受影响成员（删除前），删除后再回写清理
+    affected = set()
+    for dn in list(desc) + [nid]:
+        for r in dbq('SELECT DISTINCT member_id FROM org_appointments WHERE node_id=?', (dn,)):
+            affected.add(r['member_id'])
+    appt_cnt = 0
+    for dn in list(desc) + [nid]:
+        appt_cnt += dbq('SELECT COUNT(*) AS c FROM org_appointments WHERE node_id=?', (dn,))[0]['c']
+    # 删除子节点（自底向上）与任职关系
+    for dn in sorted(desc, reverse=True):
+        dbe('DELETE FROM org_appointments WHERE node_id=?', (dn,))
+        sub = dbq('SELECT wg_id FROM org_nodes WHERE id=?', (dn,))
+        if sub and sub[0]['wg_id']:
+            dbe('DELETE FROM workgroups WHERE id=?', (sub[0]['wg_id'],))
+        dbe('DELETE FROM org_nodes WHERE id=?', (dn,))
+    dbe('DELETE FROM org_appointments WHERE node_id=?', (nid,))
+    if node.get('wg_id'):
+        dbe('DELETE FROM workgroups WHERE id=?', (node['wg_id'],))
+    dbe('DELETE FROM org_nodes WHERE id=?', (nid,))
+    # 清理成员侧的旧引用（该成员若已无任何小组任职，其 workgroups 串里对应名称要移除）
+    for mid in affected:
+        _org_sync_member_legacy(mid)
+    audit_log(username, client_ip(request), 'org_node_delete',
+              f'节点 {node["name"]} (id={nid})',
+              f'删除架构节点，级联清理 {len(desc)} 个子节点、{appt_cnt} 条任职关系', 'success')
+    return {'ok': True, 'removed_children': len(desc), 'removed_appointments': appt_cnt}
+
+class OrgMoveNodeReq(BaseModel):
+    """移动节点只需目标上级；名称/类型不变"""
+    parent_id: int
+
+@app.post('/api/org/nodes/{nid}/move')
+def move_org_node(nid: int, req: OrgMoveNodeReq, username: str = Depends(require_admin), request: Request = None):
+    """移动节点（换上级）：跨部门组 / 调整层级。
+       校验：目标上级类型合法、不成环、子节点类型仍兼容。"""
+    node = _org_node(nid)
+    if not node:
+        raise HTTPException(404, '节点不存在')
+    if node['node_type'] == 'center':
+        raise HTTPException(403, '中心节点不可移动')
+    new_parent = req.parent_id
+    _check_parent_ok(node['node_type'], new_parent, self_id=nid)
+    kids = dbq('SELECT id, name, node_type FROM org_nodes WHERE parent_id=?', (nid,))
+    for k in kids:
+        if node['node_type'] not in ORG_PARENT_RULES.get(k['node_type'], set()):
+            raise HTTPException(400, f'子节点「{k["name"]}」的类型不允许挂在目标上级下，'
+                                    f'请先调整子节点')
+    dbe('UPDATE org_nodes SET parent_id=? WHERE id=?', (new_parent, nid))
+    if node.get('wg_id'):
+        pwg = dbq('SELECT wg_id FROM org_nodes WHERE id=?', (new_parent,)) if new_parent else []
+        parent_wg = pwg[0]['wg_id'] if pwg and pwg[0]['wg_id'] else 0
+        dbe('UPDATE workgroups SET parent_id=? WHERE id=?', (parent_wg, node['wg_id']))
+    audit_log(username, client_ip(request), 'org_node_move',
+              f'节点 {node["name"]} (id={nid})', f'移动到上级 id={new_parent}', 'success')
+    return {'ok': True}
+
+@app.post('/api/org/appointments')
+def create_org_appointment(req: OrgAppointmentReq, username: str = Depends(require_admin), request: Request = None):
+    """新增任职关系：一人多岗 / 一人多组织。
+       校验：节点存在、成员存在、岗位属于该节点类型、唯一槽位不被占。"""
+    node = _org_node(req.node_id)
+    if not node:
+        raise HTTPException(404, '节点不存在')
+    m = dbq('SELECT id, name FROM team_members WHERE id=?', (req.member_id,))
+    if not m:
+        raise HTTPException(404, '成员不存在')
+    role_key = (req.role_key or '').strip()
+    _check_role_allowed(node['node_type'], role_key)
+    _check_unique_slot(req.node_id, role_key, req.member_id)
+    try:
+        dbe('INSERT INTO org_appointments (node_id, member_id, role_key, is_primary) VALUES (?,?,?,?)',
+            (req.node_id, req.member_id, role_key, 1 if req.is_primary else 0))
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, '该成员在此节点已有该岗位')
+    _org_sync_legacy(req.node_id)
+    audit_log(username, client_ip(request), 'org_appointment_create',
+              f'{m[0]["name"]} @ {node["name"]}',
+              f'新增任职，岗位 {role_key}', 'success')
+    return {'ok': True}
+
+@app.delete('/api/org/appointments/{aid}')
+def delete_org_appointment(aid: int, username: str = Depends(require_admin), request: Request = None):
+    """删除任职关系"""
+    row = dbq('''SELECT a.id, a.node_id, a.member_id, a.role_key, m.name AS member_name
+                 FROM org_appointments a JOIN team_members m ON m.id=a.member_id WHERE a.id=?''', (aid,))
+    if not row:
+        raise HTTPException(404, '任职关系不存在')
+    dbe('DELETE FROM org_appointments WHERE id=?', (aid,))
+    _org_sync_legacy(row[0]['node_id'])
+    _org_sync_member_legacy(row[0]['member_id'])
+    audit_log(username, client_ip(request), 'org_appointment_delete',
+              f'{row[0]["member_name"]}', '删除任职关系', 'success')
+    return {'ok': True}
+
+@app.get('/api/org/members/{member_id}/appointments')
+def get_member_appointments(member_id: int, username: str = Depends(require_auth)):
+    """某人的全部任职（多归属视图）：横跨哪些节点、担任什么岗位"""
+    rows = dbq('''SELECT a.id, a.node_id, a.role_key, a.is_primary, r.role_name, r.unique_slot,
+                         n.name AS node_name, n.node_type
+                  FROM org_appointments a
+                  JOIN org_nodes n ON n.id=a.node_id
+                  LEFT JOIN org_roles r ON r.node_type=n.node_type AND r.role_key=a.role_key
+                  WHERE a.member_id=? ORDER BY n.id, a.role_key''', (member_id,))
+    out = []
+    for r in rows:
+        d = dict(r)
+        d['is_primary'] = 1 if d.get('is_primary') else 0
+        d['type_name'] = ORG_TYPE_NAMES.get(d['node_type'], d['node_type'])
+        out.append(d)
+    return {'appointments': out}
+
+class OrgMoveApptReq(BaseModel):
+    appt_id: int
+    node_id: int = 0        # 0=不换节点
+    role_key: str = ''      # 空=不换岗位
+
+@app.post('/api/org/appointments/move')
+def move_org_appointment(req: OrgMoveApptReq, username: str = Depends(require_admin), request: Request = None):
+    """调整任职：换节点（一人多组织的维护入口）或换岗位。
+       校验与新增一致：目标节点类型允许该岗位、唯一槽位未被他人占用。"""
+    row = dbq('''SELECT a.id, a.node_id, a.member_id, a.role_key, m.name AS member_name
+                 FROM org_appointments a JOIN team_members m ON m.id=a.member_id WHERE a.id=?''',
+               (req.appt_id,))
+    if not row:
+        raise HTTPException(404, '任职关系不存在')
+    old_node = row[0]['node_id']
+    new_node = req.node_id or old_node
+    new_role = (req.role_key or '').strip() or row[0]['role_key']
+    node = _org_node(new_node)
+    if not node:
+        raise HTTPException(404, '目标节点不存在')
+    _check_role_allowed(node['node_type'], new_role)
+    _check_unique_slot(new_node, new_role, row[0]['member_id'], exclude_id=req.appt_id)
+    try:
+        dbe('UPDATE org_appointments SET node_id=?, role_key=? WHERE id=?',
+            (new_node, new_role, req.appt_id))
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, '该成员在目标节点已有该岗位')
+    _org_sync_legacy(old_node)
+    _org_sync_legacy(new_node)
+    _org_sync_member_legacy(row[0]['member_id'])
+    audit_log(username, client_ip(request), 'org_appointment_move',
+              f'{row[0]["member_name"]}',
+              f'任职调整：节点 {old_node} → {new_node}，岗位 {row[0]["role_key"]} → {new_role}', 'success')
+    return {'ok': True}
+
+
 # ---------------- API：看板管理（配置板块：年份/归属部门/属性/状态） ----------------
 # 枚举可选值（与 DB CHECK 约束保持一致，应用层二次校验，越界即 400）
 ALLOWED_YEARS = {'2025', '2026', '2027', '2028', '2029', '2030'}

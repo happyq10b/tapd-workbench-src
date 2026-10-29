@@ -107,6 +107,84 @@ CREATE TABLE IF NOT EXISTS board_config (
 );
 CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(year, dept, attr);
 
+-- ============================================================
+-- 组织架构（新模型）
+--
+-- 与旧表 workgroups 的关系：
+--   workgroups 保留为「架构节点」的兼容视图（id/name/parent_id/boards 等），
+--   旧权限逻辑（_leader_boards / _group_boards）继续读它，零改动。
+--   本组三张表承载新需求：节点类型、岗位角色、多重归属（一人多岗）。
+--
+-- org_nodes —— 架构节点（一棵树）
+--   node_type 决定它能有哪些岗位、能挂在什么下面：
+--     center  中心（顶级，唯一，parent_id=0）
+--     dept    部门（挂在中心下）
+--     group   常规小组（挂在部门下）
+--     special 专项小组（可挂在中心或部门下 —— 跨部门临时协作）
+--   is_anchor=1 表示该节点同时是 workgroups 中的可见节点（数据同源）。
+--
+-- org_roles —— 岗位定义（节点类型 → 可设岗位）
+--   unique_slot=1 表示该岗位在一个节点内**至多一人**（组长/部门长/中心负责人…），
+--   unique_slot=0 表示**可多人**（组员/骨干…）。
+--
+-- org_appointments —— 任职关系（人与节点的多对多 + 岗位）
+--   同一节点同一人同一岗位唯一（UNIQUE(node_id,member_id,role)）；
+--   同一节点同一人可担任多个岗位（一人多岗）；
+--   同一人可在多个节点任职（一人多组织）。
+--   唯一性由「节点内岗位唯一槽位」在应用层保证（DB 层用 partial unique index）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS org_nodes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    node_type   TEXT NOT NULL DEFAULT 'group'
+                CHECK (node_type IN ('center','dept','group','special')),
+    parent_id   INTEGER NOT NULL DEFAULT 0,   -- 上级节点 id；0=顶级（中心）
+    wg_id       INTEGER NOT NULL DEFAULT 0,   -- 关联 workgroups.id（兼容视图），0=未关联
+    is_anchor   INTEGER NOT NULL DEFAULT 0,   -- 1=主架构锚点节点（与 workgroups 一一对应）
+    function    TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    sort        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(parent_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_org_nodes_parent ON org_nodes(parent_id);
+CREATE INDEX IF NOT EXISTS idx_org_nodes_wg ON org_nodes(wg_id);
+
+-- 岗位定义：每个节点类型可配置的岗位清单
+CREATE TABLE IF NOT EXISTS org_roles (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_type   TEXT NOT NULL CHECK (node_type IN ('center','dept','group','special')),
+    role_key    TEXT NOT NULL,                -- 岗位标识，如 group_leader
+    role_name   TEXT NOT NULL,                -- 岗位显示名，如 组长
+    unique_slot INTEGER NOT NULL DEFAULT 0,   -- 1=该节点内至多一人；0=可多人
+    sort        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(node_type, role_key)
+);
+CREATE INDEX IF NOT EXISTS idx_org_roles_type ON org_roles(node_type, sort);
+
+-- 任职关系：人 × 节点 × 岗位
+CREATE TABLE IF NOT EXISTS org_appointments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id     INTEGER NOT NULL,
+    member_id   INTEGER NOT NULL,
+    role_key    TEXT NOT NULL,
+    is_primary  INTEGER NOT NULL DEFAULT 0,   -- 1=主岗（该人以此节点为第一归属）
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(node_id, member_id, role_key),
+    FOREIGN KEY (node_id) REFERENCES org_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (member_id) REFERENCES team_members(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_org_appt_node ON org_appointments(node_id);
+CREATE INDEX IF NOT EXISTS idx_org_appt_member ON org_appointments(member_id);
+-- 「节点内唯一槽位」岗位的强约束：同一节点同一 unique_slot 岗位只能有一个人。
+-- ⚠️ SQLite 的 partial index 的 WHERE 子句**不允许子查询**（不能引用 org_roles），
+--    因此这里把唯一槽位岗位键写死。与 org_roles 中的 unique_slot=1 集合保持一致
+--    （中心负责人 / 总经理 / 部门长 / 组长），改岗位表时必须同步改这里。
+CREATE UNIQUE INDEX IF NOT EXISTS ux_org_unique_slot
+    ON org_appointments(node_id, role_key)
+    WHERE role_key IN ('center_head','gm','dept_head','group_leader');
+
+
 -- 部门主页：文化展示区（标语 / 职能介绍 / 团队合照）
 -- dept 与 DEPT_ORDER 的部门名一一对应；一个部门一条记录
 CREATE TABLE IF NOT EXISTS dept_profile (
@@ -332,6 +410,132 @@ def _migrate_schema(conn):
                         SELECT id, name, workgroups, account, created_at FROM team_members_bak''')
         conn.execute('DROP TABLE team_members_bak')
 
+def _migrate_org(conn):
+    """组织架构迁移：workgroups（层级 + 单个 leader + 成员分号串）
+    → org_nodes（带类型的节点树） + org_roles（岗位定义） + org_appointments（任职关系）。
+
+    幂等策略：
+      1) 岗位定义用 INSERT OR IGNORE 补齐（org_roles 有 UNIQUE(node_type,role_key)）。
+      2) 存量节点转换只在「org_nodes 中不存在同名锚点节点」时进行。
+      3) 任职关系用 INSERT OR IGNORE（表上有 UNIQUE(node_id,member_id,role_key)）。
+
+    节点类型推断（基于旧层级 + 是否含子节点）：
+      parent_id=0            → center（中心）
+      有子节点                → dept（部门）
+      叶子节点                → group（常规小组）
+    专项小组（special）旧库里不存在，全部由新接口创建。
+    """
+    # ---------- 1) 岗位定义 ----------
+    # unique_slot=1 的岗位在一个节点内至多一人（DB partial unique index 强制）
+    # unique_slot=0 的岗位可多人（组员 / 骨干）
+    ROLE_DEFS = [
+        # (node_type, role_key, role_name, unique_slot, sort)
+        ('center',  'center_head',    '中心负责人', 1, 1),
+        ('center',  'gm',             '总经理',     1, 2),
+        ('center',  'center_backbone','中心骨干',   0, 3),
+        ('dept',    'dept_head',      '部门长',     1, 1),
+        ('dept',    'dept_backbone',  '部门骨干',   0, 2),
+        ('group',   'group_leader',   '组长',       1, 1),
+        ('group',   'member',         '组员',       0, 2),
+        ('special', 'group_leader',   '组长',       1, 1),
+        ('special', 'member',         '组员',       0, 2),
+    ]
+    for nt, rk, rn, us, so in ROLE_DEFS:
+        conn.execute('INSERT OR IGNORE INTO org_roles (node_type, role_key, role_name, unique_slot, sort)'
+                     ' VALUES (?,?,?,?,?)', (nt, rk, rn, us, so))
+
+    # ---------- 2) 节点转换 ----------
+    wgs = [dict(zip(('id', 'name', 'parent_id', 'leader', 'function', 'description'), r))
+           for r in conn.execute('SELECT id, name, parent_id, leader, function, description'
+                                 ' FROM workgroups ORDER BY id')]
+    if not wgs:
+        return
+    # 有子节点者 = 部门
+    has_child = set(r['parent_id'] for r in wgs if r['parent_id'])
+    existing = set(r[0] for r in conn.execute('SELECT id FROM org_nodes'))
+    # 先算出「中心」节点的 id 集合：parent_id=0 的即中心
+    center_wg_ids = set(r['id'] for r in wgs if r['parent_id'] == 0)
+
+    def _node_type(w):
+        """类型推断（依据业务层级：中心 → 部门 → 常规小组）：
+          parent_id=0            → center
+          挂在中心下            → dept   （部门可能还没有子组，不能因「是叶子」就判成 group）
+          挂在部门下 / 其他      → group
+        """
+        if w['parent_id'] == 0:
+            return 'center'
+        if w['parent_id'] in center_wg_ids:
+            return 'dept'
+        return 'group'
+
+    # workgroups.id → org_nodes.id 的映射（迁移后要用）
+    id_map = {}
+    for w in wgs:
+        row = conn.execute('SELECT id FROM org_nodes WHERE name=? AND parent_id=?',
+                           (w['name'], 0 if w['parent_id'] == 0 else -1)).fetchone()
+        if row:
+            id_map[w['id']] = row[0]
+            continue
+        # 找同名的既有节点（按 wg_id 关联最准）
+        row = conn.execute('SELECT id FROM org_nodes WHERE wg_id=?', (w['id'],)).fetchone()
+        if row:
+            id_map[w['id']] = row[0]
+            conn.execute('UPDATE org_nodes SET name=?, node_type=?, is_anchor=1,'
+                         ' function=?, description=? WHERE id=?',
+                         (w['name'], _node_type(w), w['function'] or '', w['description'] or '', row[0]))
+            continue
+        # 新建：父级先建（按 parent_id 递增顺序，父 id 更小）
+        pid = id_map.get(w['parent_id'], 0)
+        cur = conn.execute('INSERT INTO org_nodes (name, node_type, parent_id, wg_id, is_anchor,'
+                            ' function, description) VALUES (?,?,?,?,1,?,?)',
+                            (w['name'], _node_type(w), pid, w['id'], w['function'] or '', w['description'] or ''))
+        id_map[w['id']] = cur.lastrowid
+        existing.add(cur.lastrowid)
+
+    # ---------- 3) 任职关系转换 ----------
+    # 3a) leader → 唯一槽位岗位
+    LEADER_ROLE = {'center': 'center_head', 'dept': 'dept_head', 'group': 'group_leader',
+                   'special': 'group_leader'}
+    for w in wgs:
+        leader = (w['leader'] or '').strip()
+        if not leader:
+            continue
+        m = conn.execute('SELECT id FROM team_members WHERE name=?', (leader,)).fetchone()
+        if not m:
+            continue
+        nid = id_map.get(w['id'])
+        if not nid:
+            continue
+        nt = conn.execute('SELECT node_type FROM org_nodes WHERE id=?', (nid,)).fetchone()[0]
+        conn.execute('INSERT OR IGNORE INTO org_appointments (node_id, member_id, role_key, is_primary)'
+                     ' VALUES (?,?,?,1)', (nid, m[0], LEADER_ROLE.get(nt, 'group_leader')))
+
+    # 3b) team_members.workgroups（分号串）→ 组员任职
+    # 只挂到「常规小组 / 专项小组」节点；部门与中心的成员归属由下级组传导。
+    for m in conn.execute('SELECT id, name, workgroups FROM team_members'):
+        m = dict(zip(('id', 'name', 'workgroups'), m))
+        names = [x.strip() for x in (m['workgroups'] or '').split(';') if x.strip()]
+        for nm in names:
+            nid = None
+            for w in wgs:
+                if w['name'] != nm:
+                    continue
+                nt = conn.execute('SELECT node_type FROM org_nodes WHERE id=?',
+                                  (id_map.get(w['id'], 0),)).fetchone()
+                if nt and nt[0] in ('group', 'special'):
+                    nid = id_map[w['id']]
+                break
+            if not nid:
+                continue
+            # 该成员若是此组组长，则不再重复挂「组员」
+            is_leader = conn.execute('SELECT 1 FROM org_appointments WHERE node_id=? AND member_id=?'
+                                     ' AND role_key=?', (nid, m['id'], 'group_leader')).fetchone()
+            if is_leader:
+                continue
+            conn.execute('INSERT OR IGNORE INTO org_appointments (node_id, member_id, role_key, is_primary)'
+                         ' VALUES (?,?,?,0)', (nid, m['id'], 'member'))
+
+
 def init_db(force_import=False):
     conn = sqlite3.connect(DB_FILE)
     conn.executescript(SCHEMA)
@@ -479,6 +683,13 @@ def init_db(force_import=False):
                     r3 = conn.execute('SELECT id FROM workgroups WHERE name=? AND parent_id=0', (sub,)).fetchone()
                     if r3:
                         conn.execute('UPDATE workgroups SET parent_id=? WHERE id=?', (hs_id, r3[0]))
+    # ============================================================
+    # 组织架构（新模型）迁移：workgroups → org_nodes / org_roles / org_appointments
+    #
+    # 幂等：以「org_nodes 是否已有锚点节点」为开关，只在首次迁移时转换存量数据，
+    # 之后新建的节点直接写 org_nodes（并同步 workgroups 兼容视图）。
+    # ============================================================
+    _migrate_org(conn)
     # 看板表：从现有 cards 派生已存在的看板，保证历史看板不丢失（全新看板由 /api/boards 写入）
     for r in conn.execute('SELECT DISTINCT board_id, board_name, workspace_id FROM cards WHERE deleted=0'):
         conn.execute('INSERT OR IGNORE INTO boards (board_id, board_name, workspace_id) VALUES (?,?,?)',

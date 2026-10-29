@@ -684,6 +684,13 @@ body{
 .combo-opt{padding:6px 10px;cursor:pointer;font-size:13px;border-radius:4px;white-space:nowrap}
 .combo-opt:hover{background:rgba(0,45,116,.07);color:var(--primary)}
 .combo-empty{padding:8px 10px;color:var(--text3);font-size:12px}
+/* 组织架构：节点行（可点击选中查看岗位）+ 任职人员 chip */
+.org-node-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
+.org-node-row:hover{background:#f5f8fc}
+.org-node-row.sel{background:#f0f7ff!important;box-shadow:inset 2px 0 0 var(--primary)}
+.org-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;font-size:11.5px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:10px;color:#0050b3;white-space:nowrap}
+.org-chip-x{border:none;background:none;cursor:pointer;padding:0 0 0 2px;font-size:10px;color:#69b1ff;line-height:1}
+.org-chip-x:hover{color:#cf1322}
 
 /* Toast */
 .toast{background:rgba(16,24,40,.82);border-radius:10px;box-shadow:var(--shadow-lg);backdrop-filter:blur(4px)}
@@ -1098,11 +1105,16 @@ function goLogin(){
     <div class="modal-header"><h2>🏗️ 架构管理</h2><button class="modal-close" onclick="closeModal('wgModal')">✕</button></div>
     <div class="modal-body" style="display:flex;flex-direction:column;overflow:hidden;gap:0">
       <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 12px;font-size:12.5px;color:#0050b3;margin-bottom:12px;flex-shrink:0">
-        工作组架构与板块权限：部门配<strong>部门长</strong>、工作组配<strong>负责人</strong>；先为部门配置看板，其子工作组只能从部门范围内选择；工作组内成员的看板访问受绑定限制。
+        组织架构：<strong>中心</strong> → <strong>部门</strong> → <strong>常规小组</strong>；中心与部门均可设立<strong>专项小组</strong>（跨部门协作）。
+        小组配<strong>组长/组员</strong>，部门配<strong>部门长/部门骨干</strong>，中心配<strong>中心负责人/总经理/中心骨干</strong>。
+        同一人员可同时在多个节点任职（一人多岗、多组织任职）。
       </div>
       <div style="flex:1;min-height:0;display:flex;gap:16px;overflow:hidden">
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
-          <div style="font-size:12px;color:var(--text2);margin-bottom:6px;flex-shrink:0">工作组架构图</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:6px;flex-shrink:0;display:flex;align-items:center;gap:8px">
+            <span>组织架构图</span>
+            <button class="icon-btn" style="margin-left:auto" onclick="resetWgForm()">＋ 新增节点</button>
+          </div>
           <div id="wgList" style="flex:1;min-height:0;border:1px solid var(--border);border-radius:8px;padding:6px 0;overflow:auto"></div>
         </div>
         <div style="width:360px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden">
@@ -1111,16 +1123,19 @@ function goLogin(){
             <button class="icon-btn" id="g_cancel_edit" style="display:none" onclick="resetWgForm()">取消编辑</button>
           </div>
           <div style="flex:1;min-height:0;border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;overflow:hidden">
-            <div class="form-group" style="flex-shrink:0"><label>名称 *</label><input type="text" class="form-input" id="g_new_name" placeholder="如：核算部 / 收入组"></div>
-            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>上级工作组</label><select class="form-select" id="g_new_parent" onchange="onWgParentChange()"></select></div>
-            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label id="g_leader_label">部门长（团队成员，可选）</label>
-              <select class="form-select" id="g_new_leader"><option value="">未选定</option></select>
+            <div class="form-group" style="flex-shrink:0"><label>名称 *</label><input type="text" class="form-input" id="g_new_name" placeholder="如：核算部 / 收入组 / 成本优化专项组"></div>
+            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>节点类型 *</label><select class="form-select" id="g_new_type" onchange="onOrgTypeChange()"></select></div>
+            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>上级节点</label><select class="form-select" id="g_new_parent" onchange="onWgParentChange()"></select></div>
+            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>职能说明（可选）</label><textarea class="form-textarea" id="g_new_desc" rows="2" placeholder="描述该节点的职责或功能" style="width:100%"></textarea></div>
+            <!-- 岗位与任职：选中节点后展示 -->
+            <div class="form-group" style="margin-top:10px;display:flex;flex-direction:column;min-height:0;flex:1">
+              <label style="flex-shrink:0">岗位与任职</label>
+              <div id="g_roles_box" style="margin-top:6px;flex:1;min-height:0;overflow:auto"></div>
             </div>
-            <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>职能说明（可选）</label><textarea class="form-textarea" id="g_new_desc" rows="2" placeholder="描述该工作组的职责或功能" style="width:100%"></textarea></div>
-            <div class="form-group" style="margin-top:10px;display:flex;flex-direction:column;min-height:0">
+            <div class="form-group" style="margin-top:10px;display:flex;flex-direction:column;min-height:0;flex-shrink:0">
               <label id="g_boards_label" style="flex-shrink:0">板块绑定（可选）</label>
               <input type="text" id="g_boards_search" class="form-input" placeholder="搜索板块（名称/ID）" style="margin-top:6px;flex-shrink:0;height:32px;font-size:13px">
-              <div id="g_new_boards" style="display:flex;flex-direction:column;gap:6px;max-height:168px;overflow:auto;margin-top:6px"></div>
+              <div id="g_new_boards" style="display:flex;flex-direction:column;gap:6px;max-height:120px;overflow:auto;margin-top:6px"></div>
               <div style="font-size:12px;color:var(--text3);margin-top:4px;flex-shrink:0" id="g_boards_hint">先为部门配置看板，其子组只能选择部门范围内的看板；留空=不限制。</div>
             </div>
             <button class="btn-primary" id="g_submit_btn" onclick="submitWgForm()" style="width:100%;margin-top:12px;height:36px;flex-shrink:0">添加</button>
@@ -4420,6 +4435,28 @@ var WG_FLAT=[];   // 平铺（含 children）
 var WG_BOARDS=[]; // 全部看板 [{board_id,board_name}]
 var WG_EDIT_ID=0; // 0=新增模式，>0=编辑节点 id
 var WG_COLLAPSED=new Set();
+// ---------- 组织架构（新模型） ----------
+var ORG_TREE=[];        // 新模型的节点树（含 roles / appointments）
+var ORG_FLAT=[];        // 新模型平铺
+var ORG_ROLES_BY_TYPE={}; // {node_type:[{role_key,role_name,unique_slot}]}
+var ORG_TYPE_NAMES={};  // {node_type:'中心'|'部门'|'常规小组'|'专项小组'}
+var ORG_SELECTED=0;    // 当前查看岗位的节点 id（0=未选中）
+var ORG_MEMBERS=[];    // 成员列表 [{id,name,account}]（任职选择用）
+var ORG_MEMBER_BY_ID={};// id → 成员
+// 节点类型 → 该类型下允许的子节点类型（前端与服务端规则一致，用于禁用非法选项）
+var ORG_CHILD_RULES={
+  center:['dept','special'],
+  dept:['group','special'],
+  group:[],
+  special:[]
+};
+// 节点类型 → 图标/颜色
+var ORG_TYPE_STYLE={
+  center:{icon:'🏛️',color:'#0958d9',bg:'#e6f7ff',bd:'#91d5ff'},
+  dept:{icon:'🏢',color:'#389e0d',bg:'#f6ffed',bd:'#b7eb8f'},
+  group:{icon:'👥',color:'#ad6800',bg:'#fffbe6',bd:'#ffd591'},
+  special:{icon:'🎯',color:'#cf1322',bg:'#fff1f0',bd:'#ffa39e'}
+};
 // 可输入下拉（带过滤 + 滚动面板，高度随窗口自适应）
 let _comboPanel=null;
 function comboMount(input){
@@ -4460,6 +4497,132 @@ function bindCombo(input){
   input.addEventListener('input', ()=>comboMount(input));
 }
 function wgFlat(nodes){return (nodes||[]).reduce((a,n)=>a.concat(n, wgFlat(n.children||[])), [])}
+
+// ---------- 组织架构：节点类型与岗位槽位 ----------
+// 节点类型下拉：按「所选上级节点」过滤出合法的子类型
+function fillOrgTypeOptions(selected, parentId){
+  const sel=document.getElementById('g_new_type');
+  if(!sel)return;
+  // 候选类型 = 上级节点允许的子类型；无上级（新增顶层）时只允许中心
+  let allow=[];
+  if(parentId){
+    const p=ORG_FLAT.find(x=>x.id===parentId);
+    allow=(p&&ORG_CHILD_RULES[p.node_type])?ORG_CHILD_RULES[p.node_type].slice():[];
+  }else{
+    allow=['center'];
+  }
+  if(!allow.length){
+    sel.innerHTML='<option value="">（该上级下不能再建节点）</option>';
+    sel.disabled=true;
+    return;
+  }
+  sel.disabled=false;
+  const cur=selected||allow[0];
+  sel.innerHTML=allow.map(t=>`<option value="${t}" ${t===cur?'selected':''}>${esc(ORG_TYPE_NAMES[t]||t)}</option>`).join('');
+  if(!allow.includes(cur))sel.value=allow[0];
+}
+// 上级变化 → 重建类型选项 + 重算板块可选范围
+function onOrgTypeChange(){
+  const t=document.getElementById('g_new_type').value;
+  const pid=parseInt(document.getElementById('g_new_parent').value||'0',10);
+  // 类型变了，父级可能不再合法（如选了 center 但父级不是 0）
+  if(t==='center'&&pid!==0){
+    document.getElementById('g_new_parent').value='0';
+  }else if(t&&pid){
+    const p=ORG_FLAT.find(x=>x.id===pid);
+    if(p&&!(ORG_CHILD_RULES[p.node_type]||[]).includes(t)){
+      // 自动找一个合法的父级
+      const alt=ORG_FLAT.find(x=>(ORG_CHILD_RULES[x.node_type]||[]).includes(t));
+      document.getElementById('g_new_parent').value=alt?String(alt.id):'0';
+    }
+  }
+  onWgParentChange();
+  renderOrgRoles();
+}
+// 岗位槽位渲染：选中节点时展示各岗位的人选
+function renderOrgRoles(){
+  const box=document.getElementById('g_roles_box');
+  if(!box)return;
+  const nid=ORG_SELECTED;
+  if(!nid){
+    box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0;text-align:center">在左侧选中一个节点后<br>可在此配置岗位与任职</div>';
+    return;
+  }
+  const node=ORG_FLAT.find(x=>x.id===nid);
+  if(!node){box.innerHTML='';return}
+  const roles=node.roles||[];
+  const appts=node.appointments||[];
+  const byRole={};
+  appts.forEach(a=>{(byRole[a.role_key]=byRole[a.role_key]||[]).push(a)});
+  let html='';
+  roles.forEach(r=>{
+    const list=byRole[r.role_key]||[];
+    const slotTag=r.unique_slot
+      ?'<span style="font-size:10.5px;color:#ad6800;background:#fffbe6;border:1px solid #ffd591;border-radius:3px;padding:0 5px">唯一</span>'
+      :'<span style="font-size:10.5px;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:0 5px">可多人</span>';
+    html+=`<div style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);margin-bottom:4px">
+        <span style="font-weight:600;color:var(--text)">${esc(r.role_name)}</span>${slotTag}
+        <span style="margin-left:auto;font-size:11px;color:var(--text3)">${list.length} 人</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">`;
+    list.forEach(a=>{
+      const multi=a.other_org_count>0
+        ?`<span title="该成员另有 ${a.other_org_count} 个组织任职" style="font-size:10px;color:var(--primary);margin-left:3px">+${a.other_org_count}</span>`:'';
+      html+=`<span class="org-chip" title="点击移除任职">${esc(a.member_name)}${multi}
+        <button class="org-chip-x" onclick="removeOrgAppt(${a.id},${esc(JSON.stringify(a.member_name))})" title="移除">✕</button></span>`;
+    });
+    if(!list.length){
+      html+='<span style="font-size:11.5px;color:var(--text3)">未配置</span>';
+    }
+    html+=`</div>
+      <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
+        <select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''">
+          <option value="">选择成员…</option>
+          ${ORG_MEMBERS.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
+        </select>
+        <button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>
+      </div>
+    </div>`;
+  });
+  box.innerHTML=html||'<div style="color:var(--text3);font-size:12px">该节点类型暂无可配置岗位</div>';
+}
+// 任命：加人
+async function addOrgAppt(nodeId,roleKey,memberId){
+  if(!memberId){toast('请先选择成员');return}
+  try{
+    await api('/api/org/appointments',{method:'POST',body:JSON.stringify({node_id:nodeId,member_id:Number(memberId),role_key:roleKey})});
+    toast('已任命');
+    await openWgModal();
+  }catch(e){toast(e.message)}
+}
+// 免职：移除任职
+async function removeOrgAppt(apptId,name){
+  if(!confirm(`解除「${name}」的该岗位任职？`))return;
+  try{
+    await api('/api/org/appointments/'+apptId,{method:'DELETE'});
+    toast('已解除任职');
+    await openWgModal();
+  }catch(e){toast(e.message)}
+}
+// 选中节点 → 右侧展示该节点的岗位槽位
+function selectOrgNode(nid){
+  ORG_SELECTED=nid;
+  const node=ORG_FLAT.find(x=>x.id===nid);
+  // 同步编辑表单（点节点 = 查看其岗位；编辑按钮进编辑模式）
+  document.getElementById('g_form_title').textContent=(node?node.name:'新增节点')+' · 岗位与任职';
+  document.getElementById('g_submit_btn').textContent='保存修改';
+  document.getElementById('g_cancel_edit').style.display='';
+  document.getElementById('g_new_name').value=node?node.name:'';
+  document.getElementById('g_new_desc').value=node?(node.description||''):'';
+  document.getElementById('g_new_type').value=node?node.node_type:'';
+  document.getElementById('g_new_parent').value=node?String(node.parent_id||0):'0';
+  // 类型下拉要按「上级节点」过滤 —— 上级变了必须重算
+  if(node)fillOrgTypeOptions(node.node_type,node.parent_id||0);
+  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display=''}
+  renderBoardChecks(node?(node.wg_boards||''):'', parentBoardLimit(node?node.parent_id:0));
+  renderOrgRoles();
+}
 function wgDescendants(n){
   const out=[];
   (function walk(ns){ns.forEach(x=>{out.push(x.id);walk(x.children||[])})})(n.children||[]);
@@ -4472,33 +4635,36 @@ function boardNames(boards){
 }
 function rebuildWgParentOptions(exceptId, selected){
   const sel=document.getElementById('g_new_parent');
-  const exclude=exceptId?new Set([exceptId, ...wgDescendants({children:WG_FLAT.filter(x=>x.id===exceptId).map(x=>({...x}))})]):new Set();
-  const opts=['<option value="0">顶层（不设上级）</option>'];
-  (function walk(ns,dep){
-    ns.forEach(n=>{
-      if(exclude.has(n.id))return;
-      opts.push(`<option value="${n.id}" ${selected===n.id?'selected':''}>${'　'.repeat(dep)}${esc(n.name)}</option>`);
-      walk(n.children||[],dep+1);
-    });
-  })(WG_ALL,1);
-  sel.innerHTML=opts.join('');
-}
-function updateLeaderLabel(parentId){
-  let role='组长';
-  if(parentId===0) role='中心负责人';
-  else{
-    const p=WG_FLAT.find(x=>x.id===parentId);
-    if(!p || p.parent_id===0) role='部门长';
+  if(!sel)return;
+  // 排除自身及其后代（防环）
+  const exclude=new Set();
+  if(exceptId){
+    exclude.add(exceptId);
+    (function walk(ns){(ns||[]).forEach(n=>{exclude.add(n.id);walk(n.children)})})(
+      (ORG_FLAT.find(x=>x.id===exceptId)||{children:[]}).children);
   }
-  const lb=document.getElementById('g_leader_label');
-  lb.textContent=role+'（团队成员，可选）';
+  const opts=['<option value="0">顶层（无上级，仅中心）</option>'];
+  (function walk(ns,dep){
+    (ns||[]).forEach(n=>{
+      if(exclude.has(n.id))return;
+      const st=ORG_TYPE_STYLE[n.node_type]||ORG_TYPE_STYLE.group;
+      opts.push(`<option value="${n.id}" ${selected===n.id?'selected':''}>${'　'.repeat(dep)}${st.icon} ${esc(n.name)}</option>`);
+      walk(n.children,dep+1);
+    });
+  })(ORG_TREE,1);
+  sel.innerHTML=opts.join('');
 }
 function parentBoardLimit(parentId){
   /* 返回所选上级的板块限制：null=不限制；array=受限看板ID列表 */
   if(!parentId) return null;
-  const p=WG_FLAT.find(x=>x.id===parentId);
-  if(!p) return null;
-  const b=(p.boards||'').trim();
+  // parentId 可能是新模型 org 节点 id，也可能是旧 workgroups id —— 两者都支持
+  let b='';
+  const on=ORG_FLAT.find(x=>x.id===parentId);
+  if(on) b=(on.wg_boards||'').trim();
+  else{
+    const w=WG_FLAT.find(x=>x.id===parentId);
+    if(w) b=(w.boards||'').trim();
+  }
   if(!b || b==='*') return null;
   return b.split(',');
 }
@@ -4532,28 +4698,26 @@ document.getElementById('g_boards_search').addEventListener('input',e=>{
 function collectBoardChecks(){
   return [...document.querySelectorAll('.g_brd_chk:checked')].map(c=>c.value).join(',');
 }
-function fillLeaderOptions(selected){
-  const sel=document.getElementById('g_new_leader');
-  sel.innerHTML='<option value="">未选定</option>'+TEAM_MEMBERS.map(n=>`<option value="${esc(n)}" ${selected===n?'selected':''}>${esc(n)}</option>`).join('');
-}
 function onWgParentChange(){
   const parent=parseInt(document.getElementById('g_new_parent').value||'0',10);
-  updateLeaderLabel(parent);
+  // 上级变了 → 类型选项要跟着过滤（只有合法的子类型可选）
+  const curType=document.getElementById('g_new_type').value;
+  fillOrgTypeOptions(curType,parent);
   renderBoardChecks('', parentBoardLimit(parent));
 }
 function resetWgForm(){
   WG_EDIT_ID=0;
-  document.getElementById('g_form_title').textContent='新增工作组节点';
+  document.getElementById('g_form_title').textContent='新增节点';
   document.getElementById('g_submit_btn').textContent='添加';
   document.getElementById('g_cancel_edit').style.display='none';
   document.getElementById('g_new_name').value='';
   document.getElementById('g_new_desc').value='';
   const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
-  const top=WG_FLAT.find(x=>x.parent_id===0);
+  const top=ORG_FLAT.find(x=>x.node_type==='center');
   rebuildWgParentOptions(0, top?top.id:0);
-  fillLeaderOptions('');
-  updateLeaderLabel(top?top.id:0);
+  fillOrgTypeOptions('', top?top.id:0);
   renderBoardChecks('', parentBoardLimit(top?top.id:0));
+  renderOrgRoles();
 }
 async function openWgModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
@@ -4561,6 +4725,24 @@ async function openWgModal(){
   WG_ALL=gd.groups||[];
   WG_FLAT=wgFlat(WG_ALL);
   WG_BOARDS=gd.all_boards||[];
+  // 新模型：节点树 + 岗位 + 任职
+  const od=await api('/api/org/tree');
+  ORG_TREE=od.tree||[];
+  ORG_FLAT=wgFlat(ORG_TREE);
+  ORG_ROLES_BY_TYPE=od.roles_by_type||{};
+  ORG_TYPE_NAMES=od.type_names||{};
+  ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||''}));
+  ORG_MEMBER_BY_ID={};
+  ORG_MEMBERS.forEach(m=>{ORG_MEMBER_BY_ID[m.id]=m});
+  // 板块绑定：新模型节点不存 boards，从旧 workgroups 视图补齐
+  (function sync(ns){
+    (ns||[]).forEach(n=>{
+      const w=WG_FLAT.find(x=>x.name===n.name);
+      n.wg_boards=w?(w.boards||''):'';
+      sync(n.children);
+    });
+  })(ORG_TREE);
+  TEAM_MEMBERS=(td.members||[]).map(m=>m.name);
   TEAM_MEMBERS=(td.members||[]).map(m=>m.name);
   resetWgForm();
   renderWgList();
@@ -4569,25 +4751,48 @@ async function openWgModal(){
 function renderWgList(){
   const canEdit=ME.is_admin;
   const box=document.getElementById('wgList');
-  if(!WG_FLAT.length){box.innerHTML='<div style="color:var(--text2);font-size:13px;padding:20px;text-align:center">暂无工作组，请在上方填写后添加顶层部门</div>';return}
-  const row=(n,dep)=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);background:${n.parent_id?'#fff':'#fafafa'}">
-      <span style="width:${dep*22}px;flex-shrink:0"></span>
-      ${(n.children&&n.children.length)?`<button class="icon-btn" onclick="toggleWg(${n.id})" style="padding:0;width:20px;height:20px" title="展开/折叠">${WG_COLLAPSED.has(n.id)?'▶':'▼'}</button>`:'<span style="width:20px;flex-shrink:0"></span>'}
-      <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:80px">${esc(n.name)}</span>
-      <span style="font-size:11px;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:0 5px;flex-shrink:0;background:var(--bg)">${n.parent_id===0?'中心':((n.children&&n.children.length)?'部门':'组')}</span>
-      <span style="color:var(--text2);font-size:12px;width:76px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(n.parent_id?'组长':'部门长')}">${n.leader?esc(n.leader):'<span style="color:var(--text3)">未选定</span>'}</span>
-      <span style="color:${n.boards?'var(--primary)':'var(--text3)'};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right">${n.parent_id===0?'🔒 全部看板（锁定）':(n.boards?('板块：'+boardNames(n.boards)):'未绑定板块')}</span>
-      ${canEdit?`<span style="flex-shrink:0">
-        <button class="icon-btn" onclick="addWgChild(${n.id})" title="在此工作组下新增子级">+ 子组</button>
+  if(!ORG_FLAT.length){box.innerHTML='<div style="color:var(--text2);font-size:13px;padding:20px;text-align:center">暂无组织架构节点<br><span style="font-size:12px">在右侧选择类型后添加</span></div>';return}
+  // 取该节点的「领导岗位」任职人（唯一槽位岗位）作为行内展示
+  const leaderOf=(n)=>{
+    const r=(n.roles||[]).find(x=>x.unique_slot);
+    if(!r)return '';
+    const a=(n.appointments||[]).find(x=>x.role_key===r.role_key);
+    return a?a.member_name:'';
+  };
+  const apptCount=(n)=>(n.appointments||[]).length;
+  const row=(n,dep)=>{
+    const st=ORG_TYPE_STYLE[n.node_type]||ORG_TYPE_STYLE.group;
+    const sel=ORG_SELECTED===n.id;
+    return `
+    <div class="org-node-row${sel?' sel':''}" style="padding-left:${10+dep*20}px;background:${sel?'#f0f7ff':(n.parent_id?'#fff':'#fafafa')}" onclick="selectOrgNode(${n.id})">
+      ${(n.children&&n.children.length)?`<button class="icon-btn" onclick="event.stopPropagation();toggleWg(${n.id})" style="padding:0;width:20px;height:20px;flex-shrink:0" title="展开/折叠">${WG_COLLAPSED.has(n.id)?'▶':'▼'}</button>`:'<span style="width:20px;flex-shrink:0"></span>'}
+      <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:76px">${st.icon} ${esc(n.name)}</span>
+      <span style="font-size:10.5px;color:${st.color};background:${st.bg};border:1px solid ${st.bd};border-radius:3px;padding:0 5px;flex-shrink:0">${esc(n.type_name||'')}</span>
+      <span style="color:var(--text2);font-size:11.5px;width:66px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(()=>{const l=leaderOf(n);return l?esc(l):'<span style="color:var(--text3)">未任命</span>'})()}</span>
+      <span style="font-size:11.5px;color:var(--text3);flex-shrink:0;min-width:44px;text-align:right" title="任职人数">${apptCount(n)} 人</span>
+      <span style="color:${n.wg_boards?'var(--primary)':'var(--text3)'};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;padding-left:8px">${n.node_type==='center'?'🔒 全部看板（锁定）':(n.wg_boards?('板块：'+boardNames(n.wg_boards)):'未绑定板块')}</span>
+      ${canEdit?`<span style="flex-shrink:0" onclick="event.stopPropagation()">
+        <button class="icon-btn" onclick="addWgChild(${n.id})" title="在此节点下新增子节点">+ 子节点</button>
         <button class="icon-btn" onclick="editWg(${n.id})">编辑</button>
-        ${n.parent_id===0?'':'<button class="icon-btn delete" onclick="removeWg('+n.id+')">删除</button>'}
+        ${n.node_type==='center'?'':`<button class="icon-btn delete" onclick="removeWg(${n.id})">删除</button>`}
       </span>`:''}
     </div>
     ${(n.children&&!WG_COLLAPSED.has(n.id))?n.children.map(c=>row(c,dep+1)).join(''):''}
   `;
-  box.innerHTML=WG_ALL.map(n=>row(n,0)).join('')+
-    `<div style="margin-top:10px;font-size:12px;color:var(--text2);padding:0 10px">共 ${WG_FLAT.length} 个工作组节点 · 部门配部门长 / 工作组配负责人 · 删除工作组前需先删除其子工作组 · 板块绑定后组内成员仅可访问绑定看板</div>`;
+  };
+  const total=ORG_FLAT.length;
+  const apptTotal=ORG_FLAT.reduce((a,n)=>a+(n.appointments||[]).length,0);
+  const multi=ORG_MEMBERS.filter(m=>{
+    let c=0;
+    (function walk(ns){(ns||[]).forEach(x=>{(x.appointments||[]).forEach(a=>{if(a.member_id===m.id)c++});walk(x.children)})})(ORG_TREE);
+    return c>1;
+  }).length;
+  box.innerHTML=ORG_TREE.map(n=>row(n,0)).join('')+
+    `<div style="margin-top:10px;font-size:12px;color:var(--text2);padding:0 10px;line-height:1.7">
+      共 ${total} 个节点 · ${apptTotal} 条任职 · ${multi} 人跨组织任职<br>
+      层级：中心 → 部门 → 常规小组；中心与部门均可设专项小组<br>
+      唯一岗位（组长/部门长/中心负责人/总经理）每节点仅一人，骨干/组员可多人
+    </div>`;
 }
 function toggleWg(id){
   WG_COLLAPSED.has(id)?WG_COLLAPSED.delete(id):WG_COLLAPSED.add(id);
@@ -4600,9 +4805,10 @@ function addWgChild(pid){
   document.getElementById('g_form_title').textContent='新增子级工作组节点';
 }
 function editWg(gid){
-  const g=WG_FLAT.find(x=>x.id===gid); if(!g)return;
-  const isRoot=g.parent_id===0;
+  const g=ORG_FLAT.find(x=>x.id===gid); if(!g)return;
+  const isRoot=g.node_type==='center';
   WG_EDIT_ID=gid;
+  ORG_SELECTED=gid;
   document.getElementById('g_form_title').textContent='编辑：'+g.name;
   document.getElementById('g_submit_btn').textContent='保存修改';
   document.getElementById('g_cancel_edit').style.display='';
@@ -4610,75 +4816,77 @@ function editWg(gid){
   document.getElementById('g_new_desc').value=g.description||'';
   const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
   rebuildWgParentOptions(gid, g.parent_id||0);
-  fillLeaderOptions(g.leader||'');
-  updateLeaderLabel(g.parent_id||0);
+  // 类型下拉：编辑时列出该类型自身 + 上级允许的其他类型（供调整层级）
+  const pid=g.parent_id||0;
+  const pnode=ORG_FLAT.find(x=>x.id===pid);
+  const allow=new Set([g.node_type]);
+  if(pnode)(ORG_CHILD_RULES[pnode.node_type]||[]).forEach(t=>allow.add(t));
+  if(isRoot)allow.clear();
+  const tsel=document.getElementById('g_new_type');
+  if(allow.size){
+    tsel.disabled=false;
+    tsel.innerHTML=[...allow].map(t=>`<option value="${t}" ${t===g.node_type?'selected':''}>${esc(ORG_TYPE_NAMES[t]||t)}</option>`).join('');
+  }else{
+    tsel.disabled=true;
+    tsel.innerHTML=`<option value="${g.node_type}" selected>${esc(ORG_TYPE_NAMES[g.node_type]||g.node_type)}</option>`;
+  }
   if(isRoot){
-    // 最顶层：板块锁定全部看板，不可修改
+    // 中心：板块锁定全部看板，不可修改
     const wrap=document.getElementById('g_new_boards');
-    wrap.innerHTML='<span style="color:#ad6800;font-size:12px;background:#fffbe6;border:1px solid #ffd591;border-radius:4px;padding:4px 10px;display:inline-block">🔒 最顶层锁定全部看板，不可修改</span>';
+    wrap.innerHTML='<span style="color:#ad6800;font-size:12px;background:#fffbe6;border:1px solid #ffd591;border-radius:4px;padding:4px 10px;display:inline-block">🔒 中心锁定全部看板，不可修改</span>';
     document.getElementById('g_boards_hint').textContent='';
     const s=document.getElementById('g_boards_search'); if(s) s.style.display='none';
   }else{
-    renderBoardChecks(g.boards||'', parentBoardLimit(g.parent_id||0));
+    renderBoardChecks(g.wg_boards||'', parentBoardLimit(pid));
   }
+  renderOrgRoles();
 }
 async function submitWgForm(){
   const name=document.getElementById('g_new_name').value.trim();
   const parent=parseInt(document.getElementById('g_new_parent').value||'0',10);
-  const leader=document.getElementById('g_new_leader').value.trim();
   const desc=document.getElementById('g_new_desc').value.trim();
-  const isRootEdit=WG_EDIT_ID&&(WG_FLAT.find(x=>x.id===WG_EDIT_ID)||{}).parent_id===0;
-  const boards=isRootEdit?'*':collectBoardChecks();
-  if(!name){toast('请输入工作组名称');return}
-  // 编辑模式：父级板块收缩时检测子级冲突，需用户确认后才保存
-  if(WG_EDIT_ID && !isRootEdit){
-    const g=WG_FLAT.find(x=>x.id===WG_EDIT_ID);
-    if(g){
-      const oldB=(g.boards||'').trim();
-      const newB=boards.trim();
-      let removed=[];
-      if(oldB && oldB!=='*' && newB && newB!=='*'){
-        removed=[...new Set(oldB.split(','))].filter(b=>!newB.split(',').includes(b));
-      }else if(oldB==='*' && newB && newB!=='*'){
-        removed=['*'];  // 全部 → 有限集：所有非空后代受影响
-      }
-      if(removed.length){
-        const lines=[];
-        (function walk(ns){
-          (ns||[]).forEach(n=>{
-            const nb=(n.boards||'').trim();
-            if(nb){
-              const lost = removed.includes('*')
-                ? (nb==='*'?['*']:nb.split(','))
-                : nb==='*' ? removed : nb.split(',').filter(b=>removed.includes(b));
-              if(lost.length){
-                const names=lost.map(b=>{const x=WG_BOARDS.find(y=>y.board_id===b);return x?x.board_name:b});
-                lines.push(`• ${n.name}：${names.join('、')} 将被移除`);
-              }
-            }
-            walk(n.children||[]);
-          });
-        })(g.children||[]);
-        if(lines.length){
-          const ok=confirm(`「${g.name}」取消看板后，以下子级将同步移除对应权限：\n\n${lines.join('\n')}\n\n确定继续保存？`);
-          if(!ok)return;  // 用户取消 → 放弃保存
-        }
-      }
-    }
-  }
-  const body={name,parent_id:parent,leader,description:desc,boards};
+  const type=document.getElementById('g_new_type').value;
+  if(!name){toast('请输入节点名称');return}
+  if(!type){toast('请选择节点类型');return}
+  const node=ORG_FLAT.find(x=>x.id===WG_EDIT_ID);
+  const isCenter=type==='center';
+  const boards=isCenter?'*':collectBoardChecks();
+  const body={name,node_type:type,parent_id:parent,function:'',description:desc};
   try{
-    if(WG_EDIT_ID){await api('/api/workgroups/'+WG_EDIT_ID,{method:'PUT',body:JSON.stringify(body)});toast('已更新')}
-    else{await api('/api/workgroups',{method:'POST',body:JSON.stringify(body)});toast('已添加')}
-    openWgModal();
+    if(WG_EDIT_ID){
+      await api('/api/org/nodes/'+WG_EDIT_ID,{method:'PUT',body:JSON.stringify(body)});
+      // 板块绑定走旧接口（workgroups），与新模型节点一一对应
+      if(node&&!isCenter){
+        const wg=WG_FLAT.find(x=>x.name===node.name);
+        if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id,leader:wg.leader||'',function:node.function||'',description:desc,boards})});
+      }
+      toast('已更新');
+    }else{
+      const r=await api('/api/org/nodes',{method:'POST',body:JSON.stringify(body)});
+      const nid=r&&r.id;
+      // 新建后同步板块绑定（需要旧 workgroups 的 id）
+      if(nid&&!isCenter&&boards){
+        const fresh=await api('/api/org/tree');
+        const nn=(function find(ns,id){for(const x of ns||[]){if(x.id===id)return x;const rr=find(x.children,id);if(rr)return rr}return null})(fresh.tree,nid);
+        if(nn){const wg=WG_FLAT.find(x=>x.name===nn.name);if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id||0,leader:'',function:'',description:desc,boards})})}
+      }
+      toast('已添加');
+    }
+    await openWgModal();
   }catch(e){toast(e.message)}
 }
 async function removeWg(gid){
-  const g=WG_FLAT.find(x=>x.id===gid);
-  if(g&&g.parent_id===0){toast('最顶层工作组（财务中心）不可删除');return}
-  if(!confirm(`删除工作组节点「${g?g.name:gid}」？${g&&g.children&&g.children.length?'其下有子工作组，需先删除子级。':''}`))return;
-  try{await api('/api/workgroups/'+gid,{method:'DELETE'});toast('已移除');openWgModal()}
-  catch(e){toast(e.message)}
+  const g=ORG_FLAT.find(x=>x.id===gid);
+  if(g&&g.node_type==='center'){toast('中心节点不可删除');return}
+  const kids=(g&&g.children&&g.children.length)||0;
+  const appts=(g&&g.appointments&&g.appointments.length)||0;
+  if(!confirm(`删除节点「${g?g.name:gid}」？${kids?`其下 ${kids} 个子节点会一并删除。`:''}${appts?`\n该节点的 ${appts} 条任职关系也会解除。`:''}`))return;
+  try{
+    const r=await api('/api/org/nodes/'+gid,{method:'DELETE'});
+    toast('已移除'+(r&&r.removed_children?`（含 ${r.removed_children} 个子节点）`:''));
+    ORG_SELECTED=0;
+    await openWgModal();
+  }catch(e){toast(e.message)}
 }
 // ---------- 账号管理（管理员） ----------
 async function openAdminModal(){
