@@ -666,14 +666,25 @@ function goLogin(){
   </div>
 </div>
 
-<!-- 新建弹窗 -->
+<!-- 新建弹窗：主事项与子事项共用（NEW_CARD_MODE='card' 主事项 / 'sub' 子事项）
+     两种模式的字段、样式与校验完全一致，只有「所属看板 / 所属板块」的取值来源不同 -->
 <div class="modal-overlay" id="newModal" style="display:none">
   <div class="modal">
-    <div class="modal-header"><h2>新建事项</h2><button class="modal-close" onclick="closeModal('newModal')">✕</button></div>
+    <div class="modal-header"><h2 id="n_title">新建事项</h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <span id="n_status_ops" style="display:flex;gap:6px;align-items:center"></span>
+        <button class="modal-close" onclick="closeModal('newModal')">✕</button>
+      </div>
+    </div>
     <div class="modal-body">
-      <div class="form-group"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
+      <div class="form-group" id="n_board_wrap"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
       <div class="form-group" id="n_col_wrap" style="display:none"><label>所属板块</label><input type="text" class="form-input" id="n_col" readonly></div>
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="n_name" placeholder="请输入工作标题"></div>
+      <div class="form-row">
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="n_begin"></div>
+        <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="n_due"></div>
+      </div>
+      <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('newModal')">取消</button><button class="btn-primary" onclick="createCard()">创建</button></div>
@@ -971,7 +982,7 @@ const YEAR_DEFAULT=String(new Date().getFullYear());
 let curYear=YEAR_DEFAULT;   // 年份筛选：按板块「归属年份」过滤当前看板下的板块（空 = 全部年份）
 let EDIT_IS_SUB=false;   // 当前编辑弹窗是否处于「子事项模式」（复用主事项弹窗，裁剪字段）
 let EDIT_FROM_DETAIL=''; // 从详情弹窗进入编辑时记录来源，关闭编辑后回到详情
-let DETAIL_ID=null, TEAM_MEMBERS=[], expandedAll=false;
+let DETAIL_ID=null, DETAIL_CARD=null, TEAM_MEMBERS=[], expandedAll=false;
 
 function api(path,opts={}){
   const o={headers:{'Authorization':'Bearer '+TOKEN},...opts};
@@ -1833,8 +1844,9 @@ async function openSubModal(id){
     const d=await api('/api/cards?card_id='+id);
     const c=d.cards&&d.cards[0];
     if(!c){toast('子事项不存在或已删除');return}
-    if(!canEditCard(c)){openDetail(id);return}
-    await openEdit(id,c);
+    // 子事项与主事项统一：点开先进**详情弹窗**（评论 / 操作记录 / 状态 / 代办任务全部可用），
+    // 需要修改时再由详情弹窗里的「✏️ 编辑」进入独立的编辑弹窗 —— 编辑流程不与详情功能混杂。
+    await openDetail(id);
   }catch(e){toast(e.message)}
 }
 // 子事项的父事项上下文：展示父事项名称/状态/时间范围，并把父时间范围写进日期输入的 min/max，
@@ -1908,16 +1920,27 @@ function closeEdit(){
   if(editing)unlockCard(editing);
   editing=null;
   EDIT_IS_SUB=false;
+  DETAIL_CARD=null;
   const back=EDIT_FROM_DETAIL;EDIT_FROM_DETAIL='';
   // 从详情弹窗进来的，关闭编辑后回到详情，保持操作上下文不断
   if(back)openDetail(back);
 }
 // openNewModal(boardId, colKey)：从「＋ 事项」按钮进来时锁定看板与板块
 let NEW_CARD_COL=null;   // {board_id, column_id, column_name}
+let NEW_CARD_MODE='card';      // 'card' 主事项 | 'sub' 子事项
+let NEW_CARD_STATUS='open';    // 新建时选定的状态（由头部状态按钮承载）
+let NEW_CARD_OWNER=[];         // 新建时选定的负责人
+let NEW_SUB_PARENT=null;       // 子事项模式：父事项的归属与时间范围
 async function openNewModal(boardId,colKey){
+  NEW_CARD_MODE='card';NEW_CARD_COL=null;NEW_SUB_PARENT=null;
   const boards=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID);
+  document.getElementById('n_title').textContent='新建事项';
   document.getElementById('n_board').innerHTML=boards.map(b=>`<option value="${b.board_id}">${esc(b.board_name)}</option>`).join('');
   document.getElementById('n_name').value='';document.getElementById('n_desc').value='';
+  document.getElementById('n_begin').value='';document.getElementById('n_due').value='';
+  NEW_CARD_STATUS='open';
+  document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
+  NEW_CARD_OWNER=[];initPersonPicker('n_owner',NEW_CARD_OWNER);
   const wrap=document.getElementById('n_col_wrap'),colInp=document.getElementById('n_col');
   NEW_CARD_COL=null;
   if(colKey){
@@ -1939,15 +1962,68 @@ async function openNewModal(boardId,colKey){
     wrap.style.display='none';
     colInp.value='';
   }
+  // 主事项没有父级，日期不受约束
+  const beg=document.getElementById('n_begin'),due=document.getElementById('n_due');
+  beg.removeAttribute('min');due.removeAttribute('max');
+  beg.title='开始日期';due.title='截止日期';
+  document.getElementById('newModal').style.display='flex';
+}
+// openNewSubModal(parentId)：新建子事项 —— 与主事项共用同一个新建弹窗，
+// 差别只在「所属看板 / 所属板块」的取值来源（继承父事项）与日期受父事项时间范围约束。
+async function openNewSubModal(parentId){
+  let p=null;
+  try{
+    const d=await api('/api/cards?card_id='+parentId);
+    p=d.cards&&d.cards[0];
+  }catch(e){}
+  if(!p){toast('父事项不存在或已删除');return}
+  NEW_CARD_MODE='sub';NEW_CARD_COL=null;
+  NEW_SUB_PARENT={
+    parent_id:p.card_id, parent_name:p.card_name,
+    board_id:p.board_id, board_name:p.board_name,
+    column_name:p.column_name||'', begin:p.begin||'', due:p.due||''
+  };
+  document.getElementById('n_title').textContent='新建子事项';
+  // 看板继承父事项（后端同样强制继承，前端只是如实回显）
+  const bs=document.getElementById('n_board');
+  bs.innerHTML=`<option value="${esc(p.board_id)}">${esc(p.board_name||'')}</option>`;
+  bs.value=p.board_id;bs.disabled=true;
+  // 板块显示父事项所属板块（只读）
+  const wrap=document.getElementById('n_col_wrap'),colInp=document.getElementById('n_col');
+  wrap.style.display='';
+  colInp.value=p.column_name||'—';
+  // 其余字段一律清空
+  document.getElementById('n_name').value='';
+  document.getElementById('n_desc').value='';
+  document.getElementById('n_begin').value='';
+  document.getElementById('n_due').value='';
+  NEW_CARD_STATUS='open';
+  document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
+  NEW_CARD_OWNER=[];initPersonPicker('n_owner',NEW_CARD_OWNER);
+  // 日期受父事项约束：与后端「子事项时间不能超出父事项」的校验口径保持一致
+  const beg=document.getElementById('n_begin'),due=document.getElementById('n_due');
+  beg.removeAttribute('min');due.removeAttribute('max');
+  beg.title='开始日期';due.title='截止日期';
+  if(p.begin){beg.setAttribute('min',p.begin);beg.title='开始日期（不能早于父事项 '+p.begin+'）'}
+  if(p.due){due.setAttribute('max',p.due);due.title='截止日期（不能晚于父事项 '+p.due+'）'}
   document.getElementById('newModal').style.display='flex';
 }
 async function createCard(){
-  const board_id=document.getElementById('n_board').value;
   const card_name=document.getElementById('n_name').value.trim();
   if(!card_name){toast('标题不能为空');return}
+  // 起止颠倒的校验：主事项与子事项共用同一段，两个模式口径一致
+  const nb=document.getElementById('n_begin').value,nd=document.getElementById('n_due').value;
+  if(nb&&nd&&nb>nd){toast('开始日期不能晚于截止日期');return}
+  if(NEW_CARD_MODE==='sub'){await createSubCard(card_name);return}
+  const board_id=document.getElementById('n_board').value;
   const board=ME.boards.find(b=>b.board_id===board_id);
   try{
-    const fields={description:document.getElementById('n_desc').value};
+    const fields={
+      description:document.getElementById('n_desc').value,
+      status:NEW_CARD_STATUS,status_name:statusText(NEW_CARD_STATUS),
+      owner:NEW_CARD_OWNER.join(';'),
+      begin:nb,due:nd,
+    };
     const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:fields};
     if(NEW_CARD_COL){
       body.column_id=NEW_CARD_COL.column_id||'';
@@ -1955,6 +2031,31 @@ async function createCard(){
     }
     await api('/api/cards',{method:'POST',body:JSON.stringify(body)});
     toast('已创建');closeModal('newModal');reload(1);renderProgress();
+  }catch(e){toast(e.message)}
+}
+// 新建子事项：与主事项走同一个弹窗、同一套字段与校验，只是归属挂在父事项下
+async function createSubCard(card_name){
+  const p=NEW_SUB_PARENT;
+  if(!p){toast('父事项上下文已失效，请重新打开');return}
+  try{
+    await api('/api/cards',{method:'POST',body:JSON.stringify({
+      parent_id:p.parent_id,board_id:'',card_name,
+      fields:{
+        status:NEW_CARD_STATUS,status_name:statusText(NEW_CARD_STATUS),
+        owner:NEW_CARD_OWNER.join(';'),
+        begin:document.getElementById('n_begin').value,
+        due:document.getElementById('n_due').value,
+        description:document.getElementById('n_desc').value
+      }
+    })});
+    toast('已创建子事项');
+    closeModal('newModal');
+    // 抽屉还开着时同步刷新子事项目录
+    if(document.getElementById('drawerPanel').classList.contains('open')){
+      const rootId=DRAWER_STACK.length?DRAWER_STACK[DRAWER_STACK.length-1].cardId:p.parent_id;
+      await renderDrawerList(rootId);
+    }
+    reload(1);renderProgress();
   }catch(e){toast(e.message)}
 }
 // ---------- 板块：新建 / 编辑（同一个弹窗，两种模式）----------
@@ -2141,9 +2242,6 @@ async function saveSubtaskTitle(sid,title){
 }
 // ---------- 右侧抽屉：父事项 + 子事项 ----------
 var DRAWER_STACK=[];      // [{type:'list',cardId}]：抽屉只有列表层，子事项编辑走共享的子事项弹窗
-var DRAWER_OWNER=[];
-var DRAWER_NEW_UNDER=null;  // 新建子事项要挂到哪个子事项下（null = 挂在主事项下）
-var DRAWER_NEW_UNDER_NAME='';
 // ---------- 状态与置顶：主事项、子事项共用的展示/操作基元 ----------
 // 状态标签：主事项行、子事项目录行、抽屉子事项行共用同一套 class 与文案，保证视觉一致
 // 同时它就是行内**唯一的状态切换入口**（点击在「未完成 ⇄ 已完成」间切换），
@@ -2449,7 +2547,6 @@ function ppRemove(containerId,n){
 }
 async function openDrawer(cardId){
   DRAWER_STACK=[{type:'list',cardId}];
-  DRAWER_NEW_UNDER=null;
   document.getElementById('drawerMask').classList.add('show');
   document.getElementById('drawerPanel').classList.add('open');
   await renderDrawer();
@@ -2501,34 +2598,12 @@ async function renderDrawerList(parentId){
       </div>`:''}
     </div>
     ${ME.can_edit?`
-    <div class="sub-new expand" id="drawerNewBox">
-      <input id="dn_name" placeholder="输入子事项标题，回车添加（可连续添加多个）…" onkeydown="if(event.key==='Enter')createDrawerSub()" onfocus="expandDrawerNew()">
-      <div id="dnUnderTip" style="display:none;font-size:11.5px;color:#d46b08;padding:4px 2px"></div>
-      <div class="sn-fields" id="dn_fields">
-        <div class="sn-row">
-          <select class="form-select" id="dn_status">${statusOptions('open')}</select>
-          <input type="date" class="form-input" id="dn_begin" title="开始日期${p.begin?('（不能早于父事项 '+esc(p.begin)+'）'):'（父事项未设起始时间，不限制）'}" ${p.begin?`min="${esc(p.begin)}"`:''}>
-          <input type="date" class="form-input" id="dn_due" title="截止日期${p.due?('（不能晚于父事项 '+esc(p.due)+'）'):'（父事项未设截止时间，不限制）'}" ${p.due?`max="${esc(p.due)}"`:''}>
-        </div>
-        ${(p.begin||p.due)?`<div style="font-size:11px;color:var(--text2);margin-top:4px">父事项时间范围：${p.begin?('开始 '+esc(fmtDT(p.begin))):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(fmtDT(p.due))):''}</div>`:''}
-        <div class="form-group"><label style="font-size:12px;color:var(--text2)">负责人</label><div class="se-owner" id="dn_owner"></div></div>
-        <div class="form-group"><label style="font-size:12px;color:var(--text2)">描述</label><textarea class="form-textarea" id="dn_desc" rows="2" placeholder="子事项内容简述…"></textarea></div>
-        <div class="sn-actions"><button class="btn-default" onclick="collapseDrawerNew()">收起</button><button class="btn-primary" onclick="createDrawerSub()">创建子事项</button></div>
-      </div>
-    </div>`:''}
+    <button class="btn-default" style="width:100%;margin-bottom:10px" onclick="openNewSubModal('${p.card_id}')" title="新建子事项（与主事项共用同一个新建弹窗）">＋ 创建子事项</button>`:''}
     <div id="drawerSubSec">
       ${todo.total?`<div class="sub-sec">代办清单 · ${tdone}/${todo.total}</div>${drawerTodoTree(todo.subtasks,0)}`:''}
       <div class="sub-sec">子事项目录 · ${subs.length} 个顶层 / ${d.total} 个合计</div>
-      ${drawerSubTree(subs,parentId,0)||'<div class="empty-hint">暂无子事项，在上方输入标题创建第一个</div>'}
+      ${drawerSubTree(subs,parentId,0)||'<div class="empty-hint">暂无子事项，点上方「＋ 创建子事项」新建第一个</div>'}
     </div>`;
-  if(ME.can_edit)initPersonPicker('dn_owner',DRAWER_OWNER);
-  // 恢复「挂在所选子事项下」的提示（重绘后需要还原）
-  if(ME.can_edit&&DRAWER_NEW_UNDER){
-    const tip=document.getElementById('dnUnderTip');
-    const inp=document.getElementById('dn_name');
-    if(tip){tip.style.display='';tip.textContent='新子事项将挂在「'+DRAWER_NEW_UNDER_NAME+'」下'}
-    if(inp)inp.placeholder='输入下级子事项标题，回车添加…';
-  }
 }
 // 弹窗内的子事项目录（树形层级）
 let DRAWER_SUB_OPEN={};
@@ -2583,7 +2658,7 @@ function drawerSubTree(nodes,parentId,level){
       ${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}
       ${ME.can_edit?`<div class="sl-ops" onclick="event.stopPropagation()">
         ${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}
-        <button onclick="openSubModal('${n.card_id}')" title="打开子事项弹窗">编辑</button>
+        <button onclick="openSubModal('${n.card_id}')" title="打开子事项详情弹窗（与主事项同构）">详情</button>
         <button onclick="startDrawerSubUnder('${n.card_id}','${esc(n.card_name)}')" title="在该子事项下再挂一级">＋下级</button>
         <button class="del" onclick="delDrawerSub('${n.card_id}','${parentId}')">删除</button>
       </div>`:''}
@@ -2610,77 +2685,10 @@ function toggleDrawerMain(){
   box.style.display=folded?'none':'block';
   if(chev)chev.classList.toggle('open',!folded);
 }
-function expandDrawerNew(){
-  const b=document.getElementById('drawerNewBox');
-  if(b&&!b.classList.contains('expand')){b.classList.add('expand');DRAWER_OWNER=[];initPersonPicker('dn_owner',DRAWER_OWNER)}
-}
-function collapseDrawerNew(){document.getElementById('drawerNewBox').classList.remove('expand')}
-// 重置「新建子事项」表单：清空负责人选择与其它已填写的临时状态。
-// 成功与失败都必须调用 —— 创建失败时若把上一次的选择/输入留在表单里，
-// 下一次提交会把脏数据（负责人、日期、描述）一起带过去。
-function resetDrawerNewForm(){
-  const box=document.getElementById('drawerNewBox');
-  const name=document.getElementById('dn_name');
-  const desc=document.getElementById('dn_desc');
-  const begin=document.getElementById('dn_begin');
-  const due=document.getElementById('dn_due');
-  const status=document.getElementById('dn_status');
-  if(name)name.value='';
-  if(desc)desc.value='';
-  if(begin)begin.value='';
-  if(due)due.value='';
-  if(status)status.value='open';
-  // 负责人：数组与选择器都要重置，否则已选中的成员仍留在标签里
-  DRAWER_OWNER=[];
-  initPersonPicker('dn_owner',DRAWER_OWNER);
-  // 保持展开状态，方便连续录入
-  if(box)box.classList.add('expand');
-}
-async function createDrawerSub(underId){
-  const mainId=DRAWER_STACK[DRAWER_STACK.length-1].cardId;
-  const parentId=underId||DRAWER_NEW_UNDER||mainId;
-  const name=document.getElementById('dn_name').value.trim();
-  if(!name){toast('子事项标题不能为空');return}
-  const st=document.getElementById('dn_status').value;
-  try{
-    await api('/api/cards',{method:'POST',body:JSON.stringify({
-      parent_id:parentId,board_id:'',card_name:name,
-      fields:{
-        status:st,status_name:statusText(st),
-        owner:DRAWER_OWNER.join(';'),
-        begin:document.getElementById('dn_begin').value,
-        due:document.getElementById('dn_due').value,
-        description:document.getElementById('dn_desc').value
-      }
-    })});
-    // 成功：清空整张表单（负责人 + 其它临时状态），保持连续添加模式
-    resetDrawerNewForm();
-    toast(`已添加「${name}」${parentId!==mainId?'（挂到所选子事项下）':''}，可继续输入下一个`);
-    // 展开新建出来的这一支
-    if(parentId!==mainId)DRAWER_SUB_OPEN[parentId]=true;
-    await renderDrawerList(mainId);
-    const inp=document.getElementById('dn_name');
-    if(inp)inp.focus();
-    reload(1);renderProgress();
-  }catch(e){
-    // 失败：同样重置表单，避免上一次输入的选择（尤其负责人）残留成脏数据
-    resetDrawerNewForm();
-    toast(e.message);
-  }
-}
-// 「＋下级」：把新建表单切到「挂在指定子事项下」的模式
+// 「＋下级」：直接打开新建弹窗，并把新子事项挂到指定的父事项下
+// （创建子事项已改为与主事项共用新建弹窗，不再有抽屉内的内联表单）
 function startDrawerSubUnder(cardId,name){
-  DRAWER_NEW_UNDER=cardId;
-  DRAWER_NEW_UNDER_NAME=name||'';
-  const box=document.getElementById('drawerNewBox');
-  if(box)box.classList.add('expand');
-  const tip=document.getElementById('dnUnderTip');
-  if(tip){
-    tip.style.display='';
-    tip.textContent='新子事项将挂在「'+(name||'')+'」下';
-  }
-  const inp=document.getElementById('dn_name');
-  if(inp){inp.placeholder='输入下级子事项标题，回车添加…';inp.focus()}
+  openNewSubModal(cardId);
 }
 // 删除子事项：抽屉列表里的删除按钮走这里；子事项弹窗里的删除走 deleteCard（共用后端接口）
 async function delDrawerSub(subId,parentId){
@@ -2703,11 +2711,24 @@ async function openDetail(id){
   const cs=await api('/api/cards/'+id+'/comments');
   const acts=await api('/api/cards/'+id+'/actions');
   document.getElementById('d_title').textContent=c.card_name||'';
-  // 编辑入口已从列表行移到这里：编辑按钮 + 置顶 + 完成情况
+  // 缓存当前卡片：从详情进编辑时直接复用，省掉 openEdit 再拉一次 size=2000 全量列表
+  DETAIL_CARD=c;
+  // 编辑入口已从列表行移到这里：编辑按钮 + 状态
   renderDetailOps(c);
+  // 主事项显示「板块」，子事项显示「父事项」——两者在同一位置、同一排版，结构保持一致
+  let scopeLabel='板块',scopeVal=esc(c.column_name||'—');
+  if(c.parent_id){
+    scopeLabel='父事项';
+    scopeVal='—';
+    try{
+      const pd=await api('/api/cards?card_id='+c.parent_id);
+      const pc=pd.cards&&pd.cards[0];
+      if(pc)scopeVal=`<span style="color:var(--primary);cursor:pointer" onclick="openSubModal('${pc.card_id}')">${esc(pc.card_name)}</span>`;
+    }catch(e){}
+  }
   // 状态不在元信息里重复呈现 —— 由头部的状态按钮统一承载，避免多处出现导致不一致
   document.getElementById('d_meta').innerHTML=
-    `看板：<b>${esc(c.board_name)}</b>　板块：<b>${esc(c.column_name||'—')}</b><br>`+
+    `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b><br>`+
     `负责人：<b>${esc(c.owner||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>`;
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
@@ -2751,46 +2772,60 @@ async function openDetailEdit(){
   if(!ME.can_edit){toast('无编辑权限');return}
   EDIT_FROM_DETAIL=id;
   closeModal('detailModal');
-  await openEdit(id);
+  // 复用详情弹窗已取到的卡片（DETAIL_CARD），避免 openEdit 再拉一次全量列表
+  await openEdit(id,DETAIL_CARD);
 }
 // ---------- 弹窗的状态按钮 ----------
 // 状态在弹窗里只出现这一处：按钮本身显示当前状态，点击展开状态菜单完成设置。
 // 编辑弹窗内部（表单区）不再有状态下拉 —— 状态设置统一收敛到弹窗主界面（头部）。
-// 详情弹窗与编辑弹窗共用这套渲染与交互，仅菜单 id 不同（ctx='d' / 'e'）。
+// 详情 / 编辑 / 新建三个弹窗共用这套渲染与交互，仅菜单 id 不同（ctx='d' / 'e' / 'n'）。
 function statusDotColor(v){return v==='done'?'#52c41a':v==='progressing'?'#1890ff':'#ff4d4d'}
+function statusMenuId(ctx){return ctx==='e'?'e_status_menu':ctx==='n'?'n_status_menu':'d_status_menu'}
+function statusPickerId(ctx){return ctx==='e'?'e_status_picker':ctx==='n'?'n_status_picker':'d_status_picker'}
 function statusPickerHtml(status,ctx){
   const st=status==='done'?'done':status==='progressing'?'progressing':'open';
-  const pid=ctx==='e'?'e_status_picker':'d_status_picker';
-  const mid=ctx==='e'?'e_status_menu':'d_status_menu';
+  const pid=statusPickerId(ctx);
+  const mid=statusMenuId(ctx);
   return `<span class="status-picker" id="${pid}">`
     +`<button class="status-btn ${st}" onclick="toggleStatusMenu(event,'${ctx}')" title="点击更改状态">`
     +`<span class="status-dot"></span>${statusText(st)}<span class="status-caret">▼</span></button>`
     +`<div class="status-menu" id="${mid}" hidden>`
-    +['open','progressing','done'].map(v=>`<button class="${v===st?'cur':''}" onclick="setCardStatus('${ctx}','${v}')">`
+    +['open','progressing','done'].map(v=>`<button class="${v===st?'cur':''}" onclick="pickStatus('${ctx}','${v}')">`
       +`<span class="status-dot" style="background:${statusDotColor(v)}"></span>${statusText(v)}</button>`).join('')
     +`</div></span>`;
 }
 // 展开/收起状态菜单：先记下目标状态，再统一收起，最后按目标状态设置（避免"收起后又被打开"）
 function toggleStatusMenu(ev,ctx){
   ev.stopPropagation();
-  const mid=ctx==='e'?'e_status_menu':'d_status_menu';
-  const m=document.getElementById(mid);
+  const m=document.getElementById(statusMenuId(ctx));
   if(!m)return;
   const willOpen=m.hidden;
   closeStatusMenu();
   m.hidden=!willOpen;
 }
 function closeStatusMenu(){
-  ['d_status_menu','e_status_menu'].forEach(id=>{
+  ['d_status_menu','e_status_menu','n_status_menu'].forEach(id=>{
     const m=document.getElementById(id);if(m)m.hidden=true;
   });
 }
-// 点击菜单外部时收起状态菜单（委托到 document，详情弹窗与编辑弹窗共用一条）
+// 点击菜单外部时收起状态菜单（委托到 document，三个弹窗共用一条）
 document.addEventListener('click',e=>{
   const t=e.target;
   if(t&&t.closest&&t.closest('.status-picker'))return;   // 点在按钮或菜单内部，不处理
   closeStatusMenu();
 });
+// 状态选择的统一入口：新建弹窗只记录选择（事项还没创建），详情/编辑弹窗则立即写回
+function pickStatus(ctx,st){
+  if(ctx==='n'){setNewCardStatus(st);return}
+  setCardStatus(ctx,st);
+}
+// 新建弹窗里选状态：只记录，不写回（此时事项还不存在）
+function setNewCardStatus(st){
+  NEW_CARD_STATUS=st;
+  const box=document.getElementById('n_status_ops');
+  if(box)box.innerHTML=statusPickerHtml(st,'n');
+  closeStatusMenu();
+}
 // 设置状态：状态字段与状态名称一起写回，状态文案由 statusText 统一生成
 async function setCardStatus(ctx,st){
   const id=ctx==='e'?editing:DETAIL_ID;
