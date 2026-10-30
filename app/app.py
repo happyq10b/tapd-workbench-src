@@ -479,13 +479,26 @@ def can_edit(username: str) -> bool:
 def is_admin(username: str) -> bool:
     return user_role(username) == 'admin'
 
-# 成本看板：仅管理员可编辑（含子事项、评论外的所有写操作）
-COST_BOARD_IDS = {'1162069797001000241'}
+# 板块级写权限：**不再对特定板块开特例**。
+# 写操作的准入统一由「账号角色（admin/editor/viewer）+ 板块归属 + 板块可见性」判定，
+# 详见 user_allowed() 与各写接口里的 require_can_edit / 板块归属校验。
 
-def check_cost_permission(board_id, username):
-    """成本卡：非管理员拒绝"""
-    if board_id in COST_BOARD_IDS and not is_admin(username):
-        raise HTTPException(403, '成本卡仅管理员可操作')
+def check_board_access(board_id: str, username: str):
+    """写操作的板块准入校验（所有涉及 board_id 的写接口都要过这一关）。
+
+    ① 板块对该用户**不可见** → 拒绝（【架构管理】的归属 + 工作组绑定决定可见范围）；
+    ② 可见但角色无编辑权（viewer） → 拒绝。
+
+    此前这条职责由「成本看板仅管理员」特例顺带兜底，特例移除后必须补上，
+    否则看不见板块的人仍能直接调 API 改写该板块的卡片。
+    """
+    if not board_id:
+        return
+    boards, _cols = user_allowed(username)
+    if boards is not None and board_id not in boards:
+        raise HTTPException(403, '无权访问该板块')
+    if not can_edit(username):
+        raise HTTPException(403, '无编辑权限，请联系管理员')
 
 async def require_auth(authorization: str = Header(None)):
     if not authorization or not authorization.startswith('Bearer '):
@@ -1021,11 +1034,10 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_edito
     name = (req.column_name or '').strip() or old_name
     if not name:
         raise HTTPException(400, '板块名称不能为空')
-    # 权限：看板可见 + 成本卡仅管理员
+    # 权限：看板可见性校验
     boards, _cols = user_allowed(username)
     if boards is not None and board_id not in boards:
         raise HTTPException(403, '无权编辑该板块')
-    check_cost_permission(board_id, username)
     nature = (req.nature or '').strip() or (old['nature'] if old else '日常')
     if nature not in COLUMN_NATURES:
         raise HTTPException(400, '性质只能是「日常」或「专项」')
@@ -1125,11 +1137,11 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     if 'version' in fields: fields.pop('version')
     if not fields:
         raise HTTPException(400, '没有可更新的字段')
-    # 乐观锁：先取当前 version + board_id（成本卡权限检查）
+    # 乐观锁：先取当前 version + board_id
     cur = dbq('SELECT version, parent_id, begin, due, board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur:
         raise HTTPException(404, '卡片不存在或已删除')
-    check_cost_permission(cur[0]['board_id'], username)
+    check_board_access(cur[0]['board_id'], username)
     cur_ver = cur[0]['version']
     # 子事项时间约束：起始 ≥ 父起始，截止 ≤ 父截止
     if cur[0]['parent_id']:
@@ -1203,8 +1215,7 @@ async def create_card(req: CardCreate, username: str = Depends(require_editor), 
         # 全新看板（尚无任何卡片）：使用建卡请求传入的看板元数据，保证首卡正确带出 board_name/workspace_id
         vals['board_name'] = (req.board_name or req.board_id).strip()
         vals['workspace_id'] = (req.workspace_id or '').strip()
-    # 成本卡权限检查（创建时基于最终 board_id）
-    check_cost_permission(req.board_id, username)
+    check_board_access(req.board_id, username)
     vals.update(req.fields)
     vals['card_id'] = new_id
     vals['board_id'] = req.board_id
@@ -1252,11 +1263,10 @@ async def delete_card(card_id: str, username: str = Depends(require_editor), req
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法删除')
-    # 成本卡权限检查
     cur_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur_row:
         raise HTTPException(404, '卡片不存在或已删除')
-    check_cost_permission(cur_row[0]['board_id'], username)
+    check_board_access(cur_row[0]['board_id'], username)
     res = dbe('UPDATE cards SET deleted=1 WHERE card_id=? AND deleted=0', (card_id,))
     if res.rowcount == 0:
         raise HTTPException(404, '卡片不存在或已删除')
@@ -1506,7 +1516,7 @@ async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(req
     card_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not card_row:
         raise HTTPException(404, '卡片不存在或已删除')
-    check_cost_permission(card_row[0]['board_id'], username)
+    check_board_access(card_row[0]['board_id'], username)
     if not dbq('SELECT 1 FROM cards WHERE card_id=? AND deleted=0', (card_id,)):
         raise HTTPException(404, '卡片不存在或已删除')
     mx = dbq('SELECT COALESCE(MAX(sort),0) m FROM card_subtasks WHERE card_id=?', (card_id,))[0]['m']
@@ -1539,9 +1549,9 @@ async def update_subtask(card_id: str, sid: int, req: SubtaskReq,
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
-    card_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
-    if card_row:
-        check_cost_permission(card_row[0]['board_id'], username)
+    _cr = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if _cr:
+        check_board_access(_cr[0]['board_id'], username)
     row = dbq('SELECT 1 FROM card_subtasks WHERE id=? AND card_id=?', (sid, card_id))
     if not row:
         raise HTTPException(404, '子事项不存在')
@@ -1572,9 +1582,9 @@ async def delete_subtask(card_id: str, sid: int, username: str = Depends(require
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
-    card_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
-    if card_row:
-        check_cost_permission(card_row[0]['board_id'], username)
+    _cr2 = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if _cr2:
+        check_board_access(_cr2[0]['board_id'], username)
     # 删除父级时一并删除其所有后代，避免留下孤儿节点
     allrows = dbq('SELECT id, parent_id FROM card_subtasks WHERE card_id=?', (card_id,))
     byid = {r['id']: (r['parent_id'] or 0) for r in allrows}
@@ -3119,12 +3129,12 @@ async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法移动')
-    # 成本卡权限：源是成本或目标是成本 → 需 admin
     src_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if src_row:
+        check_board_access(src_row[0]['board_id'], username)
     if not src_row:
         raise HTTPException(404, '卡片不存在或已删除')
-    check_cost_permission(src_row[0]['board_id'], username)
-    check_cost_permission(req.board_id, username)
+    check_board_access(req.board_id, username)
     # 目标看板是否存在
     tgt = dbq('SELECT board_id, board_name FROM cards WHERE board_id=? AND deleted=0 LIMIT 1', (req.board_id,))
     if not tgt:

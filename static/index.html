@@ -48,7 +48,6 @@ button{font-family:inherit}
 .year-chip.all:hover{border-color:var(--primary);color:var(--primary)}
 .year-chip.all.on{border-style:solid;border-color:var(--primary);background:#eef5ff;color:var(--primary)}
 /* 成本看板的锁标记：仅对确实受限的账号显示，含义写在 title 里 */
-.tab-lock{font-size:11px;line-height:1;opacity:.75;flex-shrink:0}
 /* header-actions 用 margin-left:auto 始终靠右。
    之前靠 .app-header 的 justify-content:space-between 撑开左右，
    一旦右侧按钮换行（窄屏），整组就会跑到左边与标题挤在一起。 */
@@ -450,9 +449,16 @@ button{font-family:inherit}
 .member-picker{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;min-height:40px}
 .pp{position:relative;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;min-height:42px;background:var(--color-background-primary,#fff)}
 .pp:focus-within{border-color:var(--primary);box-shadow:0 0 0 2px rgba(24,144,255,.12)}
-/* 成员表格：容器独立滚动 + 表头首行冻结 */
-.tm-table-scroll{max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
-.tm-table-scroll thead th{position:sticky;top:0;z-index:2;background:var(--bg);
+/* 成员表格：表头首行冻结。
+   容器**不独立滚动**（否则与弹窗主体的滚动条形成双滚轮），
+   thead th 相对 modal-body 这个滚动容器做 sticky。
+   top 取常驻筛选栏的高度（--tm-sticky-top，由 JS 测量写入），
+   避免表头与 sticky 的筛选栏重叠。 */
+.tm-table-scroll{border:1px solid var(--border);border-radius:8px;overflow:visible;flex-shrink:0}
+/* 成员弹窗主体的直接子项一律不参与 flex 压缩 ——
+   否则表格（1400px+）会被压扁到容器高度内、内容溢出却无法滚动。 */
+#teamModal .modal-body>*{flex-shrink:0}
+.tm-table-scroll thead th{position:sticky;top:var(--tm-sticky-top,0px);z-index:2;background:var(--bg);
   box-shadow:inset 0 -1px 0 var(--border)}
 /* 「已选工作组」只读层级树 */
 .wgt{font-size:12.5px;line-height:1.5}
@@ -1324,9 +1330,10 @@ function goLogin(){
 
 <script>
 let TOKEN=localStorage.getItem('tk')||'';
-const COST_BOARD_ID='1162069797001000241';
-function isCostCard(c){return c&&c.board_id===COST_BOARD_ID}
-function canEditCard(c){return c?(isCostCard(c)?ME.is_admin:ME.can_edit):ME.can_edit}
+// 板块级写权限：**不再对特定板块开特例**。
+// 卡片是否可编辑统一看账号角色（ME.can_edit），
+// 能否看到/进入该板块由【架构管理】的归属 + 可见性判定。
+function canEditCard(c){return !!(ME&&ME.can_edit)}
 let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
 // 年份筛选默认落在「当前年份」：切换看板时统一重置回默认年份（保证各板块一致）
 const YEAR_DEFAULT=String(new Date().getFullYear());
@@ -1627,13 +1634,9 @@ function groupBoardsByDept(){
 }
 // 单个板块 tab（部门分组内）
 function boardTabHtml(b,deptLabel){
-  // 成本看板仅管理员可写：只有当这个限制**对当前用户确实生效**时才显示锁。
-  // 管理员本身没有限制，还挂个锁只会让人以为"点了会被拦下来"，属于误导性占位。
-  const locked=b.board_id===COST_BOARD_ID&&!(ME&&ME.is_admin);
-  const lock=locked?`<span class="tab-lock" title="成本看板：仅管理员可编辑">🔒</span>`:'';
   const base=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
-  const title=locked?(base+'（成本看板：仅管理员可编辑）'):base;
-  return `<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')" title="${esc(title)}">${esc(b.board_name)}${lock}</button>`;
+  const title=base;
+  return `<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')" title="${esc(title)}">${esc(b.board_name)}</button>`;
 }
 function renderTabs(){
   const tabs=document.getElementById('boardTabs');
@@ -2226,8 +2229,7 @@ function updateNewBtn(){
   const btn=document.getElementById('newBtn');
   if(!btn||!ME)return;
   if(!ME.can_edit){btn.style.display='none';return}
-  // editor 在成本看板不允许新建
-  btn.style.display=(curBoard===COST_BOARD_ID&&!ME.is_admin)?'none':'';
+  btn.style.display='';
 }
 async function renderProgress(){
   const ov=await api('/api/overview');
@@ -3095,7 +3097,6 @@ async function openEdit(id,preloaded){
     c=d.cards.find(x=>x.card_id===id);
   }
   if(!c){toast('卡片不存在');return}
-  if(isCostCard(c)&&!ME.is_admin){toast('成本卡仅管理员可编辑');return}
   if(c.locked_by&&c.locked_by!==ME.username){toast(`已被 ${c.locked_by} 锁定`);return}
   if(!await lockCard(id))return;
   editing=id;
@@ -3234,7 +3235,7 @@ let NEW_CARD_CC=[];            // 新建时选定的参与人（主/子事项一
 let NEW_SUB_PARENT=null;       // 子事项模式：父事项的归属与时间范围
 async function openNewModal(boardId,colKey){
   NEW_CARD_MODE='card';NEW_CARD_COL=null;NEW_SUB_PARENT=null;
-  const boards=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID);
+  const boards=ME.boards;
   document.getElementById('n_title').textContent='新建事项';
   document.getElementById('n_board').innerHTML=boards.map(b=>`<option value="${b.board_id}">${esc(b.board_name)}</option>`).join('');
   document.getElementById('n_name').value='';document.getElementById('n_desc').value='';
@@ -3363,8 +3364,8 @@ var COLUMN_MODE='create';     // create | edit
 var COLUMN_EDIT_KEY='';       // 编辑模式：原 col_key（定位板块）
 var COLUMN_EDIT_BOARD='';     // 编辑模式：所属看板（板块归属不可改）
 var YEAR_TOUCHED=false;        // 用户是否手动改过「归属年份」（改过就不再自动跟随创建日期）
-// 板块是否可编辑：成本看板仅管理员
-function canEditColumn(boardId){return !!(ME&&ME.can_edit)&&(boardId!==COST_BOARD_ID||ME.is_admin)}
+// 板块是否可编辑：统一看账号角色（可见性由归属判定，这里不再开特例）
+function canEditColumn(boardId){return !!(ME&&ME.can_edit)}
 // 归属年份默认 = 板块创建年份：
 // 新建时跟随「创建日期」自动填；编辑时只在原值为空时才补（已登记的年份不被日期覆盖）
 function syncYearFromDate(){
@@ -3377,7 +3378,7 @@ function syncYearFromDate(){
 }
 function openColumnModal(){
   COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
-  const boards=ME.boards.filter(b=>ME.is_admin||b.board_id!==COST_BOARD_ID);
+  const boards=ME.boards;
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
   document.getElementById('c_board_wrap').style.display='';
   document.getElementById('c_name').value='';
@@ -4077,7 +4078,6 @@ function renderDetailOps(c){
   const lockedByOther=c.locked_by&&c.locked_by!==ME.username;
   const parts=[];
   if(lockedByOther)parts.push(`<span class="lock-tag">🔒 ${esc(c.locked_by)} 已锁定</span>`);
-  else if(!canEditCard(c)&&ME.can_edit)parts.push(`<span style="font-size:12px;color:var(--text2)" title="成本卡仅管理员可编辑">🔒 仅管理员</span>`);
   // 状态按钮：弹窗里状态的唯一呈现，也是唯一的状态设置入口
   parts.push(statusPickerHtml(c.status,'d'));
   parts.push(`<button class="btn-primary" style="padding:4px 12px;font-size:12px" onclick="openDetailEdit()" title="打开编辑弹窗">✏️ 编辑</button>`);
@@ -4440,7 +4440,14 @@ function renderTeamList(){
         </td>`:''}
       </tr>`}).join(''):'<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text2);font-size:13px">无匹配成员</td></tr>';
   footer.textContent=`显示 ${filtered.length} / ${TM_ALL.length} 人 · 权限（角色）只对已开通登录账号的成员生效；管理员可开通账号并设置首次密码/角色，密码重置仅超级管理员可操作 · 编辑后点「保存全部」统一提交`;
+  syncTmStickyTop();
 }
+// 视口变化时筛选栏可能换行 → 高度变化 → 表头 sticky 偏移需重算。
+// 用 document 而非 window（DOM stub 只提供 document.addEventListener）。
+if(typeof document!=='undefined' && typeof document.addEventListener==='function'){
+  document.addEventListener('resize', function(){ syncTmStickyTop(); });
+}
+
 function resetTmFilter(){
   TM_FILTER={name:'',workgroup:[],role:[]};   // 重置回全部角色
   const ni=document.getElementById('tm_filter_name'); if(ni)ni.value='';
@@ -4568,7 +4575,7 @@ function initTeamFilterBar(){
     return out;
   })(WG_ALL||[],'');
   list.innerHTML=`
-    <div style="position:sticky;top:0;background:var(--bg);z-index:5;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <div id="tm_filter_bar" style="position:sticky;top:0;background:var(--bg);z-index:5;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <input type="text" class="form-input" id="tm_filter_name" placeholder="姓名搜索" value="${esc(TM_FILTER.name||'')}" style="width:140px" oninput="TM_FILTER.name=this.value;renderTeamList()">
       <input type="text" class="form-input" id="tm_filter_workgroup" readonly value="${TM_FILTER.workgroup.length?TM_FILTER.workgroup.join(' / '):''}" placeholder="架构筛选（全部）" style="width:240px;cursor:pointer" onclick="openWgFilterPicker(this)">
       <button type="button" class="form-input" id="tm_filter_role" style="width:140px;height:32px;cursor:pointer;text-align:left;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;padding:0 8px" title="${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}" onclick="openRoleMulti(this)">${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}</button>
@@ -4589,6 +4596,18 @@ function initTeamFilterBar(){
       </table>
     </div>
     <div id="tm_footer" style="margin-top:10px;font-size:12px;color:var(--text2)"></div>`;
+  syncTmStickyTop();
+}
+// 表头 sticky 的 top = 常驻筛选栏的高度（避免表头与筛选栏重叠）
+function syncTmStickyTop(){
+  try{
+    const bar=document.getElementById('tm_filter_bar');
+    const box=document.querySelector('.tm-table-scroll');
+    if(!bar||!box||!box.style||typeof box.style.setProperty!=='function')return;
+    // 筛选栏自带 8px 上下 padding + margin-bottom 8px → 实际让出 = 高度 + 8
+    const raw=Number(bar.offsetHeight)||0;
+    box.style.setProperty('--tm-sticky-top', (raw+8)+'px');
+  }catch(e){ /* 测量失败不影响主流程 */ }
 }
 async function addTeamMember(){
   const n=document.getElementById('t_new_name').value.trim();
@@ -5086,6 +5105,7 @@ async function ensureOrgTree(){
     const od=await api('/api/org/tree');
     ORG_TREE=od.tree||[];
     ORG_FLAT=wgFlat(ORG_TREE);
+    ORG_ROLES_BY_TYPE=od.roles_by_type||ORG_ROLES_BY_TYPE;
     ORG_TYPE_NAMES=od.type_names||ORG_TYPE_NAMES;
     // 汇总架构里的全部人员姓名
     ORG_PERSON_NAMES=new Set();
@@ -5104,8 +5124,7 @@ async function openWgModal(){
   WG_BOARDS=gd.all_boards||[];
   // 新模型：节点树 + 岗位 + 任职（按需加载，幂等）
   await ensureOrgTree();
-  ORG_ROLES_BY_TYPE=od.roles_by_type||{};
-  ORG_TYPE_NAMES=od.type_names||{};
+  ORG_TYPE_NAMES=ORG_TYPE_NAMES||{};
   ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||''}));
   ORG_MEMBER_BY_ID={};
   ORG_MEMBERS.forEach(m=>{ORG_MEMBER_BY_ID[m.id]=m});
