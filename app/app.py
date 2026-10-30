@@ -2481,6 +2481,9 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_adm
               f'状态={status}', 'success')
     return {'ok': True}
 
+class BoardConfigBulkDeleteReq(BaseModel):
+    board_ids: List[str] = []   # 待删除配置的板块 id 列表
+
 class BoardConfigBulkReq(BaseModel):
     board_ids: List[str] = []   # 批量应用的板块（board_id 列表）
     year: str = ''
@@ -2529,6 +2532,30 @@ def bulk_board_config(req: BoardConfigBulkReq, username: str = Depends(require_a
     audit_log(username, client_ip(request), 'board_config_bulk', f'{len(ids)} 个板块',
               f'{year}/{dept}/{attr} 状态={status}（新建 {created} / 更新 {updated}）', 'success')
     return {'ok': True, 'created': created, 'updated': updated, 'skipped': skipped}
+
+@app.post('/api/board-config/bulk-delete')
+def bulk_delete_board_config(req: BoardConfigBulkDeleteReq, username: str = Depends(require_admin), request: Request = None):
+    """批量删除看板配置（仅管理员）。
+
+    按 board_id 删除对应的 board_config 行；只删配置，不动看板本身与卡片。
+    删除后这些板块回到「未配置」状态（归属部门清空 → 对全员可见）。
+    """
+    ids = []
+    for b in (req.board_ids or []):
+        b = (b or '').strip()
+        if b and b not in ids:
+            ids.append(b)
+    if not ids:
+        raise HTTPException(400, '未选择任何板块')
+    deleted = 0
+    for bid in ids:
+        row = dbq('SELECT id FROM board_config WHERE board_id=?', (bid,))
+        if row:
+            dbe('DELETE FROM board_config WHERE id=?', (row[0]['id'],))
+            deleted += 1
+    audit_log(username, client_ip(request), 'board_config_bulk_delete', f'{len(ids)} 个板块',
+              f'删除 {deleted} 条看板配置（板块回到未配置状态）', 'success')
+    return {'ok': True, 'deleted': deleted}
 
 @app.put('/api/board-config/{cid}')
 def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(require_admin), request: Request = None):

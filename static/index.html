@@ -1185,6 +1185,13 @@ function goLogin(){
 .bc-pill.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(0,45,116,.25)}
 .bc-pill.on.warn{background:var(--warning);border-color:var(--warning);box-shadow:0 2px 8px rgba(250,173,20,.3)}
 .bc-empty-edit{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:var(--text2);font-size:13px;gap:10px;padding:50px;text-align:center}
+.bc-opbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.bc-opbar-count{font-size:11.5px;color:var(--text2);margin-left:auto;white-space:nowrap}
+.bc-del-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:4px 10px;font-size:12px;border-radius:var(--radius-sm);cursor:pointer;transition:all .15s;white-space:nowrap}
+.bc-del-btn:hover:not(:disabled){border-color:var(--danger);color:var(--danger);background:#fff1f0}
+.bc-del-btn:disabled{opacity:.45;cursor:not-allowed}
+.bc-item-del{color:var(--danger);font-size:12px;background:none;border:none;cursor:pointer;padding:0 2px;line-height:1.4;font-family:inherit}
+.bc-item-del:hover{text-decoration:underline}
 .bc-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
 .badge-active{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:rgba(0,45,116,.10);color:#002D74;border:1px solid rgba(0,45,116,.30)}
 .badge-locked{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff7e6;color:var(--warning);border:1px solid #ffd591}
@@ -1206,10 +1213,10 @@ function goLogin(){
             <div class="bc-filter-row"><span class="lab">归属部门</span><select id="bcf_dept" onchange="bcFilterChange('dept',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">属性</span><select id="bcf_attr" onchange="bcFilterChange('attr',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">状态</span><select id="bcf_status" onchange="bcFilterChange('status',this.value)"></select></div>
-            <div class="bc-filter-row" style="grid-column:1/-1;display:flex;align-items:center;gap:8px">
-              <button class="btn-default" style="padding:4px 10px;font-size:12px" onclick="bcPickAll(true)" title="勾选当前筛选下的全部板块">全选</button>
-              <button class="btn-default" style="padding:4px 10px;font-size:12px" onclick="bcPickAll(false)" title="取消勾选">取消全选</button>
-              <span style="font-size:11.5px;color:var(--text2)">已勾选 <b id="bcPickCount">0</b> 个板块</span>
+            <div class="bc-filter-row bc-opbar" style="grid-column:1/-1">
+              <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的板块）">全选</button>
+              <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选板块的配置（需两次确认）" disabled>删除所选 0 个</button>
+              <span class="bc-opbar-count">已勾选 <b id="bcPickCount">0</b> 个板块</span>
             </div>
           </div>
           <div class="bc-list" id="bcList"></div>
@@ -4612,7 +4619,7 @@ async function removeOrgAppt(apptId,name){
     await openWgModal();
   }catch(e){toast(e.message)}
 }
-// 选中态同步：ORG_SELECTED 是唯一真相，树内底色高亮统一由此刷新
+// 选中态同步：ORG_SELECTED 是唯一真相（0=未选中），树内底色高亮统一由此刷新
 function paintOrgSelection(){
   const box=document.getElementById('wgList');
   if(!box)return;
@@ -4620,8 +4627,38 @@ function paintOrgSelection(){
     el.classList.toggle('sel', Number(el.dataset.orgId)===ORG_SELECTED);
   });
 }
-// 选中节点 → 右侧展示该节点的岗位槽位
+// 未选中时的右侧面板：岗位区 / 板块绑定区 / 表单全部回到初始态
+function renderOrgIdle(){
+  const wrap=document.getElementById('g_new_boards');
+  if(wrap){
+    wrap.dataset.boards=''; wrap.dataset.limit='[]'; wrap.dataset.readonly='';
+    wrap.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0;text-align:center">在左侧选中一个节点后<br>可在此配置板块绑定</div>';
+  }
+  const hint=document.getElementById('g_boards_hint');
+  if(hint)hint.textContent='先在左侧选中一个节点，再配置它可访问的板块。';
+  const s=document.getElementById('g_boards_search');
+  if(s){s.value='';s.disabled=true;}
+}
+// 取消选中：清空状态 + 右侧回到未选中态 + 清除树内高亮
+function clearOrgSelection(){
+  ORG_SELECTED=0;
+  WG_EDIT_ID=0;
+  document.getElementById('g_form_title').textContent='新增节点';
+  document.getElementById('g_submit_btn').textContent='添加';
+  document.getElementById('g_cancel_edit').style.display='none';
+  document.getElementById('g_new_name').value='';
+  document.getElementById('g_new_type').value='';
+  document.getElementById('g_new_parent').value='0';
+  const top=ORG_FLAT.find(x=>x.node_type==='center');
+  rebuildWgParentOptions(0, top?top.id:0);
+  fillOrgTypeOptions('', top?top.id:0);
+  renderOrgIdle();
+  renderOrgRoles();
+  paintOrgSelection();
+}
+// 选中节点 → 右侧展示该节点的岗位槽位；重复点击同一节点 = 取消选中
 function selectOrgNode(nid){
+  if(ORG_SELECTED===nid){clearOrgSelection();return;}
   ORG_SELECTED=nid;
   const node=ORG_FLAT.find(x=>x.id===nid);
   // 同步编辑表单（点节点 = 查看其岗位；编辑按钮进编辑模式）
@@ -4633,7 +4670,7 @@ function selectOrgNode(nid){
   document.getElementById('g_new_parent').value=node?String(node.parent_id||0):'0';
   // 类型下拉要按「上级节点」过滤 —— 上级变了必须重算
   if(node)fillOrgTypeOptions(node.node_type,node.parent_id||0);
-  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display=''}
+  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.disabled=false;s.style.display=''}
   const isDeptNode=!!node&&(node.node_type==='center'||node.node_type==='dept');
   const scope=isDeptNode?nodeBoardScope(node):(node?(node.wg_boards||''):'');
   renderBoardChecks(isDeptNode?((scope||[]).join(',')):scope, parentBoardLimit(node?node.parent_id:0), undefined, isDeptNode);
@@ -4704,7 +4741,7 @@ function renderBoardChecks(boards, limit, searchTerm, readonly){
   const hint=document.getElementById('g_boards_hint');
   const input=document.getElementById('g_boards_search');
   const search=(searchTerm!==undefined?searchTerm:(input?input.value:'')).trim().toLowerCase();
-  if(input) input.style.display=readonly?'none':'';
+  if(input){ input.style.display=readonly?'none':''; input.disabled=!!readonly; }
   const sel=boards==='*'?[]:(boards||'').split(',').filter(Boolean);
   wrap.dataset.boards=sel.join(',');
   wrap.dataset.limit=JSON.stringify(limit||[]);
@@ -4744,16 +4781,19 @@ function onWgParentChange(){
 }
 function resetWgForm(){
   WG_EDIT_ID=0;
+  ORG_SELECTED=0;
   document.getElementById('g_form_title').textContent='新增节点';
   document.getElementById('g_submit_btn').textContent='添加';
   document.getElementById('g_cancel_edit').style.display='none';
   document.getElementById('g_new_name').value='';
-  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
+  document.getElementById('g_new_type').value='';
+  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.disabled=true;s.style.display='';}
   const top=ORG_FLAT.find(x=>x.node_type==='center');
   rebuildWgParentOptions(0, top?top.id:0);
   fillOrgTypeOptions('', top?top.id:0);
-  renderBoardChecks('', parentBoardLimit(top?top.id:0));
+  renderOrgIdle();
   renderOrgRoles();
+  paintOrgSelection();
 }
 async function openWgModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
@@ -4779,7 +4819,8 @@ async function openWgModal(){
     });
   })(ORG_TREE);
   TEAM_MEMBERS=(td.members||[]).map(m=>m.name);
-  TEAM_MEMBERS=(td.members||[]).map(m=>m.name);
+  // 打开弹窗时清空选中（默认未选中）：避免上一次的高亮残留
+  ORG_SELECTED=0;
   resetWgForm();
   renderWgList();
   document.getElementById('wgModal').style.display='flex';
@@ -4798,9 +4839,8 @@ function renderWgList(){
   const apptCount=(n)=>(n.appointments||[]).length;
   const row=(n,dep)=>{
     const st=ORG_TYPE_STYLE[n.node_type]||ORG_TYPE_STYLE.group;
-    const sel=ORG_SELECTED===n.id;
     return `
-    <div class="org-node-row${sel?' sel':''}${n.parent_id?'':' root'}" data-org-id="${n.id}" style="padding-left:${10+dep*20}px" onclick="selectOrgNode(${n.id})">
+    <div class="org-node-row${n.parent_id?'':' root'}" data-org-id="${n.id}" style="padding-left:${10+dep*20}px" onclick="selectOrgNode(${n.id})">
       ${(n.children&&n.children.length)?`<button class="icon-btn" onclick="event.stopPropagation();toggleWg(${n.id})" style="padding:0;width:20px;height:20px;flex-shrink:0" title="展开/折叠">${WG_COLLAPSED.has(n.id)?'▶':'▼'}</button>`:'<span style="width:20px;flex-shrink:0"></span>'}
       <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:76px">${st.icon} ${esc(n.name)}</span>
       <span style="font-size:10.5px;color:${st.color};background:${st.bg};border:1px solid ${st.bd};border-radius:3px;padding:0 5px;flex-shrink:0">${esc(n.type_name||'')}</span>
@@ -4829,6 +4869,7 @@ function renderWgList(){
       层级：中心 → 部门 → 常规小组；中心与部门均可设专项小组<br>
       唯一岗位（组长/部门长/中心负责人/总经理）每节点仅一人，骨干/组员可多人
     </div>`;
+  paintOrgSelection();   // 选中态唯一来源：渲染后统一回写，杜绝残留高亮
 }
 function toggleWg(id){
   WG_COLLAPSED.has(id)?WG_COLLAPSED.delete(id):WG_COLLAPSED.add(id);
@@ -4836,9 +4877,12 @@ function toggleWg(id){
 }
 function addWgChild(pid){
   resetWgForm();
+  ORG_SELECTED=pid;
   document.getElementById('g_new_parent').value=String(pid);
   onWgParentChange();
   document.getElementById('g_form_title').textContent='新增子级工作组节点';
+  renderOrgRoles();
+  paintOrgSelection();
 }
 function editWg(gid){
   const g=ORG_FLAT.find(x=>x.id===gid); if(!g)return;
@@ -4849,7 +4893,7 @@ function editWg(gid){
   document.getElementById('g_submit_btn').textContent='保存修改';
   document.getElementById('g_cancel_edit').style.display='';
   document.getElementById('g_new_name').value=g.name;
-  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.style.display='';}
+  const s=document.getElementById('g_boards_search'); if(s){s.value='';s.disabled=false;s.style.display='';}
   rebuildWgParentOptions(gid, g.parent_id||0);
   // 类型下拉：编辑时列出该类型自身 + 上级允许的其他类型（供调整层级）
   const pid=g.parent_id||0;
@@ -5205,7 +5249,7 @@ if(window.__IS_FILE__){showFileGuard();probeBackend();}
 var BC_EDIT_ID=0;
 var BC_BOARDS=[];
 var BC_SELECTED=null;
-var BC_SEL=new Set();     // 批量选中的板块（进入看板管理时默认全选可见板块）
+var BC_SEL=new Set();     // 批量选中的板块（进入看板管理时默认【不选中】，由用户自行勾选）
 var BC_FORM={year:'2026',dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:''};
 var BC_FILTER={year:'',dept:'',attr:'',status:''};
 var BC_YEARS=['2025','2026','2027','2028','2029','2030'];
@@ -5241,15 +5285,21 @@ function initBcListEvents(){
   });
   box._bcEvtBound=true;
 }
-// 多选状态（可见板块默认全选）
+// 多选状态
 function bcTogglePick(bid,checked){
   if(checked)BC_SEL.add(bid);else BC_SEL.delete(bid);
   bcPaintPick();
 }
-function bcPickAll(checked){
-  BC_SEL=new Set(checked?bcVisibleBoards().map(function(b){return b.board_id}):[]);
+// 全选 / 取消全选 合并为一个切换按钮：点击时按当前状态取反
+function bcTogglePickAll(){
+  const vis=bcVisibleBoards();
+  if(!vis.length){toast('当前筛选下没有板块');return;}
+  const allOn=vis.every(function(b){return BC_SEL.has(b.board_id);});
+  BC_SEL=allOn?new Set():new Set(vis.map(function(b){return b.board_id}));
   bcPaintPick();
 }
+// 确认对话框（抽出便于测试注入）
+function bcConfirm(msg){ return window.confirm(msg); }
 function bcVisibleBoards(){
   return BC_BOARDS.filter(function(b){
     if(BC_FILTER.year && b.year!==BC_FILTER.year)return false;
@@ -5264,12 +5314,24 @@ function bcVisibleBoards(){
 }
 function bcPaintPick(){
   const box=document.getElementById('bcList');
-  if(!box)return;
-  box.querySelectorAll('.bc-pick').forEach(function(el){
-    el.checked=BC_SEL.has(el.getAttribute('data-bid'));
-  });
+  if(box){
+    box.querySelectorAll('.bc-pick').forEach(function(el){
+      el.checked=BC_SEL.has(el.getAttribute('data-bid'));
+    });
+  }
   const n=document.getElementById('bcPickCount');
   if(n)n.textContent=BC_SEL.size;
+  // 全选按钮文案随状态切换（同一个按钮，不再并排两个按钮）
+  const vis=bcVisibleBoards();
+  const allOn=vis.length>0&&vis.every(function(b){return BC_SEL.has(b.board_id);});
+  const pb=document.getElementById('bcPickAllBtn');
+  if(pb)pb.textContent=allOn?'取消全选':'全选';
+  // 批量删除按钮：与全选按钮同排，样式统一；未勾选时禁用
+  const db=document.getElementById('bcDelBtn');
+  if(db){
+    db.textContent='删除所选 '+BC_SEL.size+' 个';
+    db.disabled=BC_SEL.size===0;
+  }
 }
 async function openBoardConfigModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
@@ -5277,8 +5339,8 @@ async function openBoardConfigModal(){
   initBcListEvents();
   BC_SELECTED=null; BC_EDIT_ID=0;
   BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
-  // 默认选中全部可见板块
-  BC_SEL=new Set(bcVisibleBoards().map(function(b){return b.board_id}));
+  // 默认不选中：进入看板管理时所有板块均未勾选（需用户主动勾选）
+  BC_SEL=new Set();
   renderBoardList();
   renderEditArea();
   document.getElementById('boardConfigModal').style.display='flex';
@@ -5326,7 +5388,9 @@ function renderBoardList(){
       +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
       +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
-      +'<span style="margin-left:auto;color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span></div>'
+      +'<span style="margin-left:auto;display:flex;align-items:center;gap:10px">'
+      +'<span style="color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span>'
+      +'<button class="bc-item-del" onclick="event.stopPropagation();bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该板块的配置（需确认）">删除</button></span></div>'
       +'</div>';
   }).join('');
   setBcListScroll(list.length);
@@ -5359,8 +5423,8 @@ function setBcListScroll(n){
 }
 function bcFilterChange(dim,val){
   BC_FILTER[dim]=val;
-  // 过滤后可见板块集合变化 → 默认全选可见板块
-  BC_SEL=new Set(bcVisibleBoards().map(function(b){return b.board_id}));
+  // 过滤后可见板块集合变化 → 清空勾选（保持「默认不选中」语义，避免误批量操作）
+  BC_SEL=new Set();
   renderBoardList();
 }
 function bcSelect(bid){
@@ -5494,6 +5558,46 @@ async function submitBoardConfigForm(){
     renderEditArea();
     toast('已保存');
   }catch(e){ /* api 内部已 toast 错误 */ }
+}
+// 单条删除：一次确认
+async function bcDeleteOne(bid){
+  const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
+  if(!b)return;
+  const name=b.board_name||bid;
+  if(!bcConfirm('删除板块「'+name+'」的配置？\n删除后该板块将回到「未配置」状态（看板与卡片不受影响）。'))return;
+  try{
+    await api('/api/board-config/bulk-delete',{method:'POST',body:JSON.stringify({board_ids:[bid]})});
+    BC_SEL.delete(bid);
+    await bcAfterDelete();
+    toast('已删除「'+name+'」的配置');
+  }catch(e){}
+}
+// 批量删除：两次确认（任一次取消 / 关闭即终止，不执行删除）
+async function bcDeleteSelected(){
+  const ids=Array.from(BC_SEL);
+  if(!ids.length){toast('请先勾选要删除的板块');return;}
+  const names=ids.map(function(id){
+    const b=BC_BOARDS.find(function(x){return x.board_id===id;});
+    return b?(b.board_name||b.board_id):id;
+  });
+  if(!bcConfirm('确认删除已勾选的 '+ids.length+' 个板块配置？\n'+names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n删除后这些板块将回到「未配置」状态。'))return;
+  if(!bcConfirm('再次确认：真的要删除这 '+ids.length+' 个板块的配置吗？\n此操作不可撤销。'))return;
+  try{
+    const r=await api('/api/board-config/bulk-delete',{method:'POST',body:JSON.stringify({board_ids:ids})});
+    BC_SEL=new Set();
+    await bcAfterDelete();
+    toast('已删除 '+(r&&r.deleted?r.deleted:0)+' 个板块配置');
+  }catch(e){}
+}
+// 删除后：刷新列表 + 清空选择状态 + 同步目录树
+async function bcAfterDelete(){
+  BC_SEL=new Set();
+  BC_SELECTED=null; BC_EDIT_ID=0;
+  await loadBoardConfig();
+  ME=await api('/api/me');
+  renderTabs();
+  renderBoardList();
+  renderEditArea();
 }
 async function deleteBoardConfig(id){
   if(!confirm('确认删除该看板配置？'))return;
