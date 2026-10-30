@@ -689,9 +689,6 @@ body{
 .org-node-row.root{background:#fafafa}
 .org-node-row:hover{background:#f5f8fc}
 .org-node-row.sel{background:#f0f7ff!important;box-shadow:inset 2px 0 0 var(--primary)}
-.org-chip{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;font-size:11.5px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:10px;color:#0050b3;white-space:nowrap}
-.org-chip-x{border:none;background:none;cursor:pointer;padding:0 0 0 2px;font-size:10px;color:#69b1ff;line-height:1}
-.org-chip-x:hover{color:#cf1322}
 
 /* Toast */
 .toast{background:rgba(16,24,40,.82);border-radius:10px;box-shadow:var(--shadow-lg);backdrop-filter:blur(4px)}
@@ -1107,7 +1104,6 @@ function goLogin(){
     <div class="modal-body" style="display:flex;flex-direction:column;overflow:hidden;gap:0">
       <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 12px;font-size:12.5px;color:#0050b3;margin-bottom:12px;flex-shrink:0">
         组织架构：<strong>中心</strong> → <strong>部门</strong> → <strong>常规小组</strong>；中心与部门均可设立<strong>专项小组</strong>（跨部门协作）。
-        小组配<strong>组长/组员</strong>，部门配<strong>部门长/部门骨干</strong>，中心配<strong>中心负责人/总经理/中心骨干</strong>。
         同一人员可同时在多个节点任职（一人多岗、多组织任职）。
       </div>
       <div style="flex:1;min-height:0;display:flex;gap:16px;overflow:hidden">
@@ -1123,15 +1119,10 @@ function goLogin(){
             <span style="font-size:12px;color:var(--text2)">配置区 · <strong id="g_form_title">新增工作组节点</strong></span>
             <button class="icon-btn" id="g_cancel_edit" style="display:none" onclick="resetWgForm()">取消编辑</button>
           </div>
-          <div style="flex:1;min-height:0;border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;overflow:hidden">
+          <div style="flex-shrink:0;max-height:100%;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column">
             <div class="form-group" style="flex-shrink:0"><label>名称 *</label><input type="text" class="form-input" id="g_new_name" placeholder="如：核算部 / 收入组 / 成本优化专项组"></div>
             <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>节点类型 *</label><select class="form-select" id="g_new_type" onchange="onOrgTypeChange()"></select></div>
             <div class="form-group" style="margin-top:10px;flex-shrink:0"><label>上级节点</label><select class="form-select" id="g_new_parent" onchange="onWgParentChange()"></select></div>
-            <!-- 岗位与任职：选中节点后展示 -->
-            <div class="form-group" style="margin-top:10px;display:flex;flex-direction:column;min-height:0;flex:1">
-              <label style="flex-shrink:0">岗位与任职</label>
-              <div id="g_roles_box" style="margin-top:6px;flex:1;min-height:0;overflow:auto"></div>
-            </div>
             <div class="form-group" style="margin-top:10px;display:flex;flex-direction:column;min-height:0;flex-shrink:0">
               <label id="g_boards_label" style="flex-shrink:0">板块绑定（可选）</label>
               <input type="text" id="g_boards_search" class="form-input" placeholder="搜索板块（名称/ID）" style="margin-top:6px;flex-shrink:0;height:32px;font-size:13px">
@@ -4455,11 +4446,9 @@ var WG_COLLAPSED=new Set();
 // ---------- 组织架构（新模型） ----------
 var ORG_TREE=[];        // 新模型的节点树（含 roles / appointments）
 var ORG_FLAT=[];        // 新模型平铺
-var ORG_ROLES_BY_TYPE={}; // {node_type:[{role_key,role_name,unique_slot}]}
 var ORG_TYPE_NAMES={};  // {node_type:'中心'|'部门'|'常规小组'|'专项小组'}
 var ORG_SELECTED=0;    // 当前查看岗位的节点 id（0=未选中）
-var ORG_MEMBERS=[];    // 成员列表 [{id,name,account}]（任职选择用）
-var ORG_MEMBER_BY_ID={};// id → 成员
+var ORG_MEMBERS=[];    // 成员列表 [{id,name,account}]（跨组织任职统计用）
 // 节点类型 → 该类型下允许的子节点类型（前端与服务端规则一致，用于禁用非法选项）
 var ORG_CHILD_RULES={
   center:['dept','special'],
@@ -4554,73 +4543,6 @@ function onOrgTypeChange(){
     }
   }
   onWgParentChange();
-  renderOrgRoles();
-}
-// 岗位槽位渲染：选中节点时展示各岗位的人选
-function renderOrgRoles(){
-  const box=document.getElementById('g_roles_box');
-  if(!box)return;
-  const nid=ORG_SELECTED;
-  if(!nid){
-    box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0;text-align:center">在左侧选中一个节点后<br>可在此配置岗位与任职</div>';
-    return;
-  }
-  const node=ORG_FLAT.find(x=>x.id===nid);
-  if(!node){box.innerHTML='';return}
-  const roles=node.roles||[];
-  const appts=node.appointments||[];
-  const byRole={};
-  appts.forEach(a=>{(byRole[a.role_key]=byRole[a.role_key]||[]).push(a)});
-  let html='';
-  roles.forEach(r=>{
-    const list=byRole[r.role_key]||[];
-    const slotTag=r.unique_slot
-      ?'<span style="font-size:10.5px;color:#ad6800;background:#fffbe6;border:1px solid #ffd591;border-radius:3px;padding:0 5px">唯一</span>'
-      :'<span style="font-size:10.5px;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:0 5px">可多人</span>';
-    html+=`<div style="margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);margin-bottom:4px">
-        <span style="font-weight:600;color:var(--text)">${esc(r.role_name)}</span>${slotTag}
-        <span style="margin-left:auto;font-size:11px;color:var(--text3)">${list.length} 人</span>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px">`;
-    list.forEach(a=>{
-      const multi=a.other_org_count>0
-        ?`<span title="该成员另有 ${a.other_org_count} 个组织任职" style="font-size:10px;color:var(--primary);margin-left:3px">+${a.other_org_count}</span>`:'';
-      html+=`<span class="org-chip" title="点击移除任职">${esc(a.member_name)}${multi}
-        <button class="org-chip-x" onclick="removeOrgAppt(${a.id},${esc(JSON.stringify(a.member_name))})" title="移除">✕</button></span>`;
-    });
-    if(!list.length){
-      html+='<span style="font-size:11.5px;color:var(--text3)">未配置</span>';
-    }
-    html+=`</div>
-      <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
-        <select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''">
-          <option value="">选择成员…</option>
-          ${ORG_MEMBERS.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
-        </select>
-        <button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>
-      </div>
-    </div>`;
-  });
-  box.innerHTML=html||'<div style="color:var(--text3);font-size:12px">该节点类型暂无可配置岗位</div>';
-}
-// 任命：加人
-async function addOrgAppt(nodeId,roleKey,memberId){
-  if(!memberId){toast('请先选择成员');return}
-  try{
-    await api('/api/org/appointments',{method:'POST',body:JSON.stringify({node_id:nodeId,member_id:Number(memberId),role_key:roleKey})});
-    toast('已任命');
-    await openWgModal();
-  }catch(e){toast(e.message)}
-}
-// 免职：移除任职
-async function removeOrgAppt(apptId,name){
-  if(!confirm(`解除「${name}」的该岗位任职？`))return;
-  try{
-    await api('/api/org/appointments/'+apptId,{method:'DELETE'});
-    toast('已解除任职');
-    await openWgModal();
-  }catch(e){toast(e.message)}
 }
 // 选中态同步：ORG_SELECTED 是唯一真相（0=未选中），树内底色高亮统一由此刷新
 function paintOrgSelection(){
@@ -4656,7 +4578,6 @@ function clearOrgSelection(){
   rebuildWgParentOptions(0, top?top.id:0);
   fillOrgTypeOptions('', top?top.id:0);
   renderOrgIdle();
-  renderOrgRoles();
   paintOrgSelection();
 }
 // 选中节点 → 右侧展示该节点的岗位槽位；重复点击同一节点 = 取消选中
@@ -4665,7 +4586,7 @@ function selectOrgNode(nid){
   ORG_SELECTED=nid;
   const node=ORG_FLAT.find(x=>x.id===nid);
   // 同步编辑表单（点节点 = 查看其岗位；编辑按钮进编辑模式）
-  document.getElementById('g_form_title').textContent=(node?node.name:'新增节点')+' · 岗位与任职';
+  document.getElementById('g_form_title').textContent=node?node.name:'新增节点';
   document.getElementById('g_submit_btn').textContent='保存修改';
   document.getElementById('g_cancel_edit').style.display='';
   document.getElementById('g_new_name').value=node?node.name:'';
@@ -4677,7 +4598,6 @@ function selectOrgNode(nid){
   const isDeptNode=!!node&&(node.node_type==='center'||node.node_type==='dept');
   const scope=isDeptNode?nodeBoardScope(node):(node?(node.wg_boards||''):'');
   renderBoardChecks(isDeptNode?((scope||[]).join(',')):scope, parentBoardLimit(node?node.parent_id:0), undefined, isDeptNode);
-  renderOrgRoles();
   paintOrgSelection();
 }
 function wgDescendants(n){
@@ -4795,7 +4715,6 @@ function resetWgForm(){
   rebuildWgParentOptions(0, top?top.id:0);
   fillOrgTypeOptions('', top?top.id:0);
   renderOrgIdle();
-  renderOrgRoles();
   paintOrgSelection();
 }
 async function openWgModal(){
@@ -4808,11 +4727,8 @@ async function openWgModal(){
   const od=await api('/api/org/tree');
   ORG_TREE=od.tree||[];
   ORG_FLAT=wgFlat(ORG_TREE);
-  ORG_ROLES_BY_TYPE=od.roles_by_type||{};
   ORG_TYPE_NAMES=od.type_names||{};
   ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||''}));
-  ORG_MEMBER_BY_ID={};
-  ORG_MEMBERS.forEach(m=>{ORG_MEMBER_BY_ID[m.id]=m});
   // 板块绑定：新模型节点不存 boards，从旧 workgroups 视图补齐
   (function sync(ns){
     (ns||[]).forEach(n=>{
@@ -4884,7 +4800,6 @@ function addWgChild(pid){
   document.getElementById('g_new_parent').value=String(pid);
   onWgParentChange();
   document.getElementById('g_form_title').textContent='新增子级工作组节点';
-  renderOrgRoles();
   paintOrgSelection();
 }
 function editWg(gid){
@@ -4923,7 +4838,6 @@ function editWg(gid){
     const scope=isDeptNode?nodeBoardScope(g):(g.wg_boards||'');
     renderBoardChecks(isDeptNode?((scope||[]).join(',')):scope, parentBoardLimit(pid), undefined, isDeptNode);
   }
-  renderOrgRoles();
   paintOrgSelection();
 }
 async function submitWgForm(){
