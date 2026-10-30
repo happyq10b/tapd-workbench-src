@@ -16,6 +16,19 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
 .field label{display:block;font-size:13px;color:#8c8c8c;margin-bottom:6px;font-weight:500}
 .field input{width:100%;padding:11px 14px;border:1px solid #d5dce6;border-radius:8px;font-size:14px;outline:none;transition:border-color .15s}
 .field input:focus{border-color:#1890ff}
+/* 密码框小眼睛 */
+.pwd-wrap{position:relative}
+.pwd-wrap input{padding-right:40px}
+.pwd-eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1;
+  padding:4px 5px;opacity:.5;user-select:none}
+.pwd-eye:hover{opacity:1}
+.pwd-eye.on{opacity:.95}
+/* 锁定提示 */
+.lock-box{margin-top:14px;padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;
+  background:#fff7e6;border:1px solid #ffd591;color:#ad6800}
+.lock-box.err{background:#fff1f0;border-color:#ffa39e;color:#cf1322}
+.lock-box b{font-variant-numeric:tabular-nums}
 button{width:100%;padding:12px;border:none;border-radius:8px;background:#1890ff;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
 button:hover{opacity:.9}
 button:disabled{opacity:.5;cursor:not-allowed}
@@ -31,14 +44,95 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <p>财务管理创造价值</p>
   </div>
   <div class="field"><label>账号</label><input id="u" autocomplete="username" placeholder="请输入账号"></div>
-  <div class="field"><label>密码</label><input id="p" type="password" autocomplete="current-password" placeholder="请输入密码"></div>
+  <div class="field"><label>密码</label>
+    <div class="pwd-wrap">
+      <input id="p" type="password" autocomplete="current-password" placeholder="请输入密码">
+      <button type="button" class="pwd-eye" id="pwdEye" onclick="toggleEye()" title="显示密码" aria-label="显示密码">👁</button>
+    </div>
+  </div>
   <button id="btn">登 录</button>
   <div class="msg" id="msg"></div>
+  <div class="lock-box" id="lockBox" hidden></div>
   <div class="hint">账号由管理员分配，权限范围以账号配置为准</div>
 </div>
 <script>
-const u=document.getElementById('u'),p=document.getElementById('p'),btn=document.getElementById('btn'),msg=document.getElementById('msg');
+const u=document.getElementById('u'),p=document.getElementById('p'),btn=document.getElementById('btn'),
+      msg=document.getElementById('msg'),lockBox=document.getElementById('lockBox'),eye=document.getElementById('pwdEye');
 function show(m,ok){msg.textContent=m;msg.style.color=ok?'#0f9d6e':'#d63c3c'}
+
+// —— 密码小眼睛：切换显示 / 隐藏 ——
+function toggleEye(){
+  const willShow=p.type==='password';
+  p.type=willShow?'text':'password';
+  eye.textContent=willShow?'🙈':'👁';
+  eye.classList.toggle('on',willShow);
+  eye.title=willShow?'隐藏密码':'显示密码';
+  eye.setAttribute('aria-label',eye.title);
+}
+
+// —— 锁定提示：冷却期显示剩余秒数倒计时；永久锁定提示找管理员 ——
+let lockTimer=null, lockPoll=null;
+function clearLockTimers(){
+  if(lockTimer){clearInterval(lockTimer);lockTimer=null;}
+  if(lockPoll){clearInterval(lockPoll);lockPoll=null;}
+}
+function renderLock(state){
+  clearLockTimers();
+  if(!state||!state.blocked){lockBox.hidden=true;lockBox.innerHTML='';btn.disabled=false;return;}
+  const permanently=state.retry_after<=0;
+  lockBox.hidden=false;
+  lockBox.className='lock-box'+(permanently?' err':'');
+  if(permanently){
+    lockBox.innerHTML='🔒 密码错误次数过多，账号已锁定，请联系管理员重置密码。';
+    btn.disabled=true;
+    // 永久锁定也要轮询：管理员重置后提示应自动消失
+    lockPoll=setInterval(pollLockState,5000);
+    return;
+  }
+  btn.disabled=true;
+  let left=state.retry_after;
+  const tick=()=>{
+    if(left<=0){
+      // 冷却结束：重新查一次真实状态（管理员可能已重置，也可能已被锁定）
+      pollLockState(true);
+      return;
+    }
+    lockBox.innerHTML='⏳ 密码错误次数过多，请在 <b>'+left+'</b> 秒后再试。';
+    left--;
+  };
+  tick();
+  lockTimer=setInterval(tick,1000);
+  lockPoll=setInterval(()=>pollLockState(false),5000);
+}
+// 轮询账号的锁定状态：管理员重置后，登录页提示自动消失、按钮恢复
+async function pollLockState(isTickEnd){
+  const name=u.value.trim();
+  if(!name)return;
+  try{
+    const r=await fetch('/api/login/lock-status?username='+encodeURIComponent(name));
+    const s=await r.json();
+    if(!s.blocked){
+      renderLock({blocked:false});
+      if(isTickEnd)show('现在可以重新尝试登录');
+    }else if(s.retry_after<=0){
+      renderLock(s);   // 已被永久锁定
+    }
+  }catch(e){}
+}
+// 账号输入变化时查询锁定状态
+let lockCheckTimer=null;
+u.addEventListener('input',()=>{
+  clearTimeout(lockCheckTimer);
+  const name=u.value.trim();
+  if(!name){renderLock({blocked:false});return;}
+  lockCheckTimer=setTimeout(async()=>{
+    try{
+      const r=await fetch('/api/login/lock-status?username='+encodeURIComponent(name));
+      renderLock(await r.json());
+    }catch(e){}
+  },300);
+});
+
 async function doLogin(){
   if(!u.value.trim()||!p.value){show('请输入账号和密码');return}
   btn.disabled=true;btn.textContent='登录中...';msg.textContent='';
@@ -46,7 +140,16 @@ async function doLogin(){
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({username:u.value.trim(),password:p.value})});
     const d=await r.json();
-    if(!r.ok){show(d.detail||'登录失败');return}
+    if(!r.ok){
+      show(d.detail||'登录失败');
+      // 失败后刷新锁定状态（可能进入冷却或被锁定）
+      try{
+        const s2=await fetch('/api/login/lock-status?username='+encodeURIComponent(u.value.trim()));
+        renderLock(await s2.json());
+      }catch(e){}
+      return;
+    }
+    renderLock({blocked:false});
     localStorage.setItem('tk',d.token);
     location.href='/';
   }catch(e){show('网络错误，请重试')}

@@ -333,6 +333,15 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     detail      TEXT NOT NULL DEFAULT '',   -- 操作详情
     result      TEXT NOT NULL DEFAULT 'success'  -- success / failed / denied
 );
+-- 登录失败计数（账号级）：失败 5 次冷却 180 秒，10 次锁定需 admin 重置
+CREATE TABLE IF NOT EXISTS login_attempts (
+    username      TEXT PRIMARY KEY,
+    fail_count    INTEGER NOT NULL DEFAULT 0,      -- 累计连续失败次数
+    last_fail_ts  REAL NOT NULL DEFAULT 0,         -- 最后一次失败的 unix 时间戳
+    locked        INTEGER NOT NULL DEFAULT 0,      -- 1=已永久锁定，需 admin 重置
+    last_ip       TEXT NOT NULL DEFAULT '',        -- 最后一次失败的来源 IP
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(username);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);

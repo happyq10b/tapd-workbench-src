@@ -69,6 +69,7 @@ button{font-family:inherit}
   justify-content:center;cursor:pointer;position:relative}
 .profile-avatar-box img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
 .profile-avatar-box .pa-ph{font-size:30px;color:var(--text3)}
+/* 密码框「小眼睛」：绝对定位在输入框右侧，点击切换可见 */
 .profile-avatar-hint{font-size:11.5px;color:var(--text3);margin-top:6px;
   display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:nowrap;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1180,9 +1181,18 @@ function goLogin(){
       </div>
       <div class="form-group">
         <label>修改密码</label>
-        <input type="password" class="form-input" id="profileOldPwd" placeholder="原密码" style="margin-bottom:8px">
-        <input type="password" class="form-input" id="profileNewPwd" placeholder="新密码（至少 6 位）" style="margin-bottom:8px">
-        <input type="password" class="form-input" id="profileNewPwd2" placeholder="确认新密码">
+        <div class="pwd-wrap" style="width:100%;margin-bottom:8px">
+          <input type="password" class="form-input" id="profileOldPwd" placeholder="原密码" autocomplete="current-password" style="flex:1;min-width:0">
+          <span id="eye_profileOldPwd"></span>
+        </div>
+        <div class="pwd-wrap" style="width:100%;margin-bottom:8px">
+          <input type="password" class="form-input" id="profileNewPwd" placeholder="新密码（至少 6 位）" autocomplete="new-password" style="flex:1;min-width:0">
+          <span id="eye_profileNewPwd"></span>
+        </div>
+        <div class="pwd-wrap" style="width:100%">
+          <input type="password" class="form-input" id="profileNewPwd2" placeholder="确认新密码" autocomplete="new-password" style="flex:1;min-width:0">
+          <span id="eye_profileNewPwd2"></span>
+        </div>
         <div class="profile-avatar-hint" style="text-align:left">修改成功后需要重新登录</div>
       </div>
     </div>
@@ -2056,8 +2066,12 @@ function openProfileModal(){
   renderProfilePhotoHint();
   const st=document.getElementById('profileStatus');
   if(st)st.value=PROFILE_STATUS;
+  // 复用既有的 pwdEyeHtml()（SVG 眼睛图标）+ togglePwd()（点击切换可见）
   ['profileOldPwd','profileNewPwd','profileNewPwd2'].forEach(id=>{
-    const el=document.getElementById(id); if(el)el.value='';
+    const el=document.getElementById(id);
+    if(el){ el.value=''; el.type='password'; }
+    const slot=document.getElementById('eye_'+id);
+    if(slot) slot.innerHTML=pwdEyeHtml(id);
   });
   const t=document.getElementById('profileTitle');
   if(t){

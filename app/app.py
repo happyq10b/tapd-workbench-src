@@ -23,6 +23,13 @@ SECRET = os.environ.get('APP_SECRET', 'tapd-webapp-dev-secret-change-me')
 TOKEN_TTL = 7 * 24 * 3600
 LOCK_TIMEOUT = 300
 LOCK_HEARTBEAT = 60
+
+# ---------------- 登录失败锁定策略 ----------------
+# 连续失败 LOGIN_FAIL_THRESHOLD 次 → 冷却 LOGIN_COOLDOWN 秒内不允许再试
+# 连续失败 LOGIN_LOCK_THRESHOLD 次 → 永久锁定，需管理员重置
+LOGIN_FAIL_THRESHOLD = 5
+LOGIN_COOLDOWN = 180          # 3 分钟
+LOGIN_LOCK_THRESHOLD = 10
 SUPER_ADMIN = 'admin'   # 内置超级管理员（不可删/改密码/改角色/换绑）
 # 「无负责人」筛选的哨兵值：前端下拉用它表示「负责人为空」。
 # 不能用空字符串（那是「全部负责人」），也不能与真实负责人重名（负责人是中文姓名）。
@@ -541,6 +548,52 @@ def client_ip(request: Request) -> str:
         return fwd.split(',')[0].strip()
     return request.client.host if request.client else ''
 
+def _login_attempt(username: str):
+    """取某账号的登录失败状态；无记录返回默认（0 次、未锁定）。"""
+    rows = dbq('SELECT * FROM login_attempts WHERE username=?', (username,))
+    if not rows:
+        return {'username': username, 'fail_count': 0, 'last_fail_ts': 0.0,
+                'locked': 0, 'last_ip': ''}
+    return dict(rows[0])
+
+def _login_lock_state(username: str):
+    """返回 (是否禁止登录, 剩余秒数, 提示文案)。
+
+    规则：
+      · 永久锁定（fail_count >= 10）→ 一直禁止，需 admin 重置
+      · 失败 >= 5 次 → 冷却 180 秒，从最后一次失败起算
+      · 其余 → 允许
+    """
+    st = _login_attempt(username)
+    cnt = int(st.get('fail_count') or 0)
+    if int(st.get('locked') or 0) or cnt >= LOGIN_LOCK_THRESHOLD:
+        return True, 0, '密码错误次数过多，账号已锁定，请联系管理员重置密码'
+    if cnt >= LOGIN_FAIL_THRESHOLD:
+        last = float(st.get('last_fail_ts') or 0)
+        elapsed = time.time() - last
+        left = int(LOGIN_COOLDOWN - elapsed)
+        if left > 0:
+            return True, left, f'密码错误次数过多，请 {left} 秒后再试'
+    return False, 0, ''
+
+def _login_record_fail(username: str, ip: str):
+    """记录一次登录失败，返回新的失败次数。"""
+    st = _login_attempt(username)
+    cnt = int(st.get('fail_count') or 0) + 1
+    locked = 1 if cnt >= LOGIN_LOCK_THRESHOLD else int(st.get('locked') or 0)
+    dbe("""INSERT INTO login_attempts (username, fail_count, last_fail_ts, locked, last_ip, updated_at)
+             VALUES (?,?,?,?,?,datetime('now','localtime'))
+             ON CONFLICT(username) DO UPDATE SET
+               fail_count=excluded.fail_count, last_fail_ts=excluded.last_fail_ts,
+               locked=excluded.locked, last_ip=excluded.last_ip,
+               updated_at=excluded.updated_at""",
+        (username, cnt, time.time(), locked, ip or ''))
+    return cnt
+
+def _login_record_success(username: str):
+    """登录成功 → 清零失败计数（但不清除永久锁定）。"""
+    dbe('DELETE FROM login_attempts WHERE username=?', (username,))
+
 def audit_log(username: str, ip: str, action: str, target: str = '', detail: str = '', result: str = 'success'):
     """写审计日志（不抛异常，避免影响主流程）"""
     try:
@@ -748,13 +801,88 @@ class LoginReq(BaseModel):
 @app.post('/api/login')
 def login(req: LoginReq, request: Request):
     ip = client_ip(request)
+    st = _login_attempt(req.username)
+    cnt = int(st.get('fail_count') or 0)
+    # 永久锁定（失败 >= 10 次）：任何密码都不放行，需管理员重置
+    if int(st.get('locked') or 0) or cnt >= LOGIN_LOCK_THRESHOLD:
+        tip = '密码错误次数过多，账号已锁定，请联系管理员重置密码'
+        audit_log(req.username, ip, 'login', '账号登录', f'登录被拒：{tip}', 'denied')
+        raise HTTPException(423, tip)
+
     u = get_user(req.username)
-    if not u or not verify_pw(req.password, u['password_hash']):
-        audit_log(req.username, ip, 'login', '账号登录', '登录失败：账号或密码错误', 'failed')
-        raise HTTPException(401, '账号或密码错误')
-    audit_log(req.username, ip, 'login', '账号登录', f'登录成功（角色：{u["role"]}）', 'success')
-    return {'token': make_token(req.username), 'username': req.username,
-            'role': u['role']}
+    pwd_ok = bool(u) and verify_pw(req.password, u['password_hash'])
+
+    if pwd_ok:
+        # 密码正确：即使处于冷却期也放行（受限的是「密码错误」，不是「登录」），并清零计数
+        _login_record_success(req.username)
+        audit_log(req.username, ip, 'login', '账号登录', f'登录成功（角色：{u["role"]}）', 'success')
+        return {'token': make_token(req.username), 'username': req.username,
+                'role': u['role']}
+
+    # 密码错误：累加失败次数
+    cnt = _login_record_fail(req.username, ip)
+    if cnt >= LOGIN_LOCK_THRESHOLD:
+        detail = (f'登录失败：账号或密码错误（已连续失败 {cnt} 次，'
+                   f'账号已锁定，需管理员重置密码）')
+        audit_log(req.username, ip, 'login', '账号登录', detail, 'failed')
+        raise HTTPException(423, '密码错误次数过多，账号已锁定，请联系管理员重置密码')
+    if cnt >= LOGIN_FAIL_THRESHOLD:
+        # 进入冷却：本次失败时间重新起算冷却窗口
+        detail = (f'登录失败：账号或密码错误（已连续失败 {cnt} 次，'
+                   f'请 {LOGIN_COOLDOWN} 秒后再试）')
+        audit_log(req.username, ip, 'login', '账号登录', detail, 'failed')
+        raise HTTPException(429, f'密码错误次数过多，请 {LOGIN_COOLDOWN} 秒后再试',
+                            headers={'Retry-After': str(LOGIN_COOLDOWN)})
+    detail = f'登录失败：账号或密码错误（已连续失败 {cnt} 次）'
+    audit_log(req.username, ip, 'login', '账号登录', detail, 'failed')
+    raise HTTPException(401, '账号或密码错误')
+
+
+@app.get('/api/login/lock-status')
+def login_lock_status(username: str = ''):
+    """登录前查询账号的锁定状态（供登录页提示剩余冷却时间）。"""
+    if not username:
+        return {'blocked': False, 'retry_after': 0, 'message': ''}
+    blocked, left, tip = _login_lock_state(username)
+    return {'blocked': blocked, 'retry_after': left, 'message': tip}
+
+
+class LoginLockResetReq(BaseModel):
+    username: str = ''
+
+
+@app.get('/api/admin/login-locks')
+def list_login_locks(username: str = Depends(require_admin)):
+    """管理员查看登录锁定列表。"""
+    rows = dbq("""SELECT username, fail_count, last_fail_ts, locked, last_ip, updated_at
+                    FROM login_attempts ORDER BY fail_count DESC, updated_at DESC""")
+    now = time.time()
+    out = []
+    for r in rows:
+        d = dict(r)
+        cnt = int(d.get('fail_count') or 0)
+        left = 0
+        if not int(d.get('locked') or 0) and cnt >= LOGIN_FAIL_THRESHOLD:
+            left = max(0, int(LOGIN_COOLDOWN - (now - float(d.get('last_fail_ts') or 0))))
+        d['retry_after'] = left
+        d['locked'] = bool(int(d.get('locked') or 0)) or cnt >= LOGIN_LOCK_THRESHOLD
+        out.append(d)
+    return {'locks': out, 'thresholds': {'fail': LOGIN_FAIL_THRESHOLD,
+                                         'cooldown': LOGIN_COOLDOWN,
+                                         'lock': LOGIN_LOCK_THRESHOLD}}
+
+
+@app.post('/api/admin/login-lock/reset')
+def reset_login_lock(req: LoginLockResetReq, username: str = Depends(require_admin),
+                     request: Request = None):
+    """管理员重置账号的登录失败计数 / 解除锁定。"""
+    target = (req.username or '').strip()
+    if not target:
+        raise HTTPException(400, '请指定账号')
+    dbe('DELETE FROM login_attempts WHERE username=?', (target,))
+    audit_log(username, client_ip(request), 'login_lock_reset', target,
+              f'管理员重置登录锁定状态：{target}', 'success')
+    return {'ok': True, 'username': target}
 
 @app.post('/api/logout')
 def logout(username: str = Depends(require_auth), request: Request = None):
