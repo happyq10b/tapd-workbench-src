@@ -5098,8 +5098,9 @@ function resetWgForm(){
 // 按需加载组织架构树（幂等）。用于「按人员筛选」「从架构选人」等独立入口，
 // 避免依赖用户先打开过架构管理弹窗。
 var _ORG_TREE_P=null;
-async function ensureOrgTree(){
-  if(ORG_TREE&&ORG_TREE.length) return ORG_TREE;
+async function ensureOrgTree(force){
+  // force=true：强制重新拉取（架构管理弹窗每次打开都要拿最新任命数据）
+  if(!force && ORG_TREE&&ORG_TREE.length) return ORG_TREE;
   if(_ORG_TREE_P) return _ORG_TREE_P;
   _ORG_TREE_P=(async()=>{
     const od=await api('/api/org/tree');
@@ -5122,8 +5123,11 @@ async function openWgModal(){
   WG_ALL=gd.groups||[];
   WG_FLAT=wgFlat(WG_ALL);
   WG_BOARDS=gd.all_boards||[];
-  // 新模型：节点树 + 岗位 + 任职（按需加载，幂等）
-  await ensureOrgTree();
+  // 新模型：节点树 + 岗位 + 任职。
+  // **必须强制刷新** —— 任命/免职后树上的「负责人」「任职人数」都来自
+  // node.appointments，用缓存会拿到旧数据，表现为「弹窗未及时刷新」。
+  const keepSel=ORG_SELECTED;   // 记住当前选中节点，刷新后恢复
+  await ensureOrgTree(true);
   ORG_TYPE_NAMES=ORG_TYPE_NAMES||{};
   ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||''}));
   ORG_MEMBER_BY_ID={};
@@ -5137,10 +5141,18 @@ async function openWgModal(){
     });
   })(ORG_TREE);
   TEAM_MEMBERS=(td.members||[]).map(m=>m.name);
-  // 打开弹窗时清空选中（默认未选中）：避免上一次的高亮残留
+  // 打开弹窗时清空选中（默认未选中）：避免上一次的高亮残留。
+  // 但「任命/免职后刷新」要保持当前选中节点 —— 否则用户点节点 → 任命 →
+  // 视线回到未选中态，还得重新点一次。
   ORG_SELECTED=0;
   resetWgForm();
-  renderWgList();
+  if(keepSel && ORG_FLAT.some(x=>x.id===keepSel)){
+    // 保持选中：只重绘树与右侧面板，不重置表单内容
+    renderWgList();
+    selectOrgNode(keepSel);
+  }else{
+    renderWgList();
+  }
   document.getElementById('wgModal').style.display='flex';
 }
 function renderWgList(){
