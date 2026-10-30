@@ -1105,7 +1105,8 @@ function goLogin(){
     <div class="modal-body">
       <div class="form-group" id="c_board_wrap"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
       <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
-      <div class="form-group"><label>归属年份</label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，可留空；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
+      <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，必填；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
+      <div class="form-group" style="font-size:12px;color:var(--text3);line-height:1.7">年份绑定在<b>板块</b>层：每个板块一个归属年份；该板块下的事项各自归属自己的周数（如 2026 年第 41 周），<b>周数与年份不做强制校验</b>。</div>
       <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
       <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
       <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
@@ -1135,14 +1136,11 @@ function goLogin(){
       <div class="form-group" id="cp_board_wrap"><label>目标看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_board"></select></div>
       <div class="form-group" id="cp_col_wrap"><label>目标板块 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_col"></select></div>
       <div class="form-group" id="cp_parent_wrap"><label>所属主事项 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_parent"></select></div>
-      <!-- 看板复制的归属配置 -->
+      <!-- 看板复制的归属配置（⚠️ 不含归属年份：年份在板块层绑定） -->
       <div id="cp_board_cfg" style="display:none;flex-direction:column;gap:10px">
         <div class="form-group"><label>归属部门 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_dept"></select></div>
         <div class="form-row">
-          <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_year"></select></div>
           <div class="form-group"><label>属性</label><select class="form-select" id="cp_attr"><option value="日常">日常</option><option value="专项">专项</option></select></div>
-        </div>
-        <div class="form-row">
           <div class="form-group"><label>状态</label><select class="form-select" id="cp_status"><option value="启用">启用</option><option value="封存">封存</option></select></div>
         </div>
       </div>
@@ -1424,7 +1422,6 @@ function goLogin(){
             <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-default" style="padding:4px 11px;font-size:12px" onclick="configBoard()" title="为尚未配置的看板补齐年份/归属部门/属性/状态">+ 配置</button><button class="btn-primary" style="padding:4px 11px;font-size:12px" onclick="openBoardModal()" title="创建一个全新的看板">+ 新建看板</button></span>
           </div>
           <div class="bc-filter" id="bcFilter">
-            <div class="bc-filter-row"><span class="lab">年份</span><select id="bcf_year" onchange="bcFilterChange('year',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">归属部门</span><select id="bcf_dept" onchange="bcFilterChange('dept',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">属性</span><select id="bcf_attr" onchange="bcFilterChange('attr',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">状态</span><select id="bcf_status" onchange="bcFilterChange('status',this.value)"></select></div>
@@ -3197,7 +3194,7 @@ function renderBoard(cards,cols,q,colHits){
       <div class="week-header">
         <span class="chev" onclick="toggleWeek(${i});event.stopPropagation()" title="展开 / 收起该板块下的事项">▶</span>
         ${titleHtml}
-        ${year?`<span class="week-year" title="归属年份">${esc(year)}年</span>`:''}
+        ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
         <span class="week-meta">${done}/${total} 完成</span>
         <div class="week-bar"><i style="width:${rate}%"></i></div>
         <div class="week-actions" onclick="event.stopPropagation()">
@@ -3430,12 +3427,21 @@ function fieldItems(o){
     {key:'due',     label:'截止日期', value:fmtDate(o.due)},
   ];
 }
-// 网格版（列表里的父/子事项行）：三列固定宽度，跨行纵向对齐。
+// 网格版（列表里的父/子事项行）：四列固定宽度，跨行纵向对齐。
 // 负责人姓名长短不影响后续列的起始位置；空值统一占位为「—」。
+// 「周数」是事项自身的维度；「所属板块年份」是板块的维度（年份绑定在板块层），
+// 两者**不做联动校验** —— 这里只在周数的悬停提示里把板块年份带出来，便于对照。
+function colYearOf(columnName){
+  const meta=(window.COLS_META||[]).find(x=>x.column_name===columnName);
+  return meta?(meta.year||''):'';
+}
 function fieldCols(o){
-  return fieldItems(o).map(f=>
-    `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}" title="${f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label)}">${f.label}：${f.value?esc(f.value):'—'}</span>`
-  ).join('');
+  const cy=colYearOf(o.column_name);
+  return fieldItems(o).map(f=>{
+    let tip=f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label);
+    if(f.key==='week_no'&&f.value&&cy)tip+='（所属板块年份：'+esc(cy)+'年）';
+    return `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}" title="${tip}">${f.label}：${f.value?esc(f.value):'—'}</span>`;
+  }).join('');
 }
 // 紧凑版（右侧抽屉面板，宽度有限无法并排三列）：字段集合与顺序同上，仅改为单行堆叠
 function fieldMeta(o){
@@ -3467,7 +3473,7 @@ function cardItem(c,seq){
   const seqHtml=seq?`<span class="item-seq ${pinned?'pin':''}" title="本板块第 ${seq} 项">${seq}</span>`:'';
   // 负责人 / 周数 / 创建日期 / 截止日期 —— 四列固定网格，跨行纵向对齐。
   // 负责人与子事项**各自独立取值**，不做父子关联或继承。
-  const colsHtml=fieldCols({owner:c.owner,week_no:c.week_no,created:c.created,due:c.due});
+  const colsHtml=fieldCols({owner:c.owner,week_no:c.week_no,created:c.created,due:c.due,column_name:c.column_name});
   return `<div class="item-wrap" id="iw_${c.card_id}">
   <div class="item-card ${lockedByOther?'locked':''}">
     ${subArrow}
@@ -3530,7 +3536,7 @@ function subNodeHtml(n,level){
   // 子事项行与主事项行同构：圆点 → 标题 → 逾期 → 字段列 → 状态标签 → 置顶
   // 字段列复用父事项的 fieldCols() → 字段集合与顺序天然一致（含周数列）
   // 负责人与父事项**各自独立取值**，子事项不会继承父事项负责人
-  const colsHtml=fieldCols({owner:n.owner,week_no:n.week_no,created:n.created,due:n.due});
+  const colsHtml=fieldCols({owner:n.owner,week_no:n.week_no,created:n.created,due:n.due,column_name:n.column_name});
   return `<div class="sub-node ${n.status==='done'?'done':''}">
     <span class="s-chev leaf">▶</span>
     <span class="s-dot"></span>
@@ -4091,7 +4097,9 @@ async function saveColumn(){
   if(!column_name){toast('板块名称不能为空');return}
   if(!board_id){toast('请选择所属看板');return}
   if(!created_at){toast('创建日期为必填项');return}
-  if(year&&!/^\d{4}$/.test(year)){toast('归属年份应为 4 位数字，如 2026');return}
+  // 归属年份：板块层单值必填（年份已从看板层下沉到板块层）
+  if(!year){toast('归属年份为必填项（4 位数字，如 2026）');return}
+  if(!/^\d{4}$/.test(year)){toast('归属年份应为 4 位数字，如 2026');return}
   try{
     if(COLUMN_MODE==='edit'){
       await api('/api/columns',{method:'PUT',body:JSON.stringify({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year})});
@@ -4164,12 +4172,9 @@ async function openCopyModal(kind,payload){
     const depts=(typeof BC_DEPTS!=='undefined'&&BC_DEPTS.length)?BC_DEPTS:[];
     document.getElementById('cp_dept').innerHTML=depts.map(d=>
       `<option value="${esc(d.name)}"${P.dept===d.name?' selected':''}>${esc(bcDeptLabel(d))}</option>`).join('');
-    const yrs=(typeof BC_YEARS!=='undefined')?BC_YEARS:['2025','2026','2027','2028','2029','2030'];
-    document.getElementById('cp_year').innerHTML=yrs.map(y=>
-      `<option value="${y}"${P.year===y?' selected':''}>${y}</option>`).join('');
     document.getElementById('cp_attr').value=P.attr||'日常';
     document.getElementById('cp_status').value=P.status||'启用';
-    tipEl.innerHTML='副本是<b>独立的看板记录</b>（新的看板 ID），归属部门等配置随附并可修改。<b>不复制</b>原看板下的板块与事项 —— 需要的话请再分别复制板块 / 事项。';
+    tipEl.innerHTML='副本是<b>独立的看板记录</b>（新的看板 ID），归属部门等配置随附并可修改。<b>不复制</b>原看板下的板块与事项 —— 需要的话请再分别复制板块 / 事项。<br>归属年份在【板块】层绑定，看板层不设置年份。';
   }else if(kind==='column'){
     document.getElementById('cp_title').textContent='📋 复制板块';
     titleEl.textContent='板块名称';
@@ -4246,7 +4251,6 @@ async function submitCopy(){
       const dn=((typeof BC_DEPTS!=='undefined')?BC_DEPTS:[]).find(d=>d.name===dept)||{};
       const r=await api('/api/boards/'+encodeURIComponent(P.board_id)+'/copy',{method:'POST',body:JSON.stringify({
         board_name:name, dept:dept, dept_node_id:dn.id||0,
-        year:document.getElementById('cp_year').value,
         attr:document.getElementById('cp_attr').value,
         status:document.getElementById('cp_status').value})});
       toast('看板副本已创建：'+(r.board_name||name));
@@ -6426,9 +6430,8 @@ var BC_EDIT_ID=0;
 var BC_BOARDS=[];
 var BC_SELECTED=null;
 var BC_SEL=new Set();     // 批量选中的板块（进入看板管理时默认【不选中】，由用户自行勾选）
-var BC_FORM={year:'2026',dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:''};
-var BC_FILTER={year:'',dept:'',attr:'',status:''};
-var BC_YEARS=['2025','2026','2027','2028','2029','2030'];
+var BC_FORM={dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:''};
+var BC_FILTER={dept:'',attr:'',status:''};
 var BC_DEPTS=[];          // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
 var BC_DEPTS_LOADED=false;
 // 归属部门下拉：中心级部门（财务中心）视为「全部板块」，对全员展示
@@ -6478,7 +6481,6 @@ function bcTogglePickAll(){
 function bcConfirm(msg){ return window.confirm(msg); }
 function bcVisibleBoards(){
   return BC_BOARDS.filter(function(b){
-    if(BC_FILTER.year && b.year!==BC_FILTER.year)return false;
     if(BC_FILTER.dept && b.dept!==BC_FILTER.dept)return false;
     if(BC_FILTER.attr && b.attr!==BC_FILTER.attr)return false;
     if(BC_FILTER.status){
@@ -6515,7 +6517,7 @@ async function openBoardConfigModal(){
   await loadBoardConfig();
   initBcListEvents();
   BC_SELECTED=null; BC_EDIT_ID=0;
-  BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
   // 默认不选中：进入看板管理时所有板块均未勾选（需用户主动勾选）
   BC_SEL=new Set();
   renderBoardList();
@@ -6532,7 +6534,6 @@ async function loadBoardConfig(){
 }
 function renderFilters(){
   const all='<option value="">全部</option>';
-  document.getElementById('bcf_year').innerHTML=all+BC_YEARS.map(function(y){return '<option value="'+y+'"'+(BC_FILTER.year===y?' selected':'')+'>'+y+'</option>'}).join('');
   document.getElementById('bcf_dept').innerHTML=all+BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FILTER.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>'}).join('');
   document.getElementById('bcf_attr').innerHTML=all+['日常','专项'].map(function(a){return '<option value="'+a+'"'+(BC_FILTER.attr===a?' selected':'')+'>'+a+'</option>'}).join('');
   document.getElementById('bcf_status').innerHTML=all
@@ -6542,7 +6543,6 @@ function renderFilters(){
 }
 function renderBoardList(){
   const list=BC_BOARDS.filter(function(b){
-    if(BC_FILTER.year && b.year!==BC_FILTER.year)return false;
     if(BC_FILTER.dept && b.dept!==BC_FILTER.dept)return false;
     if(BC_FILTER.attr && b.attr!==BC_FILTER.attr)return false;
     if(BC_FILTER.status){
@@ -6559,10 +6559,13 @@ function renderBoardList(){
             : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
     const sel = (BC_SELECTED && BC_SELECTED.board_id===b.board_id) ? ' active':'';
     const deptTip = b.dept?('归属：'+esc(b.dept)):'';
+    // 所属板块年份：年份在【板块】层，看板只是容器 → 展示该看板下各板块的年份集合
+    const years=(b.col_years||[]);
+    const yearTip=years.length?('板块年份：'+esc(years.join('、'))+'年'):'板块年份：未配置';
     // 复制入口（仅管理员：看板的新建与配置都是管理员级操作）
     // 参数用 JSON 塞进 data-* 再解析 —— 名称里带引号也不会截断内联 JS
     const copyBtn=(ME&&ME.is_admin)
-      ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',year:b.year||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||''}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（归属部门可重选）">📋 复制</button>'
+      ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||''}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（归属部门可重选）">📋 复制</button>'
       :'';
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
@@ -6570,6 +6573,7 @@ function renderBoardList(){
       +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
       +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
+      +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span>'
       +'<span style="margin-left:auto;color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span></div>'
       +'</div>';
   }).join('');
@@ -6612,7 +6616,7 @@ function bcSelect(bid){
   if(!b)return;
   BC_SELECTED=b;
   BC_EDIT_ID=b.config_id||0;
-  BC_FORM={year:b.year||'2026',dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};
+  BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};
   renderBoardList();
   renderEditArea();
 }
@@ -6621,7 +6625,7 @@ function configBoard(){
   if(!unconf.length){toast('所有看板均已配置');return;}
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
-  BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
   renderBoardList();
   renderEditArea();
 }
@@ -6629,7 +6633,7 @@ function bcChangeBoard(bid){
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
   if(b){
     BC_SELECTED=b;BC_EDIT_ID=0;
-    BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+    BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
     renderBoardList();
     renderEditArea();
   }
@@ -6654,13 +6658,13 @@ async function applyBulkConfig(){
   if(!BC_FORM.dept){toast('请选择归属部门');return;}
   try{
     const r=await api('/api/board-config/bulk',{method:'POST',body:JSON.stringify({
-      board_ids:ids, year:BC_FORM.year, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id,
+      board_ids:ids, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id,
       attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark})});
     await loadBoardConfig();
     ME=await api('/api/me');
     renderTabs();
     const b=BC_BOARDS.find(function(x){return x.board_id===BC_SELECTED&&BC_SELECTED.board_id});
-    if(b){BC_FORM={year:b.year||'2026',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
+    if(b){BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
     renderBoardList();
     renderEditArea();
     toast('已应用到 '+(r.updated||0)+' 个板块（新建 '+(r.created||0)+'）');
@@ -6693,7 +6697,6 @@ function renderEditArea(){
       +'<div class="bi-meta">为以下真实看板新建配置</div>'
       +'<select class="form-select" id="bc_board" onchange="bcChangeBoard(this.value)">'+opts+'</select></div>';
   }
-  const yearPills=BC_YEARS.map(function(y){return '<span class="bc-pill'+(BC_FORM.year===y?' on':'')+'" data-dim="year" data-val="'+y+'" onclick="bcPick(\'year\',\''+y+'\')">'+y+'</span>';}).join('');
   const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FORM.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>';}).join('');
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
   const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
@@ -6705,26 +6708,26 @@ function renderEditArea(){
   area.innerHTML='<div class="bc-edit">'
     +'<div class="bc-edit-title">'+(isEdit?'✏️ 编辑看板配置':'➕ 新建看板配置')+'<span class="sub">'+(isEdit?'修改该看板的维度属性':'为真实看板登记维度属性')+'</span></div>'
     +boardBlock
-    +'<div class="bc-section"><div class="lab"><span class="req">*</span>年份</div><div class="bc-pills">'+yearPills+'</div></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div>'
     +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="max-width:320px">'+deptOpts+'</select>'
     +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+'</div></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills">'+attrPills+'</div></div>'
     +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills">'+statusPills+'</div></div>'
+    +'<div class="bc-hint" style="margin-top:-4px">归属年份在【板块】层单独配置 —— 每个板块绑定唯一归属年份（点板块标题即可编辑），看板本身不再有年份。</div>'
     +'<div class="bc-section"><div class="lab">备注（可选）</div><textarea class="form-textarea" id="bc_remark" rows="2" placeholder="如：年度预算看板" oninput="BC_FORM.remark=this.value">'+esc(BC_FORM.remark||'')+'</textarea></div>'
     +footer
     +'</div>';
 }
 function resetBoardConfigForm(){
   BC_EDIT_ID=0; BC_SELECTED=null;
-  BC_FORM={year:'2026',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
   renderBoardList();
   renderEditArea();
 }
 async function submitBoardConfigForm(){
   if(!BC_SELECTED){toast('请选择看板');return;}
   const bid=BC_SELECTED.board_id;
-  const payload={board_id:bid, year:BC_FORM.year, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept), attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
+  const payload={board_id:bid, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept), attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
   try{
     if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
     else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
@@ -6733,7 +6736,7 @@ async function submitBoardConfigForm(){
     ME=await api('/api/me');
     renderTabs();
     const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
-    if(b){BC_SELECTED=b;BC_EDIT_ID=b.config_id||0;BC_FORM={year:b.year||'2026',dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
+    if(b){BC_SELECTED=b;BC_EDIT_ID=b.config_id||0;BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
     renderBoardList();
     renderEditArea();
     toast('已保存');

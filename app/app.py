@@ -827,17 +827,26 @@ def _ts(v):
 
 
 def ensure_column(board_id, column_name, column_id='', creator='', created_at=''):
-    """确保板块元信息存在；不存在则按默认值建一条（幂等）"""
+    """确保板块元信息存在；不存在则按默认值建一条（幂等）
+
+    先按 (board_id, column_id) 找已登记的板块 —— 命中就直接复用，
+    避免同一个板块被登记成两行（col_key 不一致 → 后续改名 / 置顶会对不上）。
+    """
     if not (board_id and column_name):
         return None
+    if column_id:
+        row = dbq('SELECT col_key FROM board_columns WHERE board_id=? AND column_id=? LIMIT 1',
+                  (board_id, column_id))
+        if row:
+            return row[0]['col_key']
     key = col_key(board_id, column_name)
     if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
         return key
     cid = column_id or ('COL' + str(int(time.time() * 1000)))
     ca = created_at or time.strftime('%Y-%m-%d %H:%M:%S')
-    dbe('INSERT OR IGNORE INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, pinned)'
-        ' VALUES (?,?,?,?,?,?,?,0)',
-        (key, cid, board_id, column_name, ca, creator or '', '日常'))
+    dbe('INSERT OR IGNORE INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
+        ' VALUES (?,?,?,?,?,?,?,?,0)',
+        (key, cid, board_id, column_name, ca, creator or '', '日常', (ca or '')[:4]))
     return key
 
 
@@ -1345,7 +1354,11 @@ class PinReq(BaseModel):
 
 @app.post('/api/columns')
 async def create_column(req: ColumnCreate, username: str = Depends(require_editor), request: Request = None):
-    """新建板块：创建日期必填（默认当天），创建人取当前登录用户（前端锁定，服务端也强制）"""
+    """新建板块：创建日期必填（默认当天），创建人取当前登录用户（前端锁定，服务端也强制）
+
+    ⚠️ **归属年份在板块层绑定，且是单值必填**（年份已从看板层下沉到这里）：
+    每个板块绑定唯一归属年份；未填时默认取创建年份。
+    """
     name = (req.column_name or '').strip()
     if not name:
         raise HTTPException(400, '板块名称不能为空')
@@ -1369,14 +1382,14 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_edito
     key = col_key(req.board_id, name)
     if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
         raise HTTPException(409, '该看板下已存在同名板块')
-    year = _norm_year(req.year) or created[:4]   # 归属年份默认取创建年份
+    year = _norm_year(req.year) or created[:4]   # 归属年份：单值必填，未填默认取创建年份
     new_cid = 'COL' + str(int(time.time() * 1000))
     dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
         ' VALUES (?,?,?,?,?,?,?,?,0)',
         (key, new_cid, req.board_id, name, created, username, req.nature, year))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
-              f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year or "未填"}，创建日期 {created}）', 'success')
+              f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year}，创建日期 {created}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'created_at': created, 'creator': username, 'nature': req.nature,
@@ -1604,6 +1617,12 @@ async def create_card(req: CardCreate, username: str = Depends(require_editor), 
     vals['column_id'] = req.column_id or vals.get('column_id', '')
     # 板块级校验：账号被限定了某看板的板块白名单时，不得写入不可见的板块
     check_column_access(req.board_id, vals['column_id'], username)
+    # 客户端没带板块名时，按 column_id 从板块元信息里取（避免事项挂到空板块名）
+    if not vals.get('column_name') and vals.get('column_id'):
+        crow = dbq('SELECT column_name FROM board_columns WHERE board_id=? AND column_id=? LIMIT 1',
+                   (req.board_id, vals['column_id']))
+        if crow:
+            vals['column_name'] = crow[0]['column_name']
     vals['card_name'] = req.card_name
     vals['creator'] = username
     vals['created'] = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -1671,7 +1690,6 @@ class CopyBoardReq(BaseModel):
     board_name: str = ''       # 副本名称（留空 = 原名 +（副本））
     dept: str = ''             # 归属重选：归属部门
     dept_node_id: int = 0      # 归属重选：归属部门对应的架构节点 id
-    year: str = ''             # 归属重选：归属年份
     attr: str = ''             # 归属重选：属性（日常/专项）
     status: str = ''           # 归属重选：状态（启用/封存）
     remark: str = ''
@@ -1683,8 +1701,9 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
     """复制看板：生成一份**独立副本**（配置随附，内容不复制）。
 
     · 副本与原看板不共享任何数据：新的 board_id + 独立的 board_config 行；
-    · 归属重选：归属部门 / 年份 / 属性 / 状态 / 备注 都能在复制弹窗里改；
+    · 归属重选：归属部门 / 属性 / 状态 / 备注 都能在复制弹窗里改；
     · 看板的创建与配置都是管理员级操作 → 复制同样**仅管理员**可用。
+    · ⚠️ 归属年份不在看板层 —— 副本**不复制**原看板的板块（含其归属年份）。
     """
     src = dbq('SELECT * FROM boards WHERE board_id=?', (board_id,))
     if not src:
@@ -1699,11 +1718,10 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
         node_id, dept_name, _is_center = _resolve_dept_node(dept, dept_node_id)
         dept_node_id = node_id
         dept = dept_name or dept
-    year = (req.year or cfg.get('year') or '').strip()
     attr = (req.attr or cfg.get('attr') or '日常').strip()
     status = (req.status or cfg.get('status') or '启用').strip()
     remark = req.remark if req.remark != '' else (cfg.get('remark') or '')
-    _validate_board_config(year, dept, attr, status)
+    _validate_board_config(dept, attr, status)
     name = (req.board_name or '').strip() or (src['board_name'] + COPY_SUFFIX)
     if not name:
         raise HTTPException(400, '看板名称不能为空')
@@ -1714,19 +1732,19 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
         conn.execute('INSERT INTO boards (board_id, board_name, workspace_id, owner, sort, created_at, copy_from)'
                      ' VALUES (?,?,?,?,?,?,?)',
                      (new_bid, name, src['workspace_id'], username, src['sort'], now, board_id))
-        conn.execute('INSERT INTO board_config (board_id, year, dept, dept_node_id, attr, status, remark, created_at)'
-                     ' VALUES (?,?,?,?,?,?,?,?)',
-                     (new_bid, year, dept, dept_node_id, attr, status, remark, now))
+        conn.execute('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark, created_at)'
+                     ' VALUES (?,?,?,?,?,?,?)',
+                     (new_bid, dept, dept_node_id, attr, status, remark, now))
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     log_action('__board__', username, 'copy', f'复制看板 {name}')
     audit_log(username, client_ip(request), 'board_copy', f'看板 {board_id}',
-              f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，年份 {year}，属性 {attr}）', 'success')
+              f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，属性 {attr}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'board_id': new_bid, 'board_name': name, 'copy_from': board_id,
-            'dept': dept, 'dept_node_id': dept_node_id, 'year': year, 'attr': attr, 'status': status}
+            'dept': dept, 'dept_node_id': dept_node_id, 'attr': attr, 'status': status}
 
 
 class CopyColumnReq(BaseModel):
@@ -3225,7 +3243,6 @@ def move_org_appointment(req: OrgMoveApptReq, username: str = Depends(require_ad
 
 # ---------------- API：看板管理（配置板块：年份/归属部门/属性/状态） ----------------
 # 枚举可选值（与 DB CHECK 约束保持一致，应用层二次校验，越界即 400）
-ALLOWED_YEARS = {'2025', '2026', '2027', '2028', '2029', '2030'}
 # 部门的**有序**列表：目录树按此顺序渲染顶层部门节点（空部门同样占位）。
 # 实际可选部门以【架构管理】的部门层级为准（_dept_names()/_dept_order()），
 # 这里的固定清单仅作为架构为空时的历史回退。
@@ -3235,8 +3252,12 @@ ALLOWED_ATTRS = {'日常', '专项'}
 ALLOWED_STATUSES = {'启用', '封存'}
 
 class BoardConfigReq(BaseModel):
+    """看板配置：**不再含归属年份** —— 年份已下沉到【板块】层（board_columns.year）。
+
+    每个板块绑定唯一归属年份；看板只是板块的容器，
+    一个看板下的不同板块可以属于不同年份。
+    """
     board_id: str = ''      # 关联的真实看板 id（boards ∪ cards 派生的 board_id）
-    year: str
     dept: str              # 归属部门名称（须是架构中的中心/部门）
     dept_node_id: int = 0  # 归属部门对应的 org_nodes.id（0=未指定，按名称解析）
     attr: str
@@ -3263,9 +3284,7 @@ def _resolve_dept_node(dept, dept_node_id=0):
             return row[0]['id'], row[0]['name'], 1 if row[0]['node_type'] == 'center' else 0
     return 0, name, 0
 
-def _validate_board_config(year, dept, attr, status):
-    if year not in ALLOWED_YEARS:
-        raise HTTPException(400, '年份必须是 ' + '/'.join(sorted(ALLOWED_YEARS)) + ' 之一')
+def _validate_board_config(dept, attr, status):
     if dept not in _dept_names():
         raise HTTPException(400, '归属部门必须是架构中的中心或部门，当前可选：'
                             + '/'.join(sorted(_dept_names())))
@@ -3280,7 +3299,12 @@ def list_boards(username: str = Depends(require_auth)):
     看板管理功能直接作用于当前在用的真实看板，通过 board_id 与 board_config 关联。
 
     可见性：管理员返回全部看板；普通用户只返回其架构授权范围内的看板
-    （与 /api/me 的看板集合一致，避免「前端只隐藏、后端仍全量下发」）。"""
+    （与 /api/me 的看板集合一致，避免「前端只隐藏、后端仍全量下发」）。
+
+    ⚠️ 看板**不再有归属年份** —— 年份下沉到板块层：
+       `col_years` = 该看板下各板块的归属年份集合（去重、倒序），供列表展示
+       「所属板块年份」。
+    """
     boards = _all_boards()
     visible, _cols = user_allowed(username)
     if visible is not None:
@@ -3288,8 +3312,12 @@ def list_boards(username: str = Depends(require_auth)):
     counts = {}
     for r in dbq('SELECT board_id, COUNT(*) AS cnt FROM cards WHERE deleted=0 GROUP BY board_id'):
         counts[r['board_id']] = r['cnt']
+    # 所属板块年份（年份在板块层，看板只是容器）
+    col_years = defaultdict(set)
+    for r in dbq("SELECT board_id, year FROM board_columns WHERE year<>'' AND year IS NOT NULL"):
+        col_years[r['board_id']].add(r['year'])
     cfgs = {}
-    for r in dbq('SELECT id, board_id, year, dept, dept_node_id, attr, status, remark, created_at'
+    for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, created_at'
                  ' FROM board_config'):
         cfgs[r['board_id']] = dict(r)
     out = []
@@ -3302,7 +3330,7 @@ def list_boards(username: str = Depends(require_auth)):
             'workspace_id': b.get('workspace_id', ''),
             'card_count': counts.get(bid, 0),
             'config_id': c.get('id'),
-            'year': c.get('year', ''),
+            'col_years': sorted(col_years.get(bid, set()), reverse=True),
             'dept': c.get('dept', ''),
             'dept_node_id': c.get('dept_node_id', 0) or 0,
             'attr': c.get('attr', ''),
@@ -3313,13 +3341,14 @@ def list_boards(username: str = Depends(require_auth)):
 
 @app.get('/api/board-config')
 def list_board_config(username: str = Depends(require_auth)):
-    """看板配置列表（含关联看板名称），按年份↓、部门、属性排序。
-    普通用户只返回其可见看板的配置（与看板列表口径一致）。"""
-    rows = dbq('''SELECT c.id, c.board_id, c.year, c.dept, c.attr, c.status, c.remark, c.created_at,
+    """看板配置列表（含关联看板名称），按部门、属性排序。
+    普通用户只返回其可见看板的配置（与看板列表口径一致）。
+    ⚠️ 配置里**没有年份** —— 归属年份在板块层（board_columns.year）。"""
+    rows = dbq('''SELECT c.id, c.board_id, c.dept, c.attr, c.status, c.remark, c.created_at,
                         COALESCE(b.board_name, '') AS board_name
                  FROM board_config c
                  LEFT JOIN boards b ON b.board_id = c.board_id
-                 ORDER BY c.year DESC, c.dept, c.attr''')
+                 ORDER BY c.dept, c.attr''')
     visible, _cols = user_allowed(username)
     if visible is not None:
         rows = [r for r in rows if r['board_id'] in visible]
@@ -3327,28 +3356,29 @@ def list_board_config(username: str = Depends(require_auth)):
 
 @app.post('/api/board-config')
 def create_board_config(req: BoardConfigReq, username: str = Depends(require_admin), request: Request = None):
-    """为真实看板登记配置（仅管理员）。每个看板仅一条配置。"""
+    """为真实看板登记配置（仅管理员）。每个看板仅一条配置。
+    归属年份不在这里配置 —— 请在板块层设置（每个板块绑定唯一归属年份）。"""
     bid = (req.board_id or '').strip()
     if not bid:
         raise HTTPException(400, '必须选择关联看板')
     if not dbq('SELECT 1 FROM boards WHERE board_id=?', (bid,)) and \
        not dbq('SELECT 1 FROM cards WHERE board_id=? AND deleted=0', (bid,)):
         raise HTTPException(404, '关联看板不存在')
-    year = req.year.strip(); attr = req.attr.strip()
+    attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
     dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
-    if not (year and dept and attr):
-        raise HTTPException(400, '年份 / 归属部门 / 属性 均必填')
-    _validate_board_config(year, dept, attr, status)
+    if not (dept and attr):
+        raise HTTPException(400, '归属部门 / 属性 均必填')
+    _validate_board_config(dept, attr, status)
     if dbq('SELECT 1 FROM board_config WHERE board_id=?', (bid,)):
         raise HTTPException(409, '该看板已存在配置，请勿重复添加')
     try:
-        dbe('INSERT INTO board_config (board_id, year, dept, dept_node_id, attr, status, remark)'
-            ' VALUES (?,?,?,?,?,?,?)',
-            (bid, year, dept, dept_node_id, attr, status, remark))
+        dbe('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark)'
+            ' VALUES (?,?,?,?,?,?)',
+            (bid, dept, dept_node_id, attr, status, remark))
     except sqlite3.IntegrityError:
         raise HTTPException(409, '该看板已存在配置')
-    audit_log(username, client_ip(request), 'board_config_create', f'{bid}/{year}/{dept}/{attr}',
+    audit_log(username, client_ip(request), 'board_config_create', f'{bid}/{dept}/{attr}',
               f'状态={status}', 'success')
     return {'ok': True}
 
@@ -3357,7 +3387,6 @@ class BoardConfigBulkDeleteReq(BaseModel):
 
 class BoardConfigBulkReq(BaseModel):
     board_ids: List[str] = []   # 批量应用的板块（board_id 列表）
-    year: str = ''
     dept: str = ''
     dept_node_id: int = 0
     attr: str = ''
@@ -3371,6 +3400,7 @@ def bulk_board_config(req: BoardConfigBulkReq, username: str = Depends(require_a
     用于「看板管理」中多选板块后统一设置归属部门等维度：
     归属部门取自【架构管理】的部门层级（中心 + 部门），
     归属中心的板块视为全部板块、对全员展示。
+    ⚠️ 不含归属年份 —— 年份在板块层单独配置。
     """
     ids = []
     for b in (req.board_ids or []):
@@ -3379,12 +3409,12 @@ def bulk_board_config(req: BoardConfigBulkReq, username: str = Depends(require_a
             ids.append(b)
     if not ids:
         raise HTTPException(400, '未选择任何板块')
-    year = req.year.strip(); attr = req.attr.strip()
+    attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
     dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
-    if not (year and dept and attr):
-        raise HTTPException(400, '年份 / 归属部门 / 属性 均必填')
-    _validate_board_config(year, dept, attr, status)
+    if not (dept and attr):
+        raise HTTPException(400, '归属部门 / 属性 均必填')
+    _validate_board_config(dept, attr, status)
     created = updated = skipped = 0
     for bid in ids:
         if not dbq('SELECT 1 FROM boards WHERE board_id=?', (bid,)) and \
@@ -3393,15 +3423,15 @@ def bulk_board_config(req: BoardConfigBulkReq, username: str = Depends(require_a
             continue
         row = dbq('SELECT id FROM board_config WHERE board_id=?', (bid,))
         if row:
-            dbe('UPDATE board_config SET year=?, dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
-                (year, dept, dept_node_id, attr, status, remark, row[0]['id']))
+            dbe('UPDATE board_config SET dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
+                (dept, dept_node_id, attr, status, remark, row[0]['id']))
             updated += 1
         else:
-            dbe('INSERT INTO board_config (board_id, year, dept, dept_node_id, attr, status, remark)'
-                ' VALUES (?,?,?,?,?,?,?)', (bid, year, dept, dept_node_id, attr, status, remark))
+            dbe('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark)'
+                ' VALUES (?,?,?,?,?,?)', (bid, dept, dept_node_id, attr, status, remark))
             created += 1
     audit_log(username, client_ip(request), 'board_config_bulk', f'{len(ids)} 个板块',
-              f'{year}/{dept}/{attr} 状态={status}（新建 {created} / 更新 {updated}）', 'success')
+              f'{dept}/{attr} 状态={status}（新建 {created} / 更新 {updated}）', 'success')
     return {'ok': True, 'created': created, 'updated': updated, 'skipped': skipped}
 
 @app.post('/api/board-config/bulk-delete')
@@ -3430,31 +3460,32 @@ def bulk_delete_board_config(req: BoardConfigBulkDeleteReq, username: str = Depe
 
 @app.put('/api/board-config/{cid}')
 def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(require_admin), request: Request = None):
-    """更新看板配置（仅管理员）。board_id 创建后锁定，不可改挂其他看板。"""
+    """更新看板配置（仅管理员）。board_id 创建后锁定，不可改挂其他看板。
+    ⚠️ 不含归属年份 —— 年份在板块层单独配置。"""
     if not dbq('SELECT 1 FROM board_config WHERE id=?', (cid,)):
         raise HTTPException(404, '配置不存在')
-    year = req.year.strip(); attr = req.attr.strip()
+    attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
     dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
-    if not (year and dept and attr):
-        raise HTTPException(400, '年份 / 归属部门 / 属性 均必填')
-    _validate_board_config(year, dept, attr, status)
-    dbe('UPDATE board_config SET year=?, dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
-        (year, dept, dept_node_id, attr, status, remark, cid))
+    if not (dept and attr):
+        raise HTTPException(400, '归属部门 / 属性 均必填')
+    _validate_board_config(dept, attr, status)
+    dbe('UPDATE board_config SET dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
+        (dept, dept_node_id, attr, status, remark, cid))
     audit_log(username, client_ip(request), 'board_config_update', f'id={cid}',
-              f'{year}/{dept}/{attr} 状态={status}', 'success')
+              f'{dept}/{attr} 状态={status}', 'success')
     return {'ok': True}
 
 @app.delete('/api/board-config/{cid}')
 def delete_board_config(cid: int, username: str = Depends(require_admin), request: Request = None):
     """删除看板配置（仅管理员）"""
-    r = dbq('SELECT year, dept, attr FROM board_config WHERE id=?', (cid,))
+    r = dbq('SELECT dept, attr FROM board_config WHERE id=?', (cid,))
     if not r:
         raise HTTPException(404, '配置不存在')
     dbe('DELETE FROM board_config WHERE id=?', (cid,))
     row = r[0]
     audit_log(username, client_ip(request), 'board_config_delete',
-              f'{row["year"]}/{row["dept"]}/{row["attr"]}', f'id={cid}', 'success')
+              f'{row["dept"]}/{row["attr"]}', f'id={cid}', 'success')
     return {'ok': True}
 
 # ---------------- API：部门主页（文化展示区 / 标杆部门 / 模范个人 / 部门介绍） ----------------

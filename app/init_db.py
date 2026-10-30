@@ -104,10 +104,12 @@ CREATE INDEX IF NOT EXISTS idx_boards_sort ON boards(sort, board_id);
 --   dept         归属部门名称（冗余存储，便于按名称分组展示）
 --   dept_node_id 归属部门对应的 org_nodes.id（权威关联；0=未配置）
 -- 年份/属性/状态的枚举仍由 CHECK 约束限定。
+-- 看板配置：只管归属部门 / 属性 / 状态 / 备注。
+-- ⚠️ **归属年份不在这里** —— 年份已下沉到【板块】层（board_columns.year）：
+-- 每个板块绑定唯一归属年份，看板只是板块的容器，不再有自己的年份。
 CREATE TABLE IF NOT EXISTS board_config (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     board_id    TEXT NOT NULL DEFAULT '',
-    year        TEXT NOT NULL CHECK (year IN ('2025','2026','2027','2028','2029','2030')),
     dept        TEXT NOT NULL DEFAULT '',
     dept_node_id INTEGER NOT NULL DEFAULT 0,
     attr        TEXT NOT NULL CHECK (attr IN ('日常','专项')),
@@ -116,7 +118,7 @@ CREATE TABLE IF NOT EXISTS board_config (
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     UNIQUE(board_id)
 );
-CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(year, dept, attr);
+CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(dept, attr);
 -- 注：idx_board_config_dept 依赖 dept_node_id，老库需先补列才能建索引，
 --     统一放在 _migrate_schema() 的 ALTER/重建之后创建。
 
@@ -406,7 +408,6 @@ def _migrate_schema(conn):
         conn.execute("""CREATE TABLE board_config (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             board_id    TEXT NOT NULL DEFAULT '',
-            year        TEXT NOT NULL CHECK (year IN ('2025','2026','2027','2028','2029','2030')),
             dept        TEXT NOT NULL DEFAULT '',
             dept_node_id INTEGER NOT NULL DEFAULT 0,
             attr        TEXT NOT NULL CHECK (attr IN ('日常','专项')),
@@ -423,7 +424,6 @@ def _migrate_schema(conn):
         conn.execute("""CREATE TABLE board_config (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             board_id    TEXT NOT NULL DEFAULT '',
-            year        TEXT NOT NULL CHECK (year IN ('2025','2026','2027','2028','2029','2030')),
             dept        TEXT NOT NULL DEFAULT '',
             dept_node_id INTEGER NOT NULL DEFAULT 0,
             attr        TEXT NOT NULL CHECK (attr IN ('日常','专项')),
@@ -432,12 +432,12 @@ def _migrate_schema(conn):
             created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
             UNIQUE(board_id)
         )""")
-        conn.execute("""INSERT INTO board_config (id, board_id, year, dept, attr, status, remark, created_at)
-                        SELECT id, board_id, year, dept, attr, status, remark, created_at FROM board_config_old""")
+        conn.execute("""INSERT INTO board_config (id, board_id, dept, attr, status, remark, created_at)
+                        SELECT id, board_id, dept, attr, status, remark, created_at FROM board_config_old""")
         conn.execute('DROP TABLE board_config_old')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config_board ON board_config(board_id)')
     # 索引统一在重建后补建（重建会丢索引）
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(year, dept, attr)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(dept, attr)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config_dept ON board_config(dept_node_id)')
 
     # ---- groups -> workgroups（组织概念改为工作组，字段同步更名） ----
@@ -678,6 +678,23 @@ def init_db(force_import=False):
     # 归属年份默认值 = 板块创建年份：老数据回填（幂等，只补空值）
     conn.execute("UPDATE board_columns SET year=substr(created_at,1,4)"
                  " WHERE (year IS NULL OR year='') AND created_at IS NOT NULL AND created_at<>''")
+    # ---- 归属年份下沉到【板块】层（2026-10-30）----
+    # 看板（board_config）不再有自己的年份 —— 年份由每个板块单独绑定。
+    # 迁移两步（幂等）：
+    #   ① 先把看板的旧年份补进该看板下**没有年份**的板块（只补空值）
+    #   ② 再删掉 board_config.year 列
+    # ⚠️ 索引 idx_board_config 建在 year 上 → 必须先删索引，否则 DROP COLUMN 会被拒绝。
+    bcfg_cols = [r[1] for r in conn.execute('PRAGMA table_info(board_config)').fetchall()]
+    if 'year' in bcfg_cols:
+        conn.execute("""UPDATE board_columns SET year = (
+                           SELECT bc.year FROM board_config bc
+                           WHERE bc.board_id = board_columns.board_id)
+                         WHERE (year IS NULL OR year='')
+                           AND EXISTS (SELECT 1 FROM board_config bc
+                                       WHERE bc.board_id = board_columns.board_id AND bc.year<>'')""")
+        conn.execute('DROP INDEX IF EXISTS idx_board_config')
+        conn.execute('ALTER TABLE board_config DROP COLUMN year')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_board_config ON board_config(dept, attr)')
     # 索引放在 ALTER 之后建（老库要先补列才能建索引）
     conn.execute('CREATE INDEX IF NOT EXISTS idx_subtasks_parent ON card_subtasks(parent_id)')
     cols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]
