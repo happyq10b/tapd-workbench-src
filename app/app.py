@@ -126,6 +126,18 @@ def user_role(username: str) -> str:
     u = get_user(username)
     return u['role'] if u else ''
 
+def _member_display_name(username: str) -> str:
+    """账号对应的成员姓名（顶栏显示「姓名(账号)」用）。
+    账号未绑定成员、或绑定的姓名与账号相同（本身就是姓名）时返回空串，
+    由前端回退为「只显示账号」。"""
+    row = dbq('SELECT name FROM team_members WHERE account=? LIMIT 1', (username,))
+    if not row:
+        return ''
+    name = (row[0]['name'] or '').strip()
+    if not name or name == username:
+        return ''
+    return name
+
 _LEADER_ALL = '__ALL_BOARDS__'   # 负责人范围含'*'（全量）的标记
 
 def _leader_boards(username: str):
@@ -774,7 +786,9 @@ def me(username: str = Depends(require_auth)):
     prof = dbq('SELECT avatar, status_text FROM users WHERE username=?', (username,))
     avatar = prof[0]['avatar'] if prof else ''
     status_text = prof[0]['status_text'] if prof else ''
-    return {'username': username, 'boards': boards_out, 'role': user_role(username),
+    # 显示名：顶栏展示「姓名(账号)」；账号未绑定成员时只显示账号
+    display_name = _member_display_name(username)
+    return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'avatar': avatar, 'status_text': status_text,
             'allowed_columns': col_info,

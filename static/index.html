@@ -1122,7 +1122,7 @@ function goLogin(){
 <!-- 个人界面：头像 / 个人状态 / 修改密码 -->
 <div class="modal-overlay" id="profileModal" style="display:none">
   <div class="modal" style="width:440px;max-width:94vw">
-    <div class="modal-header"><h2>👤 个人界面</h2><button class="modal-close" onclick="closeModal('profileModal')">✕</button></div>
+    <div class="modal-header"><h2 id="profileTitle">👤 个人界面</h2><button class="modal-close" onclick="closeModal('profileModal')">✕</button></div>
     <div class="modal-body">
       <div class="form-group">
         <label>头像</label>
@@ -1611,7 +1611,7 @@ async function init(){
     loadDeptOpen();
     ME=await api('/api/me');
     loadPins();   // 载入当前账号的个人置顶设置（按账号分桶，互不影响）
-    document.getElementById('userName').textContent='👤 '+ME.username;
+    document.getElementById('userName').textContent=meDisplayLabel();
     renderMyProfile();   // 顶栏头像 + 个人状态栏
     document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
     document.getElementById('roleTag').className='role-tag role-'+ME.role;
@@ -1951,8 +1951,19 @@ var PROFILE_AVATAR_TYPES=['image/jpeg','image/png','image/gif','image/webp'];
 var PROFILE_MAX_IMG_BYTES=512*1024;
 
 // 渲染顶栏头像 + 状态栏（init 与保存后统一走这里）
+// 顶栏用户区文案：优先「姓名(账号)」，账号未绑定成员时只显示账号
+function meDisplayLabel(){
+  if(!ME)return '';
+  const dn=(ME.display_name||'').trim();
+  return dn ? ('👤 '+dn+'('+ME.username+')') : ('👤 '+ME.username);
+}
 function renderMyProfile(){
   if(!ME)return;
+  const hu=document.getElementById('headerUser');
+  if(hu){
+    const dn=(ME.display_name||'').trim();
+    hu.title=(dn? dn+'('+ME.username+')' : ME.username)+' · 点击打开个人界面（头像 / 状态 / 修改密码）';
+  }
   const av=document.getElementById('headerAvatar');
   if(av){
     if(ME.avatar){ av.src=ME.avatar; av.hidden=false; }
@@ -1977,6 +1988,11 @@ function openProfileModal(){
   ['profileOldPwd','profileNewPwd','profileNewPwd2'].forEach(id=>{
     const el=document.getElementById(id); if(el)el.value='';
   });
+  const t=document.getElementById('profileTitle');
+  if(t){
+    const dn=(ME.display_name||'').trim();
+    t.textContent= dn ? ('👤 个人界面 · '+dn+'('+ME.username+')') : ('👤 个人界面 · '+ME.username);
+  }
   document.getElementById('profileModal').style.display='flex';
 }
 function renderProfileAvatarBox(){
