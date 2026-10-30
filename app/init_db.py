@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """数据库初始化：建表 + 首次导入宽表 CSV"""
-import sqlite3, csv, os, json
+import sqlite3, csv, os, json, re
 
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app.db')
 CSV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', '全部看板_2026年度_总宽表.csv')
@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS cards (
     board_creator  TEXT NOT NULL DEFAULT '',
     parent_id      TEXT NOT NULL DEFAULT '',
     version        INTEGER NOT NULL DEFAULT 1,
-    deleted        INTEGER NOT NULL DEFAULT 0
+    deleted        INTEGER NOT NULL DEFAULT 0,
+    week_no        TEXT NOT NULL DEFAULT '',   -- 周数维度，如「2026年第41周」（自然周：周一~周日）
+    copy_from      TEXT NOT NULL DEFAULT ''    -- 复制来源 card_id（空 = 非副本）
 );
 CREATE INDEX IF NOT EXISTS idx_cards_board ON cards(board_id);
 CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status);
@@ -92,7 +94,8 @@ CREATE TABLE IF NOT EXISTS boards (
     workspace_id  TEXT NOT NULL DEFAULT '',   -- TAPD 工作空间 ID（可空）
     owner         TEXT NOT NULL DEFAULT '',    -- 看板负责人
     sort          INTEGER NOT NULL DEFAULT 0,  -- 排序权重（小在前）
-    created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    copy_from     TEXT NOT NULL DEFAULT ''     -- 复制来源 board_id（空 = 非副本）
 );
 CREATE INDEX IF NOT EXISTS idx_boards_sort ON boards(sort, board_id);
 
@@ -264,7 +267,8 @@ CREATE TABLE IF NOT EXISTS board_columns (
     creator     TEXT NOT NULL DEFAULT '',
     nature      TEXT NOT NULL DEFAULT '日常' CHECK (nature IN ('日常','专项')),
     year        TEXT NOT NULL DEFAULT '',
-    pinned      INTEGER NOT NULL DEFAULT 0
+    pinned      INTEGER NOT NULL DEFAULT 0,
+    copy_from   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
 CREATE INDEX IF NOT EXISTS idx_board_columns_name ON board_columns(column_name);
@@ -600,6 +604,33 @@ def _migrate_org(conn):
                          ' VALUES (?,?,?,0)', (nid, m['id'], 'member'))
 
 
+def _backfill_week_no(conn):
+    """老数据回填「周数」维度（自然周：周一~周日，格式「2026年第41周」）。
+
+    按创建日期所属周计算；归属年用 ISO-8601 规则（该周周四所在年份），
+    与 Excel / ISO 周编号一致。只补空值，幂等可重复执行。
+    """
+    import datetime as _dt
+    rows = conn.execute("SELECT card_id, created FROM cards "
+                         "WHERE (week_no IS NULL OR week_no='') "
+                         "AND created IS NOT NULL AND created<>''").fetchall()
+    if not rows:
+        return
+    upd = []
+    for card_id, created in rows:
+        m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})', str(created or '').strip())
+        if not m:
+            continue
+        try:
+            d = _dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            continue
+        iso = d.isocalendar()
+        upd.append(('%d年第%d周' % (iso[0], iso[1]), card_id))
+    if upd:
+        conn.executemany('UPDATE cards SET week_no=? WHERE card_id=?', upd)
+
+
 def init_db(force_import=False):
     conn = sqlite3.connect(DB_FILE)
     conn.executescript(SCHEMA)
@@ -621,6 +652,21 @@ def init_db(force_import=False):
     if 'pinned' not in cols:
         conn.execute('ALTER TABLE cards ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_cards_pinned ON cards(pinned)')
+    # 周数维度（自然周：周一~周日，格式「2026年第41周」）：主事项与子事项共用 cards 表
+    if 'week_no' not in cols:
+        conn.execute("ALTER TABLE cards ADD COLUMN week_no TEXT NOT NULL DEFAULT ''")
+    # 复制来源：标识本条是副本（空 = 非副本）
+    if 'copy_from' not in cols:
+        conn.execute("ALTER TABLE cards ADD COLUMN copy_from TEXT NOT NULL DEFAULT ''")
+    # 老数据回填周数：按创建日期所属自然周（幂等，只补空值）
+    _backfill_week_no(conn)
+    # 板块/看板的副本标识
+    bcols2 = [r[1] for r in conn.execute('PRAGMA table_info(board_columns)').fetchall()]
+    if 'copy_from' not in bcols2:
+        conn.execute("ALTER TABLE board_columns ADD COLUMN copy_from TEXT NOT NULL DEFAULT ''")
+    bdcols = [r[1] for r in conn.execute('PRAGMA table_info(boards)').fetchall()]
+    if 'copy_from' not in bdcols:
+        conn.execute("ALTER TABLE boards ADD COLUMN copy_from TEXT NOT NULL DEFAULT ''")
     # 子事项层级：parent_id 指向同卡片下的另一个子事项，0 表示顶层
     scols = [r[1] for r in conn.execute('PRAGMA table_info(card_subtasks)').fetchall()]
     if 'parent_id' not in scols:

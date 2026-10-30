@@ -10,7 +10,7 @@ TAPD 看板 Web 应用 v2 - 多人协作编辑版
 """
 import json, os, time, hmac, hashlib, base64, secrets, sqlite3, threading, re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, date as _date
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, Response
@@ -53,12 +53,53 @@ def _norm_date(s):
         except ValueError:
             pass
     return None
+def week_label(s) -> str:
+    """周数标签：按**自然周（周一 ~ 周日）**计算，格式「2026年第41周」。
+
+    归属年采用 ISO-8601 规则 —— 该周**周四**所在的年份（与 Excel / ISO 周编号一致），
+    所以跨年周的归属年可能与日历年不同（如 2027-01-01 属于 2026 年第 53 周）。
+    空值 / 非法日期返回空串。
+    """
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})', str(s or '').strip())
+    if not m:
+        return ''
+    try:
+        d = _date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return ''
+    iso = d.isocalendar()
+    return '%d年第%d周' % (iso[0], iso[1])
+
+
+WEEK_RE = re.compile(r'^\d{4}年第(\d{1,2})周$')
+
+
+def _norm_week(v) -> str:
+    """周数字段归一：接受「2026年第41周」或「2026-41」，返回标准标签；非法值报错。"""
+    s = str(v or '').strip()
+    if not s:
+        return ''
+    m = WEEK_RE.match(s)
+    if m:
+        wk = int(m.group(1))
+        if 1 <= wk <= 53:
+            return s
+        raise HTTPException(400, '周数应在第 1 ~ 53 周之间')
+    m = re.match(r'^(\d{4})-(\d{1,2})$', s)
+    if m:
+        wk = int(m.group(2))
+        if 1 <= wk <= 53:
+            return '%s年第%d周' % (m.group(1), wk)
+    raise HTTPException(400, '周数格式应为「2026年第41周」')
+
+
 CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','workspace_id',
     'card_name','status','status_name','priority','creator','owner','cc','follower',
     'begin','due','completed','created','modified','description','attachment_count',
     'label','b_sort','entity_type','cover_setted','cover_info','is_filed','created_from',
     'date_status','due_time_ux','begin_date_status','begin_time_ux','comments',
-    'column_sort','board_status','board_creator','parent_id','pinned']
+    'column_sort','board_status','board_creator','parent_id','pinned',
+    'week_no','copy_from']
 
 app = FastAPI(title="财务工作事项平台", docs_url=None, redoc_url=None)
 
@@ -1138,7 +1179,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
           q: Optional[str] = None, page: int = 1, size: int = 50,
           parent_id: Optional[str] = None, card_id: Optional[str] = None,
           created_start: Optional[str] = None, created_end: Optional[str] = None,
-          cc: Optional[str] = None,
+          cc: Optional[str] = None, week: Optional[str] = None,
           username: str = Depends(require_auth), request: Request = None):
     if card_id:
         audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
@@ -1206,6 +1247,15 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
                     if any(nm in (r.get('cc') or '') for nm in cnames)]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]
+    # 周数维度：可选周数 = 当前范围（该看板下、权限可见）里出现过的周数集合。
+    # 在**应用周数筛选之前**统计 → 勾选某周后，其余周数仍在选项里（可随时改选）。
+    week_options = sorted({(r.get('week_no') or '').strip()
+                           for r in mine if (r.get('week_no') or '').strip()})
+    if week:
+        # 多值（逗号分隔 = 任一命中），与负责人/参与人筛选口径一致
+        wset = {x.strip() for x in week.split(',') if x.strip()}
+        if wset:
+            mine = [r for r in mine if (r.get('week_no') or '').strip() in wset]
     # 搜索：同时命中「事项」（名称/描述）与「板块」（板块名）
     # 板块名命中时，该板块下的全部事项都算命中；返回结果按 match_type 区分
     col_hit_keys = set()
@@ -1254,7 +1304,8 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         d['sub_count'] = sub_count.get(r['card_id'], 0)
         out.append(d)
     return {'total': total, 'page': page, 'size': size, 'cards': out,
-            'columns': cols_meta, 'column_hits': col_hits, 'q': q}
+            'columns': cols_meta, 'column_hits': col_hits, 'q': q,
+            'weeks': week_options}
 
 # ---------------- API：板块（新建 / 编辑 / 置顶）----------------
 class ColumnCreate(BaseModel):
@@ -1436,6 +1487,7 @@ class CardCreate(BaseModel):
     parent_id: str = ''
     board_name: str = ''      # 全新看板（尚无卡片）建首卡时由前端传入
     workspace_id: str = ''    # 同上，携带看板工作空间
+    week_no: str = ''         # 周数维度（如 2026年第41周）；留空 = 按创建日期自动计算
 
 class CommentReq(BaseModel):
     content: str
@@ -1464,6 +1516,14 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     # 板块级校验：账号被限定了某看板的板块白名单时，不得把事项移入不可见的板块
     if fields.get('column_id'):
         check_column_access(cur[0]['board_id'], str(fields.get('column_id')), username)
+    # 周数维度：格式校验；清空则回落到「按创建日期所在自然周」
+    if 'week_no' in fields:
+        raw = str(fields.get('week_no') or '').strip()
+        if raw:
+            fields['week_no'] = _norm_week(raw)
+        else:
+            crow = dbq('SELECT created FROM cards WHERE card_id=?', (card_id,))
+            fields['week_no'] = week_label(crow[0]['created']) if crow else ''
     cur_ver = cur[0]['version']
     # 子事项时间约束：起始 ≥ 父起始，截止 ≤ 父截止
     if cur[0]['parent_id']:
@@ -1548,6 +1608,8 @@ async def create_card(req: CardCreate, username: str = Depends(require_editor), 
     vals['creator'] = username
     vals['created'] = time.strftime('%Y-%m-%d %H:%M:%S')
     vals['parent_id'] = req.parent_id
+    # 周数维度：默认取**创建日期**所处的自然周；前端显式传入时以其为准（可手动调整）
+    vals['week_no'] = _norm_week(req.week_no or vals.get('week_no', '')) or week_label(vals['created'])
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
@@ -1581,6 +1643,285 @@ def create_board(req: BoardCreateReq, username: str = Depends(require_admin), re
         (bid, name, (req.workspace_id or '').strip(), (req.owner or username).strip(), req.sort, time.strftime('%Y-%m-%d %H:%M:%S')))
     audit_log(username, client_ip(request), 'board_create', f'看板 {bid}', f'新建看板：{name}', 'success')
     return {'ok': True, 'board_id': bid, 'board_name': name, 'workspace_id': (req.workspace_id or '').strip()}
+
+
+# ---------------- API：复制（看板 / 板块 / 主事项 / 子事项） ----------------
+# 统一约定：
+#   ① **副本是全新记录**，与原记录不共享任何数据（新的主键 + 独立的配置行）；
+#   ② 标题等关键字段在复制弹窗里可编辑，默认「原标题（副本）」；
+#   ③ 复制后必须**重新选择上级归属**（看板 → 板块 → 主事项），
+#      可选项仅限当前账号权限范围内的数据 —— 越权数据不可见、也不可选；
+#   ④ 服务端对「源记录可见性」与「目标归属可见性」各校验一次，
+#      前端过滤只是体验，服务端才是边界。
+COPY_SUFFIX = '（副本）'
+
+
+def _unique_copy_name(base: str, exists) -> str:
+    """副本名称去重：'X（副本）' 已存在时追加序号 → 'X（副本2）'。"""
+    name = base
+    i = 1
+    while exists(name):
+        i += 1
+        stem = base[:-1] if base.endswith('）') else base
+        name = '%s%d%s' % (stem, i, '）')
+    return name
+
+
+class CopyBoardReq(BaseModel):
+    board_name: str = ''       # 副本名称（留空 = 原名 +（副本））
+    dept: str = ''             # 归属重选：归属部门
+    dept_node_id: int = 0      # 归属重选：归属部门对应的架构节点 id
+    year: str = ''             # 归属重选：归属年份
+    attr: str = ''             # 归属重选：属性（日常/专项）
+    status: str = ''           # 归属重选：状态（启用/封存）
+    remark: str = ''
+
+
+@app.post('/api/boards/{board_id}/copy')
+async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(require_admin),
+                     request: Request = None):
+    """复制看板：生成一份**独立副本**（配置随附，内容不复制）。
+
+    · 副本与原看板不共享任何数据：新的 board_id + 独立的 board_config 行；
+    · 归属重选：归属部门 / 年份 / 属性 / 状态 / 备注 都能在复制弹窗里改；
+    · 看板的创建与配置都是管理员级操作 → 复制同样**仅管理员**可用。
+    """
+    src = dbq('SELECT * FROM boards WHERE board_id=?', (board_id,))
+    if not src:
+        raise HTTPException(404, '看板不存在')
+    src = dict(src[0])
+    cfg = dbq('SELECT * FROM board_config WHERE board_id=?', (board_id,))
+    cfg = dict(cfg[0]) if cfg else {}
+    # 归属重选：未填的项沿用原看板配置
+    dept = (req.dept or cfg.get('dept') or '').strip()
+    dept_node_id = req.dept_node_id or int(cfg.get('dept_node_id') or 0)
+    if dept_node_id or dept:
+        node_id, dept_name, _is_center = _resolve_dept_node(dept, dept_node_id)
+        dept_node_id = node_id
+        dept = dept_name or dept
+    year = (req.year or cfg.get('year') or '').strip()
+    attr = (req.attr or cfg.get('attr') or '日常').strip()
+    status = (req.status or cfg.get('status') or '启用').strip()
+    remark = req.remark if req.remark != '' else (cfg.get('remark') or '')
+    _validate_board_config(year, dept, attr, status)
+    name = (req.board_name or '').strip() or (src['board_name'] + COPY_SUFFIX)
+    if not name:
+        raise HTTPException(400, '看板名称不能为空')
+    new_bid = 'BCP' + str(int(time.time() * 1000))
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    try:
+        conn.execute('INSERT INTO boards (board_id, board_name, workspace_id, owner, sort, created_at, copy_from)'
+                     ' VALUES (?,?,?,?,?,?,?)',
+                     (new_bid, name, src['workspace_id'], username, src['sort'], now, board_id))
+        conn.execute('INSERT INTO board_config (board_id, year, dept, dept_node_id, attr, status, remark, created_at)'
+                     ' VALUES (?,?,?,?,?,?,?,?)',
+                     (new_bid, year, dept, dept_node_id, attr, status, remark, now))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    log_action('__board__', username, 'copy', f'复制看板 {name}')
+    audit_log(username, client_ip(request), 'board_copy', f'看板 {board_id}',
+              f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，年份 {year}，属性 {attr}）', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'board_id': new_bid, 'board_name': name, 'copy_from': board_id,
+            'dept': dept, 'dept_node_id': dept_node_id, 'year': year, 'attr': attr, 'status': status}
+
+
+class CopyColumnReq(BaseModel):
+    col_key: str = ''          # 源板块
+    board_id: str = ''         # 归属重选：目标看板
+    column_id: str = ''        # 归属重选：目标板块（该看板下可见的板块）
+    column_name: str = ''      # 副本名称（留空 = 原名 +（副本））
+    created_at: str = ''       # 副本创建日期（留空 = 今天）
+    nature: str = ''           # 性质（留空 = 沿用原板块）
+    year: str = ''             # 归属年份（留空 = 沿用原板块）
+
+
+@app.post('/api/columns/copy')
+async def copy_column(req: CopyColumnReq, username: str = Depends(require_editor),
+                      request: Request = None):
+    """复制板块：复制到**指定看板**（归属重选）。
+
+    权限三重校验：
+      ① 源板块必须对当前账号可见（否则无权复制）；
+      ② 目标看板必须可见且当前账号有编辑权；
+      ③ 目标板块（若指定）必须对该账号可见 —— 越权板块既不可见也不可选。
+    """
+    if not req.col_key:
+        raise HTTPException(400, '缺少源板块')
+    src = dbq('SELECT * FROM board_columns WHERE col_key=?', (req.col_key,))
+    if not src:
+        raise HTTPException(404, '源板块不存在')
+    src = dict(src[0])
+    # ① 源板块可见性
+    boards, columns = user_allowed(username)
+    if boards is not None and src['board_id'] not in boards:
+        raise HTTPException(403, '无权复制该板块')
+    if columns is not None and src['column_id']:
+        allowed = columns.get(src['board_id'])
+        if allowed is not None and src['column_id'] not in allowed:
+            raise HTTPException(403, '无权复制该板块')
+    # ② 目标看板：可见 + 可编辑
+    if not req.board_id:
+        raise HTTPException(400, '请选择目标看板')
+    check_board_access(req.board_id, username)
+    if not dbq('SELECT board_id FROM boards WHERE board_id=?', (req.board_id,)):
+        raise HTTPException(404, '目标看板不存在')
+    # ③ 目标板块可见性
+    if req.column_id:
+        check_column_access(req.board_id, req.column_id, username)
+    base_name = (req.column_name or '').strip() or (src['column_name'] + COPY_SUFFIX)
+    name = _unique_copy_name(base_name,
+                              lambda n: bool(dbq('SELECT col_key FROM board_columns WHERE col_key=?',
+                                                 (col_key(req.board_id, n),))))
+    key = col_key(req.board_id, name)
+    created = (req.created_at or '').strip() or time.strftime('%Y-%m-%d %H:%M:%S')
+    nature = (req.nature or src['nature'] or '日常').strip()
+    if nature not in COLUMN_NATURES:
+        raise HTTPException(400, '性质只能是「日常」或「专项」')
+    year = _norm_year(req.year) or (src['year'] or '') or created[:4]
+    new_cid = 'COL' + str(int(time.time() * 1000))
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, copy_from)'
+        ' VALUES (?,?,?,?,?,?,?,?,0,?)',
+        (key, new_cid, req.board_id, name, created, username, nature, year, src['col_key']))
+    log_action('__column__', username, 'copy', f'复制板块 {name}')
+    audit_log(username, client_ip(request), 'column_copy', f'板块 {src["col_key"]}',
+              f'复制板块「{src["column_name"]}」→「{name}」（目标看板 {req.board_id}）', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
+            'board_id': req.board_id, 'copy_from': src['col_key'],
+            'created_at': created, 'creator': username, 'nature': nature, 'year': year}
+
+
+class CopyCardReq(BaseModel):
+    card_id: str = ''          # 源事项（主事项或子事项）
+    board_id: str = ''         # 归属重选：目标看板
+    column_id: str = ''        # 归属重选：目标板块
+    column_name: str = ''      # 目标板块名（随目标板块带出）
+    parent_id: str = ''        # 归属重选：目标主事项（复制**子事项**时必填）
+    card_name: str = ''        # 副本标题（留空 = 原标题 +（副本））
+    week_no: str = ''          # 副本周数（留空 = 按副本创建日期计算）
+
+
+# 复制时随附的业务字段（运行时状态字段一律重置，不复制）
+CARD_COPY_FIELDS = ['owner', 'cc', 'follower', 'begin', 'due', 'description', 'priority',
+                     'label', 'entity_type', 'cover_setted', 'cover_info', 'b_sort',
+                     'column_sort', 'board_status', 'board_creator', 'workspace_id']
+
+
+@app.post('/api/cards/copy')
+async def copy_card(req: CopyCardReq, username: str = Depends(require_editor),
+                    request: Request = None):
+    """复制主事项 / 子事项：生成一份**全新记录**，并重新选择上级归属。
+
+    · 副本与原记录不共享任何数据（新的 card_id，字段独立）；
+    · 归属重选：目标看板 + 目标板块；**复制子事项时还必须重新选择所属主事项**；
+    · 权限：源事项必须可见；目标看板 / 目标板块 / 目标主事项必须在当前账号的
+      可见范围内，且当前账号具备编辑权 —— 越权数据不可见也不可选；
+    · 副本的状态重置为「未完成」，创建人 / 创建时间重置为当前账号与当前时间，
+      置顶、编辑锁、评论与子事项目录均不复制。
+    """
+    if not req.card_id:
+        raise HTTPException(400, '缺少源事项')
+    src = dbq('SELECT * FROM cards WHERE card_id=? AND deleted=0', (req.card_id,))
+    if not src:
+        raise HTTPException(404, '源事项不存在或已删除')
+    src = dict(src[0])
+    # ① 源事项可见性（check_card_access 内部同时校验看板可见性与存在性）
+    check_card_access(req.card_id, username)
+    # ② 目标看板：可见 + 可编辑
+    if not req.board_id:
+        raise HTTPException(400, '请选择目标看板')
+    check_board_access(req.board_id, username)
+    # ③ 目标板块可见性
+    if req.column_id:
+        check_column_access(req.board_id, req.column_id, username)
+    # ④ 层级：主事项 → 主事项；子事项 → 子事项（必须重新选择所属主事项）
+    is_sub = bool(src.get('parent_id'))
+    parent_id = ''
+    if is_sub:
+        if not req.parent_id:
+            raise HTTPException(400, '复制子事项必须重新选择所属主事项')
+        prow = dbq('SELECT * FROM cards WHERE card_id=? AND deleted=0', (req.parent_id,))
+        if not prow:
+            raise HTTPException(404, '目标主事项不存在或已删除')
+        prow = dict(prow[0])
+        if prow.get('parent_id'):
+            raise HTTPException(400, '目标主事项不能是子事项')
+        boards, columns = user_allowed(username)
+        if not perm_pass(prow, boards, columns):
+            raise HTTPException(403, '目标主事项不可见')
+        parent_id = req.parent_id
+    name = (req.card_name or '').strip() or (src['card_name'] + COPY_SUFFIX)
+    if not name:
+        raise HTTPException(400, '事项标题不能为空')
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    new_id = 'NC' + str(int(time.time() * 1000))
+    vals = {k: src.get(k, '') for k in CARD_COPY_FIELDS}
+    # 目标归属
+    vals['board_id'] = req.board_id
+    bmeta = dbq('SELECT board_name FROM boards WHERE board_id=?', (req.board_id,))
+    if bmeta:
+        vals['board_name'] = bmeta[0]['board_name']
+    else:
+        cmeta = dbq('SELECT board_name FROM cards WHERE board_id=? AND deleted=0 LIMIT 1', (req.board_id,))
+        vals['board_name'] = cmeta[0]['board_name'] if cmeta else req.board_id
+    vals['column_id'] = req.column_id or ''
+    vals['column_name'] = req.column_name or ''
+    # 运行时字段重置
+    vals['card_id'] = new_id
+    vals['card_name'] = name
+    vals['status'] = 'open'
+    vals['status_name'] = '未完成'
+    vals['creator'] = username
+    vals['created'] = now
+    vals['modified'] = ''
+    vals['completed'] = ''
+    vals['parent_id'] = parent_id
+    vals['version'] = 1
+    vals['deleted'] = 0
+    vals['pinned'] = 0
+    vals['copy_from'] = src['card_id']
+    # 周数：默认按**副本创建日期**所在自然周，可手动指定
+    vals['week_no'] = _norm_week(req.week_no) or week_label(now)
+    cols = [k for k in CARD_FIELDS if k in vals]
+    dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
+        [vals[k] for k in cols])
+    # 目标板块的元信息登记（目标看板下该板块可能尚未登记）
+    if vals['column_name'] and not parent_id:
+        ensure_column(req.board_id, vals['column_name'], vals['column_id'], username, now)
+    log_action(new_id, username, 'copy', f'复制自 {src["card_id"]}')
+    audit_log(username, client_ip(request), 'card_copy', f'事项 {src["card_id"]}',
+              f'复制事项「{src["card_name"]}」→「{name}」（目标看板 {req.board_id}'
+              + (f'，目标主事项 {parent_id}' if parent_id else '') + '）', 'success')
+    await ws_mgr.broadcast({'type': 'card_create', 'card_id': new_id,
+        'board_id': req.board_id, 'by': username}, exclude=username)
+    return {'ok': True, 'card_id': new_id, 'card_name': name, 'board_id': req.board_id,
+            'column_id': vals['column_id'], 'column_name': vals['column_name'],
+            'parent_id': parent_id, 'week_no': vals['week_no'], 'copy_from': src['card_id']}
+
+
+@app.get('/api/boards/{board_id}/columns')
+def board_columns_list(board_id: str, username: str = Depends(require_auth)):
+    """某看板下**当前账号可见**的板块清单（复制弹窗选目标板块用）。
+
+    可见性口径与 /api/cards 返回的板块列表完全一致（visible_columns），
+    因此**越权板块既不会出现在选项里，也不可能被提交**。
+    """
+    boards, columns = user_allowed(username)
+    if boards is not None and board_id not in boards:
+        raise HTTPException(403, '无权访问该看板')
+    counts = {}
+    for r in dbq("SELECT column_id, column_name, COUNT(*) n,"
+                 " SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) dn"
+                 " FROM cards WHERE deleted=0 AND board_id=? GROUP BY column_id, column_name",
+                 (board_id,)):
+        counts[col_key(board_id, r['column_name'])] = (r['n'], r['dn'] or 0)
+    out = visible_columns(username, boards, columns, board_id, counts)
+    return {'columns': out}
+
 
 @app.delete('/api/cards/{card_id}')
 async def delete_card(card_id: str, username: str = Depends(require_editor), request: Request = None):

@@ -326,13 +326,15 @@ button{font-family:inherit}
 .pin-btn.on{background:#fff7e6;border-color:#ffd591;color:#d46b08;font-weight:600}
 .add-item-btn{border:1px solid #b5d4f4;background:#e6f1fb;color:#185fa5;border-radius:12px;font-size:11.5px;padding:2px 10px;cursor:pointer;transition:all .15s;white-space:nowrap;font-weight:500;font-family:inherit}
 .add-item-btn:hover{background:#d6e9fb}
-/* 字段列：负责人 / 创建日期 / 截止日期
-   用 grid 三列定宽 → 负责人姓名长短、空值占位都不影响后续列的起始位置。
-   父事项行与子事项行共用同一套类名与同一套字段定义。 */
-.fcols{display:grid;grid-template-columns:166px 146px 178px;gap:0 10px;align-items:center;
-  width:520px;flex:0 0 520px}
+/* 字段列：负责人 / 周数 / 创建日期 / 截止日期
+   用 grid 定宽列 → 负责人姓名长短、周数文本长短、空值占位都不影响后续列的起始位置。
+   父事项行与子事项行共用同一套类名与同一套字段定义（列宽也必须完全一致，
+   否则父行与子行的字段列起点会错位）。 */
+.fcols{display:grid;grid-template-columns:166px 118px 146px 178px;gap:0 10px;align-items:center;
+  width:648px;flex:0 0 648px}
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .fcol-owner{color:var(--text2)}
+.fcol-week_no{color:var(--text2)}
 .fcol-created{color:var(--text3)}
 .fcol-due{color:var(--text2)}
 /* 空值占位：与「截止日期」同款（灰色 + 破折号），不占额外视觉重量 */
@@ -387,7 +389,7 @@ button{font-family:inherit}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
 /* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小） */
-.sub-node .fcols{grid-template-columns:166px 146px 178px;gap:0 10px;width:520px;flex:0 0 520px}
+.sub-node .fcols{grid-template-columns:166px 118px 146px 178px;gap:0 10px;width:648px;flex:0 0 648px}
 .sub-node .fcol{font-size:11px}
 /* 子事项行的尾部槽位：同样固定宽度 → 与父事项行同样的对齐逻辑 */
 /* 子事项行的尾部槽位宽度与父事项行**完全一致**（含 gap），
@@ -949,6 +951,11 @@ function goLogin(){
       </select>
       <button class="filter-select" id="personFilterBtn" onclick="openPersonFilterPicker(this)"
         style="cursor:pointer" title="按架构末级人员筛选（可套用为负责人或参与人条件）">👤 按人员筛选</button>
+      <span class="week-filter-wrap" id="weekFilterWrap">
+        <button type="button" class="filter-select" id="weekFilterBtn" onclick="toggleWeekFilterDrop(event)" style="cursor:pointer" title="按周数筛选（可多选）">📅 周数</button>
+        <div class="week-drop" id="weekFilterDrop" hidden></div>
+      </span>
+      <span id="weekFilterHint" style="font-size:12px;color:var(--text2)"></span>
       <span id="personFilterHint" style="font-size:12px;color:var(--text2)"></span>
       <span class="date-filter" id="dateFilterBox" title="按创建日期区间筛选（起止都留空 = 不限；只填一端 = 单边区间）">
         <input type="date" class="filter-date" id="createdStart" onchange="onDateFilterChange()" aria-label="创建日期 起">
@@ -1035,6 +1042,9 @@ function goLogin(){
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label>周数</label><input type="text" class="form-input" id="e_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可手动调整"></div>
+      </div>
       <div class="form-row" id="e_owner_row">
         <div class="form-group" id="e_owner_group"><label>负责人<span id="e_owner_opt" style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="e_owner"></div></div>
         <div class="form-group" id="e_cc_wrap"><label>参与人</label><div class="member-picker" id="e_cc"></div></div>
@@ -1053,6 +1063,7 @@ function goLogin(){
       </div>
     </div>
     <div class="modal-footer">
+      <button class="btn-default" id="e_copy_btn" style="color:var(--primary);border-color:var(--primary)" onclick="copyCurrentCard()" title="复制该事项（副本需重新选择板块 / 看板归属）">📋 复制</button>
       <button class="btn-default" style="color:var(--danger);border-color:var(--danger)" onclick="deleteCard()">删除</button>
       <button class="btn-default" onclick="closeEdit()">取消</button>
       <button class="btn-primary" onclick="saveEdit()">保存</button>
@@ -1078,6 +1089,7 @@ function goLogin(){
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="n_begin"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="n_due"></div>
       </div>
+      <div class="form-group"><label>周数</label><input type="text" class="form-input" id="n_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可手动调整"></div>
       <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
       <div class="form-group" id="n_cc_group"><label>参与人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_cc"></div></div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
@@ -1105,6 +1117,46 @@ function goLogin(){
       <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。</div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" id="c_submit" onclick="saveColumn()">创建板块</button></div>
+  </div>
+</div>
+
+<!-- 复制弹窗：看板 / 板块 / 主事项 / 子事项 共用
+     · 标题等关键字段可编辑，默认「原标题（副本）」
+     · 归属重选：目标看板 → 目标板块 →（子事项）所属主事项
+     · 选项来源全部走**权限过滤后的接口**（/api/me、/api/boards/{id}/columns、/api/cards），
+       越权数据不可见、也不可选；服务端还会再校验一次 -->
+<div class="modal-overlay" id="copyModal" style="display:none">
+  <div class="modal" style="width:min(560px,94vw)">
+    <div class="modal-header"><h2 id="cp_title">复制</h2><button class="modal-close" onclick="closeModal('copyModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label id="cp_name_label">名称</label><input type="text" class="form-input" id="cp_name"></div>
+      <div class="form-group" id="cp_week_wrap"><label>周数</label><input type="text" class="form-input" id="cp_week" placeholder="例如：2026年第41周" title="默认按创建日期所处的自然周（周一~周日）计算，可手动调整"></div>
+      <!-- 归属重选 -->
+      <div class="form-group" id="cp_board_wrap"><label>目标看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_board"></select></div>
+      <div class="form-group" id="cp_col_wrap"><label>目标板块 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_col"></select></div>
+      <div class="form-group" id="cp_parent_wrap"><label>所属主事项 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_parent"></select></div>
+      <!-- 看板复制的归属配置 -->
+      <div id="cp_board_cfg" style="display:none;flex-direction:column;gap:10px">
+        <div class="form-group"><label>归属部门 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_dept"></select></div>
+        <div class="form-row">
+          <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><select class="form-select" id="cp_year"></select></div>
+          <div class="form-group"><label>属性</label><select class="form-select" id="cp_attr"><option value="日常">日常</option><option value="专项">专项</option></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>状态</label><select class="form-select" id="cp_status"><option value="启用">启用</option><option value="封存">封存</option></select></div>
+        </div>
+      </div>
+      <!-- 板块复制的元信息 -->
+      <div id="cp_col_cfg" style="display:none;flex-direction:column;gap:10px">
+        <div class="form-row">
+          <div class="form-group"><label>创建日期</label><input type="date" class="form-input" id="cp_created"></div>
+          <div class="form-group"><label>性质</label><select class="form-select" id="cp_nature"><option value="日常">日常</option><option value="专项">专项</option></select></div>
+        </div>
+        <div class="form-group"><label>归属年份</label><input type="text" class="form-input" id="cp_col_year" maxlength="4" placeholder="留空 = 沿用原板块"></div>
+      </div>
+      <div class="cp-tip" id="cp_tip"></div>
+    </div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('copyModal')">取消</button><button class="btn-primary" id="cp_submit" onclick="submitCopy()">创建副本</button></div>
   </div>
 </div>
 
@@ -1344,6 +1396,18 @@ function goLogin(){
 .bc-del-single{border-color:var(--danger)!important;color:var(--danger)}
 .bc-del-single:hover{border-color:var(--danger)!important;color:var(--danger);background:#fff1f0}
 .bc-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
+/* 复制弹窗：归属重选的级联说明 + 复制按钮 */
+.cp-tip{font-size:12px;color:var(--text3);line-height:1.7;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 12px}
+.cp-copy-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:2px 9px;font-size:11.5px;border-radius:12px;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
+.cp-copy-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
+/* 周数筛选（多选）：下拉 + 勾选，与「年份」多选同一套交互 */
+.week-filter-wrap{position:relative;display:inline-flex;align-items:center}
+.week-drop{position:absolute;top:calc(100% + 6px);left:0;z-index:60;min-width:150px;max-height:240px;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);padding:4px 0}
+.week-drop[hidden]{display:none}
+.week-opt{display:flex;align-items:center;gap:7px;padding:6px 12px;font-size:12.5px;color:var(--text);cursor:pointer;white-space:nowrap}
+.week-opt:hover{background:#f0f5ff;color:var(--primary)}
+.week-opt input{width:14px;height:14px;accent-color:var(--primary);cursor:pointer;margin:0}
+.week-opt .wo-tick{width:12px;text-align:center;color:var(--primary);font-size:12px;font-weight:600}
 .badge-active{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:rgba(0,45,116,.10);color:#002D74;border:1px solid rgba(0,45,116,.30)}
 .badge-locked{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff7e6;color:var(--warning);border:1px solid #ffd591}
 .badge-muted{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:var(--bg);color:var(--text3);border:1px solid var(--border)}
@@ -2918,8 +2982,68 @@ async function reload(page){
   if(cc)ps.set('cc',cc);
   if(ds)ps.set('created_start',ds);
   if(de)ps.set('created_end',de);
+  if(WEEK_SEL.size)ps.set('week',[...WEEK_SEL].join(','));   // 周数多选（任一命中）
   const d=await api('/api/cards?'+ps);
+  renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（已按权限过滤），不随勾选收缩
   renderBoard(d.cards,d.columns,q,d.column_hits);
+}
+// ---------- 周数筛选（多选） ----------
+// 形态：工具栏里的「📅 周数」按钮 + 勾选式下拉（与「年份」多选同一套交互）。
+// 选项来源 = /api/cards 返回的 weeks（当前看板下、**当前账号可见**的事项里出现过的周数），
+// 因此越权事项的周数不会出现在选项里。
+let WEEK_OPTIONS=[];      // 当前看板可选的周数
+let WEEK_SEL=new Set();   // 已选周数（多选，任一命中）
+let _weekDropOpen=false;
+function renderWeekFilter(weeks){
+  const list=(weeks||[]).filter(Boolean).slice().sort();
+  // 当前看板已不存在的周数（换看板 / 被删）→ 丢弃已选项，避免筛出空列表
+  if(WEEK_SEL.size){
+    const keep=[...WEEK_SEL].filter(w=>list.includes(w));
+    WEEK_SEL=new Set(keep);
+  }
+  WEEK_OPTIONS=list;
+  paintWeekFilter();
+}
+function paintWeekFilter(){
+  const btn=document.getElementById('weekFilterBtn');
+  if(btn){
+    btn.textContent=WEEK_SEL.size?('📅 周数('+WEEK_SEL.size+')'):'📅 周数';
+    btn.style.color=WEEK_SEL.size?'var(--primary)':'';
+  }
+  const hint=document.getElementById('weekFilterHint');
+  if(hint)hint.textContent=WEEK_SEL.size?([...WEEK_SEL].sort().join('、')):'';
+  const drop=document.getElementById('weekFilterDrop');
+  if(!drop)return;
+  if(!_weekDropOpen||!WEEK_OPTIONS.length){drop.hidden=true;drop.innerHTML='';return}
+  drop.hidden=false;
+  drop.innerHTML=WEEK_OPTIONS.map(w=>{
+    const on=WEEK_SEL.has(w);
+    return `<label class="week-opt"><input type="checkbox"${on?' checked':''} data-pick-week="${esc(w)}">`
+      +`<span class="wo-tick">${on?'✓':''}</span><span>${esc(w)}</span></label>`;
+  }).join('')
+    +`<label class="week-opt" data-week-clear="1"><span class="wo-tick"></span><span style="color:var(--text3)">清空全部</span></label>`;
+}
+function toggleWeekFilterDrop(ev){
+  if(ev)ev.stopPropagation();
+  if(!WEEK_OPTIONS.length){toast('当前看板没有可按周数筛选的事项');return}
+  _weekDropOpen=!_weekDropOpen;
+  paintWeekFilter();
+}
+function closeWeekFilterDrop(){
+  if(!_weekDropOpen)return;
+  _weekDropOpen=false;
+  paintWeekFilter();
+}
+function onWeekFilterClick(ev){
+  const t=ev.target;if(!t||!t.dataset)return;
+  if(t.dataset.pickWeek){
+    const w=t.dataset.pickWeek;
+    if(WEEK_SEL.has(w))WEEK_SEL.delete(w);else WEEK_SEL.add(w);
+    paintWeekFilter();reload(1);return;
+  }
+  if(t.dataset.weekClear){
+    WEEK_SEL=new Set();paintWeekFilter();reload(1);
+  }
 }
 // ---------- 按人员筛选（架构树末级人员） ----------
 // 所选人员直接套用为【负责人】或【参与人】筛选条件。
@@ -3081,6 +3205,7 @@ function renderBoard(cards,cols,q,colHits){
           <button class="fold-btn" onclick="foldItems('wg_${i}',false)" title="折叠该板块下各事项的子事项目录">折叠事项</button>
           <button class="fold-btn" onclick="foldItems('wg_${i}',true)" title="展开该板块下各事项的子事项目录">展开事项</button>
           <button class="pin-btn ${pinned?'on':''}" onclick="toggleColumnPin('${esc(colKey)}',${pinned?0:1})" title="${pinned?'取消置顶':'置顶该板块（在本看板内优先显示）'}">${pinned?'📌 已置顶':'📌 板块置顶'}</button>
+          <button class="cp-copy-btn" data-copy='${esc(JSON.stringify({col_key:colKey,column_name:k,board_id:boardId,column_id:meta?(meta.column_id||''):'',nature:meta?(meta.nature||'日常'):'日常',year:year,created_at:meta?(meta.created_at||''):''}))}' onclick="openCopyModal('column',JSON.parse(this.dataset.copy))" title="复制该板块到其它看板（归属重选）">📋 复制</button>
           <button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button>
         </div>
       </div>
@@ -3292,13 +3417,15 @@ function fmtDate(v){
   if(!m)return s;
   return m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0');
 }
-// ---------- 字段列：负责人 / 创建日期 / 截止日期 ----------
+// ---------- 字段列：负责人 / 周数 / 创建日期 / 截止日期 ----------
 // 单一数据源：父事项与子事项共用 fieldItems()，
 // 字段集合与顺序由这里定义，渲染器只负责排版 → 两者必然一致，不会各写一份而漂移。
 // 负责人与父事项**各自独立取值**，不做任何父子关联或继承。
+// 「周数」放在创建信息列（创建日期）**之前** —— 它本身就是按创建日期算出来的维度。
 function fieldItems(o){
   return [
     {key:'owner',   label:'负责人',   value:String(o.owner||'').trim()},
+    {key:'week_no', label:'周数',     value:String(o.week_no||'').trim()},
     {key:'created', label:'创建日期', value:fmtDate(o.created)},
     {key:'due',     label:'截止日期', value:fmtDate(o.due)},
   ];
@@ -3338,9 +3465,9 @@ function cardItem(c,seq){
     :'';
   // 列表最前方只保留顺序序号（每个板块独立从 1 开始，按当前排序规则连续排列）
   const seqHtml=seq?`<span class="item-seq ${pinned?'pin':''}" title="本板块第 ${seq} 项">${seq}</span>`:'';
-  // 负责人 / 创建日期 / 截止日期 —— 三列固定网格，跨行纵向对齐。
+  // 负责人 / 周数 / 创建日期 / 截止日期 —— 四列固定网格，跨行纵向对齐。
   // 负责人与子事项**各自独立取值**，不做父子关联或继承。
-  const colsHtml=fieldCols({owner:c.owner,created:c.created,due:c.due});
+  const colsHtml=fieldCols({owner:c.owner,week_no:c.week_no,created:c.created,due:c.due});
   return `<div class="item-wrap" id="iw_${c.card_id}">
   <div class="item-card ${lockedByOther?'locked':''}">
     ${subArrow}
@@ -3401,9 +3528,9 @@ function subNodeHtml(n,level){
   const open=!!SUBTREE_OPEN[n.card_id];
   const od=n.due&&n.status!=='done'&&n.due<todayStr();
   // 子事项行与主事项行同构：圆点 → 标题 → 逾期 → 字段列 → 状态标签 → 置顶
-  // 字段列复用父事项的 fieldCols() → 字段集合与顺序天然一致
+  // 字段列复用父事项的 fieldCols() → 字段集合与顺序天然一致（含周数列）
   // 负责人与父事项**各自独立取值**，子事项不会继承父事项负责人
-  const colsHtml=fieldCols({owner:n.owner,created:n.created,due:n.due});
+  const colsHtml=fieldCols({owner:n.owner,week_no:n.week_no,created:n.created,due:n.due});
   return `<div class="sub-node ${n.status==='done'?'done':''}">
     <span class="s-chev leaf">▶</span>
     <span class="s-dot"></span>
@@ -3623,6 +3750,7 @@ async function openEdit(id,preloaded){
   if(!await lockCard(id))return;
   editing=id;
   EDIT_IS_SUB=!!c.parent_id;
+  window._editCard=c;          // 复制入口要用的当前事项快照
   window._editOwner=(c.owner||'').split(';').filter(Boolean);
   // 子事项同样有参与人（与主事项对标）：cc 是 cards 表的标准字段，父子共用一张表
   window._editCc=(c.cc||'').split(';').filter(Boolean);
@@ -3634,6 +3762,7 @@ async function openEdit(id,preloaded){
   document.getElementById('e_begin').value=c.begin||'';
   document.getElementById('e_due').value=c.due||'';
   document.getElementById('e_desc').value=c.description||'';
+  document.getElementById('e_week').value=c.week_no||'';
   document.getElementById('e_board').innerHTML=ME.boards.map(b=>`<option value="${b.board_id}" ${b.board_id===c.board_id?'selected':''}>${esc(b.board_name)}</option>`).join('');
   // 子事项模式：只隐藏「所属看板」（子事项继承父看板）；「参与人」与主事项一样保留
   document.getElementById('e_board_wrap').style.display=EDIT_IS_SUB?'none':'';
@@ -3713,6 +3842,10 @@ async function saveEdit(){
     due:document.getElementById('e_due').value,
     description:document.getElementById('e_desc').value,
   };
+  // 周数维度：格式校验（清空 = 回落到按创建日期自动计算）
+  const wk=(document.getElementById('e_week').value||'').trim();
+  if(wk&&!/^\d{4}年第(\d{1,2})周$/.test(wk)){toast('周数格式应为「2026年第41周」');return}
+  fields.week_no=wk;
   // 参与人：主事项与子事项都有（对标主事项，cc 是 cards 表的标准字段）
   fields.cc=(window._editCc||[]).join(';');
   try{
@@ -3762,6 +3895,7 @@ async function openNewModal(boardId,colKey){
   document.getElementById('n_board').innerHTML=boards.map(b=>`<option value="${b.board_id}">${esc(b.board_name)}</option>`).join('');
   document.getElementById('n_name').value='';document.getElementById('n_desc').value='';
   document.getElementById('n_begin').value='';document.getElementById('n_due').value='';
+  document.getElementById('n_week').value=cpWeekOf();   // 周数默认 = 当前自然周
   NEW_CARD_STATUS='open';
   document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
   NEW_CARD_OWNER=[];initPersonPicker('n_owner',NEW_CARD_OWNER);
@@ -3822,6 +3956,7 @@ async function openNewSubModal(parentId){
   document.getElementById('n_desc').value='';
   document.getElementById('n_begin').value='';
   document.getElementById('n_due').value='';
+  document.getElementById('n_week').value=cpWeekOf();   // 子事项同样有周数维度
   NEW_CARD_STATUS='open';
   document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
   NEW_CARD_OWNER=[];initPersonPicker('n_owner',NEW_CARD_OWNER);
@@ -3851,7 +3986,10 @@ async function createCard(){
       cc:NEW_CARD_CC.join(';'),
       begin:nb,due:nd,
     };
-    const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:fields};
+    // 周数：格式校验后提交（留空 = 后端按创建日期自动算）
+    const nw=(document.getElementById('n_week').value||'').trim();
+    if(nw&&!/^\d{4}年第(\d{1,2})周$/.test(nw)){toast('周数格式应为「2026年第41周」');return}
+    const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:fields,week_no:nw};
     if(NEW_CARD_COL){
       body.column_id=NEW_CARD_COL.column_id||'';
       fields.column_name=NEW_CARD_COL.column_name;
@@ -3864,9 +4002,11 @@ async function createCard(){
 async function createSubCard(card_name){
   const p=NEW_SUB_PARENT;
   if(!p){toast('父事项上下文已失效，请重新打开');return}
+  const nw=(document.getElementById('n_week').value||'').trim();
+  if(nw&&!/^\d{4}年第(\d{1,2})周$/.test(nw)){toast('周数格式应为「2026年第41周」');return}
   try{
     await api('/api/cards',{method:'POST',body:JSON.stringify({
-      parent_id:p.parent_id,board_id:'',card_name,
+      parent_id:p.parent_id,board_id:'',card_name,week_no:nw,
       fields:{
         status:NEW_CARD_STATUS,status_name:statusText(NEW_CARD_STATUS),
         owner:NEW_CARD_OWNER.join(';'),
@@ -3966,6 +4106,186 @@ async function saveColumn(){
       reload(1);renderProgress();
     }
   }catch(e){toast(e.message)}
+}
+// 复制当前编辑中的事项（主事项 / 子事项）：归属重选在复制弹窗里做
+function copyCurrentCard(){
+  const c=window._editCard;
+  if(!c){toast('请先打开事项');return}
+  const kind=c.parent_id?'sub':'card';
+  openCopyModal(kind,{
+    card_id:c.card_id, card_name:c.card_name||'', week_no:c.week_no||'',
+    board_id:c.board_id, column_id:c.column_id||'', column_name:c.column_name||'',
+    parent_id:c.parent_id||''
+  });
+}
+// ---------- 复制：看板 / 板块 / 主事项 / 子事项 ----------
+// 统一入口：openCopyModal(kind, payload)
+//   kind='board'  payload={board_id, board_name, year, dept, dept_node_id, attr, status}
+//   kind='column' payload={col_key, column_name, board_id, column_id, nature, year, created_at}
+//   kind='card'   payload={card_id, card_name, week_no, board_id, column_id, column_name}
+//   kind='sub'    payload={card_id, card_name, week_no, parent_id, board_id, column_id, column_name}
+//
+// ★ 权限过滤：所有「目标归属」选项都来自**已按权限过滤的接口**
+//   · 目标看板：/api/me 的 boards（可见看板）
+//   · 目标板块：/api/boards/{id}/columns（visible_columns，可见板块）
+//   · 所属主事项：/api/cards（列表接口本身已按可见性过滤）
+//   越权数据既不会出现在下拉里，也提交不上去（服务端还会再校验一次）。
+let COPY_CTX=null;
+const COPY_SUFFIX='（副本）';
+function cpWeekOf(d){                       // 本地算当前自然周（周一~周日），用于默认值
+  const dt=(d||new Date());
+  const t=new Date(Date.UTC(dt.getFullYear(),dt.getMonth(),dt.getDate()));
+  const day=t.getUTCDay()||7;              // 周一=1 … 周日=7
+  t.setUTCDate(t.getUTCDate()+4-day);       // 移到本周周四（ISO 规则：周四决定归属年）
+  const ys=new Date(Date.UTC(t.getUTCFullYear(),0,1));
+  const week=Math.ceil(((t-ys)/86400000+1)/7);
+  return t.getUTCFullYear()+'年第'+week+'周';
+}
+async function openCopyModal(kind,payload){
+  if(!ME){toast('未登录');return}
+  if(kind!=='board'&&!ME.can_edit){toast('无编辑权限');return}
+  if(kind==='board'&&!ME.is_admin){toast('仅管理员可复制看板');return}
+  COPY_CTX={kind:kind,payload:payload||{}};
+  const P=COPY_CTX.payload;
+  const show=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?'':'none'};
+  show('cp_board_wrap',kind==='column'||kind==='card'||kind==='sub');
+  show('cp_col_wrap',kind==='card'||kind==='sub');
+  show('cp_parent_wrap',kind==='sub');
+  show('cp_week_wrap',kind==='card'||kind==='sub');
+  show('cp_board_cfg',kind==='board');
+  show('cp_col_cfg',kind==='column');
+  const titleEl=document.getElementById('cp_name_label');
+  const tipEl=document.getElementById('cp_tip');
+  if(kind==='board'){
+    document.getElementById('cp_title').textContent='📋 复制看板';
+    titleEl.textContent='看板名称';
+    document.getElementById('cp_name').value=(P.board_name||'')+COPY_SUFFIX;
+    // 归属部门选项：与看板管理同一份（架构层级）
+    const depts=(typeof BC_DEPTS!=='undefined'&&BC_DEPTS.length)?BC_DEPTS:[];
+    document.getElementById('cp_dept').innerHTML=depts.map(d=>
+      `<option value="${esc(d.name)}"${P.dept===d.name?' selected':''}>${esc(bcDeptLabel(d))}</option>`).join('');
+    const yrs=(typeof BC_YEARS!=='undefined')?BC_YEARS:['2025','2026','2027','2028','2029','2030'];
+    document.getElementById('cp_year').innerHTML=yrs.map(y=>
+      `<option value="${y}"${P.year===y?' selected':''}>${y}</option>`).join('');
+    document.getElementById('cp_attr').value=P.attr||'日常';
+    document.getElementById('cp_status').value=P.status||'启用';
+    tipEl.innerHTML='副本是<b>独立的看板记录</b>（新的看板 ID），归属部门等配置随附并可修改。<b>不复制</b>原看板下的板块与事项 —— 需要的话请再分别复制板块 / 事项。';
+  }else if(kind==='column'){
+    document.getElementById('cp_title').textContent='📋 复制板块';
+    titleEl.textContent='板块名称';
+    document.getElementById('cp_name').value=(P.column_name||'')+COPY_SUFFIX;
+    document.getElementById('cp_created').value=(P.created_at||'').slice(0,10)||cpToday();
+    document.getElementById('cp_nature').value=P.nature||'日常';
+    document.getElementById('cp_col_year').value=P.year||'';
+    fillCopyBoards(P.board_id);
+    tipEl.innerHTML='副本会新建在<b>所选看板</b>下（归属重选），与原板块<b>不共享任何数据</b>；<b>不复制</b>该板块下的事项。';
+  }else{
+    document.getElementById('cp_title').textContent=(kind==='sub'?'📋 复制子事项':'📋 复制主事项');
+    titleEl.textContent='事项标题';
+    document.getElementById('cp_name').value=(P.card_name||'')+COPY_SUFFIX;
+    document.getElementById('cp_week').value=P.week_no||cpWeekOf();
+    fillCopyBoards(P.board_id);
+    tipEl.innerHTML='副本是<b>全新事项</b>（新的事项 ID），与原事项<b>不共享任何数据</b>；状态重置为「未完成」，创建人 / 创建时间重置为当前账号与当前时间，评论、子事项目录、附件均不复制。';
+  }
+  document.getElementById('copyModal').style.display='flex';
+  if(kind==='column'||kind==='card'||kind==='sub'){
+    await loadCopyColumns();
+    if(kind==='sub')await loadCopyParents();
+  }
+}
+function cpToday(){
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+}
+// 目标看板下拉：来源 = /api/me 的 boards（**已按权限过滤**）
+function fillCopyBoards(selected){
+  const sel=document.getElementById('cp_board');
+  const list=(ME&&ME.boards)||[];
+  sel.innerHTML=list.map(b=>`<option value="${esc(b.board_id)}"${b.board_id===selected?' selected':''}>${esc(b.board_name||b.board_id)}</option>`).join('');
+  sel.onchange=()=>{loadCopyColumns();if(COPY_CTX&&COPY_CTX.kind==='sub')loadCopyParents()};
+}
+// 目标板块下拉：来源 = /api/boards/{id}/columns（**已按权限过滤**，越权板块不出现）
+async function loadCopyColumns(){
+  const bid=document.getElementById('cp_board').value;
+  const sel=document.getElementById('cp_col');
+  if(!bid){sel.innerHTML='';return}
+  try{
+    const d=await api('/api/boards/'+encodeURIComponent(bid)+'/columns');
+    const cols=d.columns||[];
+    sel.innerHTML=cols.map(c=>`<option value="${esc(c.column_id)}" data-cname="${esc(c.column_name)}">${esc(c.column_name)}</option>`).join('');
+    if(!cols.length){
+      sel.innerHTML='<option value="">（该看板下没有可见板块）</option>';
+    }
+  }catch(e){sel.innerHTML='<option value="">（加载失败）</option>'}
+}
+// 所属主事项下拉：来源 = /api/cards（列表接口本身**已按权限过滤**）
+async function loadCopyParents(){
+  const bid=document.getElementById('cp_board').value;
+  const sel=document.getElementById('cp_parent');
+  const colEl=document.getElementById('cp_col');
+  const colName=(colEl.selectedOptions&&colEl.selectedOptions[0]&&colEl.selectedOptions[0].dataset.cname)||'';
+  if(!bid){sel.innerHTML='';return}
+  try{
+    const qs='board_id='+encodeURIComponent(bid)+'&size=200'+(colName?('&column='+encodeURIComponent(colName)):'');
+    const d=await api('/api/cards?'+qs);
+    const cards=(d.cards||[]).filter(c=>!c.parent_id);   // 只能是主事项
+    sel.innerHTML=cards.map(c=>`<option value="${esc(c.card_id)}">${esc(c.card_name)}</option>`).join('');
+    if(!cards.length)sel.innerHTML='<option value="">（该板块下没有可见主事项）</option>';
+  }catch(e){sel.innerHTML='<option value="">（加载失败）</option>'}
+}
+async function submitCopy(){
+  if(!COPY_CTX)return;
+  const kind=COPY_CTX.kind,P=COPY_CTX.payload;
+  const name=document.getElementById('cp_name').value.trim();
+  if(!name){toast('名称不能为空');return}
+  const btn=document.getElementById('cp_submit');
+  btn.disabled=true;
+  try{
+    if(kind==='board'){
+      const dept=document.getElementById('cp_dept').value;
+      const dn=((typeof BC_DEPTS!=='undefined')?BC_DEPTS:[]).find(d=>d.name===dept)||{};
+      const r=await api('/api/boards/'+encodeURIComponent(P.board_id)+'/copy',{method:'POST',body:JSON.stringify({
+        board_name:name, dept:dept, dept_node_id:dn.id||0,
+        year:document.getElementById('cp_year').value,
+        attr:document.getElementById('cp_attr').value,
+        status:document.getElementById('cp_status').value})});
+      toast('看板副本已创建：'+(r.board_name||name));
+      closeModal('copyModal');
+      if(typeof loadBoardConfig==='function')loadBoardConfig();
+      ME=await api('/api/me');
+      renderTabs();ensureInitialSelection();
+    }else if(kind==='column'){
+      const bid=document.getElementById('cp_board').value;
+      if(!bid){toast('请选择目标看板');return}
+      const r=await api('/api/columns/copy',{method:'POST',body:JSON.stringify({
+        col_key:P.col_key, board_id:bid, column_name:name,
+        created_at:document.getElementById('cp_created').value,
+        nature:document.getElementById('cp_nature').value,
+        year:document.getElementById('cp_col_year').value.trim()})});
+      toast('板块副本已创建：'+(r.column_name||name));
+      closeModal('copyModal');
+      if(curBoard!==bid){curBoard=bid;ensureDeptOpen(bid)}
+      reload(1);renderProgress();
+    }else{
+      const bid=document.getElementById('cp_board').value;
+      if(!bid){toast('请选择目标看板');return}
+      const colEl=document.getElementById('cp_col');
+      const opt=colEl.selectedOptions&&colEl.selectedOptions[0];
+      const body={card_id:P.card_id, board_id:bid, column_id:colEl.value||'', column_name:(opt&&opt.dataset.cname)||'',
+        card_name:name, week_no:document.getElementById('cp_week').value.trim()};
+      if(kind==='sub'){
+        const pid=document.getElementById('cp_parent').value;
+        if(!pid){toast('请选择所属主事项');return}
+        body.parent_id=pid;
+      }
+      const r=await api('/api/cards/copy',{method:'POST',body:JSON.stringify(body)});
+      toast((kind==='sub'?'子事项':'事项')+'副本已创建：'+(r.card_name||name));
+      closeModal('copyModal');
+      if(curBoard!==bid){curBoard=bid;ensureDeptOpen(bid)}
+      reload(1);renderProgress();
+    }
+  }catch(e){toast(e.message)}
+  finally{btn.disabled=false}
 }
 // ---------- 新建看板（管理员） ----------
 function openBoardModal(){
@@ -4451,7 +4771,7 @@ async function openDetail(id){
   // 状态不在元信息里重复呈现 —— 由头部的状态按钮统一承载，避免多处出现导致不一致
   document.getElementById('d_meta').innerHTML=
     `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b><br>`+
-    `负责人：<b>${esc(c.owner||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>`;
+    `负责人：<b>${esc(c.owner||'—')}</b>　周数：<b>${esc(c.week_no||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>`;
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
   document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
@@ -4675,6 +4995,10 @@ document.addEventListener('click',e=>{
   if(t.closest('#yearFilter')||t.closest('#yearDrop')){onYearFilterClick(e);return}
   // 点其它地方 → 收起「＋ 年份」下拉
   closeYearDrop();
+  // 周数筛选下拉：下拉内部点击 → 勾选 / 清空；点别处 → 收起
+  if(t.closest('#weekFilterDrop')){onWeekFilterClick(e);return}
+  if(t.closest('#weekFilterWrap'))return;
+  closeWeekFilterDrop();
 });
 // 评论 @ 提及：候选项点击 + 已插入 chip 的移除
 document.addEventListener('click',e=>{
@@ -6235,9 +6559,14 @@ function renderBoardList(){
             : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
     const sel = (BC_SELECTED && BC_SELECTED.board_id===b.board_id) ? ' active':'';
     const deptTip = b.dept?('归属：'+esc(b.dept)):'';
+    // 复制入口（仅管理员：看板的新建与配置都是管理员级操作）
+    // 参数用 JSON 塞进 data-* 再解析 —— 名称里带引号也不会截断内联 JS
+    const copyBtn=(ME&&ME.is_admin)
+      ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',year:b.year||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||''}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（归属部门可重选）">📋 复制</button>'
+      :'';
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+'</div>'
+      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
       +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
