@@ -1217,7 +1217,7 @@ function goLogin(){
             <div class="bc-filter-row bc-opbar" style="grid-column:1/-1">
               <div class="bc-opbar-btns">
                 <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的板块）">全选</button>
-                <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选板块的配置（需两次确认）" disabled>删除所选 0 个</button>
+                <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选板块的配置（需两次确认）" disabled>删除所选</button>
               </div>
               <span class="bc-opbar-count">已选 <b id="bcPickCount">0</b> 个</span>
             </div>
@@ -5330,9 +5330,10 @@ function bcPaintPick(){
   const pb=document.getElementById('bcPickAllBtn');
   if(pb)pb.textContent=allOn?'取消全选':'全选';
   // 批量删除按钮：与全选按钮同排，样式统一；未勾选时禁用
+  // 文案不带个数 —— 个数由右侧「已选 N 个」统一显示，避免重复
   const db=document.getElementById('bcDelBtn');
   if(db){
-    db.textContent='删除所选 '+BC_SEL.size+' 个';
+    db.textContent='删除所选';
     db.disabled=BC_SEL.size===0;
   }
 }
