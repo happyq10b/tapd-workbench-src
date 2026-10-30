@@ -2074,38 +2074,41 @@ function renderProfileAvatarBox(){
   box.innerHTML=`<img src="${src}" alt="头像">`;
   renderProfileAvatarHint();
 }
-// 头像区提示：未上传时明确标注「当前使用默认占位图」
-function renderProfileAvatarHint(text){
+// 头像区提示：**上传说明常驻**，状态信息只作为后缀追加。
+// （早期实现用状态文案整体覆盖，导致「已裁切」时上传说明整条消失）
+function renderProfileAvatarHint(state){
   const hint=document.getElementById('profileAvatarHint');
   if(!hint)return;
-  if(text){ hint.innerHTML='<span class="hint-text">'+text+'</span>'; return; }
   const isDefault=!PROFILE_AVATAR;
+  const base='点击上传（JPG/PNG/GIF/WebP，≤512KB）';
   hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span>':'')
-    +'<span class="hint-text">点击上传（JPG/PNG/GIF/WebP，≤512KB）</span>';
+    +'<span class="hint-text">'+base+(state?' · '+state:'')+'</span>';
 }
 // 选择头像文件（前端先做类型/大小校验，避免白跑一趟接口）
 function pickProfileAvatar(inp){
   const f=inp&&inp.files&&inp.files[0];
   if(!f)return;
-  const hint=document.getElementById('profileAvatarHint');
   if(PROFILE_AVATAR_TYPES.indexOf(f.type)<0){
-    if(hint)hint.textContent='仅支持 JPG / PNG / GIF / WebP 格式';
+    renderProfileAvatarHint('格式不支持');
+    toast('头像仅支持 JPG / PNG / GIF / WebP 格式');
     inp.value='';return;
   }
   if(f.size>PROFILE_MAX_IMG_BYTES){
-    if(hint)hint.textContent=`图片过大（${Math.round(f.size/1024)}KB），请压缩到 ${PROFILE_MAX_IMG_BYTES/1024}KB 以内`;
+    renderProfileAvatarHint('图片过大');
+    toast(`头像图片过大（${Math.round(f.size/1024)}KB），请压到 ${PROFILE_MAX_IMG_BYTES/1024}KB 以内`);
     inp.value='';return;
   }
   const fr=new FileReader();
   fr.onload=()=>{
     // 选图后进入裁切器：拖动/缩放调整构图，确认后才写入
     openCropper('avatar',String(fr.result||''));
-    if(hint)hint.textContent='正在裁切…';
+    renderProfileAvatarHint('正在裁切…');
   };
   fr.onerror=()=>{
     PROFILE_AVATAR=ME&&ME.avatar?ME.avatar:'';
     renderProfileAvatarBox();
-    if(hint)hint.textContent='图片读取失败，请重新选择';
+    renderProfileAvatarHint('读取失败');
+    toast('图片读取失败，请重新选择');
   };
   fr.readAsDataURL(f);
 }
@@ -2238,11 +2241,11 @@ function confirmCrop(){
   if(CROP.target==='avatar'){
     PROFILE_AVATAR=dataUrl;
     renderProfileAvatarBox();
-    renderProfileAvatarHint('已裁切，点「保存资料」生效');
+    renderProfileAvatarHint('已裁切');
   }else{
     PROFILE_PHOTO=dataUrl;
     renderProfilePhotoBox();
-    renderProfilePhotoHint('已裁切，点「保存资料」生效');
+    renderProfilePhotoHint('已裁切');
   }
   closeModal('cropModal');
   toast(CROP.spec.label+'已裁切，请点「保存资料」');
@@ -2271,21 +2274,21 @@ function renderProfilePhotoBox(){
     +`<button class="profile-photo-clear" onclick="clearProfilePhoto(event)">清除</button>`;
   renderProfilePhotoHint();
 }
-// 照片区提示：未上传时明确标注「当前使用默认占位图」
-function renderProfilePhotoHint(text){
+// 照片区提示：**上传说明常驻**，状态信息只作为后缀追加。
+function renderProfilePhotoHint(state){
   const hint=document.getElementById('profilePhotoHint');
   if(!hint)return;
-  if(text){ hint.innerHTML='<span class="hint-text">'+text+'</span>'; return; }
   const isDefault=!PROFILE_PHOTO;
+  const base='点击上传（JPG/PNG/GIF/WebP，≤2MB，自动压缩）';
   hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span>':'')
-    +'<span class="hint-text">点击上传（JPG/PNG/GIF/WebP，≤2MB，自动压缩）</span>';
+    +'<span class="hint-text">'+base+(state?' · '+state:'')+'</span>';
 }
 // 清除个人照片（阻止冒泡，避免触发「点击上传」）
 function clearProfilePhoto(ev){
   if(ev&&ev.stopPropagation)ev.stopPropagation();
   PROFILE_PHOTO='';
   renderProfilePhotoBox();
-  renderProfilePhotoHint('已清除，点「保存资料」生效');
+  renderProfilePhotoHint('已清除');
 }
 // 压缩图片：最长边缩到 PROFILE_PHOTO_MAX_EDGE，输出 JPEG
 // 手机直出的照片常有 3~5MB，直接存 data URL 会把库撑大；
@@ -2322,28 +2325,31 @@ function compressProfilePhoto(file){
 async function pickProfilePhoto(inp){
   const f=inp&&inp.files&&inp.files[0];
   if(!f)return;
-  const hint=document.getElementById('profilePhotoHint');
   if(PROFILE_AVATAR_TYPES.indexOf(f.type)<0){
-    if(hint)hint.textContent='仅支持 JPG / PNG / GIF / WebP 格式';
+    renderProfilePhotoHint('格式不支持');
+    toast('照片仅支持 JPG / PNG / GIF / WebP 格式');
     inp.value='';return;
   }
   if(f.size>PROFILE_MAX_PHOTO_BYTES){
-    if(hint)hint.textContent=`图片过大（${Math.round(f.size/1024)}KB），请压缩到 ${PROFILE_MAX_PHOTO_BYTES/1024}KB 以内`;
+    renderProfilePhotoHint('图片过大');
+    toast(`照片过大（${Math.round(f.size/1024)}KB），请压到 ${PROFILE_MAX_PHOTO_BYTES/1024}KB 以内`);
     inp.value='';return;
   }
   const dataUrl=await compressProfilePhoto(f);
   if(!dataUrl){
-    if(hint)hint.textContent='图片读取失败，请重新选择';
+    renderProfilePhotoHint('读取失败');
+    toast('图片读取失败，请重新选择');
     inp.value='';return;
   }
   const approx=Math.round(dataUrl.length*3/4);
   if(approx>PROFILE_MAX_PHOTO_BYTES){
-    if(hint)hint.textContent=`压缩后仍过大（${Math.round(approx/1024)}KB），请换一张更小的照片`;
+    renderProfilePhotoHint('仍然过大');
+    toast(`压缩后仍过大（${Math.round(approx/1024)}KB），请换一张更小的照片`);
     inp.value='';return;
   }
   // 选图后进入裁切器：拖动/缩放调整构图，确认后才写入
   openCropper('photo',dataUrl);
-  if(hint)hint.textContent=`已选择（压缩后约 ${Math.round(approx/1024)}KB），正在裁切…`;
+  renderProfilePhotoHint('正在裁切…');
 }
 // 保存头像 + 个人照片 + 个人状态
 async function saveProfile(){
@@ -2356,6 +2362,8 @@ async function saveProfile(){
     renderMyProfile();
     renderProfileAvatarHint('已保存');
     renderProfilePhotoHint('已保存');
+    // 保存后清掉状态后缀，回到基础上传说明
+    setTimeout(()=>{ renderProfileAvatarHint(); renderProfilePhotoHint(); }, 1200);
     toast('个人资料已保存');
     closeModal('profileModal');
   }catch(e){toast(e.message)}
