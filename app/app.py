@@ -1144,6 +1144,30 @@ def me(username: str = Depends(require_auth)):
             'allowed_columns': col_info,
             'depts': _dept_order()}   # 有序部门清单（随架构层级动态变化）：空部门同样占位
 
+@app.get('/api/filter-options')
+def filter_options(username: str = Depends(require_auth)):
+    """筛选栏候选项：人员（负责人）名单 + 周数名单。
+
+    · 人员候选 = **当前账号可见范围内**的事项里出现过的负责人姓名（去重、排序）。
+      越权事项的负责人不会出现在这里 —— 筛选项本身也遵守权限过滤。
+    · 周数候选 = 同理，取可见范围内出现过的 week_no。
+    · 两者都作为「可输入下拉」的候选：前端允许手工输入任意文本，
+      输入的内容按同样的语义参与过滤（找不到就查不到结果）。
+    """
+    boards, columns = user_allowed(username)
+    rows = filter_rows(dbq('SELECT owner, week_no FROM cards WHERE deleted=0'), boards, columns)
+    people, weeks = set(), set()
+    for r in rows:
+        for n in (r.get('owner') or '').split(';'):
+            n = n.strip()
+            if n:
+                people.add(n)
+        w = (r.get('week_no') or '').strip()
+        if w:
+            weeks.add(w)
+    return {'people': sorted(people), 'weeks': sorted(weeks)}
+
+
 @app.get('/api/overview')
 def overview(username: str = Depends(require_auth)):
     boards, columns = user_allowed(username)
@@ -1189,6 +1213,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
           parent_id: Optional[str] = None, card_id: Optional[str] = None,
           created_start: Optional[str] = None, created_end: Optional[str] = None,
           cc: Optional[str] = None, week: Optional[str] = None,
+          person: Optional[str] = None,
           username: str = Depends(require_auth), request: Request = None):
     if card_id:
         audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
@@ -1254,6 +1279,16 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         if cnames:
             mine = [r for r in mine
                     if any(nm in (r.get('cc') or '') for nm in cnames)]
+    if person:
+        # 人员筛选：**锚定在负责人（owner）字段上** —— 与 owner 条件指向同一字段，
+        # 两者在服务端做交集（AND）：owner 命中的集合 ∩ person 命中的集合。
+        # 人员集合内部为「任一命中」（逗号分隔），与 owner 多值口径一致。
+        # 说明：前端已把「人员」与「负责人」拆成两个独立控件、各自提交，
+        # 不再互相覆盖 —— 这里保证它们组合时语义是交集而非覆盖。
+        pnames = [x.strip() for x in person.split(',') if x.strip()]
+        if pnames:
+            mine = [r for r in mine
+                    if any(nm in (r.get('owner') or '') for nm in pnames)]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]
     # 周数维度：可选周数 = 当前范围（该看板下、权限可见）里出现过的周数集合。
@@ -2932,8 +2967,13 @@ class OrgAppointmentReq(BaseModel):
 def _collect_node_members(node_id: int, nodes, appts):
     """节点（含全部后代）的末级人员名单。
 
-    返回 [{name, role_name, node_name}]，按姓名去重（同名人员在不同节点各占一项）。
+    返回 [{name, role_name, node_name, node_id}]，按姓名去重（同名人员在不同节点各占一项）。
     「末级人员」= 该节点及其后代节点上所有任职人 —— 树形组件在节点下追加人员层时使用。
+
+    ⚠️ `node_id` = 该人员**实际任职所在**的节点 id。
+    前端树形组件据此把人员挂到「真正所属的那个节点」下，
+    否则父节点的成员表（含全部后代）会与子节点的成员表重复 —— 同一批人
+    在树上出现两次（父节点一份、子节点一份），看起来就是「树状展开异常」。
     """
     by_parent = defaultdict(list)
     for n in nodes:
@@ -2951,7 +2991,8 @@ def _collect_node_members(node_id: int, nodes, appts):
             seen.add(nm)
             out.append({'name': nm,
                         'role_name': a.get('role_name') or '',
-                        'node_name': name_by_id.get(cur, '')})
+                        'node_name': name_by_id.get(cur, ''),
+                        'node_id': cur})
         # by_parent 的 value 是节点 dict 列表，这里要的是**节点 id**
         stack.extend(child['id'] for child in by_parent.get(cur, []))
     out.sort(key=lambda x: (x['node_name'], x['name']))

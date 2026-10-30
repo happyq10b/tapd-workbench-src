@@ -116,6 +116,52 @@ button{font-family:inherit}
 .role-admin{background:#fff7e6;color:#d46b08;border:1px solid #ffd591}
 .role-editor{background:#e6f7ff;color:#1890ff;border:1px solid #91d5ff}
 .role-viewer{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}
+/* ---------------- 顶部栏：左右分栏（看板/板块/统计 ←→ 公告） ----------------
+   外层 .topbar：两列栅格 —— 左列 1fr（自适应内容），右列固定 320~420px 给公告区。
+   左列 .topbar-main：再分三列（repeat(3,1fr)），三个「带」各占一整行，
+   每带内部也是三列小栅格 → 形成「三列多行」的矩阵式排布。
+   右列 .topbar-aside：独立边框的公告区，跨整列高度（align-self:stretch）。 */
+.topbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,420px);
+  gap:14px;align-items:stretch;max-width:1440px;margin:0 auto;padding:12px 24px 0}
+.topbar-main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-rows:auto auto auto;gap:10px 14px;align-content:start;min-width:0}
+/* 每个「带」跨满三列；带内是小栅格（三列），条目按列优先填充 */
+.tb-band{grid-column:1/-1;min-width:0}
+.tb-band-title{font-size:11.5px;color:var(--text3);letter-spacing:.4px;margin-bottom:5px;
+  display:flex;align-items:center;gap:6px}
+.tb-band-title::before{content:'';width:3px;height:11px;border-radius:2px;background:var(--primary);opacity:.55}
+.tb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;align-items:start}
+.tb-grid>*{min-width:0}
+.topbar-aside{display:flex;flex-direction:column;min-width:0}
+/* 公告区在右半独立成块：固定边框 + 自身留白，与左半的卡片区分开 */
+.topbar-aside .notice-bar{flex:1;align-items:flex-start;flex-direction:column;gap:8px;
+  padding:12px 14px;border-radius:var(--radius);overflow:auto}
+/* 公告区标题条（独立展示空间的标识） */
+.topbar-aside .notice-bar::before{content:'公告';font-size:11.5px;color:var(--text3);letter-spacing:.4px;
+  display:flex;align-items:center;gap:6px;width:100%;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.topbar-aside .notice-body{flex:1;min-width:0}
+.topbar-aside .notice-title,.topbar-aside .notice-text{white-space:normal;overflow:visible;text-overflow:clip}
+.topbar-aside .notice-empty{flex:1;min-width:0}
+/* 统计带：左列三列 → 卡片横排三张 */
+.tb-stat-band .progress-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0}
+.tb-stat-band .progress-cards{display:contents}
+@media(max-width:1180px){
+  .topbar{grid-template-columns:minmax(0,1fr) minmax(260px,320px)}
+  .tb-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tb-stat-band .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:900px){
+  /* 窄屏：公告区移到左半下方（上下堆叠），左半保持双列 */
+  .topbar{grid-template-columns:minmax(0,1fr);gap:10px}
+  .topbar-aside{order:2}
+  .tb-stat-band .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  .topbar{padding:10px 12px 0}
+  .tb-grid{grid-template-columns:minmax(0,1fr)}
+  .tb-stat-band .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tb-stat-band .stat-value{font-size:17px}
+}
 .board-tabs{display:flex;flex-direction:column;gap:0;padding:12px 24px 0;max-width:1440px;margin:0 auto}
 /* ---- 目录树：按归属部门分组折叠 ---- */
 /* 部门层：所有部门节点排在同一行（紧凑），空部门同样占位不隐藏 */
@@ -176,11 +222,11 @@ button{font-family:inherit}
 .btn-default:hover{border-color:var(--primary);color:var(--primary)}
 .btn-secondary{border:1px solid var(--border);background:#fff;color:var(--text);padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;font-weight:500;transition:all .15s}
 .btn-secondary:hover{border-color:var(--primary);color:var(--primary)}
-/* 顶部统计区：左右分栏 —— 左侧 2 张核心指标卡（压缩），右侧公告栏（长条形）。
-   用户反馈「统计卡片太占地方」→ 卡片数从 4 压到 2，空出来的位置做公告栏。 */
-.progress-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:10px;margin-bottom:12px;align-items:stretch}
+/* 统计带：顶部栏左半第三行，3 张核心指标卡横排（总事项 / 已完成 / 未完成）。
+   公告区已独立到顶部栏右半（.topbar-aside），这里只管卡片行。 */
+.progress-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px;align-items:stretch}
 .progress-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-content:start}
-/* 公告栏：横向长条，承载平台公告 */
+/* 公告栏：独立展示块（右半），标题与内容纵向排列、可换行 */
 .notice-bar{background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:10px 14px;display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden}
 .notice-tag{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 9px;border-radius:11px;background:#fff7e6;color:#d46b08;font-size:11.5px;font-weight:600}
 .notice-body{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:1px}
@@ -194,7 +240,7 @@ button{font-family:inherit}
 .notice-item-text{font-size:12.5px;color:var(--text2);line-height:1.7;margin-top:5px;white-space:pre-wrap}
 .notice-item-meta{font-size:11.5px;color:var(--text3);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 @media(max-width:1024px){
-  .progress-overview{grid-template-columns:1fr}
+  .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 /* 统计卡片：紧凑版。原先 padding:14px 18px + 26px 字号，一行 4 张要吃掉
    近 120px 高度，用户反馈「太占地方」。压缩后仍保持左主色竖条与 hover 反馈，
@@ -542,6 +588,8 @@ button{font-family:inherit}
 .tp-label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--text);flex:1;position:relative;outline:none;border-radius:3px}
 .tp-label:focus-visible{box-shadow:0 0 0 2px var(--primary)}
 .tp-box-na{opacity:.35;cursor:default}
+/* person 模式的节点框：可点击（级联勾选下属人员），用「半选」表达部分选中 */
+.tp-box-node{cursor:pointer;border-color:#b7d4f7}
 .tp-box{display:inline-block;width:14px;height:14px;border:1.5px solid #d9d9d9;border-radius:3px;background:#fff;cursor:pointer;position:relative;flex-shrink:0;vertical-align:middle;transition:border-color .15s;user-select:none;pointer-events:none}
 .tp-box.on,.tp-box.half{background:var(--primary);border-color:var(--primary)}
 .tp-box .tp-tick{position:absolute;left:3px;top:0;width:4px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
@@ -904,7 +952,28 @@ function goLogin(){
   </div>
   <div class="msg-list" id="msgList"></div>
 </aside>
-<div class="board-tabs" id="boardTabs"></div>
+<!-- 顶部栏：左右分栏
+     左半 = 看板 / 板块 / 统计卡片（三列多行栅格）；右半 = 公告区（独立展示空间）。
+     栅格：.topbar 两列（1fr + 固定宽公告列），左半内部三列（部门带 / 板块带 / 统计带各一行）。 -->
+<div class="topbar" id="topbar">
+  <div class="topbar-main" id="boardTabs">
+    <div class="tb-band tb-dept-band">
+      <div class="tb-band-title">架构部门</div>
+      <div class="tb-grid" id="tbDepts"></div>
+    </div>
+    <div class="tb-band tb-board-band">
+      <div class="tb-band-title">板块</div>
+      <div class="tb-grid" id="tbBoards"></div>
+    </div>
+    <div class="tb-band tb-stat-band">
+      <div class="tb-band-title">统计概览</div>
+      <div class="progress-overview" id="progressOverview"></div>
+    </div>
+  </div>
+  <aside class="topbar-aside" id="topbarAside">
+    <div class="notice-bar" id="noticeBar"></div>
+  </aside>
+</div>
 <!-- 部门页顶部切换条：只在部门主页面显示（部门之间切换 + 返回事项列表） -->
 <div class="dept-switch-bar" id="deptSwitchBar" style="display:none">
   <button class="btn-default" onclick="backToBoardList()" title="返回事项列表">← 返回事项列表</button>
@@ -938,8 +1007,7 @@ function goLogin(){
   </div>
 </div>
 <div class="wrap" id="boardListWrap">
-  <!-- 布局对调：进度概览（原「事项明细」区）在上，工具栏（原「板块列表」区）在下 -->
-  <div class="progress-overview" id="progressOverview"></div>
+  <!-- 统计概览已上移到顶部栏左半第三行（#progressOverview），此处只留筛选工具栏 -->
   <div class="toolbar">
     <div class="toolbar-left">
       <input type="text" class="search-input" id="searchInput" placeholder="搜索事项 / 板块…" oninput="debounceReload()">
@@ -949,14 +1017,32 @@ function goLogin(){
       <select class="filter-select" id="ownerFilter" onchange="reload(1)">
         <option value="">全部负责人</option><option value="__no_owner__">无负责人</option>
       </select>
-      <button class="filter-select" id="personFilterBtn" onclick="openPersonFilterPicker(this)"
-        style="cursor:pointer" title="按架构末级人员筛选（可套用为负责人或参与人条件）">👤 按人员筛选</button>
-      <span class="week-filter-wrap" id="weekFilterWrap">
-        <button type="button" class="filter-select" id="weekFilterBtn" onclick="toggleWeekFilterDrop(event)" style="cursor:pointer" title="按周数筛选（可多选）">📅 周数</button>
-        <div class="week-drop" id="weekFilterDrop" hidden></div>
+      <!-- 人员筛选：可输入 + 多选。锚定在「负责人」维度（owner 字段），
+           与上方「负责人」下拉指向同一字段、两者取交集，互不覆盖。 -->
+      <span class="combo-filter" id="personFilterWrap">
+        <span class="cf-label">👤 人员</span>
+        <span class="cf-field">
+          <input type="text" class="cf-input" id="personFilterInput" autocomplete="off"
+                 placeholder="输入姓名筛选（可多选）" onfocus="openFilterCombo('person')" onclick="openFilterCombo('person')"
+                 oninput="onFilterComboInput('person',this.value)" onkeydown="onFilterComboKey('person',event)">
+          <span class="cf-chips" id="personFilterChips"></span>
+        </span>
+        <button type="button" class="cf-tree-btn" id="personFilterTreeBtn" onclick="openPersonFilterPicker(this)"
+                title="从【架构管理】的末级人员中批量勾选">🌳</button>
+        <div class="cf-drop" id="personFilterDrop" hidden></div>
       </span>
-      <span id="weekFilterHint" style="font-size:12px;color:var(--text2)"></span>
-      <span id="personFilterHint" style="font-size:12px;color:var(--text2)"></span>
+      <!-- 周数筛选：可输入（数字/周标签）+ 多选 -->
+      <span class="combo-filter" id="weekFilterWrap">
+        <span class="cf-label">📅 周数</span>
+        <span class="cf-field">
+          <input type="text" class="cf-input" id="weekFilterInput" autocomplete="off"
+                 placeholder="输入周数（如 41 或 2026-41）" onfocus="openFilterCombo('week')" onclick="openFilterCombo('week')"
+                 oninput="onFilterComboInput('week',this.value)" onkeydown="onFilterComboKey('week',event)">
+          <span class="cf-chips" id="weekFilterChips"></span>
+        </span>
+        <div class="cf-drop" id="weekFilterDrop" hidden></div>
+      </span>
+      <span id="filterHint" style="font-size:12px;color:var(--text2)"></span>
       <span class="date-filter" id="dateFilterBox" title="按创建日期区间筛选（起止都留空 = 不限；只填一端 = 单边区间）">
         <input type="date" class="filter-date" id="createdStart" onchange="onDateFilterChange()" aria-label="创建日期 起">
         <span class="date-sep">~</span>
@@ -1406,6 +1492,37 @@ function goLogin(){
 .week-opt:hover{background:#f0f5ff;color:var(--primary)}
 .week-opt input{width:14px;height:14px;accent-color:var(--primary);cursor:pointer;margin:0}
 .week-opt .wo-tick{width:12px;text-align:center;color:var(--primary);font-size:12px;font-weight:600}
+/* ---------- 可输入 + 多选的筛选控件（人员 / 周数） ----------
+   形态：标签 + 输入框（可输入匹配）+ 已选 chips + 悬浮候选面板（勾选式多选）。
+   两个控件共用一套 .combo-filter / .cf-* 样式，行为只差在归一化与提交参数上。 */
+.combo-filter{position:relative;display:inline-flex;align-items:flex-start;gap:6px;box-sizing:border-box;
+  min-height:33px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff}
+.combo-filter.active{border-color:var(--primary);background:#f2f7fc}
+.combo-filter:focus-within{border-color:var(--primary);box-shadow:var(--ring)}
+.cf-label{font-size:12.5px;color:var(--text2);white-space:nowrap;padding-top:4px;user-select:none}
+.combo-filter.active .cf-label{color:var(--primary)}
+.cf-field{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:150px;max-width:420px}
+.cf-input{border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;min-width:110px;flex:1;color:var(--text);font-family:inherit}
+.cf-input::placeholder{color:var(--text3)}
+.cf-chips{display:flex;flex-wrap:wrap;gap:4px}
+.cf-chip{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:11.5px;
+  padding:1px 5px 1px 8px;border-radius:10px;border:1px solid #b5d4f4;white-space:nowrap;max-width:160px}
+.cf-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cf-chip i{font-style:normal;cursor:pointer;color:#85b7eb;font-size:13px;line-height:1;flex-shrink:0}
+.cf-chip i:hover{color:var(--danger)}
+.cf-drop{position:absolute;top:calc(100% + 5px);left:0;z-index:70;min-width:220px;max-width:340px;max-height:280px;
+  overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-md);padding:4px 0}
+.cf-drop[hidden]{display:none}
+.cf-opt{display:flex;align-items:center;gap:7px;padding:6px 12px;font-size:12.5px;color:var(--text);cursor:pointer;white-space:nowrap}
+.cf-opt:hover{background:#f0f5ff;color:var(--primary)}
+.cf-opt.on{background:#eef5ff;color:var(--primary);font-weight:600}
+.cf-opt input{width:14px;height:14px;accent-color:var(--primary);cursor:pointer;margin:0}
+.cf-empty{padding:8px 12px;font-size:12px;color:var(--text3)}
+.cf-tip{padding:6px 12px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border);margin-bottom:3px;white-space:normal}
+.cf-tree-btn{flex-shrink:0;align-self:center;border:1px solid var(--border);border-radius:var(--radius-sm);
+  background:#fff;color:var(--text2);font-size:12.5px;padding:2px 6px;cursor:pointer;line-height:1.4}
+.cf-tree-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
 .badge-active{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:rgba(0,45,116,.10);color:#002D74;border:1px solid rgba(0,45,116,.30)}
 .badge-locked{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff7e6;color:var(--warning);border:1px solid #ffd591}
 .badge-muted{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:var(--bg);color:var(--text3);border:1px solid var(--border)}
@@ -1836,9 +1953,13 @@ function boardTabHtml(b,deptLabel){
 function renderTabs(){
   const tabs=document.getElementById('boardTabs');
   const g=groupBoardsByDept();
-  // 第 1 层：部门节点（全部展示，空部门同样占位；单选，同一时刻只展开一个）
+  const deptBox=document.getElementById('tbDepts');
+  const boardBox=document.getElementById('tbBoards');
+  if(!tabs||!deptBox||!boardBox)return;
+  // ── 带 1：架构部门（三列小栅格，按列优先填充）
+  // 部门节点全部展示（空部门同样占位）；单选展开，同一时刻只展开一个部门。
   // 注：「全部看板」卡片已按需求隐藏 —— 逐个部门展开即可覆盖全部板块。
-  let html=`<div class="tree-dept-row">`;
+  let dhtml='';
   g.depts.forEach(d=>{
     const open=!!DEPT_OPEN[d.name];
     const cnt=d.boards.length;
@@ -1847,35 +1968,36 @@ function renderTabs(){
     //   ① 部门块本身 = 展开/收起该部门的板块（保持原有行为）
     //   ② 「主页」按钮 = 进入该部门的部门主页
     const tip=cnt?('点击展开/收起该部门的板块'):(d.name+' 下暂无板块（可在「看板管理」中把板块挂载到该部门）');
-    html+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
+    dhtml+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
       +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span>`
       +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">🏠 主页</span>`
       +`</span>`;
   });
   if(g.unassigned.length){
     const open=!!DEPT_OPEN[UNASSIGNED_KEY];
-    html+=`<button class="tree-dept${open?' open':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的板块" aria-expanded="${open}">`
+    dhtml+=`<button class="tree-dept${open?' open':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的板块" aria-expanded="${open}">`
       +`<span class="chev">▶</span>未配置<span class="dept-count">${g.unassigned.length}</span></button>`;
   }
-  html+=`</div>`;
-  // 第 2 层：展开的部门，其板块缩进排在下一行
+  deptBox.innerHTML=dhtml;
+  // ── 带 2：板块（展开的部门下的看板 tab，同样三列小栅格）
+  let bhtml='';
   g.depts.forEach(d=>{
     if(!DEPT_OPEN[d.name])return;
-    const inner=d.boards.length
+    bhtml+=d.boards.length
       ? d.boards.map(b=>boardTabHtml(b,d.name)).join('')
       : `<span class="tree-empty-tip">「${esc(d.name)}」下暂无板块 — 可在「看板管理」中把板块挂载到该部门</span>`;
-    html+=`<div class="tree-children">${inner}</div>`;
   });
   if(g.unassigned.length&&DEPT_OPEN[UNASSIGNED_KEY]){
-    html+=`<div class="tree-children">${g.unassigned.map(b=>boardTabHtml(b,'')).join('')}</div>`;
+    bhtml+=g.unassigned.map(b=>boardTabHtml(b,'')).join('');
   }
   // 空状态：账号在【架构管理】里没有任何授权（未被任命到任何节点 / 所属部门未挂载看板）
   // → 明确提示原因，避免用户以为"看板丢了"。可见范围由后端按架构权限计算。
   if(!(ME.boards||[]).length){
-    html+=`<div class="tree-empty-tip" style="display:block;margin-top:8px">
+    bhtml+=`<div class="tree-empty-tip" style="grid-column:1/-1">
       当前账号没有可见看板：请联系管理员在【架构管理】中把您任命到相应部门/小组，或为该部门挂载看板。</div>`;
   }
-  tabs.innerHTML=html;
+  if(!bhtml)bhtml=`<span class="tree-empty-tip" style="grid-column:1/-1">点击上方部门可展开其下的板块</span>`;
+  boardBox.innerHTML=bhtml;
 }
 // 单选切换：点已展开的部门 → 收起；点其他部门 → 展开它并收起其他
 function toggleDept(name){
@@ -1892,23 +2014,28 @@ function toggleDept(name){
 let CUR_DEPT='';            // 当前打开的部门（空 = 不在部门页）
 let DEPT_DATA=null;         // 当前部门页数据缓存
 let DEPT_MORE_OPEN=false;   // 「更多」折叠区是否展开
-// 切换视图：同时接管顶部导航条（#boardTabs）。
+// 切换视图：同时接管顶部栏（#topbar：左半看板/板块/统计 + 右半公告）。
 // 之前只切了两个 wrap 容器，导致部门节点 + 板块 tab 仍然留在屏幕上，
 // 与部门页内容同时出现 —— 用户看到的"切换混乱"就是这个。
+// ⚠️ 顶部栏改版后 #boardTabs 只是左半主体，必须隐藏**整个 #topbar**，
+//    否则部门页顶部会残留一列空的看板/统计区，公告也会与部门页内容混排。
 function switchView(toDept){
   const bw=document.getElementById('boardListWrap');
   const pw=document.getElementById('deptPageWrap');
   const tabs=document.getElementById('boardTabs');
+  const topbar=document.getElementById('topbar');
   const deptBar=document.getElementById('deptSwitchBar');
   if(toDept){
     if(bw)bw.style.display='none';
     if(pw)pw.style.display='';
     if(tabs)tabs.style.display='none';       // 隐藏顶部导航条
+    if(topbar)topbar.style.display='none';   // 隐藏整个顶部栏（含公告区）
     if(deptBar)deptBar.style.display='';      // 显示部门切换条
   }else{
     if(bw)bw.style.display='';
     if(pw)pw.style.display='none';
     if(tabs)tabs.style.display='';
+    if(topbar)topbar.style.display='';
     if(deptBar)deptBar.style.display='none';
   }
   // 部门节点的「当前部门」高亮跟着视图走：进部门页时标出当前部门，
@@ -2816,15 +2943,15 @@ function updateNewBtn(){
 }
 async function renderProgress(){
   const ov=await api('/api/overview');
-  const rate=ov.total?Math.round(ov.done/ov.total*100):0;
-  // 顶部统计区：左侧只保留 2 张核心指标卡（压缩后不占地方），
-  // 右侧是长条形的公告栏。其余指标（进行中/未完成）在部门主页的统计区里有。
-  document.getElementById('progressOverview').innerHTML=`
-    <div class="progress-cards">
+  // 顶部统计带：3 张核心指标卡横排（总事项 / 已完成 / 未完成），
+  // 位于顶部栏左半的第三行；公告区在右半独立展示（#noticeBar 已在 HTML 中）。
+  const box=document.getElementById('progressOverview');
+  if(box){
+    box.innerHTML=`
       <div class="stat-card"><div class="stat-label">总事项</div><div class="stat-value blue">${ov.total}</div></div>
       <div class="stat-card"><div class="stat-label">已完成</div><div class="stat-value green">${ov.done}</div></div>
-    </div>
-    <div class="notice-bar" id="noticeBar"></div>`;
+      <div class="stat-card"><div class="stat-label">未完成</div><div class="stat-value orange">${ov.open}</div></div>`;
+  }
   await renderNoticeBar();
   // 负责人下拉：选项 = 「全部负责人」+「无负责人」（静态 option）+ 各负责人（动态填充）
   // 用 dataset.filled 标记是否填过，不能再用 options.length 判断 ——
@@ -2834,6 +2961,8 @@ async function renderProgress(){
     ov.owners.forEach(o=>{const op=document.createElement('option');op.value=o.owner;op.textContent=o.owner;os_.appendChild(op)});
     os_.dataset.filled='1';
   }
+  // 负责人列表变化后刷新一次筛选提示（人员筛选不再改写 ownerFilter，这里只是同步展示）
+  syncFilterHint();
 }
 // ---------- 公告栏 ----------
 // 长条形横幅，展示平台公告（scope='all'）与当前部门的公告。
@@ -2979,138 +3108,238 @@ async function reload(page){
   if(cc)ps.set('cc',cc);
   if(ds)ps.set('created_start',ds);
   if(de)ps.set('created_end',de);
-  if(WEEK_SEL.size)ps.set('week',[...WEEK_SEL].join(','));   // 周数多选（任一命中）
+  // 周数多选（任一命中）
+  if(WEEK_SEL.size)ps.set('week',[...WEEK_SEL].join(','));
+  // 人员多选（锚定 owner 字段，与 owner 条件取交集 —— 见后端 /api/cards 的 person 分支）
+  if(PERSON_SEL.size)ps.set('person',[...PERSON_SEL].join(','));
   const d=await api('/api/cards?'+ps);
   renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（已按权限过滤），不随勾选收缩
   renderBoard(d.cards,d.columns,q,d.column_hits);
+  syncFilterHint();
 }
-// ---------- 周数筛选（多选） ----------
-// 形态：工具栏里的「📅 周数」按钮 + 勾选式下拉（与「年份」多选同一套交互）。
-// 选项来源 = /api/cards 返回的 weeks（当前看板下、**当前账号可见**的事项里出现过的周数），
-// 因此越权事项的周数不会出现在选项里。
-let WEEK_OPTIONS=[];      // 当前看板可选的周数
+// ---------- 可输入 + 多选的筛选控件（人员 / 周数） ----------
+// 设计要点：
+//  ① 控件是「输入框 + chips + 悬浮候选面板」，输入框可自由输入（人员按姓名模糊匹配，
+//     周数按数字/周标签匹配），候选面板是勾选式多选；
+//  ② 人员筛选与「负责人」下拉**指向同一字段（owner）**，两者独立提交、
+//     服务端做交集 —— 不再像旧实现那样共用一个 select 导致互相覆盖；
+//  ③ 候选来源都是接口返回的**权限可见范围**内的数据，越权数据不出现在候选里。
+let WEEK_OPTIONS=[];      // 当前看板可选的周数（renderWeekFilter 维护）
+let FILTER_WEEK_CAND=[];  // 接口返回的全量可选周数（候选面板用，与上面互不覆盖）
 let WEEK_SEL=new Set();   // 已选周数（多选，任一命中）
-let _weekDropOpen=false;
+let PERSON_OPTIONS=[];    // 可选人员（权限可见范围内的负责人）
+let PERSON_SEL=new Set();  // 已选人员（多选；与 owner 条件取交集）
+let FILTER_COMBO=null;    // 当前展开的候选面板：'person' | 'week' | null
+
+// ---------- 周数归一化 ----------
+// 接受「41」「2026-41」「2026年第41周」三种输入，统一成「2026年第41周」。
+// 纯数字时按「输入时的当前年」补全年份（与后端 _norm_week 的口径一致）。
+function normWeekInput(raw){
+  let s=(raw||'').trim();
+  if(!s)return '';
+  // 「2026年第41周」/「2026第41周」
+  let m=s.match(/^(\d{4})\s*年?\s*第\s*(\d{1,2})\s*周?$/);
+  if(m)return m[1]+'年第'+parseInt(m[2],10)+'周';
+  // 「2026-41」
+  m=s.match(/^(\d{4})\s*[-/]\s*(\d{1,2})$/);
+  if(m)return m[1]+'年第'+parseInt(m[2],10)+'周';
+  // 纯数字「41」→ 当年第 41 周
+  m=s.match(/^(\d{1,2})\s*周?$/);
+  if(m){
+    const w=parseInt(m[1],10);
+    if(w<1||w>53)return '';
+    return new Date().getFullYear()+'年第'+w+'周';
+  }
+  return '';
+}
+// 候选面板里显示的周数：把「2026年第41周」拆成「2026 · 第41周」便于阅读，
+// 但选中/提交时仍用标准标签。
+function weekLabelOf(v){return v.replace(/^(\d{4})年第(\d{1,2})周$/,'$1 · 第$2周')}
+
+// ---------- 候选面板的开关 ----------
+// openFilterCombo 是**幂等的「确保打开」**（不是 toggle）：
+// 聚焦（focus）与点击（click）都会调它，若做成 toggle，
+// 聚焦后再点一下就把面板关掉了 —— 表现为「点了没反应」。
+function openFilterCombo(kind){
+  if(FILTER_COMBO===kind){paintFilterCombos();return}
+  FILTER_COMBO=kind;
+  paintFilterCombos();
+  loadFilterOptions(kind);
+}
+function closeFilterCombo(){
+  if(!FILTER_COMBO)return;
+  FILTER_COMBO=null;
+  paintFilterCombos();
+}
+// 点外部 → 收起候选面板（与下拉/树的关闭策略一致）
+function filterComboOutside(e){
+  if(!FILTER_COMBO)return;
+  const wrap=document.getElementById(FILTER_COMBO==='person'?'personFilterWrap':'weekFilterWrap');
+  if(wrap&&!wrap.contains(e.target))closeFilterCombo();
+}
+async function loadFilterOptions(kind){
+  try{
+    const d=await api('/api/filter-options');
+    // ⚠️ 候选来源与「当前看板已出现的周数」是**两套语义**，不能互相覆盖：
+    //   FILTER_WEEK_CAND  = 接口给的**全量**可选周数（用于输入框的候选面板）
+    //   WEEK_OPTIONS       = 当前看板下实际出现过的周数（renderWeekFilter 维护）
+    // 早期实现把两者混用同一个变量 → 一打开候选面板，当前看板的周数就被全量替换，
+    // 勾选后又会被 renderWeekFilter 收回去，表现为「选项忽多忽少」。
+    if(kind==='person')PERSON_OPTIONS=d.people||[];
+    else FILTER_WEEK_CAND=d.weeks||[];
+  }catch(e){/* 候选拉取失败不阻断筛选 */}
+  paintFilterCombos();
+}
+// 输入时：先在候选里找匹配项，找不到就允许「手工输入值」（周数归一 / 人员原样）
+function onFilterComboInput(kind,val){
+  paintFilterCombos();
+  if(!val||!val.trim())return;
+  const v=val.trim();
+  if(kind==='week'){
+    const n=normWeekInput(v);
+    // 输入已完全匹配某个候选 → 直接选中（体验接近「回车即选」）
+    if(n&&WEEK_SEL.has(n)&&WEEK_OPTIONS.includes(n))return;
+  }else{
+    if(PERSON_SEL.has(v))return;
+  }
+}
+function onFilterComboKey(kind,ev){
+  if(ev.key!=='Enter'){
+    if(ev.key==='Escape'){closeFilterCombo();ev.stopPropagation()}
+    return;
+  }
+  ev.preventDefault();
+  const inp=document.getElementById(kind==='person'?'personFilterInput':'weekFilterInput');
+  const raw=(inp.value||'').trim();
+  if(!raw)return;
+  if(kind==='week'){
+    const n=normWeekInput(raw);
+    if(!n){toast('周数格式应为 41 / 2026-41 / 2026年第41周');return}
+    WEEK_SEL.add(n);
+  }else{
+    PERSON_SEL.add(raw);
+  }
+  inp.value='';
+  paintFilterCombos();
+  reload(1);
+}
+// 候选项点击（勾选式多选）
+function onFilterOptionClick(kind,val){
+  const set=(kind==='person')?PERSON_SEL:WEEK_SEL;
+  if(set.has(val))set.delete(val);else set.add(val);
+  paintFilterCombos();
+  reload(1);
+}
+function removeFilterChip(kind,val){
+  const set=(kind==='person')?PERSON_SEL:WEEK_SEL;
+  set.delete(val);
+  paintFilterCombos();
+  reload(1);
+}
+function clearFilterSel(kind){
+  const set=(kind==='person')?PERSON_SEL:WEEK_SEL;
+  set.clear();
+  paintFilterCombos();
+  reload(1);
+}
+// ---------- 渲染两个控件 ----------
+function paintFilterCombos(){
+  // 人员
+  const pWrap=document.getElementById('personFilterWrap');
+  const pChips=document.getElementById('personFilterChips');
+  const pDrop=document.getElementById('personFilterDrop');
+  const pInp=document.getElementById('personFilterInput');
+  if(pWrap)pWrap.classList.toggle('active',PERSON_SEL.size>0);
+  if(pChips)pChips.innerHTML=[...PERSON_SEL].map(n=>
+    `<span class="cf-chip" title="${esc(n)}"><span>${esc(n)}</span><i onclick="removeFilterChip('person','${esc(n)}')">×</i></span>`).join('');
+  if(pDrop){
+    const kw=((pInp&&pInp.value)||'').trim().toLowerCase();
+    const list=PERSON_OPTIONS.filter(n=>!kw||n.toLowerCase().includes(kw));
+    pDrop.hidden=(FILTER_COMBO!=='person');
+    pDrop.innerHTML=(FILTER_COMBO!=='person')?'':
+      (list.length
+        ? `<div class="cf-tip">点击勾选（可多选）；「负责人」下拉与此处指向同一字段，两者取交集</div>`
+          +list.map(n=>`<label class="cf-opt ${PERSON_SEL.has(n)?'on':''}"><input type="checkbox"${PERSON_SEL.has(n)?' checked':''} data-pick-person="${esc(n)}"><span>${esc(n)}</span></label>`).join('')
+          +`<label class="cf-opt" data-clear-person="1"><span style="color:var(--text3)">清空全部</span></label>`
+        : `<div class="cf-empty">${kw?'无匹配人员':'暂无可选人员（当前可见范围内没有负责人）'}</div>`);
+  }
+  // 周数
+  const wWrap=document.getElementById('weekFilterWrap');
+  const wChips=document.getElementById('weekFilterChips');
+  const wDrop=document.getElementById('weekFilterDrop');
+  const wInp=document.getElementById('weekFilterInput');
+  if(wWrap)wWrap.classList.toggle('active',WEEK_SEL.size>0);
+  if(wChips)wChips.innerHTML=[...WEEK_SEL].map(w=>
+    `<span class="cf-chip" title="${esc(w)}"><span>${esc(weekLabelOf(w))}</span><i onclick="removeFilterChip('week','${esc(w)}')">×</i></span>`).join('');
+  if(wDrop){
+    const kw=((wInp&&wInp.value)||'').trim().toLowerCase();
+    // 候选 = 接口全量周数 ∪ 当前看板已出现的周数（两者口径不同，都保留）
+    const cand=Array.from(new Set(FILTER_WEEK_CAND.concat(WEEK_OPTIONS)))
+      .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw))
+      .sort();
+    wDrop.hidden=(FILTER_COMBO!=='week');
+    wDrop.innerHTML=(FILTER_COMBO!=='week')?'':
+      (cand.length
+        ? `<div class="cf-tip">点击勾选（可多选）；也可直接输入「41」「2026-41」后回车</div>`
+          +cand.map(w=>`<label class="cf-opt ${WEEK_SEL.has(w)?'on':''}"><input type="checkbox"${WEEK_SEL.has(w)?' checked':''} data-pick-week="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
+          +`<label class="cf-opt" data-clear-week="1"><span style="color:var(--text3)">清空全部</span></label>`
+        : `<div class="cf-empty">${kw?'无匹配周数':'暂无可选周数（当前可见范围内没有周数）'}</div>`);
+  }
+}
+// 顶部提示：把当前生效的筛选条件汇总成一行，避免多控件时看不清当前状态
+function syncFilterHint(){
+  const box=document.getElementById('filterHint');
+  if(!box)return;
+  const parts=[];
+  const o=document.getElementById('ownerFilter').value;
+  if(o&&o!=='__no_owner__')parts.push('负责人：'+o.split(',').join('、'));
+  if(o==='__no_owner__')parts.push('负责人：无负责人');
+  if(PERSON_SEL.size)parts.push('人员：'+[...PERSON_SEL].join('、'));
+  if(WEEK_SEL.size)parts.push('周数：'+[...WEEK_SEL].map(weekLabelOf).join('、'));
+  if(window._ccFilter)parts.push('参与人：'+window._ccFilter.split(',').join('、'));
+  box.textContent=parts.length?parts.join('  |  '):'';
+  // 负责人下拉的选中值同步高亮（人员筛选不再改写它的 value）
+  const sel=document.getElementById('ownerFilter');
+  if(sel)sel.style.color=(o?'var(--primary)':'');
+}
 function renderWeekFilter(weeks){
   const list=(weeks||[]).filter(Boolean).slice().sort();
-  // 当前看板已不存在的周数（换看板 / 被删）→ 丢弃已选项，避免筛出空列表
+  // 当前看板已不存在的周数（换看板 / 被删）→ 丢弃已选项，避免筛出空列表。
+  // 注意：**手工输入**的周数不在接口返回里，不能被误删 —— 用 _manualWeek 标记保护。
   if(WEEK_SEL.size){
-    const keep=[...WEEK_SEL].filter(w=>list.includes(w));
+    const keep=[...WEEK_SEL].filter(w=>list.includes(w)||_manualWeek.has(w));
     WEEK_SEL=new Set(keep);
   }
   WEEK_OPTIONS=list;
-  paintWeekFilter();
+  paintFilterCombos();
+  syncFilterHint();
 }
-function paintWeekFilter(){
-  const btn=document.getElementById('weekFilterBtn');
-  if(btn){
-    btn.textContent=WEEK_SEL.size?('📅 周数('+WEEK_SEL.size+')'):'📅 周数';
-    btn.style.color=WEEK_SEL.size?'var(--primary)':'';
-  }
-  const hint=document.getElementById('weekFilterHint');
-  if(hint)hint.textContent=WEEK_SEL.size?([...WEEK_SEL].sort().join('、')):'';
-  const drop=document.getElementById('weekFilterDrop');
-  if(!drop)return;
-  if(!_weekDropOpen||!WEEK_OPTIONS.length){drop.hidden=true;drop.innerHTML='';return}
-  drop.hidden=false;
-  drop.innerHTML=WEEK_OPTIONS.map(w=>{
-    const on=WEEK_SEL.has(w);
-    return `<label class="week-opt"><input type="checkbox"${on?' checked':''} data-pick-week="${esc(w)}">`
-      +`<span class="wo-tick">${on?'✓':''}</span><span>${esc(w)}</span></label>`;
-  }).join('')
-    +`<label class="week-opt" data-week-clear="1"><span class="wo-tick"></span><span style="color:var(--text3)">清空全部</span></label>`;
-}
-function toggleWeekFilterDrop(ev){
-  if(ev)ev.stopPropagation();
-  if(!WEEK_OPTIONS.length){toast('当前看板没有可按周数筛选的事项');return}
-  _weekDropOpen=!_weekDropOpen;
-  paintWeekFilter();
-}
-function closeWeekFilterDrop(){
-  if(!_weekDropOpen)return;
-  _weekDropOpen=false;
-  paintWeekFilter();
-}
-function onWeekFilterClick(ev){
-  const t=ev.target;if(!t||!t.dataset)return;
-  if(t.dataset.pickWeek){
-    const w=t.dataset.pickWeek;
-    if(WEEK_SEL.has(w))WEEK_SEL.delete(w);else WEEK_SEL.add(w);
-    paintWeekFilter();reload(1);return;
-  }
-  if(t.dataset.weekClear){
-    WEEK_SEL=new Set();paintWeekFilter();reload(1);
-  }
-}
-// ---------- 按人员筛选（架构树末级人员） ----------
-// 所选人员直接套用为【负责人】或【参与人】筛选条件。
-// 负责人条件写入 ownerFilter（多值逗号分隔）；参与人条件写入 window._ccFilter。
+const _manualWeek=new Set();   // 手工输入（非候选列表）的周数：不受「选项收缩」清理
+// ---------- 从架构树批量选人（人员筛选的补充入口） ----------
+// 树里勾选的人员会并入 PERSON_SEL（同样锚定 owner 字段，与负责人条件取交集）。
 async function openPersonFilterPicker(anchor){
-  if(!ORG_TREE.length){
-    try{ await ensureOrgTree(); }catch(e){ toast('架构数据加载失败'); return; }
-  }
+  // 强制刷新架构数据：人员筛选要反映最新的任命（免职/任命后立即生效），
+  // 同时让「数据刷新后展开状态同步」这条路径被真正走到。
+  try{ await ensureOrgTree(true); }catch(e){ toast('架构数据加载失败'); return; }
   if(!ORG_TREE.length){ toast('架构数据为空'); return; }
-  openTreePick(anchor, [], (persons)=>{
+  // 已选人员回填进树（避免每次打开都从零开始）
+  const cur=[...PERSON_SEL].map(n=>ORG_PERSON_PREFIX+n);
+  openTreePick(anchor, cur, (persons)=>{
     if(!persons||!persons.length){ toast('未选择人员'); return; }
-    askPersonFilterTarget(persons);
+    PERSON_SEL=new Set(persons);
+    paintFilterCombos();
+    reload(1);
   }, {mode:'filter', pickMode:'person', width:340, height:420, tree:ORG_TREE});
 }
-// 选定人员后：让用户选择套用为「负责人」还是「参与人」条件
-function askPersonFilterTarget(persons){
-  closeTreePick();
-  const pop=document.createElement('div');
-  pop.className='tree-pick';
-  pop.style.width='320px';
-  pop.style.padding='12px 14px';
-  pop.innerHTML=`<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px">已选 ${persons.length} 人：${persons.map(esc).join('、')}</div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn-secondary" onclick="closePersonFilterAsk()">取消</button>
-      <button class="btn-secondary" id="pfApplyOwner">套用为负责人</button>
-      <button class="btn-primary" id="pfApplyCc">套用为参与人</button>
-    </div>`;
-  document.body.appendChild(pop);
-  // 用事件绑定而非内联 onclick —— 人员姓名含中文/引号时，内联属性会被引号截断
-  const po=pop.querySelector('#pfApplyOwner'), pc=pop.querySelector('#pfApplyCc');
-  if(po)po.onclick=()=>applyPersonFilter('owner',persons);
-  if(pc)pc.onclick=()=>applyPersonFilter('cc',persons);
-  const r=(arguments[0]&&arguments[0].getBoundingClientRect)?arguments[0].getBoundingClientRect():null;
-  if(r){ pop.style.position='fixed'; pop.style.left=r.left+'px'; pop.style.top=Math.min(r.bottom+6, window.innerHeight-120)+'px'; }
-  window._pfPop=pop;
-}
-function closePersonFilterAsk(){
-  if(window._pfPop){ window._pfPop.remove(); window._pfPop=null; }
-}
 function applyPersonFilter(kind, persons){
-  closePersonFilterAsk();
-  const names=(persons||[]).join(',');
-  if(kind==='owner'){
-    const sel=document.getElementById('ownerFilter');
-    // 多值负责人：写成一个自定义 option（逗号分隔），后端按「任一命中」过滤
-    let opt=sel.querySelector('option[data-multi="1"]');
-    if(!opt){ opt=document.createElement('option'); opt.dataset.multi='1'; sel.appendChild(opt); }
-    opt.value=names; opt.textContent='负责人：'+persons.join('、');
-    sel.value=names;
-    window._ccFilter='';
-  }else{
-    window._ccFilter=names;
-    const sel=document.getElementById('ownerFilter');
-    const opt=sel.querySelector('option[data-multi="1"]');
-    if(opt) opt.textContent='负责人：'+persons.join('、');
-  }
-  syncPersonFilterHint();
+  // 兼容旧调用点：人员筛选已统一锚定到「负责人」维度（owner 字段），
+  // 与负责人下拉指向同一字段、两者取交集 —— 不再改写 ownerFilter 的 value，
+  // 因此不存在「人员筛选覆盖负责人条件」的问题。
+  const names=(persons||[]).filter(Boolean);
+  if(!names.length)return;
+  PERSON_SEL=new Set(names);
+  paintFilterCombos();
   reload(1);
-}
-function syncPersonFilterHint(){
-  const box=document.getElementById('personFilterHint');
-  if(!box)return;
-  const parts=[];
-  const sel=document.getElementById('ownerFilter');
-  const o=sel&&sel.value||'';
-  if(o && o!=='__no_owner__') parts.push('负责人：'+o.split(',').join('、'));
-  if(window._ccFilter) parts.push('参与人：'+window._ccFilter.split(',').join('、'));
-  box.textContent=parts.length?parts.join('  |  '):'';
-  const btn=document.getElementById('personFilterBtn');
-  if(btn) btn.style.color=(parts.length?'var(--primary)':'');
 }
 
 // ---------- 创建日期区间筛选 ----------
@@ -4441,6 +4670,12 @@ function initPersonPicker(containerId,arr){
 }
 // ---------- 树形多选选择器（工作组选择：点击展开/折叠 + 勾选） ----------
 var TREE_PICK=null;
+// 树形选择器的展开状态**跨弹窗持久保存**（按节点 id）。
+// 需求：展开状态要在「筛选变更」「父节点选中/取消」「数据刷新」后正确同步 ——
+// 旧实现把 expanded 放在 TREE_PICK 里，每次 openTreePick 都新建空 Set，
+// 于是重开弹窗就跳回根节点；数据刷新（ensureOrgTree(force)）后节点 id 不变，
+// 用全局 Set 记录即可自然保持。
+var TREE_EXPANDED=new Set();
 function openTreePick(anchorEl, selected, onConfirm, opts){
   closeTreePick();
   const mode=(opts&&opts.mode)||'select';   // 'select'=联动全选孙级；'filter'=仅 toggle 自身（用于筛选）
@@ -4464,12 +4699,19 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
   const pickMode=(opts.pickMode||'node');
   const personNames=new Set();
   if(pickMode==='person'){
+    // 收集**全部**人员名（含后代节点）—— 人员可能直属任一节点，
+    // 树里渲染时按 node_id 过滤到「真正任职的那一层」，但选中态判定用全量名单
     (function flat2(ns){ (ns||[]).forEach(n=>{ (n.members||[]).forEach(m=>personNames.add(m.name)); flat2(n.children||[]); }); })(treeSource||[]);
   }
   const okSel=(x)=>pickMode==='person'
     ? (personNames.has(x)||x.startsWith(ORG_PERSON_PREFIX))
     : (validNames.has(x)||x.startsWith('__'));
-  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded:new Set(), mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames};
+  // 展开状态从全局存储恢复（跨弹窗、跨数据刷新保持一致）
+  const expanded=new Set();
+  (function collect(ns){
+    (ns||[]).forEach(n=>{ if(TREE_EXPANDED.has(n.id))expanded.add(n.id); collect(n.children||[]); });
+  })(treeSource||[]);
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames};
   renderTreePick();
   const ph=Math.min(panel.offsetHeight, maxH);          // 真实渲染高度（关键：消除估算高度导致的空隙）
   const vh=window.innerHeight, vw=window.innerWidth;
@@ -4533,21 +4775,41 @@ function treePickNodes(nodes,dep){
     const hasCh=n.children&&n.children.length;
     const exp=TREE_PICK.expanded.has(n.id);
     const labelText=n.label||n.name;   // 优先显示 label（虚拟节点可定制文案）
-    // person 模式：节点下追加「末级人员」子条目（仅叶子层直接展示，父级展开后可见）
-    const members=(TREE_PICK.pickMode==='person')?(n.members||[]):[];
+    // person 模式：人员按 **node_id（实际任职节点）** 归属。
+    // 后端 members 里含「本节点 + 全部后代」的人员，若不过滤，同一个人会在
+    // 父节点与子节点各出现一次（树上看就是同一批人重复、层级错乱）。
+    // 过滤后每个人只出现在真正任职的那一层。
+    const members=(TREE_PICK.pickMode==='person')
+      ? (n.members||[]).filter(m=>!m.node_id||m.node_id===n.id) : [];
+    // 有子节点**或**有直属人员 → 该节点才可展开
+    const hasBody=hasCh||members.length>0;
     const memberHtml=members.map(m=>{
       const key=ORG_PERSON_PREFIX+m.name;
       const on=TREE_PICK.selected.includes(key);
+      // 人员框用 data-pbox 标记（同名人员可能在多个节点出现 → id 会冲突，
+      // 改用属性选择器统一处理，重名也能各自正确显示勾选态）
       return `<div class="tp-node tp-person" style="padding-left:${(dep+1)*16}px">
         <span class="tp-arrow" style="visibility:hidden">▶</span>
-        <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择人员 ${esc(m.name)}" onclick="tpPersonClick('${esc(m.name)}')" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpPersonClick('${esc(m.name)}')}"><span class="tp-box${on?' on':''}" id="tp_pbox_${esc(m.name)}"></span><span>👤 ${esc(m.name)}${m.role_name?`<span style="color:var(--text3);font-size:11px">（${esc(m.role_name)}）</span>`:''}</span></label>
+        <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择人员 ${esc(m.name)}" onclick="tpPersonClick('${esc(m.name)}')" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpPersonClick('${esc(m.name)}')}"><span class="tp-box${on?' on':''}" data-pbox="${esc(m.name)}"></span><span>👤 ${esc(m.name)}${m.role_name?`<span style="color:var(--text3);font-size:11px">（${esc(m.role_name)}）</span>`:''}</span></label>
       </div>`;
     }).join('');
     return `<div class="tp-node" style="padding-left:${dep*16}px">
-      ${hasCh?`<span class="tp-arrow" id="tp_arrow_${n.id}" onclick="tpToggle(${n.id})" title="展开/折叠">${exp?'▼':'▶'}</span>`:'<span class="tp-arrow" style="visibility:hidden">▶</span>'}
-      <label class="tp-label" tabindex="0" role="${TREE_PICK.pickMode==='person'?'group':'checkbox'}" aria-label="选择 ${esc(labelText)}" onclick="tpBoxClick('${esc(n.name)}',${n.id})" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpBoxClick('${esc(n.name)}',${n.id})}"><span class="tp-box${TREE_PICK.pickMode==='person'?' tp-box-na':''}" id="tp_box_${n.id}"></span><span>${esc(labelText)}</span></label>
-    </div>${memberHtml}${hasCh?`<div id="tp_children_${n.id}" style="display:${exp?'block':'none'}">${treePickNodes(n.children,dep+1)}</div>`:''}`;
+      ${hasBody?`<span class="tp-arrow" id="tp_arrow_${n.id}" onclick="tpToggle(${n.id})" title="展开/折叠">${exp?'▼':'▶'}</span>`:'<span class="tp-arrow" style="visibility:hidden">▶</span>'}
+      <label class="tp-label" tabindex="0" role="${TREE_PICK.pickMode==='person'?'group':'checkbox'}" aria-label="选择 ${esc(labelText)}" onclick="tpBoxClick('${esc(n.name)}',${n.id})" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpBoxClick('${esc(n.name)}',${n.id})}"><span class="tp-box${TREE_PICK.pickMode==='person'?' tp-box-node':''}" id="tp_box_${n.id}"></span><span>${esc(labelText)}</span></label>
+    </div>${hasBody?`<div id="tp_children_${n.id}" style="display:${exp?'block':'none'}">${memberHtml}${hasCh?treePickNodes(n.children,dep+1):''}</div>`:''}`;
   }).join('');
+}
+// person 模式：节点下的全部人员（本人 + 全部后代），用于父节点级联勾选
+function tpPersonUnder(node){
+  const out=[];
+  (function walk(n){
+    (n.members||[]).forEach(m=>{ if(!m.node_id||m.node_id===n.id) out.push(m.name); });
+    (n.children||[]).forEach(walk);
+  })(node);
+  return out;
+}
+function tpFindNode(id){
+  return (function find(ns){let r=null;(ns||[]).forEach(n=>{if(n.id===id)r=n;else if(!r)r=find(n.children||[])});return r})(TREE_PICK.tree||[]);
 }
 // person 模式：勾选人员（用 __P__ 前缀存 selected，避免与节点名冲突）
 function tpPersonClick(name){
@@ -4555,29 +4817,31 @@ function tpPersonClick(name){
   const key=ORG_PERSON_PREFIX+name;
   const i=TREE_PICK.selected.indexOf(key);
   if(i>=0)TREE_PICK.selected.splice(i,1);else TREE_PICK.selected.push(key);
-  const box=document.getElementById('tp_pbox_'+name);
-  if(box){ box.className='tp-box'+(TREE_PICK.selected.includes(key)?' on':'');
-    box.innerHTML=TREE_PICK.selected.includes(key)?'<span class="tp-tick"></span>':''; }
-  const cnt=document.getElementById('tp_count');
-  if(cnt)cnt.textContent=TREE_PICK.selected.length;
+  // 重绘整棵树的勾选态：人员框 + 各级父节点的三态（全选/半选/未选）
+  // 旧实现只改了这一个框，父节点状态不同步 —— 这正是「父节点选中/取消后状态异常」的根因。
+  paintAll();
 }
 function paintAll(){
   if(!TREE_PICK)return;
-  // person 模式：只画人员勾选框（节点勾选框在 person 模式下不参与）
+  // person 模式：节点框显示其下属人员的勾选状态（全选/半选/未选），
+  // 人员框显示各自的勾选状态。节点框可点击 → 级联勾选该节点下全部人员。
   if(TREE_PICK.pickMode==='person'){
-    // 节点勾选框不可用（只勾人员）→ 置灰
-    (function paintNa(ns){
+    (function paint(ns){
       (ns||[]).forEach(n=>{
         const box=document.getElementById('tp_box_'+n.id);
-        if(box){ box.className='tp-box tp-box-na'; box.innerHTML=''; }
-        paintNa(n.children||[]);
+        if(box){
+          const under=tpPersonUnder(n);
+          const sel=under.filter(x=>TREE_PICK.selected.includes(ORG_PERSON_PREFIX+x)).length;
+          setBox(box, under.length===0?'off':(sel===0?'off':(sel===under.length?'on':'half')));
+        }
+        paint(n.children||[]);
       });
     })(TREE_PICK.tree||[]);
     (TREE_PICK.personNames||new Set()).forEach(nm=>{
-      const box=document.getElementById('tp_pbox_'+nm);
-      if(!box)return;
+      // 同名人员可能出现在多个节点 → 用属性选择器批量更新，id 会冲突
+      const boxes=TREE_PICK.panel.querySelectorAll('[data-pbox="'+CSS.escape(nm)+'"]');
       const on=TREE_PICK.selected.includes(ORG_PERSON_PREFIX+nm);
-      setBox(box,on?'on':'off');
+      boxes.forEach(box=>setBox(box,on?'on':'off'));
     });
     const cnt=document.getElementById('tp_count');
     if(cnt)cnt.textContent=TREE_PICK.selected.length;
@@ -4643,15 +4907,35 @@ function collectDesc(n){
 function normalizeSelected(){ return [...TREE_PICK.selected]; }   // 保留接口（暂不污染 selected）
 function setBox(box,mode){
   // 勾/横线 用 CSS class 子元素绘制（规范化，替代 inline style）
-  box.className='tp-box'+(mode==='on'||mode==='half'?(' '+mode):'');
+  // ⚠️ 必须保留原有 class（person 模式节点框带 tp-box-node 表示可点击级联）：
+  //    直接覆盖 className 会把 tp-box-node 冲掉，节点框就变成不可点的死元素。
+  const extra=box.classList&&box.classList.contains('tp-box-node')?' tp-box-node':'';
+  box.className='tp-box'+(mode==='on'||mode==='half'?(' '+mode):'')+extra;
   box.innerHTML = mode==='on' ? '<span class="tp-tick"></span>'
                  : mode==='half' ? '<span class="tp-bar"></span>'
                  : '';
 }
 function tpBoxClick(name,id){
   if(!TREE_PICK)return;
-  // person 模式：只勾人员，节点行不参与勾选（否则节点名会混进人员集合）
-  if(TREE_PICK.pickMode==='person')return;
+  // person 模式：节点框 = 级联勾选该节点下的全部人员
+  // （原来节点框是置灰不可点的，导致「父节点选中/取消」无从触发，
+  //   也让树上的层级状态永远对不上）
+  if(TREE_PICK.pickMode==='person'){
+    const node=tpFindNode(id);
+    if(!node)return;
+    const under=tpPersonUnder(node);
+    if(!under.length)return;
+    const sel=under.filter(x=>TREE_PICK.selected.includes(ORG_PERSON_PREFIX+x)).length;
+    const allOn=sel===under.length;
+    under.forEach(x=>{
+      const key=ORG_PERSON_PREFIX+x;
+      const i=TREE_PICK.selected.indexOf(key);
+      if(allOn){ if(i>=0)TREE_PICK.selected.splice(i,1); }
+      else if(i<0) TREE_PICK.selected.push(key);
+    });
+    paintAll();
+    return;
+  }
   const isOn=TREE_PICK.selected.includes(name);
   // 按当前树源查找节点（不能硬编码 WG_ALL —— person 模式的树源是 ORG_TREE）
   const kids=(function find(ns){let r=null;(ns||[]).forEach(n=>{if(n.id===id)r=n;else if(!r)r=find(n.children||[])});return r})(TREE_PICK.tree||WG_ALL||[]);
@@ -4671,11 +4955,22 @@ function tpBoxClick(name,id){
 function tpToggle(id){
   if(!TREE_PICK)return;
   TREE_PICK.expanded.has(id)?TREE_PICK.expanded.delete(id):TREE_PICK.expanded.add(id);
+  // 展开状态写入**全局**存储：这样「筛选变更后重开弹窗」「架构数据刷新后重开」
+  // 都能保持用户上次展开到哪一层，不会每次都跳回根节点。
+  if(TREE_PICK.expanded.has(id))TREE_EXPANDED.add(id);else TREE_EXPANDED.delete(id);
   const exp=TREE_PICK.expanded.has(id);
   const wrap=document.getElementById('tp_children_'+id);
   if(wrap)wrap.style.display=exp?'block':'none';
   const arrow=document.getElementById('tp_arrow_'+id);
   if(arrow)arrow.textContent=exp?'▼':'▶';
+  // 折叠时收起其后代节点的展开标记，避免「收起父节点后子节点仍标记为展开」
+  // 导致下次展开父节点时子节点莫名其妙是展开的
+  if(!exp){
+    const node=tpFindNode(id);
+    (function prune(ns){
+      (ns||[]).forEach(n=>{ TREE_EXPANDED.delete(n.id); prune(n.children||[]); });
+    })(node&&node.children||[]);
+  }
 }
 function tpCheck(name,checked){
   if(!TREE_PICK)return;
@@ -4999,10 +5294,19 @@ document.addEventListener('click',e=>{
   if(t.closest('#yearFilter')||t.closest('#yearDrop')){onYearFilterClick(e);return}
   // 点其它地方 → 收起「＋ 年份」下拉
   closeYearDrop();
-  // 周数筛选下拉：下拉内部点击 → 勾选 / 清空；点别处 → 收起
-  if(t.closest('#weekFilterDrop')){onWeekFilterClick(e);return}
-  if(t.closest('#weekFilterWrap'))return;
-  closeWeekFilterDrop();
+  // 可输入筛选（人员 / 周数）：面板内点击 → 勾选 / 清空；点别处 → 收起
+  const pOpt=t.closest('#personFilterDrop [data-pick-person]');
+  if(pOpt){onFilterOptionClick('person',pOpt.getAttribute('data-pick-person'));return}
+  if(t.closest('#personFilterDrop [data-clear-person]')){clearFilterSel('person');return}
+  const wOpt=t.closest('#weekFilterDrop [data-pick-week]');
+  if(wOpt){
+    const w=wOpt.getAttribute('data-pick-week');
+    onFilterOptionClick('week',w);
+    return;
+  }
+  if(t.closest('#weekFilterDrop [data-clear-week]')){clearFilterSel('week');return}
+  if(t.closest('#personFilterWrap')||t.closest('#weekFilterWrap'))return;
+  closeFilterCombo();
 });
 // 评论 @ 提及：候选项点击 + 已插入 chip 的移除
 document.addEventListener('click',e=>{
@@ -5963,6 +6267,13 @@ async function ensureOrgTree(force){
     (function collectPersons(ns){
       (ns||[]).forEach(n=>{ (n.members||[]).forEach(m=>{ if(m.name) ORG_PERSON_NAMES.add(m.name); }); collectPersons(n.children||[]); });
     })(ORG_TREE);
+    // 数据刷新后，若树选择器正开着（人员筛选），用新数据重绘它 ——
+    // 否则弹窗里还是旧的任职信息，与刚刷新的架构数据对不上。
+    // 展开状态由 TREE_EXPANDED（按节点 id）保留，重绘后仍在同一层。
+    if(TREE_PICK&&TREE_PICK.pickMode==='person'){
+      TREE_PICK.tree=ORG_TREE;
+      renderTreePick();
+    }
     return ORG_TREE;
   })();
   try{ return await _ORG_TREE_P; } finally { _ORG_TREE_P=null; }
