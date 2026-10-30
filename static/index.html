@@ -70,6 +70,16 @@ button{font-family:inherit}
 .profile-avatar-box img{width:100%;height:100%;object-fit:cover}
 .profile-avatar-box .pa-ph{font-size:30px;color:var(--text3)}
 .profile-avatar-hint{text-align:center;font-size:11.5px;color:var(--text3);margin-top:6px}
+/* 个人照片（形象照）：竖版大图预览，与圆形头像分开 */
+.profile-photo-box{position:relative;width:100%;max-width:220px;margin:0 auto;border:1px solid var(--border);
+  border-radius:8px;background:var(--bg);min-height:120px;display:flex;align-items:center;justify-content:center;
+  overflow:hidden;cursor:pointer}
+.profile-photo-box img{max-width:100%;max-height:260px;display:block;object-fit:contain}
+.profile-photo-box .pp-ph{font-size:34px;color:var(--text3)}
+.profile-photo-clear{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.55);color:#fff;border:none;
+  border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;line-height:1.6}
+.profile-photo-clear:hover{background:rgba(0,0,0,.75)}
+.profile-photo-row{display:flex;gap:12px;align-items:flex-start}
 .header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
 /* 头部「更多」下拉：低频操作收在这里，避免按钮平铺把标题挤扁 */
 .header-more{position:relative}
@@ -1133,6 +1143,14 @@ function goLogin(){
         <input type="file" id="profileAvatarFile" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="pickProfileAvatar(this)">
       </div>
       <div class="form-group">
+        <label>个人照片<span style="color:var(--text3)">（形象照，用于展示本人照片）</span></label>
+        <div class="profile-photo-box" id="profilePhotoBox" onclick="document.getElementById('profilePhotoFile').click()" title="点击上传个人照片">
+          <span class="pp-ph" id="profilePhotoPh">🖼️</span>
+        </div>
+        <div class="profile-avatar-hint" id="profilePhotoHint">点击上传个人照片（JPG / PNG / GIF / WebP，≤ 2MB，超大图会自动压缩）</div>
+        <input type="file" id="profilePhotoFile" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="pickProfilePhoto(this)">
+      </div>
+      <div class="form-group">
         <label>个人状态<span style="color:var(--text3)">（显示在页面顶部状态栏）</span></label>
         <input type="text" class="form-input" id="profileStatus" maxlength="120" placeholder="例如：本周聚焦成本复盘">
         <div class="profile-avatar-hint" style="text-align:left">留空则不显示状态栏</div>
@@ -1945,9 +1963,12 @@ let DEPT_EDIT_HONORS=[];                  // 待保存的标杆/模范列表
 let DEPT_SAVING=false;                    // 保存中（防重复提交）
 // 打开编辑弹窗
 // ---------- 个人界面：头像 / 个人状态 / 修改密码 ----------
-var PROFILE_AVATAR='';        // 弹窗里暂存的��像 data URL（未保存）
+var PROFILE_AVATAR='';        // 弹窗里暂存的头像 data URL（未保存）
+var PROFILE_PHOTO='';         // 弹窗里暂存的个人照片 data URL（未保存）
 var PROFILE_STATUS='';        // 弹窗里暂存的个人状态
 var PROFILE_AVATAR_TYPES=['image/jpeg','image/png','image/gif','image/webp'];
+var PROFILE_MAX_PHOTO_BYTES=2*1024*1024;   // 与后端 MAX_PHOTO_BYTES 保持一致（2MB）
+var PROFILE_PHOTO_MAX_EDGE=1200;           // 压缩后的最长边（像素）
 var PROFILE_MAX_IMG_BYTES=512*1024;
 
 // 渲染顶栏头像 + 状态栏（init 与保存后统一走这里）
@@ -1981,8 +2002,12 @@ function renderMyProfile(){
 function openProfileModal(){
   if(!ME)return;
   PROFILE_AVATAR=ME.avatar||'';
+  PROFILE_PHOTO=ME.photo||'';
   PROFILE_STATUS=ME.status_text||'';
   renderProfileAvatarBox();
+  renderProfilePhotoBox();
+  const ph=document.getElementById('profilePhotoHint');
+  if(ph)ph.textContent=PROFILE_PHOTO?'照片已上传，点「保存资料」生效':'点击上传个人照片（JPG / PNG / GIF / WebP，≤ 2MB，超大图会自动压缩）';
   const st=document.getElementById('profileStatus');
   if(st)st.value=PROFILE_STATUS;
   ['profileOldPwd','profileNewPwd','profileNewPwd2'].forEach(id=>{
@@ -2030,17 +2055,96 @@ function pickProfileAvatar(inp){
   };
   fr.readAsDataURL(f);
 }
-// 保存头像 + 个人状态
+// 渲染个人照片预览
+function renderProfilePhotoBox(){
+  const box=document.getElementById('profilePhotoBox');
+  if(!box)return;
+  if(PROFILE_PHOTO){
+    box.innerHTML=`<img src="${PROFILE_PHOTO}" alt="个人照片">`
+      +`<button class="profile-photo-clear" onclick="clearProfilePhoto(event)">清除</button>`;
+  }else{
+    box.innerHTML='<span class="pp-ph">🖼️</span>';
+  }
+}
+// 清除个人照片（阻止冒泡，避免触发「点击上传」）
+function clearProfilePhoto(ev){
+  if(ev&&ev.stopPropagation)ev.stopPropagation();
+  PROFILE_PHOTO='';
+  renderProfilePhotoBox();
+  const hint=document.getElementById('profilePhotoHint');
+  if(hint)hint.textContent='已清除，点「保存资料」生效';
+}
+// 压缩图片：最长边缩到 PROFILE_PHOTO_MAX_EDGE，输出 JPEG
+// 手机直出的照片常有 3~5MB，直接存 data URL 会把库撑大；
+// 统一压到长边 1200px / 质量 0.85，通常落在 100~300KB。
+function compressProfilePhoto(file){
+  return new Promise(resolve=>{
+    const fr=new FileReader();
+    fr.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        try{
+          let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+          const max=PROFILE_PHOTO_MAX_EDGE;
+          if(Math.max(w,h)>max){
+            const k=max/Math.max(w,h);
+            w=Math.round(w*k); h=Math.round(h*k);
+          }
+          const cv=document.createElement('canvas');
+          cv.width=w; cv.height=h;
+          const ctx=cv.getContext('2d');
+          ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);   // 透明底转白底，避免 JPEG 变黑
+          ctx.drawImage(img,0,0,w,h);
+          resolve(cv.toDataURL('image/jpeg',0.85));
+        }catch(e){ resolve(String(fr.result||'')); }   // canvas 不可用时退回原图
+      };
+      img.onerror=()=>resolve(String(fr.result||''));
+      img.src=String(fr.result||'');
+    };
+    fr.onerror=()=>resolve('');
+    fr.readAsDataURL(file);
+  });
+}
+// 选择个人照片（前端先校验类型与大小，避免白跑一趟接口）
+async function pickProfilePhoto(inp){
+  const f=inp&&inp.files&&inp.files[0];
+  if(!f)return;
+  const hint=document.getElementById('profilePhotoHint');
+  if(PROFILE_AVATAR_TYPES.indexOf(f.type)<0){
+    if(hint)hint.textContent='仅支持 JPG / PNG / GIF / WebP 格式';
+    inp.value='';return;
+  }
+  if(f.size>PROFILE_MAX_PHOTO_BYTES){
+    if(hint)hint.textContent=`图片过大（${Math.round(f.size/1024)}KB），请压缩到 ${PROFILE_MAX_PHOTO_BYTES/1024}KB 以内`;
+    inp.value='';return;
+  }
+  const dataUrl=await compressProfilePhoto(f);
+  if(!dataUrl){
+    if(hint)hint.textContent='图片读取失败，请重新选择';
+    inp.value='';return;
+  }
+  const approx=Math.round(dataUrl.length*3/4);
+  if(approx>PROFILE_MAX_PHOTO_BYTES){
+    if(hint)hint.textContent=`压缩后仍过大（${Math.round(approx/1024)}KB），请换一张更小的照片`;
+    inp.value='';return;
+  }
+  PROFILE_PHOTO=dataUrl;
+  renderProfilePhotoBox();
+  if(hint)hint.textContent=`已选择（压缩后约 ${Math.round(approx/1024)}KB），点「保存资料」生效`;
+}
+// 保存头像 + 个人照片 + 个人状态
 async function saveProfile(){
   const st=document.getElementById('profileStatus');
   const status_text=st?(st.value||'').trim():'';
   try{
-    await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,status_text})});
+    await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,photo:PROFILE_PHOTO,status_text})});
     // 同步到 ME 并刷新顶栏
-    ME.avatar=PROFILE_AVATAR; ME.status_text=status_text;
+    ME.avatar=PROFILE_AVATAR; ME.photo=PROFILE_PHOTO; ME.status_text=status_text;
     renderMyProfile();
     const hint=document.getElementById('profileAvatarHint');
     if(hint)hint.textContent='已保存';
+    const phint=document.getElementById('profilePhotoHint');
+    if(phint)phint.textContent='已保存';
     toast('个人资料已保存');
     closeModal('profileModal');
   }catch(e){toast(e.message)}

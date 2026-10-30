@@ -782,15 +782,16 @@ def me(username: str = Depends(require_auth)):
     col_info = None
     if columns is not None:
         col_info = {bid: sorted(cols) for bid, cols in columns.items()}
-    # 个人资料（头像 / 个人状态）—— 顶栏状态栏与个人界面使用
-    prof = dbq('SELECT avatar, status_text FROM users WHERE username=?', (username,))
+    # 个人资料（头像 / 个人照片 / 个人状态）—— 顶栏状态栏与个人界面使用
+    prof = dbq('SELECT avatar, photo, status_text FROM users WHERE username=?', (username,))
     avatar = prof[0]['avatar'] if prof else ''
+    photo = prof[0]['photo'] if prof else ''
     status_text = prof[0]['status_text'] if prof else ''
     # 显示名：顶栏展示「姓名(账号)」；账号未绑定成员时只显示账号
     display_name = _member_display_name(username)
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
-            'avatar': avatar, 'status_text': status_text,
+            'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'allowed_columns': col_info,
             'depts': _dept_order()}   # 有序部门清单（随架构层级动态变化）：空部门同样占位
 
@@ -2788,11 +2789,14 @@ def delete_board_config(cid: int, username: str = Depends(require_admin), reques
 # 图片一律以 data URL 存进数据库：同步脚本只传代码不传数据文件，
 # 存文件系统会在同步后指向服务器上不存在的路径（图片直接失效）。
 MAX_IMAGE_BYTES = 512 * 1024        # 单张图片上限 512KB（data URL 后的实际字节数）
+MAX_PHOTO_BYTES = 2 * 1024 * 1024   # 个人照片上限 2MB（形象照比头像大得多）
 ALLOWED_IMAGE_TYPES = ('image/jpeg', 'image/png', 'image/gif', 'image/webp')
 
-def _check_image_data_url(data_url: str) -> str:
+def _check_image_data_url(data_url: str, max_bytes: int = None) -> str:
     """校验图片 data URL：类型必须是常见图片格式，大小不得超过上限。
-    返回去掉前缀的纯 base64 载荷（入库用）。不合规则抛 400。"""
+    返回去掉前缀的纯 base64 载荷（入库用）。不合规则抛 400。
+    max_bytes：按用途区分上限（头像 512KB、个人照片 2MB）。"""
+    limit = MAX_IMAGE_BYTES if max_bytes is None else max_bytes
     s = (data_url or '').strip()
     if not s:
         return ''
@@ -2806,26 +2810,36 @@ def _check_image_data_url(data_url: str) -> str:
         raise HTTPException(400, '仅支持 JPG / PNG / GIF / WebP 格式的图片')
     # base64 长度 → 原始字节数（约 3/4）
     approx = len(payload) * 3 // 4
-    if approx > MAX_IMAGE_BYTES:
-        raise HTTPException(400, f'图片过大（{approx//1024}KB），请压缩到 {MAX_IMAGE_BYTES//1024}KB 以内')
+    if approx > limit:
+        raise HTTPException(400, f'图片过大（{approx//1024}KB），请压缩到 {limit//1024}KB 以内')
     return s
 
 class ProfileReq(BaseModel):
-    """个人资料：头像 + 个人状态"""
-    avatar: str = ''          # data URL（空串=清除头像）
+    """个人资料：头像 + 个人照片 + 个人状态"""
+    avatar: str = ''          # 头像 data URL（空串=清除头像）
+    photo: str = ''           # 个人照片 data URL（空串=清除照片）
     status_text: str = ''     # 个人状态（一句话）
 
 
 @app.post('/api/profile')
 def update_profile(req: ProfileReq, username: str = Depends(require_auth), request: Request = None):
-    """保存个人资料（头像 + 个人状态）。仅能改自己的。"""
+    """保存个人资料（头像 + 个人照片 + 个人状态）。仅能改自己的。"""
     avatar = _check_image_data_url(req.avatar) if (req.avatar or '').strip() else ''
+    # 个人照片用独立上限（2MB）；照片与头像分开校验，互不影响
+    photo = _check_image_data_url(req.photo, MAX_PHOTO_BYTES) if (req.photo or '').strip() else ''
     status_text = (req.status_text or '').strip()[:120]
-    dbe('UPDATE users SET avatar=?, status_text=? WHERE username=?',
-        (avatar, status_text, username))
+    dbe('UPDATE users SET avatar=?, photo=?, status_text=? WHERE username=?',
+        (avatar, photo, status_text, username))
+    parts = []
+    if avatar:
+        parts.append('更新头像')
+    if photo:
+        parts.append('更新个人照片')
+    if status_text:
+        parts.append('更新个人状态')
     audit_log(username, client_ip(request), 'profile_update', '个人资料',
-              ('更新头像' if avatar else '清除头像') + ('，更新个人状态' if status_text else ''), 'success')
-    return {'ok': True, 'avatar': avatar, 'status_text': status_text}
+              '，'.join(parts) or '更新个人资料', 'success')
+    return {'ok': True, 'avatar': avatar, 'photo': photo, 'status_text': status_text}
 
 
 class PasswordChangeReq(BaseModel):
