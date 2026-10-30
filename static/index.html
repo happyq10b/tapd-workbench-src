@@ -469,6 +469,7 @@ button{font-family:inherit}
 .tp-arrow:hover{background:rgba(47,128,237,.12);color:var(--primary)}
 .tp-label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--text);flex:1;position:relative;outline:none;border-radius:3px}
 .tp-label:focus-visible{box-shadow:0 0 0 2px var(--primary)}
+.tp-box-na{opacity:.35;cursor:default}
 .tp-box{display:inline-block;width:14px;height:14px;border:1.5px solid #d9d9d9;border-radius:3px;background:#fff;cursor:pointer;position:relative;flex-shrink:0;vertical-align:middle;transition:border-color .15s;user-select:none;pointer-events:none}
 .tp-box.on,.tp-box.half{background:var(--primary);border-color:var(--primary)}
 .tp-box .tp-tick{position:absolute;left:3px;top:0;width:4px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
@@ -871,6 +872,9 @@ function goLogin(){
       <select class="filter-select" id="ownerFilter" onchange="reload(1)">
         <option value="">全部负责人</option><option value="__no_owner__">无负责人</option>
       </select>
+      <button class="filter-select" id="personFilterBtn" onclick="openPersonFilterPicker(this)"
+        style="cursor:pointer" title="按架构末级人员筛选（可套用为负责人或参与人条件）">👤 按人员筛选</button>
+      <span id="personFilterHint" style="font-size:12px;color:var(--text2)"></span>
       <span class="date-filter" id="dateFilterBox" title="按创建日期区间筛选（起止都留空 = 不限；只填一端 = 单边区间）">
         <input type="date" class="filter-date" id="createdStart" onchange="onDateFilterChange()" aria-label="创建日期 起">
         <span class="date-sep">~</span>
@@ -2371,15 +2375,88 @@ async function reload(page){
   const ps=new URLSearchParams({page:curPage,size:pageSize});
   const s=document.getElementById('statusFilter').value,o=document.getElementById('ownerFilter').value,
         q=document.getElementById('searchInput').value.trim();
+  const cc=window._ccFilter||'';
   // 创建日期区间：两端都空 = 不筛选；只填一端 = 单边区间（从某天起 / 到某天止）
   const ds=document.getElementById('createdStart').value,de=document.getElementById('createdEnd').value;
   if(curBoard)ps.set('board_id',curBoard);
   if(s)ps.set('status',s);if(o)ps.set('owner',o);if(q)ps.set('q',q);
+  if(cc)ps.set('cc',cc);
   if(ds)ps.set('created_start',ds);
   if(de)ps.set('created_end',de);
   const d=await api('/api/cards?'+ps);
   renderBoard(d.cards,d.columns,q,d.column_hits);
 }
+// ---------- 按人员筛选（架构树末级人员） ----------
+// 所选人员直接套用为【负责人】或【参与人】筛选条件。
+// 负责人条件写入 ownerFilter（多值逗号分隔）；参与人条件写入 window._ccFilter。
+async function openPersonFilterPicker(anchor){
+  if(!ORG_TREE.length){
+    try{ await ensureOrgTree(); }catch(e){ toast('架构数据加载失败'); return; }
+  }
+  if(!ORG_TREE.length){ toast('架构数据为空'); return; }
+  openTreePick(anchor, [], (persons)=>{
+    if(!persons||!persons.length){ toast('未选择人员'); return; }
+    askPersonFilterTarget(persons);
+  }, {mode:'filter', pickMode:'person', width:340, height:420, tree:ORG_TREE});
+}
+// 选定人员后：让用户选择套用为「负责人」还是「参与人」条件
+function askPersonFilterTarget(persons){
+  closeTreePick();
+  const pop=document.createElement('div');
+  pop.className='tree-pick';
+  pop.style.width='320px';
+  pop.style.padding='12px 14px';
+  pop.innerHTML=`<div style="font-size:12.5px;color:var(--text2);margin-bottom:8px">已选 ${persons.length} 人：${persons.map(esc).join('、')}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-secondary" onclick="closePersonFilterAsk()">取消</button>
+      <button class="btn-secondary" id="pfApplyOwner">套用为负责人</button>
+      <button class="btn-primary" id="pfApplyCc">套用为参与人</button>
+    </div>`;
+  document.body.appendChild(pop);
+  // 用事件绑定而非内联 onclick —— 人员姓名含中文/引号时，内联属性会被引号截断
+  const po=pop.querySelector('#pfApplyOwner'), pc=pop.querySelector('#pfApplyCc');
+  if(po)po.onclick=()=>applyPersonFilter('owner',persons);
+  if(pc)pc.onclick=()=>applyPersonFilter('cc',persons);
+  const r=(arguments[0]&&arguments[0].getBoundingClientRect)?arguments[0].getBoundingClientRect():null;
+  if(r){ pop.style.position='fixed'; pop.style.left=r.left+'px'; pop.style.top=Math.min(r.bottom+6, window.innerHeight-120)+'px'; }
+  window._pfPop=pop;
+}
+function closePersonFilterAsk(){
+  if(window._pfPop){ window._pfPop.remove(); window._pfPop=null; }
+}
+function applyPersonFilter(kind, persons){
+  closePersonFilterAsk();
+  const names=(persons||[]).join(',');
+  if(kind==='owner'){
+    const sel=document.getElementById('ownerFilter');
+    // 多值负责人：写成一个自定义 option（逗号分隔），后端按「任一命中」过滤
+    let opt=sel.querySelector('option[data-multi="1"]');
+    if(!opt){ opt=document.createElement('option'); opt.dataset.multi='1'; sel.appendChild(opt); }
+    opt.value=names; opt.textContent='负责人：'+persons.join('、');
+    sel.value=names;
+    window._ccFilter='';
+  }else{
+    window._ccFilter=names;
+    const sel=document.getElementById('ownerFilter');
+    const opt=sel.querySelector('option[data-multi="1"]');
+    if(opt) opt.textContent='负责人：'+persons.join('、');
+  }
+  syncPersonFilterHint();
+  reload(1);
+}
+function syncPersonFilterHint(){
+  const box=document.getElementById('personFilterHint');
+  if(!box)return;
+  const parts=[];
+  const sel=document.getElementById('ownerFilter');
+  const o=sel&&sel.value||'';
+  if(o && o!=='__no_owner__') parts.push('负责人：'+o.split(',').join('、'));
+  if(window._ccFilter) parts.push('参与人：'+window._ccFilter.split(',').join('、'));
+  box.textContent=parts.length?parts.join('  |  '):'';
+  const btn=document.getElementById('personFilterBtn');
+  if(btn) btn.style.color=(parts.length?'var(--primary)':'');
+}
+
 // ---------- 创建日期区间筛选 ----------
 // 起止颠倒时自动交换，避免查出空结果；空值与非法值一律忽略（后端也会再兜一层）
 function onDateFilterChange(){
@@ -2959,6 +3036,43 @@ function renderPickers(){
   // 子事项同样支持「参与人」（与主事项对标）：cc 是 cards 表的标准字段，
   // 父子事项共用同一张表，无需后端改动 —— 之前是前端主动隐藏了。
   initPersonPicker('e_cc',window._editCc=window._editCc||[]);
+  // 架构选人入口：与手动输入并存，选中人员直接回填到对应选择器
+  addOrgPickBtn('e_owner','owner');
+  addOrgPickBtn('e_cc','cc');
+}
+// 在指定人员选择器旁追加「🌳 从架构选人」按钮
+function addOrgPickBtn(containerId, kind){
+  const host=document.getElementById(containerId);
+  if(!host)return;
+  const btn=document.createElement('button');
+  btn.type='button';
+  btn.className='icon-btn';
+  btn.style.cssText='margin-top:6px;font-size:12px;padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);cursor:pointer;white-space:nowrap';
+  btn.textContent='🌳 从架构选人';
+  btn.title='从【架构管理】的末级人员中勾选（可多选），直接回填到'+(kind==='owner'?'负责人':'参与人');
+  btn.onclick=()=>openOrgPersonPick(containerId, kind, btn);
+  host.appendChild(btn);
+}
+// 打开 person 模式树，把勾选的人员回填到指定选择器
+async function openOrgPersonPick(containerId, kind, anchor){
+  if(!ORG_TREE.length){
+    try{ await ensureOrgTree(); }catch(e){ toast('架构数据加载失败'); return; }
+  }
+  if(!ORG_TREE.length){ toast('架构数据为空'); return; }
+  const o=PP[containerId];
+  const cur=(o&&o.arr)||[];
+  openTreePick(anchor, cur.map(n=>ORG_PERSON_PREFIX+n), (persons)=>{
+    if(!persons||!persons.length){ toast('未选择人员'); return; }
+    const oo=PP[containerId];
+    if(!oo)return;
+    // 保留手动输入的、手工添加的名字（不在架构树里的），架构选人结果覆盖同名项
+    const treeSet=new Set(persons);
+    const manual=oo.arr.filter(x=>!ORG_PERSON_NAMES.has(x));
+    const merged=[...new Set([...manual,...persons])];
+    oo.arr.length=0; merged.forEach(x=>oo.arr.push(x));
+    ppSyncTags(containerId);
+    toast(`已按架构选择 ${persons.length} 人`);
+  }, {mode:'filter', pickMode:'person', width:340, height:420, tree:ORG_TREE});
 }
 // 打开事项弹窗。子事项复用同一套弹窗（子事项模式）：隐藏「所属看板」，
 // 补上父事项信息与父时间范围约束，字段布局与主事项完全一致。
@@ -3488,7 +3602,16 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
   const treeSource = opts.tree || WG_ALL;  // 可指定渲染源（架构筛选传入含虚拟节点的扩展树）
   const validNames=new Set();
   (function flat(ns){ (ns||[]).forEach(n=>{ validNames.add(n.name); flat(n.children||[]); }); })(treeSource||[]);
-  TREE_PICK={panel, selected:[...(selected||[])].filter(x=>validNames.has(x)||x.startsWith('__')), onConfirm, expanded:new Set(), mode, tree: treeSource, showSelectAll: !!opts.showSelectAll};
+  // person 模式：勾选的是**人员**，人员条目用 __P__ 前缀与节点名区分
+  const pickMode=(opts.pickMode||'node');
+  const personNames=new Set();
+  if(pickMode==='person'){
+    (function flat2(ns){ (ns||[]).forEach(n=>{ (n.members||[]).forEach(m=>personNames.add(m.name)); flat2(n.children||[]); }); })(treeSource||[]);
+  }
+  const okSel=(x)=>pickMode==='person'
+    ? (personNames.has(x)||x.startsWith(ORG_PERSON_PREFIX))
+    : (validNames.has(x)||x.startsWith('__'));
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded:new Set(), mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames};
   renderTreePick();
   const ph=Math.min(panel.offsetHeight, maxH);          // 真实渲染高度（关键：消除估算高度导致的空隙）
   const vh=window.innerHeight, vw=window.innerWidth;
@@ -3523,9 +3646,11 @@ function treePickOutside(e){
 function renderTreePick(){
   if(!TREE_PICK)return;
   const p=TREE_PICK.panel;
-  const title=TREE_PICK.mode==='filter'
+  const title=TREE_PICK.pickMode==='person'
+    ? '选择人员（点击 ▶ 展开部门 / 小组，勾选末级人员）'
+    : (TREE_PICK.mode==='filter'
     ? '架构筛选（点击 ▶ 展开，多选）'
-    : '选择工作组（点击 ▶ 展开 / 折叠，选中上级将自动全选下级）';
+    : '选择工作组（点击 ▶ 展开 / 折叠，选中上级将自动全选下级）');
   p.innerHTML=`
     <div style="font-size:12px;color:var(--text2);padding:8px 10px 4px">${title}</div>
     <div style="flex:1;overflow:auto;padding:2px 6px 6px;min-height:60px">${treePickNodes(TREE_PICK.tree,0)}</div>
@@ -3550,14 +3675,56 @@ function treePickNodes(nodes,dep){
     const hasCh=n.children&&n.children.length;
     const exp=TREE_PICK.expanded.has(n.id);
     const labelText=n.label||n.name;   // 优先显示 label（虚拟节点可定制文案）
+    // person 模式：节点下追加「末级人员」子条目（仅叶子层直接展示，父级展开后可见）
+    const members=(TREE_PICK.pickMode==='person')?(n.members||[]):[];
+    const memberHtml=members.map(m=>{
+      const key=ORG_PERSON_PREFIX+m.name;
+      const on=TREE_PICK.selected.includes(key);
+      return `<div class="tp-node tp-person" style="padding-left:${(dep+1)*16}px">
+        <span class="tp-arrow" style="visibility:hidden">▶</span>
+        <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择人员 ${esc(m.name)}" onclick="tpPersonClick('${esc(m.name)}')" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpPersonClick('${esc(m.name)}')}"><span class="tp-box${on?' on':''}" id="tp_pbox_${esc(m.name)}"></span><span>👤 ${esc(m.name)}${m.role_name?`<span style="color:var(--text3);font-size:11px">（${esc(m.role_name)}）</span>`:''}</span></label>
+      </div>`;
+    }).join('');
     return `<div class="tp-node" style="padding-left:${dep*16}px">
       ${hasCh?`<span class="tp-arrow" id="tp_arrow_${n.id}" onclick="tpToggle(${n.id})" title="展开/折叠">${exp?'▼':'▶'}</span>`:'<span class="tp-arrow" style="visibility:hidden">▶</span>'}
-      <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择 ${esc(labelText)}" onclick="tpBoxClick('${esc(n.name)}',${n.id})" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpBoxClick('${esc(n.name)}',${n.id})}"><span class="tp-box" id="tp_box_${n.id}"></span><span>${esc(labelText)}</span></label>
-    </div>${hasCh?`<div id="tp_children_${n.id}" style="display:${exp?'block':'none'}">${treePickNodes(n.children,dep+1)}</div>`:''}`;
+      <label class="tp-label" tabindex="0" role="${TREE_PICK.pickMode==='person'?'group':'checkbox'}" aria-label="选择 ${esc(labelText)}" onclick="tpBoxClick('${esc(n.name)}',${n.id})" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpBoxClick('${esc(n.name)}',${n.id})}"><span class="tp-box${TREE_PICK.pickMode==='person'?' tp-box-na':''}" id="tp_box_${n.id}"></span><span>${esc(labelText)}</span></label>
+    </div>${memberHtml}${hasCh?`<div id="tp_children_${n.id}" style="display:${exp?'block':'none'}">${treePickNodes(n.children,dep+1)}</div>`:''}`;
   }).join('');
+}
+// person 模式：勾选人员（用 __P__ 前缀存 selected，避免与节点名冲突）
+function tpPersonClick(name){
+  if(!TREE_PICK)return;
+  const key=ORG_PERSON_PREFIX+name;
+  const i=TREE_PICK.selected.indexOf(key);
+  if(i>=0)TREE_PICK.selected.splice(i,1);else TREE_PICK.selected.push(key);
+  const box=document.getElementById('tp_pbox_'+name);
+  if(box){ box.className='tp-box'+(TREE_PICK.selected.includes(key)?' on':'');
+    box.innerHTML=TREE_PICK.selected.includes(key)?'<span class="tp-tick"></span>':''; }
+  const cnt=document.getElementById('tp_count');
+  if(cnt)cnt.textContent=TREE_PICK.selected.length;
 }
 function paintAll(){
   if(!TREE_PICK)return;
+  // person 模式：只画人员勾选框（节点勾选框在 person 模式下不参与）
+  if(TREE_PICK.pickMode==='person'){
+    // 节点勾选框不可用（只勾人员）→ 置灰
+    (function paintNa(ns){
+      (ns||[]).forEach(n=>{
+        const box=document.getElementById('tp_box_'+n.id);
+        if(box){ box.className='tp-box tp-box-na'; box.innerHTML=''; }
+        paintNa(n.children||[]);
+      });
+    })(TREE_PICK.tree||[]);
+    (TREE_PICK.personNames||new Set()).forEach(nm=>{
+      const box=document.getElementById('tp_pbox_'+nm);
+      if(!box)return;
+      const on=TREE_PICK.selected.includes(ORG_PERSON_PREFIX+nm);
+      setBox(box,on?'on':'off');
+    });
+    const cnt=document.getElementById('tp_count');
+    if(cnt)cnt.textContent=TREE_PICK.selected.length;
+    return;
+  }
   // filter 模式：用户明确勾选，直接根据自身 selected 绘制（无半选概念，避免视觉与 selected 不一致）
   if(TREE_PICK.mode==='filter'){
     (function paint(ns){
@@ -3625,8 +3792,11 @@ function setBox(box,mode){
 }
 function tpBoxClick(name,id){
   if(!TREE_PICK)return;
+  // person 模式：只勾人员，节点行不参与勾选（否则节点名会混进人员集合）
+  if(TREE_PICK.pickMode==='person')return;
   const isOn=TREE_PICK.selected.includes(name);
-  const kids=(function find(ns){let r=null;ns.forEach(n=>{if(n.id===id)r=n;else if(!r)r=find(n.children||[])});return r})(WG_ALL);
+  // 按当前树源查找节点（不能硬编码 WG_ALL —— person 模式的树源是 ORG_TREE）
+  const kids=(function find(ns){let r=null;(ns||[]).forEach(n=>{if(n.id===id)r=n;else if(!r)r=find(n.children||[])});return r})(TREE_PICK.tree||WG_ALL||[]);
   const allDesc=kids?collectDesc(kids):[];
   const descSel=allDesc.filter(x=>TREE_PICK.selected.includes(x)).length;
   // 点击父级：若部分/未选 → 全选后代+自身；若全选 → 全取消
@@ -3678,6 +3848,15 @@ function tpCheck(name,checked){
   paintAll();   // 只更新视觉，不重建 DOM
 }
 function treePickConfirm(){
+  // person 模式：把 __P__ 前缀还原成纯人员姓名回传
+  // 注意：'__P__' 是 5 个字符（下划线×2 + P + 下划线×2），slice 长度必须一致
+  if(TREE_PICK&&TREE_PICK.pickMode==='person'){
+    const persons=TREE_PICK.selected.filter(x=>x.startsWith(ORG_PERSON_PREFIX)).map(x=>x.slice(ORG_PERSON_PREFIX.length));
+    const cb=TREE_PICK.onConfirm;
+    closeTreePick();
+    if(cb)cb(persons);
+    return;
+  }
   if(TREE_PICK&&TREE_PICK.onConfirm)TREE_PICK.onConfirm([...TREE_PICK.selected]);
   closeTreePick();
 }
@@ -4038,6 +4217,7 @@ async function setCardStatus(ctx,st){
 }
 // ---------- 团队 ----------
 var TM_ALL=[];  // [{id,name,workgroups:[...]}]
+var TM_VISIBLE_IDS=new Set();  // 当前表格可见的成员 id（筛选后的结果集）
 var TM_FILTER={name:'',workgroup:[],role:['noaccount']};  // 成员表格筛选条件（workgroup/role 改为多选数组）
 async function openTeamModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
@@ -4045,7 +4225,8 @@ async function openTeamModal(){
   const [team, groupsRes]=await Promise.all([api('/api/team'), api('/api/workgroups')]);
   WG_ALL=groupsRes.groups||[];  // 树形工作组选择器使用架构树
   WG_FLAT=wgFlat(WG_ALL);
-  TM_ALL=(team.members||[]).map(m=>({id:m.id,name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set}));
+  TM_ALL=(team.members||[]).map(m=>({id:m.id,name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set,
+    org_source:m.org_source||'none',org_conflict:m.org_conflict||[],org_nodes:m.org_nodes||[]}));
   TEAM_MEMBERS=TM_ALL.map(m=>m.name);
   TM_FILTER={name:'',workgroup:[],role:['noaccount']};
   initTeamFilterBar();
@@ -4138,6 +4319,8 @@ function renderTeamList(){
     }
     return true;
   });
+  // 当前可见的成员 id（保存时只提交这些行，见 saveAllTeamMembers）
+  TM_VISIBLE_IDS=new Set(filtered.map(m=>m.id));
   tbody.innerHTML=filtered.length?filtered.map(m=>{
         const hasAccount = !!m.account;
         const pwdCell = !isAdmin
@@ -4153,7 +4336,21 @@ function renderTeamList(){
           <input type="text" id="tm_edit_name_${m.id}" value="${esc(m.name)}" style="width:100px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">
         </td>
         <td class="tm-grp-cell" id="tm_wg_${m.id}"><button class="icon-btn" style="border:1px solid var(--border);border-radius:4px;padding:3px 10px;background:var(--bg);font-size:12.5px;width:fit-content;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;height:30px;vertical-align:middle;gap:4px" onclick="openTreePick(this, TM_ALL.find(x=>x.id===${m.id}).workgroups, (sel)=>{TM_ALL.find(x=>x.id===${m.id}).workgroups=sel; renderTeamList()})">🌳 选择工作组</button></td>
-        <td style="padding:7px 10px;font-size:12.5px;color:var(--text2)">${(()=>{const leaves=flattenWgToLeaves(m.workgroups);return leaves.length?leaves.map(x=>`<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 7px;background:var(--bg);border:1px solid var(--border);border-radius:10px">${esc(x)}</span>`).join(''):'<span style="color:var(--text3)">—</span>'})()}</td>
+        <td style="padding:7px 10px;font-size:12.5px;color:var(--text2)">
+          ${(()=>{const leaves=flattenWgToLeaves(m.workgroups);return leaves.length?leaves.map(x=>`<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 7px;background:var(--bg);border:1px solid var(--border);border-radius:10px">${esc(x)}</span>`).join(''):'<span style="color:var(--text3)">—</span>'})()}
+          ${(()=>{
+            const src=m.org_source||'none';
+            if(src==='org'){
+              const nodes=(m.org_nodes||[]).join('、');
+              const conflict=(m.org_conflict||[]);
+              return `<div style="margin-top:3px;font-size:11px;color:var(--primary)" title="以【架构管理】的任命为准">🏛 架构管理任命：${esc(nodes||'—')}${conflict.length?`<div style="color:var(--danger,#d4380d)" title="架构管理未覆盖的工作组，按规则忽略">⚠ 忽略：${esc(conflict.join('、'))}</div>`:''}</div>`;
+            }
+            if(src==='legacy'){
+              return `<div style="margin-top:3px;font-size:11px;color:var(--text3)" title="该成员在【架构管理】中无任命，回退使用工作组选择">👥 工作组选择（架构管理未任命）</div>`;
+            }
+            return `<div style="margin-top:3px;font-size:11px;color:var(--text3)">未分配</div>`;
+          })()}
+        </td>
         <td style="padding:7px 10px">${isAdmin
             ? `<input type="text" id="tm_account_${m.id}" value="${esc(m.account)}" placeholder="登录账号名" style="width:140px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">`
             : (hasAccount ? `<span style="font-size:13px;color:var(--text)">${esc(m.account)}</span>` : '<span style="color:var(--text3);font-size:12px">—</span>')}</td>
@@ -4345,7 +4542,16 @@ async function saveAllTeamMembers(){
   const isAdmin=ME.is_admin, isSuperUser=ME.username==='admin';
   const updates=[];
   let pwdChanged=0;
-  for(const m of TM_ALL){
+  // 只提交**当前可见**的行。
+  // 原因：表格按筛选条件渲染，被筛掉的成员在 DOM 里没有输入框，
+  //   遍历全量 TM_ALL 会取不到姓名 → 误判「姓名不能为空」→ 整批保存被中断；
+  //   更严重的是，若硬取空值提交，还会把该成员的账号/角色/工作组一并清空。
+  const visible=TM_ALL.filter(m=>TM_VISIBLE_IDS.has(m.id));
+  const hidden=TM_ALL.length-visible.length;
+  if(!visible.length){
+    toast('当前筛选结果为空，没有可保存的成员');return;
+  }
+  for(const m of visible){
     const name=(document.getElementById('tm_edit_name_'+m.id)?.value||'').trim();
     if(!name){toast(`ID ${m.id} 的姓名不能为空`);return}
     const workgroups=m.workgroups||[];  // 已通过树形选择器更新到 TM_ALL
@@ -4366,7 +4572,8 @@ async function saveAllTeamMembers(){
   }
   try{
     await Promise.all(updates.map(u=>api('/api/team/'+u.id,{method:'PUT',body:JSON.stringify(u)})));
-    toast(`已保存 ${updates.length} 位成员`+(pwdChanged?`，密码已更新 ${pwdChanged} 位`:''));
+    toast(`已保存 ${updates.length} 位成员`+(pwdChanged?`，密码已更新 ${pwdChanged} 位`:'')+
+          (hidden?`（另有 ${hidden} 位成员被筛选隐藏，未提交）`:''));
     openTeamModal();
   }catch(e){toast(e.message)}
 }
@@ -4457,6 +4664,8 @@ var ORG_TREE=[];        // 新模型的节点树（含 roles / appointments）
 var ORG_FLAT=[];        // 新模型平铺
 var ORG_ROLES_BY_TYPE={}; // {node_type:[{role_key,role_name,unique_slot}]}
 var ORG_TYPE_NAMES={};  // {node_type:'中心'|'部门'|'常规小组'|'专项小组'}
+var ORG_PERSON_NAMES=new Set();  // 架构中出现的全部人员姓名（用于区分「手动输入」与「架构选人」）
+var ORG_PERSON_PREFIX='__P__';   // 树形选择器里人员条目的前缀（与节点名区分）
 var ORG_SELECTED=0;    // 当前查看岗位的节点 id（0=未选中）
 var ORG_MEMBERS=[];    // 成员列表 [{id,name,account}]（任职选择用）
 var ORG_MEMBER_BY_ID={};// id → 成员
@@ -4798,16 +5007,34 @@ function resetWgForm(){
   renderOrgRoles();
   paintOrgSelection();
 }
+// 按需加载组织架构树（幂等）。用于「按人员筛选」「从架构选人」等独立入口，
+// 避免依赖用户先打开过架构管理弹窗。
+var _ORG_TREE_P=null;
+async function ensureOrgTree(){
+  if(ORG_TREE&&ORG_TREE.length) return ORG_TREE;
+  if(_ORG_TREE_P) return _ORG_TREE_P;
+  _ORG_TREE_P=(async()=>{
+    const od=await api('/api/org/tree');
+    ORG_TREE=od.tree||[];
+    ORG_FLAT=wgFlat(ORG_TREE);
+    ORG_TYPE_NAMES=od.type_names||ORG_TYPE_NAMES;
+    // 汇总架构里的全部人员姓名
+    ORG_PERSON_NAMES=new Set();
+    (function collectPersons(ns){
+      (ns||[]).forEach(n=>{ (n.members||[]).forEach(m=>{ if(m.name) ORG_PERSON_NAMES.add(m.name); }); collectPersons(n.children||[]); });
+    })(ORG_TREE);
+    return ORG_TREE;
+  })();
+  try{ return await _ORG_TREE_P; } finally { _ORG_TREE_P=null; }
+}
 async function openWgModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
   const [gd, td] = await Promise.all([api('/api/workgroups'), api('/api/team')]);
   WG_ALL=gd.groups||[];
   WG_FLAT=wgFlat(WG_ALL);
   WG_BOARDS=gd.all_boards||[];
-  // 新模型：节点树 + 岗位 + 任职
-  const od=await api('/api/org/tree');
-  ORG_TREE=od.tree||[];
-  ORG_FLAT=wgFlat(ORG_TREE);
+  // 新模型：节点树 + 岗位 + 任职（按需加载，幂等）
+  await ensureOrgTree();
   ORG_ROLES_BY_TYPE=od.roles_by_type||{};
   ORG_TYPE_NAMES=od.type_names||{};
   ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||''}));

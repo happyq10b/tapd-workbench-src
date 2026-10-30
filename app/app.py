@@ -138,6 +138,12 @@ def _leader_boards(username: str):
         candidates.append(row[0]['name'])
     marks = ','.join('?' * len(candidates))
     rows = dbq(f'SELECT id, parent_id, boards FROM workgroups WHERE leader IN ({marks})', candidates)
+    # 【架构管理】优先：若该成员在架构管理里有「负责人」岗位任命（部门长/组长/
+    # 中心负责人/总经理），以其负责范围为准 —— 旧 workgroups.leader 字段仅作回退，
+    # 避免两套机制并存时负责人范围被旧字段带偏。
+    org_rows = _org_leader_nodes(username)
+    if org_rows:
+        rows = org_rows
     if not rows:
         return None
     all_rows = dbq('SELECT id, parent_id, boards FROM workgroups')
@@ -162,6 +168,29 @@ def _leader_boards(username: str):
         if collect(r):
             return _LEADER_ALL
     return merged
+
+
+def _org_leader_nodes(username):
+    """该成员在【架构管理】中担任负责人的节点列表（来自 org_appointments）。
+
+    负责人岗位：group_leader(组长) / dept_head(部门长) / center_head(中心负责人)
+    / gm(总经理)。返回 [{'id','parent_id','boards'}]，与 workgroups 同构，
+    便于 _leader_boards 复用同一套「节点 + 后代」的板块收集逻辑。
+    """
+    candidates = [username]
+    row = dbq('SELECT name FROM team_members WHERE account=?', (username,))
+    if row and row[0]['name'] and row[0]['name'] != username:
+        candidates.append(row[0]['name'])
+    marks = ','.join('?' * len(candidates))
+    rows = dbq(f"SELECT n.id, n.parent_id, w.boards"
+                   f" FROM org_appointments a"
+                   f" JOIN org_nodes n ON n.id = a.node_id"
+                   f" JOIN team_members m ON m.id = a.member_id"
+                   f" LEFT JOIN workgroups w ON w.id = n.wg_id"
+                   f" WHERE a.role_key IN ('group_leader','dept_head','center_head','gm')"
+                   f" AND (m.account IN ({marks}) OR m.name IN ({marks}) OR m.account=? OR m.name=?)",
+                 list(candidates) + list(candidates) + [username, username])
+    return [dict(r) for r in rows]
 
 
 # ---------------- 归属部门（架构层级）与板块归属 ----------------
@@ -229,24 +258,38 @@ def _dept_ancestor_of_node(node_id, nmap=None):
     return None
 
 
-def _member_dept_scope(username):
-    """成员的归属部门范围（部门层级节点 id 集合）。
+def _member_authority_nodes(username):
+    """该成员的**权威组织节点**集合（架构管理优先）。
 
-    来源：
-      1) org_appointments（新模型的任职/挂靠）
-      2) team_members.workgroups（旧字段的分组归属）
-    小组归属向上取最近的部门/中心祖先。
+    数据来源与优先级：
+      ① org_appointments（【架构管理】的「任命」）—— 唯一权威源；
+      ② team_members.workgroups（【人员与账号管理】的「工作组选择」）——
+         仅当该成员在架构管理里**没有任何任命**时才作为回退。
+
+    返回 (node_ids:set, source:str)
+      source: 'org' = 来自架构管理任命
+              'legacy' = 回退旧工作组字段
+              'none' = 无任何归属
+    node_ids 是 org_nodes.id 集合；小组节点向上取最近的部门/中心祖先。
     """
     nmap = _org_node_map()
     node_ids = set()
     member_ids = [r['id'] for r in
                   dbq('SELECT id FROM team_members WHERE account=? OR name=?', (username, username))]
+    # ---- ① 架构管理任命（权威）----
     if member_ids:
         marks = ','.join('?' * len(member_ids))
         for r in dbq(f'SELECT DISTINCT node_id FROM org_appointments WHERE member_id IN ({marks})',
                      member_ids):
             node_ids.add(r['node_id'])
-    # 旧字段：分组名 → 架构节点
+    if node_ids:
+        scope = set()
+        for nid in node_ids:
+            anc = _dept_ancestor_of_node(nid, nmap)
+            if anc:
+                scope.add(anc['id'])
+        return scope, 'org'
+    # ---- ② 回退：旧 workgroups 字段 ----
     wg_by_name = {r['name']: r['id'] for r in dbq('SELECT id, name FROM workgroups')}
     node_by_wg = {n['wg_id']: n['id'] for n in nmap.values() if n.get('wg_id')}
     for r in dbq('SELECT workgroups FROM team_members WHERE account=? OR name=?', (username, username)):
@@ -262,6 +305,55 @@ def _member_dept_scope(username):
         anc = _dept_ancestor_of_node(nid, nmap)
         if anc:
             scope.add(anc['id'])
+    return scope, ('legacy' if scope else 'none')
+
+
+def _member_workgroup_names(username):
+    """该成员的工作组名称列表（按同一优先级推导）。
+
+    ① 成员在架构管理里有任命 → 用其任命的**小组/部门节点**名称（权威）；
+    ② 否则回退 team_members.workgroups（旧字段）。
+
+    架构管理里「任命到部门/中心」的成员，其 workgroups 字段可能为空，
+    但按权威源应视为归属该部门/中心 —— 这里返回对应节点名，
+    供 _group_boards 做「祖先部门传导」计算。
+    """
+    nmap = _org_node_map()
+    member_ids = [r['id'] for r in
+                  dbq('SELECT id FROM team_members WHERE account=? OR name=?', (username, username))]
+    if member_ids:
+        marks = ','.join('?' * len(member_ids))
+        rows = dbq(f"SELECT DISTINCT n.name, n.node_type, n.wg_id, n.parent_id"
+                   f" FROM org_appointments a JOIN org_nodes n ON n.id=a.node_id"
+                   f" WHERE a.member_id IN ({marks})", member_ids)
+        if rows:
+            # 权威源：按 org_nodes 树取该成员所属节点的**工作组的祖先链**
+            names = []
+            by_id = {r['id']: r for r in dbq('SELECT id, name, parent_id FROM workgroups')}
+            for r in rows:
+                # 该节点自身的 workgroups 名
+                wg_name = ''
+                if r['wg_id']:
+                    wr = by_id.get(r['wg_id'])
+                    if wr:
+                        wg_name = wr['name']
+                if wg_name and wg_name not in names:
+                    names.append(wg_name)
+            return names, 'org'
+    row = dbq('SELECT workgroups FROM team_members WHERE account=?', (username,))
+    if row and row[0]['workgroups']:
+        return [g.strip() for g in row[0]['workgroups'].split(';') if g.strip()], 'legacy'
+    return [], 'none'
+
+
+def _member_dept_scope(username):
+    """成员的归属部门范围（部门层级节点 id 集合）。
+
+    **架构管理优先**：org_appointments（任命）为唯一权威源；
+    该成员在架构管理里无任何任命时，才回退 team_members.workgroups（旧字段）。
+    详见 _member_authority_nodes。
+    """
+    scope, _src = _member_authority_nodes(username)
     return scope
 
 
@@ -304,10 +396,9 @@ def _group_boards(username: str):
     返回 set(board_id) 表示受限板块；None 表示不限制（未绑定/绑定'*'/超管/负责人）。"""
     if username == SUPER_ADMIN:
         return None
-    row = dbq('SELECT workgroups FROM team_members WHERE account=?', (username,))
-    if not row or not row[0]['workgroups']:
-        return None
-    names = [g.strip() for g in row[0]['workgroups'].split(';') if g.strip()]
+    # 架构管理优先：成员在架构管理里有任命时，用任命节点推导出的工作组名；
+    # 否则回退旧 workgroups 字段。与 _member_dept_scope 同源，保证两层口径一致。
+    names, _src = _member_workgroup_names(username)
     if not names:
         return None
     all_rows = dbq('SELECT id, name, parent_id, boards FROM workgroups')
@@ -715,6 +806,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
           q: Optional[str] = None, page: int = 1, size: int = 50,
           parent_id: Optional[str] = None, card_id: Optional[str] = None,
           created_start: Optional[str] = None, created_end: Optional[str] = None,
+          cc: Optional[str] = None,
           username: str = Depends(require_auth), request: Request = None):
     if card_id:
         audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
@@ -766,8 +858,20 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         # 「无负责人」：负责人为空或纯空白（负责人字段多人时以 ; 分隔）
         mine = [r for r in mine if not (r.get('owner') or '').strip()]
     elif owner:
-        # 普通负责人：保持既有的子串匹配语义（多人负责人以 ; 分隔，名字互为前缀时仍能命中）
-        mine = [r for r in mine if owner in (r.get('owner') or '')]
+        # 负责人筛选：支持多值（逗号分隔 = 任一命中），单值时保持既有的子串匹配语义
+        # （多人负责人以 ; 分隔，名字互为前缀时仍能命中）
+        onames = [x.strip() for x in owner.split(',') if x.strip()]
+        if len(onames) > 1:
+            mine = [r for r in mine
+                    if any(nm in (r.get('owner') or '') for nm in onames)]
+        else:
+            mine = [r for r in mine if owner in (r.get('owner') or '')]
+    if cc:
+        # 参与人筛选：同样支持多值（逗号分隔 = 任一命中）
+        cnames = [x.strip() for x in cc.split(',') if x.strip()]
+        if cnames:
+            mine = [r for r in mine
+                    if any(nm in (r.get('cc') or '') for nm in cnames)]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]
     # 搜索：同时命中「事项」（名称/描述）与「板块」（板块名）
@@ -1505,12 +1609,35 @@ def get_team(username: str = Depends(require_auth)):
                  LEFT JOIN users u ON u.username = m.account
                  ORDER BY m.id''')
     out = [dict(r) for r in rows]
+    # 组织归属来源（架构管理优先）——供前端标注「以架构管理为准 / 与架构管理冲突」
+    appt_nodes = defaultdict(set)
+    for r in dbq('SELECT a.member_id, n.name FROM org_appointments a '
+                 'JOIN org_nodes n ON n.id=a.node_id'):
+        appt_nodes[r['member_id']].add(r['name'])
+    for m in out:
+        names = set(x.strip() for x in (m.get('workgroups') or '').split(';') if x.strip())
+        org_names = appt_nodes.get(m['id'], set())
+        if org_names:
+            m['org_source'] = 'org'
+            # 冲突：workgroups 里有架构管理未覆盖的组
+            m['org_conflict'] = sorted(names - org_names)
+            m['org_nodes'] = sorted(org_names)
+        elif names:
+            m['org_source'] = 'legacy'
+            m['org_conflict'] = []
+            m['org_nodes'] = []
+        else:
+            m['org_source'] = 'none'
+            m['org_conflict'] = []
+            m['org_nodes'] = []
     if not is_admin(username):
         # 非管理员仅用于首页负责人下拉，不暴露账号/角色/密码状态
         for m in out:
             m['account'] = ''
             m['role'] = ''
             m['password_set'] = False
+            m.pop('org_conflict', None)
+            m.pop('org_nodes', None)
     return {'members': out}
 
 class TeamReq(BaseModel):
@@ -2086,6 +2213,35 @@ class OrgAppointmentReq(BaseModel):
     role_key: str
     is_primary: int = 0
 
+def _collect_node_members(node_id: int, nodes, appts):
+    """节点（含全部后代）的末级人员名单。
+
+    返回 [{name, role_name, node_name}]，按姓名去重（同名人员在不同节点各占一项）。
+    「末级人员」= 该节点及其后代节点上所有任职人 —— 树形组件在节点下追加人员层时使用。
+    """
+    by_parent = defaultdict(list)
+    for n in nodes:
+        by_parent[n['parent_id']].append(n)
+    name_by_id = {n['id']: n['name'] for n in nodes}
+    out = []
+    seen = set()
+    stack = [node_id]
+    while stack:
+        cur = stack.pop()
+        for a in appts.get(cur, []):
+            nm = a.get('member_name') or ''
+            if not nm or nm in seen:
+                continue          # 同一人只在最靠近的节点出现一次，避免父节点重复列出
+            seen.add(nm)
+            out.append({'name': nm,
+                        'role_name': a.get('role_name') or '',
+                        'node_name': name_by_id.get(cur, '')})
+        # by_parent 的 value 是节点 dict 列表，这里要的是**节点 id**
+        stack.extend(child['id'] for child in by_parent.get(cur, []))
+    out.sort(key=lambda x: (x['node_name'], x['name']))
+    return out
+
+
 @app.get('/api/org/tree')
 def get_org_tree(username: str = Depends(require_auth)):
     """组织架构树：节点 + 类型 + 岗位定义 + 任职明细（含多归属标记）"""
@@ -2133,6 +2289,9 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['roles'] = roles_by_type.get(n['node_type'], [])
             node['appointments'] = appts.get(n['id'], [])
             node['owned_boards'] = sorted(owned.get(n['id'], set()))
+            # 该节点的末级人员名单（姓名 + 岗位），供前端树形组件渲染「人员」层。
+            # 取该节点的任职人 + 其所有后代节点的任职人（末级=最深层的实际人员）。
+            node['members'] = _collect_node_members(n['id'], nodes, appts)
             node['children'] = build(n['id'])
             out.append(node)
         return out
