@@ -52,7 +52,24 @@ button{font-family:inherit}
    之前靠 .app-header 的 justify-content:space-between 撑开左右，
    一旦右侧按钮换行（窄屏），整组就会跑到左边与标题挤在一起。 */
 .header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;min-width:0;margin-left:auto}
-.header-user{display:flex;align-items:center;gap:8px;margin-right:8px;font-size:13px;color:var(--text2)}
+.header-user{display:flex;align-items:center;gap:8px;margin-right:8px;font-size:13px;color:var(--text2);
+  cursor:pointer;padding:3px 8px;border-radius:var(--radius-sm);border:1px solid transparent}
+.header-user:hover{background:var(--bg);border-color:var(--border)}
+.header-avatar{width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;
+  border:1px solid var(--border);background:var(--bg)}
+/* 顶栏个人状态栏 */
+.my-status-bar{display:flex;align-items:center;gap:8px;max-width:1440px;margin:0 auto;
+  padding:7px 24px 0;font-size:12.5px;color:var(--text2)}
+.my-status-bar .ms-dot{width:7px;height:7px;border-radius:50%;background:var(--primary);flex-shrink:0}
+.my-status-bar .ms-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.my-status-bar .ms-text:empty{display:none}
+/* 个人界面 */
+.profile-avatar-box{width:96px;height:96px;border-radius:50%;overflow:hidden;margin:0 auto;
+  border:2px solid var(--border);background:var(--bg);display:flex;align-items:center;
+  justify-content:center;cursor:pointer;position:relative}
+.profile-avatar-box img{width:100%;height:100%;object-fit:cover}
+.profile-avatar-box .pa-ph{font-size:30px;color:var(--text3)}
+.profile-avatar-hint{text-align:center;font-size:11.5px;color:var(--text3);margin-top:6px}
 .header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
 /* 头部「更多」下拉：低频操作收在这里，避免按钮平铺把标题挤扁 */
 .header-more{position:relative}
@@ -801,7 +818,9 @@ function goLogin(){
     </div>
   </div>
   <div class="header-actions">
-    <span class="header-user"><span id="userName"></span><span class="role-tag" id="roleTag"></span></span>
+    <span class="header-user" id="headerUser" onclick="openProfileModal()" title="个人界面（头像 / 状态 / 修改密码）">
+      <img class="header-avatar" id="headerAvatar" alt="" hidden><span id="userName"></span><span class="role-tag" id="roleTag"></span>
+    </span>
     <button class="header-btn msg-btn" id="msgBtn" onclick="openMsgPanel()" title="消息中心">🔔<span class="msg-badge" id="msgBadge" hidden>0</span></button>
     <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
     <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
@@ -824,6 +843,10 @@ function goLogin(){
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
 </header>
+<!-- 个人状态栏：显示当前登录用户的个人状态（无状态则隐藏） -->
+<div class="my-status-bar" id="myStatusBar" hidden title="我的个人状态">
+  <span class="ms-dot"></span><span class="ms-text" id="myStatusText"></span>
+</div>
 <!-- 公告管理弹窗（仅管理员） -->
 <div class="modal-overlay" id="noticeModal" style="display:none">
   <div class="modal modal-wide">
@@ -1096,6 +1119,40 @@ function goLogin(){
 </div>
 
 <!-- 团队弹窗 -->
+<!-- 个人界面：头像 / 个人状态 / 修改密码 -->
+<div class="modal-overlay" id="profileModal" style="display:none">
+  <div class="modal" style="width:440px;max-width:94vw">
+    <div class="modal-header"><h2>👤 个人界面</h2><button class="modal-close" onclick="closeModal('profileModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>头像</label>
+        <div class="profile-avatar-box" id="profileAvatarBox" onclick="document.getElementById('profileAvatarFile').click()" title="点击上传头像">
+          <span class="pa-ph" id="profileAvatarPh">👤</span>
+        </div>
+        <div class="profile-avatar-hint" id="profileAvatarHint">点击头像上传（支持 JPG / PNG / GIF / WebP，≤ 512KB）</div>
+        <input type="file" id="profileAvatarFile" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="pickProfileAvatar(this)">
+      </div>
+      <div class="form-group">
+        <label>个人状态<span style="color:var(--text3)">（显示在页面顶部状态栏）</span></label>
+        <input type="text" class="form-input" id="profileStatus" maxlength="120" placeholder="例如：本周聚焦成本复盘">
+        <div class="profile-avatar-hint" style="text-align:left">留空则不显示状态栏</div>
+      </div>
+      <div class="form-group">
+        <label>修改密码</label>
+        <input type="password" class="form-input" id="profileOldPwd" placeholder="原密码" style="margin-bottom:8px">
+        <input type="password" class="form-input" id="profileNewPwd" placeholder="新密码（至少 6 位）" style="margin-bottom:8px">
+        <input type="password" class="form-input" id="profileNewPwd2" placeholder="确认新密码">
+        <div class="profile-avatar-hint" style="text-align:left">修改成功后需要重新登录</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('profileModal')">取消</button>
+      <button class="btn-primary" onclick="saveProfile()">保存资料</button>
+      <button class="btn-primary" style="background:var(--warning,#d48806);border-color:var(--warning,#d48806)" onclick="submitChangePassword()">修改密码</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="teamModal" style="display:none">
   <div class="modal" style="width:fit-content;min-width:920px;max-width:min(1200px,98vw);max-height:min(92vh,880px);overflow:hidden;display:flex;flex-direction:column">
     <div class="modal-header"><h2>👥 成员与账号管理</h2><button class="modal-close" onclick="closeModal('teamModal')">✕</button></div>
@@ -1555,6 +1612,7 @@ async function init(){
     ME=await api('/api/me');
     loadPins();   // 载入当前账号的个人置顶设置（按账号分桶，互不影响）
     document.getElementById('userName').textContent='👤 '+ME.username;
+    renderMyProfile();   // 顶栏头像 + 个人状态栏
     document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
     document.getElementById('roleTag').className='role-tag role-'+ME.role;
     if(!ME.is_admin){document.getElementById('teamBtn').style.display='none';document.getElementById('wgBtn').style.display='none';document.getElementById('auditBtn').style.display='none'}
@@ -1886,6 +1944,108 @@ let DEPT_EDIT_PHOTO='';                   // 当前合照（data URL）
 let DEPT_EDIT_HONORS=[];                  // 待保存的标杆/模范列表
 let DEPT_SAVING=false;                    // 保存中（防重复提交）
 // 打开编辑弹窗
+// ---------- 个人界面：头像 / 个人状态 / 修改密码 ----------
+var PROFILE_AVATAR='';        // 弹窗里暂存的��像 data URL（未保存）
+var PROFILE_STATUS='';        // 弹窗里暂存的个人状态
+var PROFILE_AVATAR_TYPES=['image/jpeg','image/png','image/gif','image/webp'];
+var PROFILE_MAX_IMG_BYTES=512*1024;
+
+// 渲染顶栏头像 + 状态栏（init 与保存后统一走这里）
+function renderMyProfile(){
+  if(!ME)return;
+  const av=document.getElementById('headerAvatar');
+  if(av){
+    if(ME.avatar){ av.src=ME.avatar; av.hidden=false; }
+    else { av.removeAttribute('src'); av.hidden=true; }
+  }
+  const bar=document.getElementById('myStatusBar');
+  const txt=document.getElementById('myStatusText');
+  if(bar&&txt){
+    const st=(ME.status_text||'').trim();
+    txt.textContent=st;
+    bar.hidden=!st;
+  }
+}
+// 打开个人界面
+function openProfileModal(){
+  if(!ME)return;
+  PROFILE_AVATAR=ME.avatar||'';
+  PROFILE_STATUS=ME.status_text||'';
+  renderProfileAvatarBox();
+  const st=document.getElementById('profileStatus');
+  if(st)st.value=PROFILE_STATUS;
+  ['profileOldPwd','profileNewPwd','profileNewPwd2'].forEach(id=>{
+    const el=document.getElementById(id); if(el)el.value='';
+  });
+  document.getElementById('profileModal').style.display='flex';
+}
+function renderProfileAvatarBox(){
+  const box=document.getElementById('profileAvatarBox');
+  if(!box)return;
+  if(PROFILE_AVATAR){
+    box.innerHTML=`<img src="${PROFILE_AVATAR}" alt="头像">`;
+  }else{
+    box.innerHTML='<span class="pa-ph">👤</span>';
+  }
+}
+// 选择头像文件（前端先做类型/大小校验，避免白跑一趟接口）
+function pickProfileAvatar(inp){
+  const f=inp&&inp.files&&inp.files[0];
+  if(!f)return;
+  const hint=document.getElementById('profileAvatarHint');
+  if(PROFILE_AVATAR_TYPES.indexOf(f.type)<0){
+    if(hint)hint.textContent='仅支持 JPG / PNG / GIF / WebP 格式';
+    inp.value='';return;
+  }
+  if(f.size>PROFILE_MAX_IMG_BYTES){
+    if(hint)hint.textContent=`图片过大（${Math.round(f.size/1024)}KB），请压缩到 ${PROFILE_MAX_IMG_BYTES/1024}KB 以内`;
+    inp.value='';return;
+  }
+  const fr=new FileReader();
+  fr.onload=()=>{
+    PROFILE_AVATAR=String(fr.result||'');
+    renderProfileAvatarBox();
+    if(hint)hint.textContent='图片已选择，点「保存资料」生效';
+  };
+  fr.onerror=()=>{
+    PROFILE_AVATAR=ME&&ME.avatar?ME.avatar:'';
+    renderProfileAvatarBox();
+    if(hint)hint.textContent='图片读取失败，请重新选择';
+  };
+  fr.readAsDataURL(f);
+}
+// 保存头像 + 个人状态
+async function saveProfile(){
+  const st=document.getElementById('profileStatus');
+  const status_text=st?(st.value||'').trim():'';
+  try{
+    await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,status_text})});
+    // 同步到 ME 并刷新顶栏
+    ME.avatar=PROFILE_AVATAR; ME.status_text=status_text;
+    renderMyProfile();
+    const hint=document.getElementById('profileAvatarHint');
+    if(hint)hint.textContent='已保存';
+    toast('个人资料已保存');
+    closeModal('profileModal');
+  }catch(e){toast(e.message)}
+}
+// 修改密码
+async function submitChangePassword(){
+  const o=document.getElementById('profileOldPwd').value;
+  const n=document.getElementById('profileNewPwd').value;
+  const n2=document.getElementById('profileNewPwd2').value;
+  if(!o){toast('请输入原密码');return}
+  if(!n){toast('请输入新密码');return}
+  if(n.length<6){toast('新密码至少 6 位');return}
+  if(n!==n2){toast('两次输入的新密码不一致');return}
+  try{
+    await api('/api/profile/password',{method:'POST',body:JSON.stringify({old_password:o,new_password:n})});
+    toast('密码已修改，请重新登录');
+    closeModal('profileModal');
+    setTimeout(()=>{ logout(); }, 900);
+  }catch(e){toast(e.message)}
+}
+
 function openDeptEditModal(){
   if(!CUR_DEPT){toast('请先进入部门主页');return}
   if(!ME||!ME.is_admin){toast('仅管理员可编辑部门文化内容');return}

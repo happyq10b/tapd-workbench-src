@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS users (
     role          TEXT NOT NULL DEFAULT 'viewer',   -- viewer/editor/admin
     allowed_boards TEXT NOT NULL DEFAULT '*',        -- '*' 或逗号分隔 board_id
     allowed_columns TEXT NOT NULL DEFAULT '*',       -- '*' 或 JSON {board_id:[column_id,...]} 板块级细分
+    avatar        TEXT NOT NULL DEFAULT '',          -- 头像（data URL）
+    status_text   TEXT NOT NULL DEFAULT '',          -- 个人状态（顶部状态栏展示）
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -592,6 +594,12 @@ def init_db(force_import=False):
     conn = sqlite3.connect(DB_FILE)
     conn.executescript(SCHEMA)
     _migrate_schema(conn)
+    # 个人界面：users 表补 avatar / status_text 列（幂等）
+    ucols = [r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()]
+    if 'avatar' not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN avatar TEXT NOT NULL DEFAULT ''")
+    if 'status_text' not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN status_text TEXT NOT NULL DEFAULT ''")
     # 兼容旧库：cards 缺 parent_id 列时补上
     cols = [r[1] for r in conn.execute('PRAGMA table_info(cards)').fetchall()]
     if 'parent_id' not in cols:

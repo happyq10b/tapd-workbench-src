@@ -770,8 +770,13 @@ def me(username: str = Depends(require_auth)):
     col_info = None
     if columns is not None:
         col_info = {bid: sorted(cols) for bid, cols in columns.items()}
+    # 个人资料（头像 / 个人状态）—— 顶栏状态栏与个人界面使用
+    prof = dbq('SELECT avatar, status_text FROM users WHERE username=?', (username,))
+    avatar = prof[0]['avatar'] if prof else ''
+    status_text = prof[0]['status_text'] if prof else ''
     return {'username': username, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
+            'avatar': avatar, 'status_text': status_text,
             'allowed_columns': col_info,
             'depts': _dept_order()}   # 有序部门清单（随架构层级动态变化）：空部门同样占位
 
@@ -2790,6 +2795,51 @@ def _check_image_data_url(data_url: str) -> str:
     if approx > MAX_IMAGE_BYTES:
         raise HTTPException(400, f'图片过大（{approx//1024}KB），请压缩到 {MAX_IMAGE_BYTES//1024}KB 以内')
     return s
+
+class ProfileReq(BaseModel):
+    """个人资料：头像 + 个人状态"""
+    avatar: str = ''          # data URL（空串=清除头像）
+    status_text: str = ''     # 个人状态（一句话）
+
+
+@app.post('/api/profile')
+def update_profile(req: ProfileReq, username: str = Depends(require_auth), request: Request = None):
+    """保存个人资料（头像 + 个人状态）。仅能改自己的。"""
+    avatar = _check_image_data_url(req.avatar) if (req.avatar or '').strip() else ''
+    status_text = (req.status_text or '').strip()[:120]
+    dbe('UPDATE users SET avatar=?, status_text=? WHERE username=?',
+        (avatar, status_text, username))
+    audit_log(username, client_ip(request), 'profile_update', '个人资料',
+              ('更新头像' if avatar else '清除头像') + ('，更新个人状态' if status_text else ''), 'success')
+    return {'ok': True, 'avatar': avatar, 'status_text': status_text}
+
+
+class PasswordChangeReq(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.post('/api/profile/password')
+def change_password(req: PasswordChangeReq, username: str = Depends(require_auth), request: Request = None):
+    """修改自己的密码：必须校验旧密码；成功后当前令牌失效（需重新登录）。"""
+    old = req.old_password or ''
+    new = req.new_password or ''
+    if not old:
+        raise HTTPException(400, '请输入原密码')
+    if len(new) < 6:
+        raise HTTPException(400, '新密码至少 6 位')
+    u = dbq('SELECT password_hash FROM users WHERE username=?', (username,))
+    if not u:
+        raise HTTPException(404, '账号不存在')
+    if not verify_pw(old, u[0]['password_hash']):
+        audit_log(username, client_ip(request), 'password_change', '修改密码', '原密码错误', 'failed')
+        raise HTTPException(400, '原密码不正确')
+    if old == new:
+        raise HTTPException(400, '新密码不能与原密码相同')
+    dbe('UPDATE users SET password_hash=? WHERE username=?', (hash_pw(new), username))
+    audit_log(username, client_ip(request), 'password_change', '修改密码', '密码修改成功', 'success')
+    return {'ok': True, 'need_relogin': True}
+
 
 class DeptProfileReq(BaseModel):
     slogan: str = ''       # 文化标语
