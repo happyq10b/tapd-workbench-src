@@ -69,7 +69,9 @@ button{font-family:inherit}
   justify-content:center;cursor:pointer;position:relative}
 .profile-avatar-box img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
 .profile-avatar-box .pa-ph{font-size:30px;color:var(--text3)}
-.profile-avatar-hint{text-align:center;font-size:11.5px;color:var(--text3);margin-top:6px}
+.profile-avatar-hint{font-size:11.5px;color:var(--text3);margin-top:6px;
+  display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:nowrap;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* 个人照片（形象照）：竖版大图预览，与圆形头像分开 */
 /* 个人照片区：固定 3:4 竖版比例，与裁切输出比例一致 */
 .profile-photo-box{position:relative;width:100%;max-width:200px;aspect-ratio:3/4;margin:0 auto;
@@ -84,17 +86,22 @@ button{font-family:inherit}
 /* ---------------- 默认占位图 ---------------- */
 /* 用户未上传头像/个人照片时，统一用这张默认图展示（居中裁切，两处共用一张资源） */
 /* 「默认占位图」标记：放在图片下方，圆形头像里角标会被裁掉，故不用角标 */
-.default-photo-tag{display:inline-block;margin-top:6px;background:#fff7e6;color:#ad6800;
-  border:1px solid #ffd591;border-radius:3px;font-size:11px;padding:0 6px;line-height:17px}
+.default-photo-tag{flex-shrink:0;background:#fff7e6;color:#ad6800;
+  border:1px solid #ffd591;border-radius:3px;font-size:11px;padding:0 5px;line-height:16px}
+/* 提示文案：始终单行，超长省略（不换行、不撑高布局） */
+.hint-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 /* ---------------- 裁切编辑器 ---------------- */
 .crop-stage{position:relative;margin:0 auto;background:#1a1d21;border-radius:6px;overflow:hidden;
   touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+/* 头像裁切：裁切框为圆形（与最终展示的圆形头像一致） */
+.crop-stage.crop-round{border-radius:50%}
 .crop-stage.dragging{cursor:grabbing}
 .crop-stage canvas{display:block;max-width:100%}
 .crop-bar{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2)}
 .crop-bar input[type=range]{flex:1;accent-color:var(--primary,#002d74)}
 .crop-zoom-label{width:44px;text-align:right;font-variant-numeric:tabular-nums}
-.crop-tip{font-size:11.5px;color:var(--text3);margin-top:8px;text-align:center;line-height:1.7}
+.crop-tip{font-size:11.5px;color:var(--text3);margin-top:8px;text-align:center;line-height:1.7;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crop-tip kbd{background:#f2f4f7;border:1px solid var(--border);border-radius:3px;padding:0 4px;font-size:11px}
 .header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
 /* 头部「更多」下拉：低频操作收在这里，避免按钮平铺把标题挤扁 */
@@ -1155,7 +1162,7 @@ function goLogin(){
         <div class="profile-avatar-box" id="profileAvatarBox" onclick="document.getElementById('profileAvatarFile').click()" title="点击上传头像">
           <span class="pa-ph" id="profileAvatarPh">👤</span>
         </div>
-        <div class="profile-avatar-hint" id="profileAvatarHint">点击头像上传（支持 JPG / PNG / GIF / WebP，≤ 512KB）</div>
+        <div class="profile-avatar-hint" id="profileAvatarHint"><span class="hint-text">点击上传（JPG/PNG/GIF/WebP，≤512KB）</span></div>
         <input type="file" id="profileAvatarFile" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="pickProfileAvatar(this)">
       </div>
       <div class="form-group">
@@ -1163,7 +1170,7 @@ function goLogin(){
         <div class="profile-photo-box" id="profilePhotoBox" onclick="document.getElementById('profilePhotoFile').click()" title="点击上传个人照片">
           <span class="pp-ph" id="profilePhotoPh">🖼️</span>
         </div>
-        <div class="profile-avatar-hint" id="profilePhotoHint">点击上传个人照片（JPG / PNG / GIF / WebP，≤ 2MB，超大图会自动压缩）</div>
+        <div class="profile-avatar-hint" id="profilePhotoHint"><span class="hint-text">点击上传（JPG/PNG/GIF/WebP，≤2MB，自动压缩）</span></div>
         <input type="file" id="profilePhotoFile" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="pickProfilePhoto(this)">
       </div>
       <div class="form-group">
@@ -1199,7 +1206,7 @@ function goLogin(){
         <input type="range" id="cropZoom" min="100" max="300" value="100" oninput="cropSetZoom(this.value/100)">
         <span class="crop-zoom-label" id="cropZoomLabel">100%</span>
       </div>
-      <div class="crop-tip">拖动图片调整位置 · 滚轮或滑块缩放 · 输出比例 <b id="cropRatioTip">1:1</b> · 最小输出 <b id="cropSizeTip">512×512</b></div>
+      <div class="crop-tip">拖动调整位置 · 滚轮/滑块缩放 · 比例 <b id="cropRatioTip">1:1</b> · 输出 <b id="cropSizeTip">512×512</b></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="cancelCrop()">取消</button>
@@ -2071,10 +2078,10 @@ function renderProfileAvatarBox(){
 function renderProfileAvatarHint(text){
   const hint=document.getElementById('profileAvatarHint');
   if(!hint)return;
-  if(text){ hint.textContent=text; return; }
+  if(text){ hint.innerHTML='<span class="hint-text">'+text+'</span>'; return; }
   const isDefault=!PROFILE_AVATAR;
-  hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span> ':'')
-    +'点击头像上传（JPG / PNG / GIF / WebP，≤ 512KB），可拖动缩放调整构图';
+  hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span>':'')
+    +'<span class="hint-text">点击上传（JPG/PNG/GIF/WebP，≤512KB）</span>';
 }
 // 选择头像文件（前端先做类型/大小校验，避免白跑一趟接口）
 function pickProfileAvatar(inp){
@@ -2136,6 +2143,9 @@ function openCropper(target, dataUrl){
   const w=spec.ratio>=1?box:Math.round(box*spec.ratio);
   const h=spec.ratio>=1?Math.round(box/spec.ratio):box;
   cv.width=w; cv.height=h;
+  // 头像的裁切框为圆形（与最终展示的圆形头像一致）；照片为 3:4 竖版矩形
+  const stage=document.getElementById('cropStage');
+  if(stage) stage.classList.toggle('crop-round', target==='avatar');
   document.getElementById('cropTitle').textContent='✂️ 裁切'+spec.label;
   document.getElementById('cropRatioTip').textContent=(spec.ratio===1?'1:1':'3:4');
   document.getElementById('cropSizeTip').textContent=spec.outW+'×'+spec.outH;
@@ -2213,7 +2223,17 @@ function confirmCrop(){
   const ctx=out.getContext('2d');
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,spec.outW,spec.outH);
   const k=spec.outW/cv.width;
-  ctx.drawImage(CROP.img, CROP.ox*k, CROP.oy*k, CROP.dispW*k, CROP.dispH*k);
+  if(CROP.target==='avatar'){
+    // 头像按圆形裁剪：圆外保持白底（展示时圆形容器会再裁一次）
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(spec.outW/2, spec.outH/2, spec.outW/2, 0, Math.PI*2);
+    ctx.clip();
+    ctx.drawImage(CROP.img, CROP.ox*k, CROP.oy*k, CROP.dispW*k, CROP.dispH*k);
+    ctx.restore();
+  }else{
+    ctx.drawImage(CROP.img, CROP.ox*k, CROP.oy*k, CROP.dispW*k, CROP.dispH*k);
+  }
   const dataUrl=out.toDataURL('image/jpeg',0.88);
   if(CROP.target==='avatar'){
     PROFILE_AVATAR=dataUrl;
@@ -2255,10 +2275,10 @@ function renderProfilePhotoBox(){
 function renderProfilePhotoHint(text){
   const hint=document.getElementById('profilePhotoHint');
   if(!hint)return;
-  if(text){ hint.textContent=text; return; }
+  if(text){ hint.innerHTML='<span class="hint-text">'+text+'</span>'; return; }
   const isDefault=!PROFILE_PHOTO;
-  hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span> ':'')
-    +'点击上传个人照片（JPG / PNG / GIF / WebP，≤ 2MB，超大图会自动压缩）';
+  hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span>':'')
+    +'<span class="hint-text">点击上传（JPG/PNG/GIF/WebP，≤2MB，自动压缩）</span>';
 }
 // 清除个人照片（阻止冒泡，避免触发「点击上传」）
 function clearProfilePhoto(ev){
