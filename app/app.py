@@ -1642,19 +1642,22 @@ def get_team(username: str = Depends(require_auth)):
 
 class TeamReq(BaseModel):
     name: str
-    workgroups: List[str] = []
+    # workgroups 已下线：成员的组织归属统一由【架构管理】的任命维护，
+    # 成员页面不再提交该字段（后端也不写 team_members.workgroups）。
     account: Optional[str] = None   # 配套登录账号（username），可空=不开通
     password: Optional[str] = None  # 开通账号时的密码
     role: str = 'editor'
 
 class TeamUpdateReq(BaseModel):
     name: str
-    workgroups: List[str] = []
     account: Optional[str] = None   # 变更账号关联：空串=关闭，非空前=开通/绑定
     password: Optional[str] = None
     role: Optional[str] = None
 
 def _norm_workgroups(workgroups):
+    """（兼容保留）工作组名归一化。
+    成员页面已下线工作组选择入口，workgroups 只由【架构管理】同步写入，
+    此函数暂留供旧数据清理/迁移脚本使用。"""
     if not workgroups: return ''
     seen=[]; seen_set=set()
     for g in workgroups:
@@ -1696,7 +1699,8 @@ def add_team(req: TeamReq, username: str = Depends(require_admin), request: Requ
     if req.account and req.account.strip() == SUPER_ADMIN:
         raise HTTPException(403, f'「{SUPER_ADMIN}」是内置超级管理员，不可被成员关联')
     try:
-        dbe('INSERT INTO team_members (name, workgroups) VALUES (?,?)', (name, _norm_workgroups(req.workgroups)))
+        # workgroups 不再由本接口写入 —— 归属统一由【架构管理】的任命同步维护
+        dbe('INSERT INTO team_members (name, workgroups) VALUES (?,?)', (name, ''))
     except sqlite3.IntegrityError:
         raise HTTPException(409, '成员已存在')
     mid = dbq('SELECT id FROM team_members WHERE name=?', (name,))[0]['id']
@@ -1731,7 +1735,8 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
     dup = dbq('SELECT 1 FROM team_members WHERE name=? AND id!=?', (name, mid))
     if dup:
         raise HTTPException(409, f'成员「{name}」已存在')
-    dbe('UPDATE team_members SET name=?, workgroups=? WHERE id=?', (name, _norm_workgroups(req.workgroups), mid))
+    # 只改姓名；workgroups 归【架构管理】独占维护，本接口不触碰
+    dbe('UPDATE team_members SET name=? WHERE id=?', (name, mid))
     # 只改角色：成员已有账号且本次未变更账号关联
     if req.account is None and req.role and old_acc:
         if req.role not in ('viewer', 'editor', 'admin'):
@@ -1777,8 +1782,13 @@ def del_team(mid: int, username: str = Depends(require_admin), request: Request 
         raise HTTPException(400, '不能删除当前登录账号关联的成员')
     if acc:
         dbe('DELETE FROM users WHERE username=?', (acc,))
+    # 清理该成员在【架构管理】中的任职记录。
+    # org_appointments 虽声明了 ON DELETE CASCADE，但本库未开启
+    # PRAGMA foreign_keys（SQLite 默认关闭），级联不会生效 → 必须显式清理，
+    # 否则会残留孤儿任职数据。
+    dbe('DELETE FROM org_appointments WHERE member_id=?', (mid,))
     dbe('DELETE FROM team_members WHERE id=?', (mid,))
-    audit_log(username, client_ip(request), 'member_delete', f'成员 {mname} (id={mid})', f'删除成员' + (f'及关联账号 {acc}' if acc else ''), 'success')
+    audit_log(username, client_ip(request), 'member_delete', f'成员 {mname} (id={mid})', f'删除成员' + (f'及关联账号 {acc}' if acc else '') + '，并清理架构管理中的任职记录', 'success')
     return {'ok': True}
 
 # ---------------- API：工作组管理（工作组树形架构） ----------------

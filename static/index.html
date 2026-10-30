@@ -450,6 +450,19 @@ button{font-family:inherit}
 .member-picker{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;min-height:40px}
 .pp{position:relative;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;min-height:42px;background:var(--color-background-primary,#fff)}
 .pp:focus-within{border-color:var(--primary);box-shadow:0 0 0 2px rgba(24,144,255,.12)}
+/* 成员表格：容器独立滚动 + 表头首行冻结 */
+.tm-table-scroll{max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
+.tm-table-scroll thead th{position:sticky;top:0;z-index:2;background:var(--bg);
+  box-shadow:inset 0 -1px 0 var(--border)}
+/* 「已选工作组」只读层级树 */
+.wgt{font-size:12.5px;line-height:1.5}
+.wgt-node{margin:0}
+.wgt-row{display:flex;align-items:center;gap:4px;padding:1px 0}
+.wgt-arrow{width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;
+  cursor:pointer;color:var(--text2);font-size:9px;flex-shrink:0;border-radius:3px}
+.wgt-arrow:hover{background:rgba(47,128,237,.12);color:var(--primary)}
+.wgt-leaf{opacity:.45;cursor:default}
+.wgt-label{color:var(--text)}
 .pp-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
 .pp-tag{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:12px;padding:2px 6px 2px 9px;border-radius:10px;border:1px solid #b5d4f4}
 .pp-tag i{font-style:normal;cursor:pointer;color:#85b7eb;font-size:13px;line-height:1}
@@ -671,7 +684,6 @@ body{
 .pcard{box-shadow:var(--shadow-sm);border-radius:12px}
 
 /* Team modal - group chips (replace inline labels) */
-.tm-grp-cell{padding:8px 10px;min-width:260px;text-align:left;vertical-align:middle}
 .tm-grp-opt{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px 3px;border-radius:5px;cursor:pointer;font-size:12.5px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;user-select:none;border:1px solid transparent}
 .tm-grp-opt:hover{background:rgba(0,45,116,.06);border-color:rgba(0,45,116,.16)}
 .tm-grp-opt:has(input:checked){background:rgba(0,45,116,.10);border-color:rgba(0,45,116,.30);color:var(--primary);font-weight:500}
@@ -1093,7 +1105,6 @@ function goLogin(){
           <div class="form-group" style="min-width:100px"><label>角色</label><select class="form-select" id="t_new_role"><option value="" selected>无权限</option><option value="editor">可编辑</option><option value="viewer">只读</option><option value="admin">管理员</option></select></div>
           <button class="btn-primary" onclick="addTeamMember()" style="flex-shrink:0;height:36px">添加成员</button>
         </div>
-        <div class="form-group"><label>工作组（可选，多选）</label><input type="text" class="form-input" id="t_new_wg_btn" readonly value="" placeholder="点击选择工作组（支持展开层级）" style="cursor:pointer;margin-bottom:4px" onclick="openTreePick(this, ADD_WG_SEL, (sel)=>{ADD_WG_SEL=sel; renderAddWgTags()})"><div id="t_new_wg_tags" class="pp-tags"></div></div>
       </div>
       <div id="teamList"></div>
     </div>
@@ -3860,15 +3871,6 @@ function treePickConfirm(){
   if(TREE_PICK&&TREE_PICK.onConfirm)TREE_PICK.onConfirm([...TREE_PICK.selected]);
   closeTreePick();
 }
-var ADD_WG_SEL=[];
-function renderAddWgTags(){
-  const box=document.getElementById('t_new_wg_tags');
-  if(box)box.innerHTML=ADD_WG_SEL.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="removeAddWg('${esc(n)}')">×</i></span>`).join('');
-}
-function removeAddWg(n){
-  const i=ADD_WG_SEL.indexOf(n);if(i>=0)ADD_WG_SEL.splice(i,1);
-  renderAddWgTags();
-}
 function ppSyncTags(containerId){
   const o=PP[containerId];if(!o)return;
   o.tags.innerHTML=o.arr.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="ppRemove('${containerId}','${esc(n)}')">×</i></span>`).join('');
@@ -4242,26 +4244,102 @@ async function openTeamModal(){
   const _nb=_np.parentElement.querySelector('.pwd-eye');
   if(_nb){_nb.innerHTML=EYE_ON;_nb.title='显示/隐藏密码'}
   document.getElementById('t_new_role').value='';
-  ADD_WG_SEL=[];
-  renderAddWgTags();
   document.getElementById('teamModal').style.display='flex';
 }
-function flattenWgToLeaves(names){
-  // 把所选名字展开到最细颗粒（叶子级）：父级节点自动拆为其所有后代叶子，去重；已删除的工作组（未知名字）直接忽略
-  const byName={};
-  (function flat(ns){ (ns||[]).forEach(n=>{ byName[n.name]=n; flat(n.children||[]); }); })(WG_ALL||[]);
-  const out=new Set();
-  (names||[]).forEach(nm=>{
-    const n=byName[nm];
-    if(!n){ return; }   // 跳过已删除的工作组
-    if(n.children&&n.children.length){
-      (function collect(x){ (x.children||[]).forEach(c=>{ out.add(c.name); collect(c); }); })(n);
-    }else{
-      out.add(nm);
+// ---------- 「已选工作组」只读层级树 ----------
+// 归属以【架构管理】为准：org_source==='org' 时用架构任命的节点；
+// 架构管理无任命时才回退旧 workgroups 字段（兼容历史成员）。
+// 纯展示：默认收起、点击逐级展开，**不提供任何编辑 / 勾选 / 修改入口**。
+var WG_TREE_EXPANDED=new Set();   // 展开的节点 key（成员id + 节点名）
+function memberWgNodeNames(m){
+  if(m.org_source==='org' && (m.org_nodes||[]).length) return m.org_nodes.slice();
+  return (m.workgroups||[]).slice();
+}
+// 取该成员相关节点（含全部祖先）在 WG_ALL 中的裁剪子树
+function memberWgTreeNodes(m){
+  const names=memberWgNodeNames(m);
+  if(!names.length) return [];
+  const byName={}, parentOf={};
+  (function walk(ns){
+    (ns||[]).forEach(n=>{
+      byName[n.name]=n;
+      (n.children||[]).forEach(c=>{ parentOf[c.name]=n.name; });
+      walk(n.children||[]);
+    });
+  })(WG_ALL||[]);
+  const keep=new Set();
+  names.forEach(nm=>{
+    let cur=nm, guard=0;
+    while(cur && !keep.has(cur) && guard++<20){
+      keep.add(cur);
+      cur=parentOf[cur];
     }
   });
-  return [...out];
+  if(!keep.size) return [];
+  // 按 WG_ALL 的层级裁剪出子树（只保留 keep 里的分支）
+  (function prune(ns){
+    (ns||[]).forEach(n=>{
+      if(!keep.has(n.name)) n.__cut=true;
+      prune(n.children||[]);
+    });
+  })(WG_ALL||[]);
+  function build(ns){
+    const out=[];
+    (ns||[]).forEach(n=>{
+      if(!keep.has(n.name)) return;
+      const kids=build(n.children||[]);
+      out.push({name:n.name, id:n.id, children:kids});
+    });
+    return out;
+  }
+  return build(WG_ALL||[]);
 }
+// 渲染单个节点（含递归子级）
+function renderWgTreeLevel(nodes, uid, depth){
+  return nodes.map(n=>{
+    const kids=n.children||[];
+    const key=uid+'::'+n.name;
+    const exp=WG_TREE_EXPANDED.has(key);
+    const arrow=kids.length
+      ? `<span class="wgt-arrow" onclick="toggleWgTree(this,'${esc(key)}')" title="展开/折叠">${exp?'▼':'▶'}</span>`
+      : '<span class="wgt-arrow wgt-leaf">·</span>';
+    return `<div class="wgt-node">
+      <div class="wgt-row" style="padding-left:${depth*14}px">${arrow}<span class="wgt-label">${esc(n.name)}</span></div>
+      ${kids.length?`<div class="wgt-children" style="display:${exp?'block':'none'}">${renderWgTreeLevel(kids,uid,depth+1)}</div>`:''}
+    </div>`;
+  }).join('');
+}
+// 单元格内容
+function renderMemberWgTree(m){
+  const nodes=memberWgTreeNodes(m);
+  if(!nodes.length){
+    return `<span style="color:var(--text3)">未分配</span>`;
+  }
+  const uid='m'+m.id;
+  const tree=`<div class="wgt">${renderWgTreeLevel(nodes,uid,0)}</div>`;
+  const conflict=(m.org_conflict||[]);
+  const note=m.org_source==='org'
+    ? (conflict.length
+        ? `<div style="margin-top:3px;font-size:11px;color:var(--danger,#d4380d)" title="架构管理未覆盖的工作组，按规则忽略">⚠ 忽略：${esc(conflict.join('、'))}</div>`
+        : `<div style="margin-top:3px;font-size:11px;color:var(--primary)" title="归属以【架构管理】的任命为准">🏛 架构管理任命</div>`)
+    : `<div style="margin-top:3px;font-size:11px;color:var(--text3)" title="该成员在【架构管理】中无任命，回退使用历史工作组归属">👥 历史归属（架构管理未任命）</div>`;
+  return tree+note;
+}
+function toggleWgTree(el, key){
+  // 局部 DOM 操作：**不重绘表格** —— 否则表格里未保存的姓名/账号/密码编辑会丢失，
+  // 滚动位置也会归零。
+  const node=el&&el.closest?el.closest('.wgt-node'):null;
+  if(!node)return;
+  const wrap=node.querySelector(':scope > .wgt-children');
+  if(!wrap)return;
+  const isOpen=wrap.style.display==='block';
+  wrap.style.display=isOpen?'none':'block';
+  el.textContent=isOpen?'▶':'▼';
+  // 同步展开状态，供下次整表重绘（筛选变化）时恢复
+  if(isOpen) WG_TREE_EXPANDED.delete(key); else WG_TREE_EXPANDED.add(key);
+}
+
+
 function renderTeamList(){
   const canEdit=ME.can_edit, isAdmin=ME.is_admin;
   const isSuperUser = ME.username === 'admin';  // 仅内置管理员账号可设置/重置密码
@@ -4341,21 +4419,8 @@ function renderTeamList(){
         <td style="padding:7px 10px" id="tm_name_${m.id}">
           <input type="text" id="tm_edit_name_${m.id}" value="${esc(m.name)}" style="width:100px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">
         </td>
-        <td class="tm-grp-cell" id="tm_wg_${m.id}"><button class="icon-btn" style="border:1px solid var(--border);border-radius:4px;padding:3px 10px;background:var(--bg);font-size:12.5px;width:fit-content;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;height:30px;vertical-align:middle;gap:4px" onclick="openTreePick(this, TM_ALL.find(x=>x.id===${m.id}).workgroups, (sel)=>{TM_ALL.find(x=>x.id===${m.id}).workgroups=sel; renderTeamList()})">🌳 选择工作组</button></td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--text2)">
-          ${(()=>{const leaves=flattenWgToLeaves(m.workgroups);return leaves.length?leaves.map(x=>`<span style="display:inline-block;margin:1px 3px 1px 0;padding:1px 7px;background:var(--bg);border:1px solid var(--border);border-radius:10px">${esc(x)}</span>`).join(''):'<span style="color:var(--text3)">—</span>'})()}
-          ${(()=>{
-            const src=m.org_source||'none';
-            if(src==='org'){
-              const nodes=(m.org_nodes||[]).join('、');
-              const conflict=(m.org_conflict||[]);
-              return `<div style="margin-top:3px;font-size:11px;color:var(--primary)" title="以【架构管理】的任命为准">🏛 架构管理任命：${esc(nodes||'—')}${conflict.length?`<div style="color:var(--danger,#d4380d)" title="架构管理未覆盖的工作组，按规则忽略">⚠ 忽略：${esc(conflict.join('、'))}</div>`:''}</div>`;
-            }
-            if(src==='legacy'){
-              return `<div style="margin-top:3px;font-size:11px;color:var(--text3)" title="该成员在【架构管理】中无任命，回退使用工作组选择">👥 工作组选择（架构管理未任命）</div>`;
-            }
-            return `<div style="margin-top:3px;font-size:11px;color:var(--text3)">未分配</div>`;
-          })()}
+          ${renderMemberWgTree(m)}
         </td>
         <td style="padding:7px 10px">${isAdmin
             ? `<input type="text" id="tm_account_${m.id}" value="${esc(m.account)}" placeholder="登录账号名" style="width:140px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">`
@@ -4509,13 +4574,12 @@ function initTeamFilterBar(){
       <button type="button" class="form-input" id="tm_filter_role" style="width:140px;height:32px;cursor:pointer;text-align:left;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;padding:0 8px" title="${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}" onclick="openRoleMulti(this)">${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}</button>
       <button class="icon-btn" onclick="resetTmFilter()">清空</button>
     </div>
-    <div style="border:1px solid var(--border);border-radius:8px">
+    <div class="tm-table-scroll">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--bg)">
           <th style="padding:6px 10px;text-align:left;width:48px">ID</th>
           <th style="padding:6px 10px;text-align:left;width:110px">姓名</th>
-          <th style="padding:6px 10px;text-align:left;width:170px">工作组</th>
-          <th style="padding:6px 10px;text-align:left;width:240px">已选工作组（最细颗粒）</th>
+          <th style="padding:6px 10px;text-align:left;width:230px">已选工作组</th>
           <th style="padding:6px 10px;text-align:left;width:150px">账号</th>
           <th style="padding:6px 10px;text-align:left;width:170px">密码</th>
           <th style="padding:6px 10px;text-align:left;width:120px">权限（角色）</th>
@@ -4529,9 +4593,8 @@ function initTeamFilterBar(){
 async function addTeamMember(){
   const n=document.getElementById('t_new_name').value.trim();
   if(!n){toast('请输入姓名');return}
-  const workgroups=ADD_WG_SEL||[];
   const role=document.getElementById('t_new_role').value;
-  const body={name:n,workgroups,role};
+  const body={name:n,role};   // 组织归属不在此处设置，归【架构管理】任命
   // 管理员可开通账号并设置首次密码/角色；密码重置仍仅超管
   if(ME.is_admin){
     const account=document.getElementById('t_new_account').value.trim();
@@ -4560,9 +4623,9 @@ async function saveAllTeamMembers(){
   for(const m of visible){
     const name=(document.getElementById('tm_edit_name_'+m.id)?.value||'').trim();
     if(!name){toast(`ID ${m.id} 的姓名不能为空`);return}
-    const workgroups=m.workgroups||[];  // 已通过树形选择器更新到 TM_ALL
+    // workgroups 不再提交：成员的组织归属统一由【架构管理】的任命维护
     const role=document.getElementById('tm_role_'+m.id)?.value??'';
-    const u={id:m.id,name,workgroups,role};
+    const u={id:m.id,name,role};
     // 管理员可提交账号开通与角色；超管额外可重置已有账号密码，普通管理员仅在首次开通时允许设置密码
     if(isAdmin){
       const accInp=document.getElementById('tm_account_'+m.id);
