@@ -67,19 +67,35 @@ button{font-family:inherit}
 .profile-avatar-box{width:96px;height:96px;border-radius:50%;overflow:hidden;margin:0 auto;
   border:2px solid var(--border);background:var(--bg);display:flex;align-items:center;
   justify-content:center;cursor:pointer;position:relative}
-.profile-avatar-box img{width:100%;height:100%;object-fit:cover}
+.profile-avatar-box img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center}
 .profile-avatar-box .pa-ph{font-size:30px;color:var(--text3)}
 .profile-avatar-hint{text-align:center;font-size:11.5px;color:var(--text3);margin-top:6px}
 /* 个人照片（形象照）：竖版大图预览，与圆形头像分开 */
-.profile-photo-box{position:relative;width:100%;max-width:220px;margin:0 auto;border:1px solid var(--border);
-  border-radius:8px;background:var(--bg);min-height:120px;display:flex;align-items:center;justify-content:center;
-  overflow:hidden;cursor:pointer}
-.profile-photo-box img{max-width:100%;max-height:260px;display:block;object-fit:contain}
+/* 个人照片区：固定 3:4 竖版比例，与裁切输出比例一致 */
+.profile-photo-box{position:relative;width:100%;max-width:200px;aspect-ratio:3/4;margin:0 auto;
+  border:1px solid var(--border);border-radius:8px;background:var(--bg);
+  display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}
+.profile-photo-box img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center}
 .profile-photo-box .pp-ph{font-size:34px;color:var(--text3)}
 .profile-photo-clear{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.55);color:#fff;border:none;
   border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;line-height:1.6}
 .profile-photo-clear:hover{background:rgba(0,0,0,.75)}
 .profile-photo-row{display:flex;gap:12px;align-items:flex-start}
+/* ---------------- 默认占位图 ---------------- */
+/* 用户未上传头像/个人照片时，统一用这张默认图展示（居中裁切，两处共用一张资源） */
+/* 「默认占位图」标记：放在图片下方，圆形头像里角标会被裁掉，故不用角标 */
+.default-photo-tag{display:inline-block;margin-top:6px;background:#fff7e6;color:#ad6800;
+  border:1px solid #ffd591;border-radius:3px;font-size:11px;padding:0 6px;line-height:17px}
+/* ---------------- 裁切编辑器 ---------------- */
+.crop-stage{position:relative;margin:0 auto;background:#1a1d21;border-radius:6px;overflow:hidden;
+  touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.crop-stage.dragging{cursor:grabbing}
+.crop-stage canvas{display:block;max-width:100%}
+.crop-bar{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2)}
+.crop-bar input[type=range]{flex:1;accent-color:var(--primary,#002d74)}
+.crop-zoom-label{width:44px;text-align:right;font-variant-numeric:tabular-nums}
+.crop-tip{font-size:11.5px;color:var(--text3);margin-top:8px;text-align:center;line-height:1.7}
+.crop-tip kbd{background:#f2f4f7;border:1px solid var(--border);border-radius:3px;padding:0 4px;font-size:11px}
 .header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
 /* 头部「更多」下拉：低频操作收在这里，避免按钮平铺把标题挤扁 */
 .header-more{position:relative}
@@ -1171,6 +1187,27 @@ function goLogin(){
   </div>
 </div>
 
+<div class="modal-overlay" id="cropModal" style="display:none">
+  <div class="modal" style="width:520px;max-width:94vw">
+    <div class="modal-header"><h2 id="cropTitle">✂️ 裁切图片</h2><button class="modal-close" onclick="cancelCrop()">✕</button></div>
+    <div class="modal-body">
+      <div class="crop-stage" id="cropStage">
+        <canvas id="cropCanvas" width="420" height="420"></canvas>
+      </div>
+      <div class="crop-bar">
+        <span>缩放</span>
+        <input type="range" id="cropZoom" min="100" max="300" value="100" oninput="cropSetZoom(this.value/100)">
+        <span class="crop-zoom-label" id="cropZoomLabel">100%</span>
+      </div>
+      <div class="crop-tip">拖动图片调整位置 · 滚轮或滑块缩放 · 输出比例 <b id="cropRatioTip">1:1</b> · 最小输出 <b id="cropSizeTip">512×512</b></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="cancelCrop()">取消</button>
+      <button class="btn-primary" onclick="confirmCrop()">确认裁切</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="teamModal" style="display:none">
   <div class="modal" style="width:fit-content;min-width:920px;max-width:min(1200px,98vw);max-height:min(92vh,880px);overflow:hidden;display:flex;flex-direction:column">
     <div class="modal-header"><h2>👥 成员与账号管理</h2><button class="modal-close" onclick="closeModal('teamModal')">✕</button></div>
@@ -1631,6 +1668,7 @@ async function init(){
     loadPins();   // 载入当前账号的个人置顶设置（按账号分桶，互不影响）
     document.getElementById('userName').textContent=meDisplayLabel();
     renderMyProfile();   // 顶栏头像 + 个人状态栏
+  if(!cropBound){ cropBindDrag(); cropBound=true; }   // 裁切编辑器拖动/缩放事件（只绑一次）
     document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
     document.getElementById('roleTag').className='role-tag role-'+ME.role;
     if(!ME.is_admin){document.getElementById('teamBtn').style.display='none';document.getElementById('wgBtn').style.display='none';document.getElementById('auditBtn').style.display='none'}
@@ -1987,8 +2025,9 @@ function renderMyProfile(){
   }
   const av=document.getElementById('headerAvatar');
   if(av){
-    if(ME.avatar){ av.src=ME.avatar; av.hidden=false; }
-    else { av.removeAttribute('src'); av.hidden=true; }
+    // 未上传头像时统一展示默认占位图（圆形裁切、居中）
+    av.src=profileImgSrc(ME.avatar);
+    av.hidden=false;
   }
   const bar=document.getElementById('myStatusBar');
   const txt=document.getElementById('myStatusText');
@@ -2006,8 +2045,8 @@ function openProfileModal(){
   PROFILE_STATUS=ME.status_text||'';
   renderProfileAvatarBox();
   renderProfilePhotoBox();
-  const ph=document.getElementById('profilePhotoHint');
-  if(ph)ph.textContent=PROFILE_PHOTO?'照片已上传，点「保存资料」生效':'点击上传个人照片（JPG / PNG / GIF / WebP，≤ 2MB，超大图会自动压缩）';
+  renderProfileAvatarHint();
+  renderProfilePhotoHint();
   const st=document.getElementById('profileStatus');
   if(st)st.value=PROFILE_STATUS;
   ['profileOldPwd','profileNewPwd','profileNewPwd2'].forEach(id=>{
@@ -2023,11 +2062,19 @@ function openProfileModal(){
 function renderProfileAvatarBox(){
   const box=document.getElementById('profileAvatarBox');
   if(!box)return;
-  if(PROFILE_AVATAR){
-    box.innerHTML=`<img src="${PROFILE_AVATAR}" alt="头像">`;
-  }else{
-    box.innerHTML='<span class="pa-ph">👤</span>';
-  }
+  const src=profileImgSrc(PROFILE_AVATAR);
+  // 未上传 → 默认占位图（圆形裁切、居中）；已上传 → 裁切后的头像
+  box.innerHTML=`<img src="${src}" alt="头像">`;
+  renderProfileAvatarHint();
+}
+// 头像区提示：未上传时明确标注「当前使用默认占位图」
+function renderProfileAvatarHint(text){
+  const hint=document.getElementById('profileAvatarHint');
+  if(!hint)return;
+  if(text){ hint.textContent=text; return; }
+  const isDefault=!PROFILE_AVATAR;
+  hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span> ':'')
+    +'点击头像上传（JPG / PNG / GIF / WebP，≤ 512KB），可拖动缩放调整构图';
 }
 // 选择头像文件（前端先做类型/大小校验，避免白跑一趟接口）
 function pickProfileAvatar(inp){
@@ -2044,9 +2091,9 @@ function pickProfileAvatar(inp){
   }
   const fr=new FileReader();
   fr.onload=()=>{
-    PROFILE_AVATAR=String(fr.result||'');
-    renderProfileAvatarBox();
-    if(hint)hint.textContent='图片已选择，点「保存资料」生效';
+    // 选图后进入裁切器：拖动/缩放调整构图，确认后才写入
+    openCropper('avatar',String(fr.result||''));
+    if(hint)hint.textContent='正在裁切…';
   };
   fr.onerror=()=>{
     PROFILE_AVATAR=ME&&ME.avatar?ME.avatar:'';
@@ -2055,24 +2102,170 @@ function pickProfileAvatar(inp){
   };
   fr.readAsDataURL(f);
 }
+// ============================================================
+// 统一的图片占位与裁切编辑
+// ============================================================
+// 默认占位图：用户未上传头像 / 个人照片时统一展示（两处共用一张资源）
+var DEFAULT_PHOTO_URL='/static/default-photo.jpg';
+// 裁切规格：比例 + 最小输出尺寸
+var CROP_SPEC={
+  avatar:{ratio:1,  outW:512, outH:512,  label:'头像',     box:420},
+  photo: {ratio:0.75,outW:720, outH:960,  label:'个人照片', box:440}   // 3:4 竖版（box=长边）
+};
+var CROP={img:null, zoom:1, ox:0, oy:0, base:1, dispW:0, dispH:0,
+          target:'avatar', spec:null, src:''};
+var cropBound=false;      // 裁切器事件是否已绑定（避免重复绑定）
+
+// 读取图片文件为 Image 对象
+function loadCropImage(dataUrl, onOk, onErr){
+  const img=new Image();
+  img.onload=()=>onOk(img);
+  img.onerror=()=>onErr&&onErr();
+  img.src=dataUrl;
+}
+
+// 打开裁切器：target='avatar' | 'photo'
+function openCropper(target, dataUrl){
+  const spec=CROP_SPEC[target];
+  if(!spec)return;
+  CROP.target=target; CROP.spec=spec; CROP.src=dataUrl;
+  CROP.zoom=1; CROP.ox=0; CROP.oy=0;
+  const cv=document.getElementById('cropCanvas');
+  // 画布按比例设置（头像 1:1 正方形；照片 3:4 竖版），box 为长边尺寸
+  const box=spec.box;
+  const w=spec.ratio>=1?box:Math.round(box*spec.ratio);
+  const h=spec.ratio>=1?Math.round(box/spec.ratio):box;
+  cv.width=w; cv.height=h;
+  document.getElementById('cropTitle').textContent='✂️ 裁切'+spec.label;
+  document.getElementById('cropRatioTip').textContent=(spec.ratio===1?'1:1':'3:4');
+  document.getElementById('cropSizeTip').textContent=spec.outW+'×'+spec.outH;
+  document.getElementById('cropModal').style.display='flex';
+  loadCropImage(dataUrl,(img)=>{
+    CROP.img=img;
+    CROP.base=Math.max(cv.width/img.naturalWidth, cv.height/img.naturalHeight);  // cover 铺满
+    CROP.zoom=1; CROP.ox=0; CROP.oy=0;
+    document.getElementById('cropZoom').value=100;
+    document.getElementById('cropZoomLabel').textContent='100%';
+    cropClamp(); cropPaint();
+  });
+}
+// 约束偏移：图片始终盖满裁切框（不留白）
+function cropClamp(){
+  const cv=document.getElementById('cropCanvas');
+  CROP.dispW=CROP.img.naturalWidth*CROP.base*CROP.zoom;
+  CROP.dispH=CROP.img.naturalHeight*CROP.base*CROP.zoom;
+  CROP.ox=Math.min(0,Math.max(cv.width-CROP.dispW,CROP.ox));
+  CROP.oy=Math.min(0,Math.max(cv.height-CROP.dispH,CROP.oy));
+}
+// 绘制
+function cropPaint(){
+  const cv=document.getElementById('cropCanvas');
+  if(!cv||!CROP.img)return;
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(CROP.img,CROP.ox,CROP.oy,CROP.dispW,CROP.dispH);
+  // 三分构图辅助线
+  ctx.strokeStyle='rgba(255,255,255,.28)'; ctx.lineWidth=1;
+  [1/3,2/3].forEach(r=>{
+    ctx.beginPath(); ctx.moveTo(Math.round(cv.width*r),0); ctx.lineTo(Math.round(cv.width*r),cv.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,Math.round(cv.height*r)); ctx.lineTo(cv.width,Math.round(cv.height*r)); ctx.stroke();
+  });
+}
+function cropSetZoom(z){
+  const cv=document.getElementById('cropCanvas');
+  if(!CROP.img)return;
+  // 以裁切框中心为锚点缩放
+  const cx=cv.width/2, cy=cv.height/2;
+  const imgX=cx-CROP.ox, imgY=cy-CROP.oy;
+  const oldW=CROP.dispW, oldH=CROP.dispH;
+  CROP.zoom=Math.max(1,Math.min(3,z));
+  CROP.dispW=CROP.img.naturalWidth*CROP.base*CROP.zoom;
+  CROP.dispH=CROP.img.naturalHeight*CROP.base*CROP.zoom;
+  CROP.ox=cx-(imgX/oldW)*CROP.dispW;
+  CROP.oy=cy-(imgY/oldH)*CROP.dispH;
+  document.getElementById('cropZoomLabel').textContent=Math.round(CROP.zoom*100)+'%';
+  cropClamp(); cropPaint();
+}
+// 拖动
+var CROP_DRAG=null;
+function cropBindDrag(){
+  const stage=document.getElementById('cropStage');
+  const down=(x,y)=>{ if(!CROP.img)return; CROP_DRAG={x:x,y:y,ox:CROP.ox,oy:CROP.oy}; stage.classList.add('dragging'); };
+  const move=(x,y)=>{ if(!CROP_DRAG)return;
+    CROP.ox=CROP_DRAG.ox+(x-CROP_DRAG.x); CROP.oy=CROP_DRAG.oy+(y-CROP_DRAG.y);
+    cropClamp(); cropPaint(); };
+  const up=()=>{ CROP_DRAG=null; stage.classList.remove('dragging'); };
+  stage.addEventListener('mousedown',e=>{ e.preventDefault(); down(e.clientX,e.clientY); });
+  window.addEventListener('mousemove',e=>move(e.clientX,e.clientY));
+  window.addEventListener('mouseup',up);
+  stage.addEventListener('touchstart',e=>{ if(e.touches[0]){ down(e.touches[0].clientX,e.touches[0].clientY); } },{passive:true});
+  stage.addEventListener('touchmove',e=>{ if(e.touches[0]){ e.preventDefault(); move(e.touches[0].clientX,e.touches[0].clientY); } },{passive:false});
+  stage.addEventListener('touchend',up);
+  stage.addEventListener('wheel',e=>{ e.preventDefault(); cropSetZoom(CROP.zoom-(e.deltaY>0?0.08:0.08)); },{passive:false});
+}
+// 确认裁切：导出固定比例、固定尺寸的 data URL
+function confirmCrop(){
+  if(!CROP.img){ toast('图片尚未加载完成'); return; }
+  const cv=document.getElementById('cropCanvas');
+  const spec=CROP.spec;
+  const out=document.createElement('canvas');
+  out.width=spec.outW; out.height=spec.outH;
+  const ctx=out.getContext('2d');
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,spec.outW,spec.outH);
+  const k=spec.outW/cv.width;
+  ctx.drawImage(CROP.img, CROP.ox*k, CROP.oy*k, CROP.dispW*k, CROP.dispH*k);
+  const dataUrl=out.toDataURL('image/jpeg',0.88);
+  if(CROP.target==='avatar'){
+    PROFILE_AVATAR=dataUrl;
+    renderProfileAvatarBox();
+    renderProfileAvatarHint('已裁切，点「保存资料」生效');
+  }else{
+    PROFILE_PHOTO=dataUrl;
+    renderProfilePhotoBox();
+    renderProfilePhotoHint('已裁切，点「保存资料」生效');
+  }
+  closeModal('cropModal');
+  toast(CROP.spec.label+'已裁切，请点「保存资料」');
+}
+// 取消裁切：丢弃本次调整，保留原状态
+function cancelCrop(){
+  closeModal('cropModal');
+  CROP.img=null; CROP.src=''; CROP_DRAG=null;
+}
+
+// ============================================================
+// 占位图回退
+// ============================================================
+// 取图片源：无记录 → 默认占位图
+function profileImgSrc(saved){
+  return (saved && String(saved).trim()) ? saved : DEFAULT_PHOTO_URL;
+}
 // 渲染个人照片预览
+
 function renderProfilePhotoBox(){
   const box=document.getElementById('profilePhotoBox');
   if(!box)return;
-  if(PROFILE_PHOTO){
-    box.innerHTML=`<img src="${PROFILE_PHOTO}" alt="个人照片">`
-      +`<button class="profile-photo-clear" onclick="clearProfilePhoto(event)">清除</button>`;
-  }else{
-    box.innerHTML='<span class="pp-ph">🖼️</span>';
-  }
+  const src=profileImgSrc(PROFILE_PHOTO);
+  // 照片区固定 3:4 竖版比例，居中裁切展示（占位图与上传图同一套规则）
+  box.innerHTML=`<img src="${src}" alt="个人照片" style="width:100%;height:100%;object-fit:cover;object-position:center">`
+    +`<button class="profile-photo-clear" onclick="clearProfilePhoto(event)">清除</button>`;
+  renderProfilePhotoHint();
+}
+// 照片区提示：未上传时明确标注「当前使用默认占位图」
+function renderProfilePhotoHint(text){
+  const hint=document.getElementById('profilePhotoHint');
+  if(!hint)return;
+  if(text){ hint.textContent=text; return; }
+  const isDefault=!PROFILE_PHOTO;
+  hint.innerHTML=(isDefault?'<span class="default-photo-tag">默认占位图</span> ':'')
+    +'点击上传个人照片（JPG / PNG / GIF / WebP，≤ 2MB，超大图会自动压缩）';
 }
 // 清除个人照片（阻止冒泡，避免触发「点击上传」）
 function clearProfilePhoto(ev){
   if(ev&&ev.stopPropagation)ev.stopPropagation();
   PROFILE_PHOTO='';
   renderProfilePhotoBox();
-  const hint=document.getElementById('profilePhotoHint');
-  if(hint)hint.textContent='已清除，点「保存资料」生效';
+  renderProfilePhotoHint('已清除，点「保存资料」生效');
 }
 // 压缩图片：最长边缩到 PROFILE_PHOTO_MAX_EDGE，输出 JPEG
 // 手机直出的照片常有 3~5MB，直接存 data URL 会把库撑大；
@@ -2128,9 +2321,9 @@ async function pickProfilePhoto(inp){
     if(hint)hint.textContent=`压缩后仍过大（${Math.round(approx/1024)}KB），请换一张更小的照片`;
     inp.value='';return;
   }
-  PROFILE_PHOTO=dataUrl;
-  renderProfilePhotoBox();
-  if(hint)hint.textContent=`已选择（压缩后约 ${Math.round(approx/1024)}KB），点「保存资料」生效`;
+  // 选图后进入裁切器：拖动/缩放调整构图，确认后才写入
+  openCropper('photo',dataUrl);
+  if(hint)hint.textContent=`已选择（压缩后约 ${Math.round(approx/1024)}KB），正在裁切…`;
 }
 // 保存头像 + 个人照片 + 个人状态
 async function saveProfile(){
@@ -2141,10 +2334,8 @@ async function saveProfile(){
     // 同步到 ME 并刷新顶栏
     ME.avatar=PROFILE_AVATAR; ME.photo=PROFILE_PHOTO; ME.status_text=status_text;
     renderMyProfile();
-    const hint=document.getElementById('profileAvatarHint');
-    if(hint)hint.textContent='已保存';
-    const phint=document.getElementById('profilePhotoHint');
-    if(phint)phint.textContent='已保存';
+    renderProfileAvatarHint('已保存');
+    renderProfilePhotoHint('已保存');
     toast('个人资料已保存');
     closeModal('profileModal');
   }catch(e){toast(e.message)}

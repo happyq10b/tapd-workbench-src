@@ -3828,6 +3828,22 @@ def index():
 def login_page():
     return _login_resp()
 
+# 默认占位图（用户未上传头像/个人照片时统一展示）。
+# 用白名单而非通用静态目录挂载 —— 避免路径穿越把任意文件暴露出去。
+_STATIC_FILES = {
+    '/static/default-photo.jpg': 'default-photo.jpg',
+}
+
+@app.get('/static/{filename}')
+def static_asset(filename: str):
+    real = _STATIC_FILES.get('/static/' + filename)
+    if not real:
+        raise HTTPException(404, '资源不存在')
+    path = os.path.join(STATIC_DIR, real)
+    if not os.path.isfile(path):
+        raise HTTPException(404, '资源不存在')
+    return FileResponse(path, headers={'Cache-Control': 'public, max-age=86400'})
+
 # ---------------- 启动初始化：确保数据表存在（含 workgroups 表） ----------------
 try:
     from app.init_db import init_db
