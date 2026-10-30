@@ -1409,7 +1409,10 @@ function goLogin(){
     <div class="modal-header"><h2>🔐 账号密码配置</h2><button class="modal-close" onclick="closeModal('adminModal')">✕</button></div>
     <div class="modal-body">
       <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:10px 14px;font-size:12.5px;color:#0050b3;margin-bottom:12px">
-        在此创建登录账号并分配角色与看板权限。角色：<b>管理员</b>=全部权限 · <b>可编辑</b>=可增删改 · <b>只读</b>=仅查看。新成员先从「团队成员」或「从数据同步」加入名单，再在下方建号。
+        在此创建登录账号并分配角色与看板权限。角色：<b>管理员</b>=全部权限（超级管理员，不受架构权限过滤限制） · <b>可编辑</b>=可增删改 · <b>只读</b>=仅查看。新成员先从「团队成员」或「从数据同步」加入名单，再在下方建号。
+      </div>
+      <div style="background:#fff7e6;border:1px solid #ffd591;border-radius:6px;padding:10px 14px;font-size:12.5px;color:#ad4e00;margin-bottom:12px">
+        <b>可见范围由【架构管理】决定</b>：账号必须先在【架构管理】里被任命到某个部门/小组，才能看到该部门拥有的看板；未任命 = 看不到任何看板。此处的「可见看板」只是<b>在架构授权范围内再收窄</b>，填 <code>*</code> 表示完全跟随架构。
       </div>
       <div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px">
         <div class="form-row" style="margin-bottom:8px">
@@ -1418,7 +1421,7 @@ function goLogin(){
         </div>
         <div class="form-row">
           <div class="form-group"><label>角色</label><select class="form-select" id="au_role"><option value="viewer">只读</option><option value="editor">可编辑</option><option value="admin">管理员</option></select></div>
-          <div class="form-group"><label>可见看板（逗号分隔 ID，* = 全部）</label><input type="text" class="form-input" id="au_boards" placeholder="* 或 1162069797001000245,1162069797001000242"></div>
+          <div class="form-group"><label title="在【架构管理】授权范围内再收窄；* = 跟随架构">可见看板（逗号分隔 ID，* = 跟随架构）</label><input type="text" class="form-input" id="au_boards" placeholder="* 或 1162069797001000245,1162069797001000242"></div>
         </div>
         <div style="margin-top:10px"><button class="btn-primary" onclick="adminCreateUser()">创建账号</button></div>
       </div>
@@ -1445,7 +1448,7 @@ function goLogin(){
         </select>
       </div>
       <div id="cm_boards" style="display:none;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:10px">
-        <div style="font-size:12px;color:var(--text2);margin-bottom:8px">勾选该用户可见的看板与板块（不勾的板块不可见）</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px">勾选该用户可见的看板与板块（不勾的板块不可见）。板块权限在【架构管理】授权的看板范围内再收窄。</div>
         <div id="cm_board_list"></div>
       </div>
     </div>
@@ -1804,6 +1807,12 @@ function renderTabs(){
   });
   if(g.unassigned.length&&DEPT_OPEN[UNASSIGNED_KEY]){
     html+=`<div class="tree-children">${g.unassigned.map(b=>boardTabHtml(b,'')).join('')}</div>`;
+  }
+  // 空状态：账号在【架构管理】里没有任何授权（未被任命到任何节点 / 所属部门未挂载看板）
+  // → 明确提示原因，避免用户以为"看板丢了"。可见范围由后端按架构权限计算。
+  if(!(ME.boards||[]).length){
+    html+=`<div class="tree-empty-tip" style="display:block;margin-top:8px">
+      当前账号没有可见看板：请联系管理员在【架构管理】中把您任命到相应部门/小组，或为该部门挂载看板。</div>`;
   }
   tabs.innerHTML=html;
 }
@@ -5829,8 +5838,8 @@ async function adminLoadUsers(){
       <option value="editor" ${u.role==='editor'?'selected':''}>可编辑</option>
       <option value="admin" ${u.role==='admin'?'selected':''}>管理员</option>
     </select></td>
-    <td style="padding:8px 10px;font-size:12px;color:var(--text2)">${u.allowed_boards==='*'?'全部看板':esc(u.allowed_boards)}</td>
-    <td style="padding:8px 10px;font-size:12px;color:var(--text2)">${u.allowed_columns==='*'?'全部板块':(u.allowed_columns||'').length>18?esc(u.allowed_columns.slice(0,18))+'…':esc(u.allowed_columns||'—')}</td>
+    <td style="padding:8px 10px;font-size:12px;color:var(--text2)" title="账号级看板白名单：在【架构管理】授权的范围内再收窄；「*」= 不额外收窄，完全跟随架构授权">${u.allowed_boards==='*'?'跟随架构':esc(u.allowed_boards)}</td>
+    <td style="padding:8px 10px;font-size:12px;color:var(--text2)" title="账号级板块白名单：在可见看板内再收窄板块；「*」= 不额外收窄">${u.allowed_columns==='*'?'跟随架构':(u.allowed_columns||'').length>18?esc(u.allowed_columns.slice(0,18))+'…':esc(u.allowed_columns||'—')}</td>
     <td style="padding:8px 10px">
       <button class="icon-btn" onclick="openColModal('${esc(u.username)}','${esc(u.allowed_columns||'*')}')">板块权限</button>
       <button class="icon-btn" onclick="adminResetPwd('${esc(u.username)}')">重置密码</button>

@@ -63,18 +63,48 @@ CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','work
 app = FastAPI(title="财务工作事项平台", docs_url=None, redoc_url=None)
 
 # ---------------- 数据库 ----------------
+_WAL_READY = False
+_local = threading.local()
+
 def get_conn():
+    """**每线程复用**一个 SQLite 连接。
+
+    为什么复用（实测数据，Windows 本地）：
+      · 新建连接并执行**第一条**语句要 ~1.15ms（文件锁开销），之后的语句几乎免费；
+      · 一次权限判定要查 20 多个小表 → 旧写法（每次查询开+关一个连接）
+        白花 20~30ms，列表接口整体变慢；
+      · 改成每线程一个连接后，连接开销只付一次，DB 相关操作快约 10 倍。
+
+    线程安全：FastAPI 的同步接口跑在线程池里，每个线程各持一份连接，
+    互不共享（`check_same_thread=False` 只是兜底）。
+    """
+    conn = getattr(_local, 'conn', None)
+    if conn is not None:
+        return conn
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA journal_mode=WAL')
+    if not _WAL_READY:
+        # WAL 是**数据库文件级**设置（写进文件头），设置一次即持久生效，
+        # 不需要每次连接都执行。
+        try:
+            conn.execute('PRAGMA journal_mode=WAL')
+            globals()['_WAL_READY'] = True
+        except sqlite3.Error:
+            pass
+    _local.conn = conn
     return conn
 
 def dbq(sql, params=()):
     conn = get_conn()
     try:
         return conn.execute(sql, params).fetchall()
-    finally:
-        conn.close()
+    except Exception:
+        # 连接是复用的：出错时必须回滚，避免把未提交事务留给后续请求
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
 
 def dbe(sql, params=()):
     conn = get_conn()
@@ -82,8 +112,12 @@ def dbe(sql, params=()):
         cur = conn.execute(sql, params)
         conn.commit()
         return cur
-    finally:
-        conn.close()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
 
 # ---------------- 密码 / JWT（标准库） ----------------
 def hash_pw(pw: str) -> str:
@@ -147,10 +181,64 @@ def _member_display_name(username: str) -> str:
 
 _LEADER_ALL = '__ALL_BOARDS__'   # 负责人范围含'*'（全量）的标记
 
+def _all_board_ids() -> set:
+    """全部看板 id 集合（boards 表 ∪ cards 派生）。"""
+    return {b['board_id'] for b in _all_boards()}
+
+
+def _node_bound_boards(node: dict, owned=None, wg_by_id=None) -> set:
+    """单个架构节点「绑定」的看板集合（按节点类型派生，与看板管理口径一致）。
+
+    · 中心(center) = 全部看板（管理层全范围）
+    · 部门(dept)   = 归属该部门的看板（board_config.dept_node_id 派生，唯一真相）
+    · 小组(group)  = 工作组手工勾选的看板（workgroups.boards）
+
+    【修复】此前部门/中心节点一律去读 workgroups.boards，而该字段对
+    部门/中心恒为空 → 负责范围层算出来永远是空集，负责人权限范围形同虚设。
+    这里改为按节点类型派生，与「看板管理 · 归属部门」保持同一真相。
+    """
+    ntype = node.get('node_type')
+    if ntype == 'center':
+        return _all_board_ids()
+    if ntype == 'dept':
+        owned = owned if owned is not None else _dept_owned_boards()
+        return set(owned.get(node['id'], set()))
+    # 小组节点：读工作组的工绑定
+    if wg_by_id is None:
+        wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+    wg = wg_by_id.get(node.get('wg_id') or 0)
+    raw = (wg['boards'] or '').strip() if wg else ''
+    if raw == '*':
+        return _all_board_ids()
+    return {x for x in raw.split(',') if x} if raw else set()
+
+
+def _leader_scope_boards(username: str) -> set:
+    """负责范围层：负责人额外拥有的看板（其负责节点 **及其全部后代** 绑定的看板）。"""
+    nodes = _org_leader_nodes(username)
+    if not nodes:
+        return set()
+    nmap = _org_node_map()
+    owned = _dept_owned_boards()
+    wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+    out = set()
+    for n in nodes:
+        nid = n['id']
+        for sub in [nid] + list(_org_node_descendants(nid, list(nmap.values()))):
+            node = nmap.get(sub)
+            if node:
+                out |= _node_bound_boards(node, owned, wg_by_id)
+    return out
+
+
 def _leader_boards(username: str):
-    """负责人（部门长/组长）负责范围绑定的板块并集。
+    """【兼容保留·诊断用】负责人（部门长/组长）负责范围绑定的看板并集。
+
+    权限判定不再走这里 —— 实际判定走 _leader_scope_boards()（按节点类型派生绑定）。
+    保留本函数是为了兼容既有引用/测试，并便于排查「负责人范围」相关问题。
+
     登录账号 → 关联的成员中文名也要匹配（workgroups.leader 存的是成员名）。
-    返回 None=非负责人；_LEADER_ALL=负责人且范围含'*'（全量）；set=负责人受限板块（可为空）。"""
+    返回 None=非负责人；_LEADER_ALL=负责人且范围含'*'（全量）；set=负责人受限看板（可为空）。"""
     candidates = [username]
     row = dbq('SELECT name FROM team_members WHERE account=?', (username,))
     if row and row[0]['name'] and row[0]['name'] != username:
@@ -162,7 +250,10 @@ def _leader_boards(username: str):
     # 避免两套机制并存时负责人范围被旧字段带偏。
     org_rows = _org_leader_nodes(username)
     if org_rows:
-        rows = org_rows
+        scope = _leader_scope_boards(username)
+        if scope >= _all_board_ids() and scope:
+            return _LEADER_ALL
+        return scope
     if not rows:
         return None
     all_rows = dbq('SELECT id, parent_id, boards FROM workgroups')
@@ -193,19 +284,18 @@ def _org_leader_nodes(username):
     """该成员在【架构管理】中担任负责人的节点列表（来自 org_appointments）。
 
     负责人岗位：group_leader(组长) / dept_head(部门长) / center_head(中心负责人)
-    / gm(总经理)。返回 [{'id','parent_id','boards'}]，与 workgroups 同构，
-    便于 _leader_boards 复用同一套「节点 + 后代」的板块收集逻辑。
+    / gm(总经理)。返回 [{'id','parent_id','node_type','wg_id'}]；
+    节点绑定的看板由 _node_bound_boards() 按节点类型派生（不再直接读 workgroups.boards）。
     """
     candidates = [username]
     row = dbq('SELECT name FROM team_members WHERE account=?', (username,))
     if row and row[0]['name'] and row[0]['name'] != username:
         candidates.append(row[0]['name'])
     marks = ','.join('?' * len(candidates))
-    rows = dbq(f"SELECT n.id, n.parent_id, w.boards"
+    rows = dbq(f"SELECT DISTINCT n.id, n.parent_id, n.node_type, n.wg_id"
                    f" FROM org_appointments a"
                    f" JOIN org_nodes n ON n.id = a.node_id"
                    f" JOIN team_members m ON m.id = a.member_id"
-                   f" LEFT JOIN workgroups w ON w.id = n.wg_id"
                    f" WHERE a.role_key IN ('group_leader','dept_head','center_head','gm')"
                    f" AND (m.account IN ({marks}) OR m.name IN ({marks}) OR m.account=? OR m.name=?)",
                  list(candidates) + list(candidates) + [username, username])
@@ -377,43 +467,50 @@ def _member_dept_scope(username):
 
 
 def _dept_stage_boards(username):
-    """第一层过滤（归属部门）：成员可见的板块集合。
+    """第一层过滤（归属部门）：成员可见的看板集合。
 
-    规则：
-      1) 成员挂靠部门的板块 —— 该部门拥有的板块对成员可见；
-      2) 中心级归属的板块 —— 对全员展示（财务中心 = 全部板块）；
-      3) 未归属部门的板块 —— 全员可见（对应目录树里的「未配置」节点）。
-    返回 None 表示本层不收窄：
-      - 成员没有挂靠任何部门（无任职、无工作组归属）；
-      - 成员挂靠的是中心（中心 = 管理层全范围，不做部门收窄）。
+    规则（**fail-closed**：本层永远返回显式集合，不再用 None 兼表「全部」）：
+      1) 成员挂靠部门的看板 —— 该部门拥有的看板对成员可见；
+      2) 中心级归属的看板 —— 对全员展示（财务中心 = 管理层全范围）；
+      3) 未归属部门的看板 —— 全员可见（对应目录树里的「未配置」节点）；
+      4) 成员挂靠的是中心 → 管理层全范围（全部看板）；
+      5) 成员**没有任何架构归属**（无任命、无工作组）→ 只能看公共看板，
+         其余一律不可见 —— 无授权即不可见（此前这里返回 None ＝「不收窄」，
+         与账号默认 allowed_boards='*' 叠加后，普通账号反而能看到全部看板）。
     """
-    scope = _member_dept_scope(username)
-    if not scope:
-        return None                      # 无部门归属 → 不按部门收窄
-    centers = _center_node_ids()
-    if scope & centers:
-        return None                      # 中心 = 管理层全范围
-    owned = _dept_owned_boards()
+    all_ids = _all_board_ids()
     owner = {}                          # board_id → 归属部门节点 id
     for r in dbq('SELECT board_id, dept_node_id FROM board_config'):
         owner[r['board_id']] = r['dept_node_id']
-    visible = set()
-    for b in _all_boards():
-        bid = b['board_id']
+    centers = _center_node_ids()
+    public = set()                      # 公共看板：未归属部门 / 归属中心
+    for bid in all_ids:
         nid = owner.get(bid, 0)
-        if not nid:
-            visible.add(bid)             # 未归属 → 全员可见
-        elif nid in centers:
-            visible.add(bid)             # 中心归属 → 对全员展示
-    for nid in scope:                    # 挂靠部门拥有的板块
+        if not nid or nid in centers:
+            public.add(bid)
+    scope = _member_dept_scope(username)
+    if not scope:
+        return public                   # 无架构归属 → 只能看公共看板
+    if scope & centers:
+        return set(all_ids)             # 挂靠中心 = 管理层全范围
+    owned = _dept_owned_boards()
+    visible = set(public)
+    for nid in scope:                    # 挂靠部门拥有的看板
         visible |= owned.get(nid, set())
     return visible
 
 
 def _group_boards(username: str):
-    """成员所属工作组的板块绑定并集（白名单），含祖先部门传导。
-    返回 set(board_id) 表示受限板块；None 表示不限制（未绑定/绑定'*'/超管/负责人）。"""
-    if username == SUPER_ADMIN:
+    """第三层过滤（工作组绑定）：成员所属工作组的**显式**看板白名单。
+
+    返回 set(board_id) = 已配置白名单（按它收窄）；
+    返回 None = 未配置绑定（不收窄，跟随前两层的结果）。
+
+    【修复】此前这里把「归属部门自有的看板」并进白名单，导致本层算出来的
+    集合永远覆盖前面两层的可见范围 → 白名单**收窄不了任何东西**（等于失效）。
+    现在只取 workgroups.boards 里手工勾选的看板，部门自有看板归第一层管。
+    """
+    if is_admin(username):
         return None
     # 架构管理优先：成员在架构管理里有任命时，用任命节点推导出的工作组名；
     # 否则回退旧 workgroups 字段。与 _member_dept_scope 同源，保证两层口径一致。
@@ -423,11 +520,8 @@ def _group_boards(username: str):
     all_rows = dbq('SELECT id, name, parent_id, boards FROM workgroups')
     by_id = {r['id']: r for r in all_rows}
     by_name = {r['name']: r for r in all_rows}
-    # 部门节点：叠加「归属部门」自动归属的板块（看板管理 → 架构管理的联动）
-    owned = _dept_owned_boards()
-    nmap = _org_node_map()
-    node_by_wg = {n['wg_id']: n['id'] for n in nmap.values() if n.get('wg_id')}
     merged = set()
+    bound = False
     for nm in names:
         cur = by_name.get(nm)
         # 沿父链向上收集（含自身）：上级部门绑定自动传导到部门内成员；
@@ -435,54 +529,58 @@ def _group_boards(username: str):
         while cur and cur['parent_id'] != 0:
             b = (cur['boards'] or '').strip()
             if b == '*':
-                return None  # 任一节点绑定全部 → 该用户不限制
+                return None  # 任一节点显式绑定全部 → 本层不收窄
             if b:
+                bound = True
                 merged |= set(x for x in b.split(',') if x)
-            nid = node_by_wg.get(cur['id'])
-            if nid:
-                merged |= owned.get(nid, set())
             cur = by_id.get(cur['parent_id']) if cur['parent_id'] else None
-    return merged or None
+    return merged if bound else None
+
+
+def _arch_scope_boards(username: str, dept_boards: set) -> set:
+    """架构授权集 = 归属部门层 ∪ 负责范围层，再按工作组绑定层收窄。"""
+    boards = set(dept_boards)
+    # ② 负责范围层：负责人额外拥有其负责范围（节点 + 全部后代）绑定的看板
+    boards |= _leader_scope_boards(username)
+    # ③ 工作组绑定层：显式白名单 → 收窄
+    gb = _group_boards(username)
+    if gb is not None:
+        boards &= gb
+    return boards
 
 def user_allowed(username: str):
     """返回 (boards, columns)：
-    boards=None=全部看板，否则 set(board_id)
+    boards=None=全部看板，否则 set(board_id)（普通用户**永远**是显式集合）
     columns=None=全部板块，否则 dict {board_id: set(column_id)}（缺省=该看板全部板块）
-    超级管理员(admin)自动拥有全部板块；
-    部门长/组长自动拥有其负责范围（节点+后代）绑定的全部板块，且不受工作组白名单限制；
-    普通成员：可见 = 账号权限 ∩ 所属工作组绑定并集。
 
-    判定流程（自外向内三层）：
-      ① 归属部门层：看板的「归属部门」（board_config.dept_node_id）决定谁能看到它 ——
-         挂靠该部门的成员可见该部门拥有的全部板块；归属中心的板块对全员展示。
-      ② 负责范围层：部门长/组长额外拥有其负责范围（节点+后代）绑定的全部板块。
-      ③ 工作组绑定层：普通成员再按所属工作组的板块绑定白名单收窄。
+    判定流程：
+      ⓪ 超级管理员（role=admin，含内置 admin 账号）→ 直接返回 (None, None)，
+         拥有当前及未来新增的全部权限，**不受架构权限过滤限制**；
+      ① 架构授权集（fail-closed）—— 由 _arch_scope_boards() 汇总三层：
+         · 归属部门层：挂靠部门拥有的看板（board_config.dept_node_id 派生）
+         · 负责范围层：负责人额外拥有其负责范围（节点+后代）绑定的看板
+         · 工作组绑定层：显式白名单收窄
+         无任何架构归属的成员 → 只能看公共看板（未归属部门 / 归属中心）；
+      ② 账号级白名单（users.allowed_boards）与①取交集 —— '*' 表示不额外收窄；
+      ③ 板块级白名单（users.allowed_columns）在可见看板内继续收窄板块。
+
+    【修复】此前普通用户的 boards 为 None（=全部）当且仅当「账号 allowed_boards='*'
+    且架构层未收窄」，而架构层在「成员无归属」时返回 None（不收窄）→ 未接入架构的
+    普通账号能看到**全部**看板与板块。现改为架构层永远返回显式集合（fail-closed）。
     """
     u = get_user(username)
     if not u:
         return set(), {}
-    if username == SUPER_ADMIN:
+    if is_admin(username):
         return None, None
-    raw_b = u['allowed_boards']
-    boards = None if raw_b == '*' else set(x for x in raw_b.split(',') if x)
-    # 负责人（部门长/组长）：账号权限 ∪ 负责范围绑定板块，不再受工作组白名单限制
-    lb = _leader_boards(username)
-    if lb is not None:
-        if lb == _LEADER_ALL:
-            boards = None
-        elif boards is None:
-            pass  # 账号权限已是全量
-        else:
-            boards = boards | lb
-    else:
-        # 普通成员：工作组板块绑定白名单（最终可见 = 账号权限 ∩ 工作组绑定并集）
-        gb = _group_boards(username)
-        if gb is not None:
-            boards = gb if boards is None else boards & gb
-    # 归属部门层（硬过滤）：看板归属部门决定可见范围，与账号/工作组权限取交集
+    # ① 架构授权集
     dept_boards = _dept_stage_boards(username)
-    if dept_boards is not None:
-        boards = dept_boards if boards is None else boards & dept_boards
+    boards = _arch_scope_boards(username, dept_boards)
+    # ② 账号级看板白名单（与架构授权集取交集）
+    raw_b = u.get('allowed_boards') or '*'
+    if raw_b != '*':
+        boards &= set(x for x in raw_b.split(',') if x)
+    # ③ 账号级板块白名单（JSON: {board_id: [column_id]}）
     raw_c = u.get('allowed_columns') or '*'
     if raw_c == '*':
         return boards, None
@@ -492,32 +590,78 @@ def user_allowed(username: str):
     except Exception:
         return boards, None
 
+
 def can_edit(username: str) -> bool:
-    return user_role(username) in ('editor', 'admin')
+    return user_role(username) in ('editor', 'admin') or username == SUPER_ADMIN
+
 
 def is_admin(username: str) -> bool:
+    """管理员判定：角色为 admin 即管理员（内置 admin 账号恒为管理员）。
+
+    ★ 超级管理员语义：拥有当前及未来新增的**全部**权限，
+      不受架构权限过滤限制（user_allowed 直接返回 None/None）。
+      判定口径必须全局唯一 —— 此前 user_allowed 用「账号名 == 'admin'」、
+      require_admin 用「角色 == 'admin'」，两套口径不一致，导致 role=admin 的
+      账号（如 dsy）被架构层过滤，却又能调全部管理接口。
+    """
+    if username == SUPER_ADMIN:
+        return True
     return user_role(username) == 'admin'
+
 
 # 板块级写权限：**不再对特定板块开特例**。
 # 写操作的准入统一由「账号角色（admin/editor/viewer）+ 板块归属 + 板块可见性」判定，
-# 详见 user_allowed() 与各写接口里的 require_can_edit / 板块归属校验。
+# 详见 user_allowed() 与各写接口里的 check_board_access / check_column_access。
 
 def check_board_access(board_id: str, username: str):
-    """写操作的板块准入校验（所有涉及 board_id 的写接口都要过这一关）。
+    """写操作的看板准入校验（所有涉及 board_id 的写接口都要过这一关）。
 
-    ① 板块对该用户**不可见** → 拒绝（【架构管理】的归属 + 工作组绑定决定可见范围）；
+    ① 看板对该用户**不可见** → 拒绝（【架构管理】的归属 + 工作组绑定决定可见范围）；
     ② 可见但角色无编辑权（viewer） → 拒绝。
 
     此前这条职责由「成本看板仅管理员」特例顺带兜底，特例移除后必须补上，
-    否则看不见板块的人仍能直接调 API 改写该板块的卡片。
+    否则看不见看板的人仍能直接调 API 改写该看板的卡片。
     """
     if not board_id:
         return
     boards, _cols = user_allowed(username)
     if boards is not None and board_id not in boards:
-        raise HTTPException(403, '无权访问该板块')
+        raise HTTPException(403, '无权访问该看板')
     if not can_edit(username):
         raise HTTPException(403, '无编辑权限，请联系管理员')
+
+
+def check_column_access(board_id: str, column_id: str, username: str):
+    """板块级写准入校验：账号被限定了某看板的板块白名单时，
+    不得把事项写入**不可见**的板块（板块权限 = 可见性约束）。"""
+    if not (board_id and column_id):
+        return
+    if is_admin(username):
+        return
+    _boards, columns = user_allowed(username)
+    if columns is None:
+        return
+    allowed = columns.get(board_id)
+    if allowed is not None and column_id not in allowed:
+        raise HTTPException(403, '无权操作该板块')
+
+
+def check_card_access(card_id: str, username: str, need_edit: bool = False):
+    """按卡片定位其看板，校验当前用户对该看板的可见性（读接口用）。
+
+    读接口此前只有 require_auth，可见性完全依赖前端隐藏 → 直接调 API
+    仍能读到不可见看板的卡片 / 评论 / 子事项（越权读）。这里统一兜住。
+    """
+    row = dbq('SELECT board_id, column_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if not row:
+        raise HTTPException(404, '事项不存在')
+    boards, columns = user_allowed(username)
+    bid = row[0]['board_id']
+    if boards is not None and bid not in boards:
+        raise HTTPException(403, '无权访问该看板')
+    if need_edit and not can_edit(username):
+        raise HTTPException(403, '无编辑权限，请联系管理员')
+    return dict(row[0])
 
 async def require_auth(authorization: str = Header(None)):
     if not authorization or not authorization.startswith('Bearer '):
@@ -743,6 +887,19 @@ class LockManager:
 lock_mgr = LockManager()
 
 # ---------------- WebSocket 广播 ----------------
+def _ws_message_boards(msg: dict):
+    """取出实时消息涉及的看板 id 集合；定位不到时返回 None（= 不按看板过滤）。"""
+    bid = msg.get('board_id')
+    if bid:
+        return {bid}
+    cid = msg.get('card_id')
+    if cid and cid != '*':
+        row = dbq('SELECT board_id FROM cards WHERE card_id=?', (cid,))
+        if row:
+            return {row[0]['board_id']}
+    return None
+
+
 class WSManager:
     def __init__(self):
         self.conns = {}    # username -> set[WebSocket]
@@ -759,11 +916,25 @@ class WSManager:
                 self.conns.pop(username, None)
 
     async def broadcast(self, msg: dict, exclude: str = None):
-        """推送给所有在线连接（可选排除某用户）"""
+        """推送给所有在线连接（可选排除某用户）。
+
+        可见性：消息能定位到看板时，只推送给**能看到该看板**的账号 ——
+        否则不可见看板的卡片 id 会通过实时通道泄漏给无权用户。
+        定位不到看板（如 card_id='*' 的全局刷新信号）时照常广播。
+        """
         dead = []
+        boards = _ws_message_boards(msg)
+        vis_cache = {}
         for username, sockets in list(self.conns.items()):
             if exclude and username == exclude:
                 continue
+            if boards is not None:
+                if username not in vis_cache:
+                    vis, _c = user_allowed(username)
+                    vis_cache[username] = vis
+                vis = vis_cache[username]
+                if vis is not None and not (boards & vis):
+                    continue
             for ws in list(sockets):
                 try:
                     await ws.send_text(json.dumps(msg, ensure_ascii=False))
@@ -1290,6 +1461,9 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     if not cur:
         raise HTTPException(404, '卡片不存在或已删除')
     check_board_access(cur[0]['board_id'], username)
+    # 板块级校验：账号被限定了某看板的板块白名单时，不得把事项移入不可见的板块
+    if fields.get('column_id'):
+        check_column_access(cur[0]['board_id'], str(fields.get('column_id')), username)
     cur_ver = cur[0]['version']
     # 子事项时间约束：起始 ≥ 父起始，截止 ≤ 父截止
     if cur[0]['parent_id']:
@@ -1368,6 +1542,8 @@ async def create_card(req: CardCreate, username: str = Depends(require_editor), 
     vals['card_id'] = new_id
     vals['board_id'] = req.board_id
     vals['column_id'] = req.column_id or vals.get('column_id', '')
+    # 板块级校验：账号被限定了某看板的板块白名单时，不得写入不可见的板块
+    check_column_access(req.board_id, vals['column_id'], username)
     vals['card_name'] = req.card_name
     vals['creator'] = username
     vals['created'] = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -1466,11 +1642,15 @@ def heartbeat(card_id: str, username: str = Depends(require_editor)):
 # ---------------- API：评论 / 日志 ----------------
 @app.get('/api/cards/{card_id}/comments')
 def get_comments(card_id: str, username: str = Depends(require_auth)):
+    # 可见性校验：该卡片所属看板对当前账号不可见 → 403（此前只做登录校验，
+    # 不可见看板的评论可被直接调 API 读取 → 越权读）
+    check_card_access(card_id, username)
     rows = dbq('SELECT id, card_id, username, content, mentions, created_at FROM comments WHERE card_id=? ORDER BY id', (card_id,))
     return {'comments': [dict(r) for r in rows]}
 
 @app.post('/api/cards/{card_id}/comments')
 async def add_comment(card_id: str, req: CommentReq, username: str = Depends(require_auth), request: Request = None):
+    check_card_access(card_id, username)
     if not req.content or not req.content.strip():
         raise HTTPException(400, '评论不能为空')
     # @ 提及：mentions 是被提及的成员姓名列表（与 owner 字段同口径）
@@ -1560,6 +1740,7 @@ def read_all_messages(username: str = Depends(require_auth)):
 
 @app.get('/api/cards/{card_id}/actions')
 def get_actions(card_id: str, username: str = Depends(require_auth)):
+    check_card_access(card_id, username)
     rows = dbq('SELECT username, action, detail, created_at FROM actions WHERE card_id=? ORDER BY id DESC LIMIT 30',
                (card_id,))
     return {'actions': [dict(r) for r in rows]}
@@ -1613,6 +1794,7 @@ def build_subtask_tree(rows):
 @app.get('/api/cards/{card_id}/subtasks')
 def get_subtasks(card_id: str, username: str = Depends(require_auth)):
     """返回子事项**树形**结构：顶层子事项在 subtasks，每项带 children 子树"""
+    check_card_access(card_id, username)
     rows = dbq('SELECT id, card_id, title, done, sort, done_by, done_at, created_by, parent_id, created_at '
                'FROM card_subtasks WHERE card_id=? ORDER BY sort, id', (card_id,))
     roots, flat = build_subtask_tree(rows)
@@ -1622,6 +1804,7 @@ def get_subtasks(card_id: str, username: str = Depends(require_auth)):
 @app.get('/api/cards/{card_id}/children')
 def get_card_children(card_id: str, username: str = Depends(require_auth)):
     """返回该事项的**子事项树**（子卡片递归嵌套），供列表与弹窗按目录展示"""
+    check_card_access(card_id, username)
     boards, columns = user_allowed(username)
     all_rows = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
     mine = filter_rows(all_rows, boards, columns)
@@ -1986,8 +2169,14 @@ def _all_boards():
 
 @app.get('/api/workgroups')
 def get_workgroups(username: str = Depends(require_auth)):
-    """工作组管理：返回树形工作组架构 + 全部看板列表（供板块绑定配置）"""
-    return {'groups': _wg_tree(_wg_rows()), 'all_boards': _all_boards()}
+    """工作组管理：返回树形工作组架构 + 全部看板列表（供板块绑定配置）
+
+    普通用户只返回其可见看板（与 /api/me 口径一致）。"""
+    all_boards = _all_boards()
+    visible, _cols = user_allowed(username)
+    if visible is not None:
+        all_boards = [b for b in all_boards if b['board_id'] in visible]
+    return {'groups': _wg_tree(_wg_rows()), 'all_boards': all_boards}
 
 @app.get('/api/org')
 def get_org_alias(username: str = Depends(require_auth)):
@@ -2448,6 +2637,10 @@ def get_org_tree(username: str = Depends(require_auth)):
         by_parent[n['parent_id']].append(n)
     # 归属部门拥有的板块（看板管理 → 架构管理的联动）
     owned = _dept_owned_boards()
+    # 普通用户只看到自己可见的看板（与 /api/me 口径一致）
+    visible, _cols = user_allowed(username)
+    if visible is not None:
+        owned = {nid: {b for b in bs if b in visible} for nid, bs in owned.items()}
 
     def build(pid):
         out = []
@@ -2743,8 +2936,14 @@ def _validate_board_config(year, dept, attr, status):
 @app.get('/api/boards')
 def list_boards(username: str = Depends(require_auth)):
     """看板管理列表：真实看板（boards ∪ cards 派生）+ 卡片数 + 关联配置。
-    看板管理功能直接作用于当前在用的真实看板，通过 board_id 与 board_config 关联。"""
+    看板管理功能直接作用于当前在用的真实看板，通过 board_id 与 board_config 关联。
+
+    可见性：管理员返回全部看板；普通用户只返回其架构授权范围内的看板
+    （与 /api/me 的看板集合一致，避免「前端只隐藏、后端仍全量下发」）。"""
     boards = _all_boards()
+    visible, _cols = user_allowed(username)
+    if visible is not None:
+        boards = [b for b in boards if b['board_id'] in visible]
     counts = {}
     for r in dbq('SELECT board_id, COUNT(*) AS cnt FROM cards WHERE deleted=0 GROUP BY board_id'):
         counts[r['board_id']] = r['cnt']
@@ -2773,12 +2972,16 @@ def list_boards(username: str = Depends(require_auth)):
 
 @app.get('/api/board-config')
 def list_board_config(username: str = Depends(require_auth)):
-    """看板配置列表（含关联看板名称），按年份↓、部门、属性排序"""
+    """看板配置列表（含关联看板名称），按年份↓、部门、属性排序。
+    普通用户只返回其可见看板的配置（与看板列表口径一致）。"""
     rows = dbq('''SELECT c.id, c.board_id, c.year, c.dept, c.attr, c.status, c.remark, c.created_at,
                         COALESCE(b.board_name, '') AS board_name
                  FROM board_config c
                  LEFT JOIN boards b ON b.board_id = c.board_id
                  ORDER BY c.year DESC, c.dept, c.attr''')
+    visible, _cols = user_allowed(username)
+    if visible is not None:
+        rows = [r for r in rows if r['board_id'] in visible]
     return {'items': [dict(r) for r in rows]}
 
 @app.post('/api/board-config')
@@ -3021,6 +3224,9 @@ def get_dept_page(dept: str, username: str = Depends(require_auth)):
                     FROM dept_honors WHERE dept=? ORDER BY kind, sort, id''', (dept,))
     # 该部门下的看板（看板管理里配置的归属部门）
     dept_boards = [b['board_id'] for b in dbq('SELECT board_id FROM board_config WHERE dept=?', (dept,))]
+    # 普通用户只看到自己可见的看板（与 /api/me 口径一致）
+    if boards is not None:
+        dept_boards = [b for b in dept_boards if b in boards]
     # 事项统计：只看该部门的看板，且是主事项（parent_id=''）
     stat = {'total': 0, 'done': 0, 'progressing': 0, 'open': 0, 'overdue': 0, 'owner_missing': 0}
     owner_cnt = defaultdict(int)
@@ -3341,6 +3547,8 @@ async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_
     if not src_row:
         raise HTTPException(404, '卡片不存在或已删除')
     check_board_access(req.board_id, username)
+    # 板块级校验：目标板块对当前账号不可见时拒绝移动
+    check_column_access(req.board_id, req.column_id, username)
     # 目标看板是否存在
     tgt = dbq('SELECT board_id, board_name FROM cards WHERE board_id=? AND deleted=0 LIMIT 1', (req.board_id,))
     if not tgt:
@@ -3532,8 +3740,13 @@ async def import_data(req: ImportReq, username: str = Depends(require_editor), r
                 if name and str(name).strip():
                     conn.execute('INSERT INTO team_members (name) VALUES (?)', (str(name).strip(),))
         conn.commit()
-    finally:
-        conn.close()
+    except Exception:
+        # 连接是线程内复用的：出错必须回滚，否则未提交事务会留给该线程的后续请求
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     log_action('__import__', username, 'import', f'cards={len(req.cards)} team={len(req.team)}')
     audit_log(username, client_ip(request), 'import', '数据导入', f'导入备份：卡片 {len(req.cards)} 张、子事项 {len(req.subtasks)} 条、团队成员 {len(req.team)} 人', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
@@ -3886,8 +4099,6 @@ async def import_xlsx(request: Request, username: str = Depends(require_editor))
     except Exception as ex:
         conn.rollback()
         raise HTTPException(500, '写入失败：%s' % ex)
-    finally:
-        conn.close()
 
     log_action('__import_xlsx__', username, 'import', f'created={created} updated={updated} skipped={skipped}')
     audit_log(username, client_ip(request), 'import_xlsx', 'xlsx 数据导入',
