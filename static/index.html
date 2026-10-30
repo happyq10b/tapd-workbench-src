@@ -4218,7 +4218,7 @@ async function setCardStatus(ctx,st){
 // ---------- 团队 ----------
 var TM_ALL=[];  // [{id,name,workgroups:[...]}]
 var TM_VISIBLE_IDS=new Set();  // 当前表格可见的成员 id（筛选后的结果集）
-var TM_FILTER={name:'',workgroup:[],role:['noaccount']};  // 成员表格筛选条件（workgroup/role 改为多选数组）
+var TM_FILTER={name:'',workgroup:[],role:[]};  // 成员表格筛选条件（workgroup/role 改为多选数组；role 空数组 = 全部角色）
 async function openTeamModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
   const isAdmin=ME.is_admin, isSuperUser=ME.username==='admin';
@@ -4228,7 +4228,7 @@ async function openTeamModal(){
   TM_ALL=(team.members||[]).map(m=>({id:m.id,name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set,
     org_source:m.org_source||'none',org_conflict:m.org_conflict||[],org_nodes:m.org_nodes||[]}));
   TEAM_MEMBERS=TM_ALL.map(m=>m.name);
-  TM_FILTER={name:'',workgroup:[],role:['noaccount']};
+  TM_FILTER={name:'',workgroup:[],role:[]};   // 默认全部角色（不再默认只看「无权限」）
   initTeamFilterBar();
   renderTeamList();
   document.getElementById('t_new_name').value='';
@@ -4271,7 +4271,7 @@ function renderTeamList(){
   // 筛选
   const q=(TM_FILTER.name||'').trim().toLowerCase();
   const workgroupList=Array.isArray(TM_FILTER.workgroup)?TM_FILTER.workgroup:[];
-  const roleList=Array.isArray(TM_FILTER.role)?TM_FILTER.role:['noaccount'];
+  const roleList=Array.isArray(TM_FILTER.role)?TM_FILTER.role:[];   // 空数组 = 全部角色（不过滤）
   // 架构筛选：按所选节点集合，汇总其自身+后代叶子集合；只要成员的 workgroups 命中任一即匹配
   let wgMatchSet=new Set();
   if(workgroupList.length){
@@ -4287,13 +4287,19 @@ function renderTeamList(){
   const filtered=TM_ALL.filter(m=>{
     if(q && !m.name.toLowerCase().includes(q)) return false;
     // 角色筛选：无权限(noaccount)=无账号成员；其他=匹配 m.role
+    // 空数组 = 全部角色（不过滤）；勾满 4 类也视同「全部角色」——
+    // 否则「有账号但 users 表无角色记录」的成员（m.role 为空串）会被漏掉。
     if(roleList.length){
-      const isNoAccount=!m.account;
-      if(isNoAccount){
-        if(!roleList.includes('noaccount')) return false;
-        // 不直接 return true —— 必须继续走架构筛选（保证全部筛选条件 AND 关系）
-      }else{
-        if(!roleList.includes(m.role)) return false;
+      const ALL_ROLES=['admin','editor','viewer','noaccount'];
+      const isAllRoles=roleList.length>=ALL_ROLES.length && ALL_ROLES.every(r=>roleList.includes(r));
+      if(!isAllRoles){
+        const isNoAccount=!m.account;
+        if(isNoAccount){
+          if(!roleList.includes('noaccount')) return false;
+          // 不直接 return true —— 必须继续走架构筛选（保证全部筛选条件 AND 关系）
+        }else{
+          if(!roleList.includes(m.role)) return false;
+        }
       }
     }
     // 架构筛选：分三种语义
@@ -4371,10 +4377,10 @@ function renderTeamList(){
   footer.textContent=`显示 ${filtered.length} / ${TM_ALL.length} 人 · 权限（角色）只对已开通登录账号的成员生效；管理员可开通账号并设置首次密码/角色，密码重置仅超级管理员可操作 · 编辑后点「保存全部」统一提交`;
 }
 function resetTmFilter(){
-  TM_FILTER={name:'',workgroup:[],role:['noaccount']};
+  TM_FILTER={name:'',workgroup:[],role:[]};   // 重置回全部角色
   const ni=document.getElementById('tm_filter_name'); if(ni)ni.value='';
   const oi=document.getElementById('tm_filter_workgroup'); if(oi)oi.value='';
-  const ri=document.getElementById('tm_filter_role'); if(ri){ri.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); ri.textContent='角色（全部）';}
+  const ri=document.getElementById('tm_filter_role'); if(ri){ri.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); ri.textContent='全部角色';}
   renderTeamList();
 }
 function openRoleMulti(btn){
@@ -4392,7 +4398,7 @@ function openRoleMulti(btn){
   pop.style.top=(r.bottom+4)+'px';
   const map={admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'};
   const opts=['admin','editor','viewer','noaccount'];
-  pop.innerHTML=opts.map(v=>`<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer"><input type="checkbox" value="${v}" ${ROLE_SNAP.includes(v)?'checked':''}> <span>${map[v]}</span></label>`).join('')+`<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span id="role_select_all_btn"><button class="icon-btn" onclick="selectAllRoles()" id="role_select_all_btn_inner">全选</button></span><span style="display:flex;gap:8px"><button class="btn-secondary" onclick="closeRoleMulti()">取消</button><button class="btn-primary" onclick="applyRoleMulti()">确定</button></span></div>`;
+  pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">不勾选任何角色 = 显示全部角色</div>`+opts.map(v=>`<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer"><input type="checkbox" value="${v}" ${ROLE_SNAP.includes(v)?'checked':''}> <span>${map[v]}</span></label>`).join('')+`<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span id="role_select_all_btn"><button class="icon-btn" onclick="selectAllRoles()" id="role_select_all_btn_inner">全选</button></span><span style="display:flex;gap:8px"><button class="btn-secondary" onclick="closeRoleMulti()">取消</button><button class="btn-primary" onclick="applyRoleMulti()">确定</button></span></div>`;
   document.body.appendChild(pop);
   // 初始化"全选/取消全选"按钮文字：若快照里全部选项都已选，显示"取消全选"；否则显示"全选"
   const _all=['admin','editor','viewer','noaccount'];
@@ -4458,7 +4464,7 @@ function renderRoleBtn(){
   const btn=document.getElementById('tm_filter_role');
   if(!btn)return;
   const map={admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'};
-  const txt=TM_FILTER.role.length?TM_FILTER.role.map(r=>map[r]||r).join(' / '):'角色（全部）';
+  const txt=TM_FILTER.role.length?TM_FILTER.role.map(r=>map[r]||r).join(' / '):'全部角色';
   btn.textContent=txt;
   btn.title=txt;   // 截断时 hover 看完整内容
 }
@@ -4500,7 +4506,7 @@ function initTeamFilterBar(){
     <div style="position:sticky;top:0;background:var(--bg);z-index:5;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <input type="text" class="form-input" id="tm_filter_name" placeholder="姓名搜索" value="${esc(TM_FILTER.name||'')}" style="width:140px" oninput="TM_FILTER.name=this.value;renderTeamList()">
       <input type="text" class="form-input" id="tm_filter_workgroup" readonly value="${TM_FILTER.workgroup.length?TM_FILTER.workgroup.join(' / '):''}" placeholder="架构筛选（全部）" style="width:240px;cursor:pointer" onclick="openWgFilterPicker(this)">
-      <button type="button" class="form-input" id="tm_filter_role" style="width:140px;height:32px;cursor:pointer;text-align:left;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;padding:0 8px" title="${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'角色（全部）'}" onclick="openRoleMulti(this)">${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'角色（全部）'}</button>
+      <button type="button" class="form-input" id="tm_filter_role" style="width:140px;height:32px;cursor:pointer;text-align:left;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;padding:0 8px" title="${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}" onclick="openRoleMulti(this)">${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}</button>
       <button class="icon-btn" onclick="resetTmFilter()">清空</button>
     </div>
     <div style="border:1px solid var(--border);border-radius:8px">
