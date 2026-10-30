@@ -1185,13 +1185,14 @@ function goLogin(){
 .bc-pill.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(0,45,116,.25)}
 .bc-pill.on.warn{background:var(--warning);border-color:var(--warning);box-shadow:0 2px 8px rgba(250,173,20,.3)}
 .bc-empty-edit{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:var(--text2);font-size:13px;gap:10px;padding:50px;text-align:center}
-.bc-opbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.bc-opbar-count{font-size:11.5px;color:var(--text2);margin-left:auto;white-space:nowrap}
+.bc-opbar{display:flex;flex-direction:row;align-items:center;gap:8px;flex-wrap:nowrap;min-width:0}
+.bc-opbar-btns{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.bc-opbar-count{font-size:11.5px;color:var(--text2);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .bc-del-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:4px 10px;font-size:12px;border-radius:var(--radius-sm);cursor:pointer;transition:all .15s;white-space:nowrap}
 .bc-del-btn:hover:not(:disabled){border-color:var(--danger);color:var(--danger);background:#fff1f0}
 .bc-del-btn:disabled{opacity:.45;cursor:not-allowed}
-.bc-item-del{color:var(--danger);font-size:12px;background:none;border:none;cursor:pointer;padding:0 2px;line-height:1.4;font-family:inherit}
-.bc-item-del:hover{text-decoration:underline}
+.bc-del-single{border-color:var(--danger)!important;color:var(--danger)}
+.bc-del-single:hover{border-color:var(--danger)!important;color:var(--danger);background:#fff1f0}
 .bc-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
 .badge-active{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:rgba(0,45,116,.10);color:#002D74;border:1px solid rgba(0,45,116,.30)}
 .badge-locked{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff7e6;color:var(--warning);border:1px solid #ffd591}
@@ -1214,9 +1215,11 @@ function goLogin(){
             <div class="bc-filter-row"><span class="lab">属性</span><select id="bcf_attr" onchange="bcFilterChange('attr',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">状态</span><select id="bcf_status" onchange="bcFilterChange('status',this.value)"></select></div>
             <div class="bc-filter-row bc-opbar" style="grid-column:1/-1">
-              <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的板块）">全选</button>
-              <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选板块的配置（需两次确认）" disabled>删除所选 0 个</button>
-              <span class="bc-opbar-count">已勾选 <b id="bcPickCount">0</b> 个板块</span>
+              <div class="bc-opbar-btns">
+                <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的板块）">全选</button>
+                <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选板块的配置（需两次确认）" disabled>删除所选 0 个</button>
+              </div>
+              <span class="bc-opbar-count">已选 <b id="bcPickCount">0</b> 个</span>
             </div>
           </div>
           <div class="bc-list" id="bcList"></div>
@@ -5388,9 +5391,7 @@ function renderBoardList(){
       +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
       +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
-      +'<span style="margin-left:auto;display:flex;align-items:center;gap:10px">'
-      +'<span style="color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span>'
-      +'<button class="bc-item-del" onclick="event.stopPropagation();bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该板块的配置（需确认）">删除</button></span></div>'
+      +'<span style="margin-left:auto;color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span></div>'
       +'</div>';
   }).join('');
   setBcListScroll(list.length);
@@ -5518,7 +5519,7 @@ function renderEditArea(){
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
   const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
   let footer='<div class="bc-footer">';
-  if(isEdit){footer+='<button class="btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteBoardConfig('+BC_EDIT_ID+')">删除配置</button>';}
+  if(isEdit){footer+='<button class="btn-secondary bc-del-single" onclick="bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该看板的配置（需一次确认）">删除该看板配置</button>';}
   footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个板块</button>'
     +'<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
     +'<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
@@ -5598,19 +5599,6 @@ async function bcAfterDelete(){
   renderTabs();
   renderBoardList();
   renderEditArea();
-}
-async function deleteBoardConfig(id){
-  if(!confirm('确认删除该看板配置？'))return;
-  try{
-    await api('/api/board-config/'+id,{method:'DELETE'});
-    if(BC_SELECTED && BC_SELECTED.config_id===id){BC_SELECTED=null;BC_EDIT_ID=0;}
-    await loadBoardConfig();
-    // 删除配置后该板块归属变为「未配置」，同步刷新目录树
-    ME=await api('/api/me');
-    renderTabs();
-    renderEditArea();
-    toast('已删除');
-  }catch(e){}
 }
 
 </script>
