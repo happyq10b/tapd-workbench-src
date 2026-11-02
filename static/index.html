@@ -1187,7 +1187,7 @@ function goLogin(){
          这 5 项（备份/恢复/模板/导入/导出）是**数据进出**类操作，
          与「更多」里的界面类操作混在一起容易被误点，也不好找。 -->
     <div class="header-more" id="headerImportExport">
-      <button class="header-btn" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">📥📤 导入导出</button>
+      <button class="header-btn" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">🔄 导入导出</button>
       <div class="header-more-menu" id="headerImportExportMenu" hidden>
         <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
         <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式，仅可编辑及以上）">📥 恢复</button>
