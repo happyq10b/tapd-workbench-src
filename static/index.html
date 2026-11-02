@@ -615,6 +615,8 @@ button{font-family:inherit}
   border:1px solid var(--border);border-radius:5px;outline:none;background:#fff;color:var(--text);
   font-family:inherit}
 .tp-search-input:focus{border-color:var(--primary);box-shadow:var(--ring)}
+/* 树内搜索无匹配时的空态提示 */
+.tp-empty{padding:18px 12px;text-align:center;font-size:12.5px;color:var(--text3)}
 /* 「无负责人」节点：树上以标签样式呈现（虚线框 + 灰底），区别于真实人员 */
 .tp-none-node{margin:2px 6px 6px;padding:4px 8px;border:1px dashed #b7d4f7;border-radius:5px;
   background:#f7faff;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2)}
@@ -4738,7 +4740,7 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
   const showNoneOwner=!!(opts&&opts.showNoneOwner);
   // keyword：树内搜索词（person 模式）
   const keyword=(opts&&opts.keyword)||'';
-  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false, keyword};
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false, keyword, keywordRaw:keyword};
   // 「无负责人」若已在选中集合里（从筛选条件回填），则同步点亮该选项
   if(showNoneOwner&&TREE_PICK.selected.includes(OWNER_NONE))TREE_PICK.noneOwner=true;
   renderTreePick();
@@ -4795,23 +4797,23 @@ function renderTreePick(){
       <span class="tp-opts-label">显示选项</span>
       <label class="tp-opt"><input type="checkbox" id="tp_opt_none"${TREE_PICK.noneOwner?' checked':''} onchange="tpToggleNoneOwner()"><span>无负责人</span></label>
     </div>`:'';
-  // 「无负责人」节点：独立的一行标签（不混入树的层级结构，保持层级不变）
-  const noneNode=TREE_PICK.showNoneOwner&&TREE_PICK.noneOwner?`
-    <div class="tp-none-node">
-      <span class="tn-tag">无负责人</span>
-      <span class="tn-desc">负责人为空的成员</span>
-      <button type="button" class="tn-clear" onclick="tpToggleNoneOwner()" title="取消「无负责人」筛选">✕</button>
-    </div>`:'';
+  // 「无负责人」节点由 renderTreePickBody() 渲染（与树内容区一起刷新）
   // 搜索框（person 模式）：按姓名过滤树上的人员。
   // 筛选栏的人员控件已改为「点击即开树」，搜索能力随之移进树里。
+  // ⚠️ IME（中文输入法）兼容：
+  //   ① 输入过程中**不能重建搜索框**（否则拼音组合状态被清空 → 打不出拼音）；
+  //      搜索只刷新树内容区 #tp_body（见 renderTreePickBody）。
+  //   ② 组合期间（拼音串还没上屏）input.value 是**拼音字母**而非汉字，
+  //      此时若触发过滤会把树过滤成空 —— 用 composition 事件 + isComposing 双重判定。
+  //   ③ 事件用 addEventListener 绑定而非内联属性：顶层 let 变量不在 window 上，
+  //      内联处理器的作用域链访问不到 script scope 的变量（标志位设不进去）。
   const searchBar=TREE_PICK.pickMode==='person'?`
     <div class="tp-search">
       <input type="text" id="tp_search" class="tp-search-input" autocomplete="off"
-             placeholder="搜索人员姓名…" value="${esc(TREE_PICK.keyword||'')}"
-             oninput="tpSearch(this.value)" onkeydown="if(event.key==='Escape'){tpSearch('')}">
+             placeholder="搜索人员姓名…" value="${esc(TREE_PICK.keyword||'')}">
     </div>`:'';
   p.innerHTML=toolbar+searchBar+optsBar+`
-    <div style="flex:1;overflow:auto;padding:2px 6px 6px;min-height:60px">${noneNode}${treePickNodes(TREE_PICK.tree,0)}</div>
+    <div id="tp_body" style="flex:1;overflow:auto;padding:2px 6px 6px;min-height:60px"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--border)">
       <span style="font-size:12px;color:var(--text3)">已选 <span id="tp_count">${TREE_PICK.selected.length}</span> 项</span>
       <span style="display:flex;gap:8px;align-items:center">
@@ -4820,6 +4822,58 @@ function renderTreePick(){
         <button class="btn-primary" onclick="treePickConfirm()">确定</button>
       </span>
     </div>`;
+  bindTpSearch();
+  renderTreePickBody();
+}
+// 绑定搜索框的输入事件（addEventListener —— 见 renderTreePick 里的说明）
+function bindTpSearch(){
+  const inp=document.getElementById('tp_search');
+  if(!inp||inp.__tpBound)return;
+  inp.__tpBound=1;
+  inp.addEventListener('compositionstart',()=>{ TP_COMPOSING=true; });
+  inp.addEventListener('compositionend',e=>{
+    TP_COMPOSING=false;
+    // 组合结束后用**最终上屏的文本**过滤（e.target.value 已是汉字）。
+    // ⚠️ 有些 IME 在 compositionend 之后还会补一个 isComposing=false 的 input 事件
+    //    → 下面 tpSearch 的 keyword 相同则跳过，避免重复重绘。
+    tpSearch((e&&e.target&&e.target.value)||inp.value);
+  });
+  inp.addEventListener('input',e=>{
+    // 组合中 → 忽略（拼音串还没上屏，此时过滤会把树清空）
+    if(TP_COMPOSING||(e&&e.isComposing))return;
+    tpSearch(inp.value);
+  });
+  inp.addEventListener('keydown',e=>{ if(e.key==='Escape')tpSearch(''); });
+}
+// 只刷新**树内容区**（#tp_body）与底部计数 —— 不动工具栏/搜索框。
+// ⚠️ 关键：搜索框 DOM 节点保持不变，输入焦点、光标位置与
+//    **中文输入法的拼音组合状态**都不会被打断 → 可以正常打拼音。
+function renderTreePickBody(){
+  if(!TREE_PICK)return;
+  const body=document.getElementById('tp_body');
+  if(!body)return;
+  // 「无负责人」节点：独立的一行标签（不混入树的层级结构，保持层级不变）
+  const noneNode=TREE_PICK.showNoneOwner&&TREE_PICK.noneOwner?`
+    <div class="tp-none-node">
+      <span class="tn-tag">无负责人</span>
+      <span class="tn-desc">负责人为空的成员</span>
+      <button type="button" class="tn-clear" onclick="tpToggleNoneOwner()" title="取消「无负责人」筛选">✕</button>
+    </div>`:'';
+  const treeHtml=treePickNodes(TREE_PICK.tree,0);
+  // 有搜索词但一个人都没匹配上 → 给提示，而不是留一片空白
+  // （拼音中间态也会走到这里，此时提示比"树消失"友好得多）
+  // ⚠️ 判定要看**人员**是否还有，而不是 treeHtml 是否为空 ——
+  //    节点行在无匹配时依然会渲染（只是下面没人），treeHtml 始终非空。
+  const kw=TREE_PICK.keyword||'';
+  // 先判断 treeHtml 里有没有人员条目（不能查 body —— 此刻 body 还是旧内容）
+  const hasPerson=/class="tp-node tp-person"/.test(treeHtml);
+  const noHit=kw&&!hasPerson;
+  body.innerHTML=noneNode+(noHit
+    ? `<div class="tp-empty">未匹配到「${esc(TREE_PICK.keywordRaw||kw)}」的人员</div>`
+    : treeHtml);
+  // 「无负责人」选项的勾选态同步（选项栏本身不重建）
+  const opt=document.getElementById('tp_opt_none');
+  if(opt)opt.checked=!!TREE_PICK.noneOwner;
   paintAll();
   // 初始化"全选"按钮文字：若当前 selected 已包含所有节点，显示"取消全选"；否则显示"全选"
   const _abtn=document.getElementById('tp_select_all_btn');
@@ -4843,14 +4897,15 @@ function tpExpandAll(){
     });
   })(TREE_PICK.tree||[]);
   ids.forEach(id=>{TREE_EXPANDED.add(id);TREE_PICK.expanded.add(id);});
-  renderTreePick();
+  // 只刷树内容区（不动搜索框 → 保住 IME 组合与焦点）
+  renderTreePickBody();
 }
 function tpCollapseAll(){
   if(!TREE_PICK)return;
   // 清空展开集合 → 所有节点的下级收起，**顶层节点行仍可见**（顶层节点本身不藏）
   TREE_EXPANDED.clear();
   TREE_PICK.expanded.clear();
-  renderTreePick();
+  renderTreePickBody();
 }
 // 「无负责人」显示选项：独立开关，启用后树上出现「无负责人」节点
 // ⚠️ 只操作 noneOwner 与 selected 里的 OWNER_NONE，**不碰展开状态** ——
@@ -4862,21 +4917,38 @@ function tpToggleNoneOwner(){
   const i=TREE_PICK.selected.indexOf(OWNER_NONE);
   if(on){ if(i<0)TREE_PICK.selected.push(OWNER_NONE); }
   else if(i>=0)TREE_PICK.selected.splice(i,1);
-  renderTreePick();
+  renderTreePickBody();
 }
 // 树内搜索：按姓名过滤树上的**人员**（节点本身保留，便于看清层级归属）。
 // 搜索只是「显示过滤」，不改变 selected —— 勾选状态与搜索词互不影响。
+//
+// ⚠️ **只刷新内容区，不重建搜索框**：
+//    早期实现每次输入都 `renderTreePick()`（整块 innerHTML 重建），
+//    输入框 DOM 节点被销毁重建 → 焦点丢失 + **中文输入法的拼音组合状态被清空**
+//    → 表现为「输入栏无法输入拼音」（打完第一个字母就没反应 / 拼音上不了屏）。
+//    现在只替换 #tp_body 的内容，搜索框节点保持不变 → IME 组合不被打断。
 function tpSearch(kw){
   if(!TREE_PICK)return;
-  TREE_PICK.keyword=(kw||'').trim().toLowerCase();
-  renderTreePick();
+  const raw=(kw||'');
+  const low=raw.trim().toLowerCase();
+  // 关键词没变 → 跳过重绘（IME 的 compositionend 之后常会补一个 input 事件）
+  if(TREE_PICK.keyword===low)return;
+  TREE_PICK.keywordRaw=raw;
+  TREE_PICK.keyword=low;
+  renderTreePickBody();
+  // 同步输入框显示值（清空搜索等场景），但不抢焦点
   const inp=document.getElementById('tp_search');
-  if(inp&&document.activeElement!==inp){
-    inp.value=TREE_PICK.keyword;
-    inp.focus();
-    inp.setSelectionRange(inp.value.length,inp.value.length);
-  }
+  if(inp&&inp.value!==raw)inp.value=raw;
 }
+// ---------- 中文输入法（IME）兼容 ----------
+// 组合期间（拼音串还没上屏）input.value 是**拼音字母**而非最终汉字，
+// 此时若触发过滤会把树过滤成空；且部分输入法在组合被打断后会丢候选。
+// 用 compositionstart / compositionend + input 事件的 isComposing 双重判定：
+//   组合中 → 忽略 input，不刷新树
+//   组合结束 → 用最终汉字刷新树
+// ⚠️ 用 var 而非 let：顶层 let 声明的变量不在 window 上，
+//    而内联事件处理器的作用域链访问不到 script scope（标志位会设不进去）。
+var TP_COMPOSING=false;
 // 该节点在当前搜索词下是否需要显示（节点自身命中，或其子树里有命中的人员）
 function tpNodeMatches(n,kw){
   if(!kw)return true;
@@ -4885,6 +4957,13 @@ function tpNodeMatches(n,kw){
   const mem=(n.members||[]).filter(m=>!m.node_id||m.node_id===n.id);
   if(mem.some(m=>(m.name||'').toLowerCase().includes(kw)))return true;
   return (n.children||[]).some(tpNodeMatches);
+}
+// 该节点的**子树**里是否有匹配的人员（用于搜索时自动展开到命中项的路径）
+function tpSubtreeHasMatch(n,kw){
+  if(!kw)return false;
+  const mem=(n.members||[]).filter(m=>!m.node_id||m.node_id===n.id);
+  if(mem.some(m=>(m.name||'').toLowerCase().includes(kw)))return true;
+  return (n.children||[]).some(tpSubtreeHasMatch);
 }
 function treePickNodes(nodes,dep){
   const kw=TREE_PICK.keyword||'';
@@ -4902,8 +4981,15 @@ function treePickNodes(nodes,dep){
     const members=kw
       ? allMembers.filter(m=>(m.name||'').toLowerCase().includes(kw))
       : allMembers;
+    // 搜索态下：节点名本身命中 → 保留该节点行（作为归属上下文）；
+    // 否则节点行隐藏，只留下命中的人员条目（避免满屏空节点）。
+    const nodeHit=kw&&(n.name||'').toLowerCase().includes(kw);
+    if(kw&&!nodeHit&&!members.length&&!hasCh)return '';
     // 有子节点**或**有直属人员 → 该节点才可展开
     const hasBody=hasCh||allMembers.length>0;
+    // 搜索时**自动展开**到命中项的路径：子树里有匹配人员的节点一律展开，
+    // 否则命中的人员藏在折叠的容器里看不见。
+    const showBody=kw?tpSubtreeHasMatch(n,kw):exp;
     const memberHtml=members.map(m=>{
       const key=ORG_PERSON_PREFIX+m.name;
       const on=TREE_PICK.selected.includes(key);
@@ -4917,7 +5003,7 @@ function treePickNodes(nodes,dep){
     return `<div class="tp-node" style="padding-left:${dep*16}px">
       ${hasBody?`<span class="tp-arrow" id="tp_arrow_${n.id}" onclick="tpToggle(${n.id})" title="展开/折叠">${exp?'▼':'▶'}</span>`:'<span class="tp-arrow" style="visibility:hidden">▶</span>'}
       <label class="tp-label" tabindex="0" role="${TREE_PICK.pickMode==='person'?'group':'checkbox'}" aria-label="选择 ${esc(labelText)}" onclick="tpBoxClick('${esc(n.name)}',${n.id})" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpBoxClick('${esc(n.name)}',${n.id})}"><span class="tp-box${TREE_PICK.pickMode==='person'?' tp-box-node':''}" id="tp_box_${n.id}"></span><span>${esc(labelText)}</span></label>
-    </div>${hasBody?`<div id="tp_children_${n.id}" style="display:${exp?'block':'none'}">${memberHtml}${hasCh?treePickNodes(n.children,dep+1):''}</div>`:''}`;
+    </div>${hasBody?`<div id="tp_children_${n.id}" style="display:${showBody?'block':'none'}">${memberHtml}${hasCh?treePickNodes(n.children,dep+1):''}</div>`:''}`;
   }).join('');
 }
 // person 模式：节点下的全部人员（本人 + 全部后代），用于父节点级联勾选
@@ -6394,7 +6480,8 @@ async function ensureOrgTree(force){
     // 展开状态由 TREE_EXPANDED（按节点 id）保留，重绘后仍在同一层。
     if(TREE_PICK&&TREE_PICK.pickMode==='person'){
       TREE_PICK.tree=ORG_TREE;
-      renderTreePick();
+      // 只刷内容区即可（树结构变了，但搜索框与其无关）→ 保住 IME 组合与焦点
+      renderTreePickBody();
     }
     return ORG_TREE;
   })();
