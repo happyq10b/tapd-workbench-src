@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS boards (
     board_id      TEXT PRIMARY KEY,
     board_name    TEXT NOT NULL DEFAULT '',
     workspace_id  TEXT NOT NULL DEFAULT '',   -- TAPD 工作空间 ID（可空）
-    owner         TEXT NOT NULL DEFAULT '',    -- 看板负责人
+    owner         TEXT NOT NULL DEFAULT '',    -- 看板负责人（ACL：owner + participants 命中才可见）
+    participants  TEXT NOT NULL DEFAULT '',    -- 看板参与人（ACL，逗号分隔的账号）
     sort          INTEGER NOT NULL DEFAULT 0,  -- 排序权重（小在前）
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     copy_from     TEXT NOT NULL DEFAULT ''     -- 复制来源 board_id（空 = 非副本）
@@ -270,7 +271,9 @@ CREATE TABLE IF NOT EXISTS board_columns (
     nature      TEXT NOT NULL DEFAULT '日常' CHECK (nature IN ('日常','专项')),
     year        TEXT NOT NULL DEFAULT '',
     pinned      INTEGER NOT NULL DEFAULT 0,
-    copy_from   TEXT NOT NULL DEFAULT ''
+    copy_from   TEXT NOT NULL DEFAULT '',
+    owner       TEXT NOT NULL DEFAULT '',   -- 板块负责人（ACL：owner + participants 命中才可见）
+    participants TEXT NOT NULL DEFAULT ''   -- 板块参与人（ACL，逗号分隔的账号）
 );
 CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
 CREATE INDEX IF NOT EXISTS idx_board_columns_name ON board_columns(column_name);
@@ -675,6 +678,19 @@ def init_db(force_import=False):
     bcols = [r[1] for r in conn.execute('PRAGMA table_info(board_columns)').fetchall()]
     if 'year' not in bcols:
         conn.execute("ALTER TABLE board_columns ADD COLUMN year TEXT NOT NULL DEFAULT ''")
+    # ---- ACL：负责人 / 参与人（2026-11-02）----
+    # 看板（boards）与板块（board_columns）各自带 ACL：
+    #   owner         负责人（单个账号）
+    #   participants  参与人（逗号分隔的账号）
+    # 判定语义：**该层级未配置任何 ACL（owner 与 participants 皆空）→ 不额外收窄**；
+    # 一旦配置 → 仅 owner / participants 命中者可见。
+    # ⚠️ 这两列是**增量补列**，不能写进上面的 CREATE TABLE（老库不会重跑建表）。
+    if 'participants' not in bdcols:
+        conn.execute("ALTER TABLE boards ADD COLUMN participants TEXT NOT NULL DEFAULT ''")
+    if 'owner' not in bcols:
+        conn.execute("ALTER TABLE board_columns ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
+    if 'participants' not in bcols:
+        conn.execute("ALTER TABLE board_columns ADD COLUMN participants TEXT NOT NULL DEFAULT ''")
     # 归属年份默认值 = 板块创建年份：老数据回填（幂等，只补空值）
     conn.execute("UPDATE board_columns SET year=substr(created_at,1,4)"
                  " WHERE (year IS NULL OR year='') AND created_at IS NOT NULL AND created_at<>''")

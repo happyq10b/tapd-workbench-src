@@ -120,7 +120,7 @@ button{font-family:inherit}
 .role-admin{background:#fff7e6;color:#b25906;border:1px solid #ffd591}
 .role-editor{background:#e6f7ff;color:#1890ff;border:1px solid #91d5ff}
 .role-viewer{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}
-/* ---------------- 顶部栏：左右分栏（看板/板块/统计 ←→ 公告） ----------------
+/* ---------------- 顶部栏：左右分栏（部门/看板/统计 ←→ 公告） ----------------
    外层 .topbar：两列栅格 —— 左列 1fr（自适应内容），右列固定 320~420px 给公告区。
    左列 .topbar-main：再分三列（repeat(3,1fr)），三个「带」各占一整行，
    每带内部也是三列小栅格 → 形成「三列多行」的矩阵式排布。
@@ -131,7 +131,7 @@ button{font-family:inherit}
   grid-template-rows:auto auto auto;gap:10px 14px;align-content:start;min-width:0}
 /* 每个「带」跨满三列；带内是小栅格（三列），条目按列优先填充 */
 .tb-band{grid-column:1/-1;min-width:0}
-/* ===== 需求3：架构部门 + 可选板块 归为一个整体 =====
+/* ===== 需求3：架构部门 + 可选看板 归为一个整体 =====
    两带同属「导航区」，用共同的容器卡片包起来（背景 + 边框 + 圆角），
    视觉上是一个整体，与下方的「统计概览」明确区分。
    容器不改变原有的三列栅格与带内结构，只做视觉包裹。 */
@@ -143,7 +143,7 @@ button{font-family:inherit}
 }
 /* 容器内的「带」不再各自跨列（已在容器内单列流），去掉原 grid-column 覆盖 */
 .tb-navgroup>.tb-band{grid-column:auto}
-/* 两个带之间的分隔线：让「架构部门」与「可选板块」在整体内部仍有清晰边界 */
+/* 两个带之间的分隔线：让「架构部门」与「可选看板」在整体内部仍有清晰边界 */
 .tb-navgroup>.tb-band+.tb-band{
   border-top:1px solid var(--border);padding-top:11px;
 }
@@ -165,8 +165,8 @@ button{font-family:inherit}
      确实可能与映射表错位 → 改为 JS 按名排序后，此风险彻底消除。
    → 好处：后端顺序变化**不再影响**视觉；且排序集中在 `groupBoardsByDept()`，
      顶部部门带 / 部门切换下拉 / 初始选中部门 三处同步生效。 */
-/* ===== 需求2：可选板块默认两行，超出滚动 =====
-   实测（1600px 视口）：板块行高 38px、行间距 6px（行距 44px），
+/* ===== 需求2：可选看板默认两行，超出滚动 =====
+   实测（1600px 视口）：看板行高 38px、行间距 6px（行距 44px），
    故两行净高 = 38 + 44 = 82px。超出部分由容器内滚动承载。 */
 .tb-board-band .tb-grid{
   max-height:82px;overflow-y:auto;overflow-x:hidden;
@@ -1212,18 +1212,18 @@ function goLogin(){
   <div class="msg-list" id="msgList"></div>
 </aside>
 <!-- 顶部栏：左右分栏
-     左半 = 看板 / 板块 / 统计卡片（三列多行栅格）；右半 = 公告区（独立展示空间）。
-     栅格：.topbar 两列（1fr + 固定宽公告列），左半内部三列（部门带 / 板块带 / 统计带各一行）。 -->
+     左半 = 部门 / 看板 / 统计卡片（三列多行栅格）；右半 = 公告区（独立展示空间）。
+     栅格：.topbar 两列（1fr + 固定宽公告列），左半内部三列（部门带 / 看板带 / 统计带各一行）。 -->
 <div class="topbar" id="topbar">
   <div class="topbar-main" id="boardTabs">
-    <!-- 需求3：架构部门 + 可选板块 归为一个整体（共同容器卡片） -->
+    <!-- 需求3：架构部门 + 可选看板 归为一个整体（共同容器卡片） -->
     <div class="tb-navgroup">
       <div class="tb-band tb-dept-band">
         <div class="tb-band-title">架构部门</div>
         <div class="tb-grid" id="tbDepts"></div>
       </div>
       <div class="tb-band tb-board-band">
-        <div class="tb-band-title">可选板块</div>
+        <div class="tb-band-title">可选看板</div>
         <div class="tb-grid" id="tbBoards"></div>
       </div>
     </div>
@@ -1272,7 +1272,7 @@ function goLogin(){
   <!-- 统计概览已上移到顶部栏左半第三行（#progressOverview），此处只留筛选工具栏 -->
   <div class="toolbar">
     <div class="toolbar-left">
-      <input type="text" class="search-input" id="searchInput" placeholder="搜索事项 / 板块…" oninput="debounceReload()">
+      <input type="text" class="search-input" id="searchInput" placeholder="搜索事项 / 看板 / 板块…" oninput="debounceReload()">
       <select class="filter-select" id="statusFilter" onchange="reload(1)">
         <option value="">全部状态</option><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option>
       </select>
@@ -1321,8 +1321,8 @@ function goLogin(){
     <span id="filterHint" class="filter-hint"></span>
     <div class="toolbar-right" style="display:flex;gap:8px">
       <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
-      <button class="btn-default" onclick="expandAll()">展开板块</button>
-      <button class="btn-default" onclick="collapseAll()">折叠板块</button>
+      <button class="btn-default" onclick="expandAll()" title="展开当前看板下的所有板块分组">展开板块</button>
+      <button class="btn-default" onclick="collapseAll()" title="折叠当前看板下的所有板块分组">折叠板块</button>
     </div>
   </div>
   <main class="board-content" id="boardContent"></main>
@@ -1891,8 +1891,8 @@ function goLogin(){
             <div class="bc-filter-row"><span class="lab">状态</span><select id="bcf_status" onchange="bcFilterChange('status',this.value)"></select></div>
             <div class="bc-filter-row bc-opbar" style="grid-column:1/-1">
               <div class="bc-opbar-btns">
-                <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的板块）">全选</button>
-                <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选板块的配置（需两次确认）" disabled>删除所选</button>
+                <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的看板）">全选</button>
+                <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选看板的配置（需两次确认）" disabled>删除所选</button>
               </div>
               <span class="bc-opbar-count">已选 <b id="bcPickCount">0</b> 个</span>
             </div>
@@ -2261,27 +2261,30 @@ async function init(){
     renderTabs();renderProgress();reload(1);connectWS();setupDraggableModals();
   }catch(e){toast(e.message)}
 }
-// 初始定位：展开一个有板块的部门，但**不自动选中板块** ——
-// 需求3：进入看板后、在用户主动选择板块之前，内容区域默认为空（显示「请选择板块」）。
-// 之前这里会自动选中第一个板块 → 用户还没选就看到满屏数据，
-// 且「板块切换不彻底」的残留问题也因此更难被发现。
+// 初始定位：展开一个有看板的部门，但**不自动选中看板** ——
+// 需求3：进入看板后、在用户主动选择看板之前，内容区域默认为空（显示「请选择看板」）。
+// 之前这里会自动选中第一个看板 → 用户还没选就看到满屏数据，
+// 且「看板切换不彻底」的残留问题也因此更难被发现。
 function ensureInitialSelection(){
   if(!ME||!ME.boards||!ME.boards.length)return;
   const g=groupBoardsByDept();
-  // 已记住的展开部门若仍有效 → 沿用（只展开，不选板块）
+  // 已记住的展开部门若仍有效 → 沿用（只展开，不选看板）
+  // ⚠️ **必须是「有看板的部门」才沿用**（2026-11-02 修正）：
+  //    记住的部门若恰好没有看板，展开它会让顶部「可选看板」带**一个 tab 都没有**，
+  //    用户进来看到空列表却不知该点哪里 —— 回退到第一个有看板的部门。
   const remembered=Object.keys(DEPT_OPEN).filter(k=>DEPT_OPEN[k])[0];
   if(remembered){
     const hit=g.depts.find(d=>d.name===remembered)||(remembered===UNASSIGNED_KEY?{boards:g.unassigned}:null);
-    if(hit){expandOnly(remembered);return;}
+    if(hit&&hit.boards.length){expandOnly(remembered);return;}
   }
-  // 否则展开第一个有板块的部门（仍不选板块）
+  // 否则展开第一个有看板的部门（仍不选看板）
   const first=g.depts.find(d=>d.boards.length);
   if(first){expandOnly(first.name);return}
   if(g.unassigned.length)expandOnly(UNASSIGNED_KEY);
 }
 // ---------- 目录树：按「归属部门」分组折叠 ----------
-// 顶层 = 部门节点（含空部门），展开后显示该部门下的板块。
-// ME.depts 由后端给出有序部门清单；ME.boards[].dept 为板块的归属部门。
+// 顶层 = 部门节点（含空部门），展开后显示该部门下的**看板**。
+// ME.depts 由后端给出有序部门清单；ME.boards[].dept 为**看板**的归属部门。
 // 展开状态存在 DEPT_OPEN，并持久化到 localStorage（刷新后保留）。
 // ★ 单选：同一时刻只展开一个部门（DEPT_OPEN 只保留一个 key），
 //   部门之间互斥，避免多个部门同时铺开把页面撑得很长。
@@ -2302,9 +2305,12 @@ function expandOnly(name){
   DEPT_OPEN[name]=true;
   saveDeptOpen();
 }
-// 分组：部门 -> 板块列表。
+// 分组：部门 -> 看板列表。
+// ⚠️ **术语**：本文件里 ME.boards 的每一条 = 后端 boards 表的一行 = **看板**；
+//    看板内部的分组（board_columns / column_id）才叫**板块**。
+//    顶部「可选看板」带渲染的就是 ME.boards —— 此前标题误写为「可选板块」。
 // 部门顺序 = DEPT_VISUAL_ORDER（**按部门名**指定的视觉顺序，与后端返回顺序无关）；
-// 部门内板块顺序 = ME.boards 原顺序（按 board_id 排序），保持与原标签页一致。
+// 部门内看板顺序 = ME.boards 原顺序（按 board_id 排序），保持与原标签页一致。
 //
 // ⚠️ 需求1 原先用「纯 CSS order + :nth-child」实现指定顺序，
 //    但 CSS 只能按 **DOM 序号** 选中元素 → 映射表必须硬编码后端的 DOM 顺序
@@ -2326,7 +2332,7 @@ function sortDeptsByName(list){
     return String(a).localeCompare(String(b),'zh-Hans-CN');
   });
 }
-// 未配置归属部门的板块单独归入「未配置」节点，不丢失、不混入其他部门。
+// 未配置归属部门的看板单独归入「未配置」节点，不丢失、不混入其他部门。
 function groupBoardsByDept(){
   const depts=(ME.depts&&ME.depts.length)?ME.depts.slice():[];
   const map={}; depts.forEach(d=>{map[d]=[];});
@@ -2342,7 +2348,7 @@ function groupBoardsByDept(){
   const ordered=sortDeptsByName(depts);
   return {depts:ordered.map(d=>({name:d,boards:map[d]})),unassigned:unassigned};
 }
-// 单个板块 tab（部门分组内）
+// 单个看板 tab（部门分组内）
 function boardTabHtml(b,deptLabel){
   const base=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
   const title=base;
@@ -2363,9 +2369,9 @@ function renderTabs(){
     const cnt=d.boards.length;
     const emptyCls=cnt?'':' empty';
     // 两个独立入口，避免歧义（之前「点名字进部门页」导致用户只是想展开板块却误入）：
-    //   ① 部门块本身 = 展开/收起该部门的板块（保持原有行为）
+    //   ① 部门块本身 = 展开/收起该部门的**看板**（保持原有行为）
     //   ② 「主页」按钮 = 进入该部门的部门主页
-    const tip=cnt?('点击展开/收起该部门的板块'):(d.name+' 下暂无板块（可在「看板管理」中把板块挂载到该部门）');
+    const tip=cnt?('点击展开/收起该部门的看板'):(d.name+' 下暂无看板（可在「看板管理」中把看板挂载到该部门）');
     dhtml+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
       +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span>`
       +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">🏠 主页</span>`
@@ -2373,7 +2379,7 @@ function renderTabs(){
   });
   if(g.unassigned.length){
     const open=!!DEPT_OPEN[UNASSIGNED_KEY];
-    dhtml+=`<button class="tree-dept${open?' open':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的板块" aria-expanded="${open}">`
+    dhtml+=`<button class="tree-dept${open?' open':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的看板" aria-expanded="${open}">`
       +`<span class="chev">▶</span>未配置<span class="dept-count">${g.unassigned.length}</span></button>`;
   }
   deptBox.innerHTML=dhtml;
@@ -2383,7 +2389,7 @@ function renderTabs(){
     if(!DEPT_OPEN[d.name])return;
     bhtml+=d.boards.length
       ? d.boards.map(b=>boardTabHtml(b,d.name)).join('')
-      : `<span class="tree-empty-tip">「${esc(d.name)}」下暂无板块 — 可在「看板管理」中把板块挂载到该部门</span>`;
+      : `<span class="tree-empty-tip">「${esc(d.name)}」下暂无看板 — 可在「看板管理」中把看板挂载到该部门</span>`;
   });
   if(g.unassigned.length&&DEPT_OPEN[UNASSIGNED_KEY]){
     bhtml+=g.unassigned.map(b=>boardTabHtml(b,'')).join('');
@@ -2403,19 +2409,19 @@ function toggleDept(name){
   if(wasOpen){
     delete DEPT_OPEN[name];
     saveDeptOpen();
-    // 收起部门 → 该部门的板块不再可见 → 当前板块作废，回到「未选板块」空状态。
-    // ⚠️ 不能保留上一个板块的内容 —— 否则会残留上一个部门的板块数据。
+    // 收起部门 → 该部门的看板不再可见 → 当前看板作废，回到「未选看板」空状态。
+    // ⚠️ 不能保留上一个看板的内容 —— 否则会残留上一个部门的事项数据。
     if(!boardBelongsToOpenDept())clearBoardSelection('部门已收起');
   }else{
     expandOnly(name);
-    // 展开另一个部门 → 原部门的板块不再可见 → 切到新部门的板块（无板块则空状态）
+    // 展开另一个部门 → 原部门的看板不再可见 → 切到新部门的看板（无看板则空状态）
     selectDeptBoards(name);
   }
   renderTabs();
   if(curBoard)reload(1); else renderEmptyBoardState();
   renderProgress();
 }
-// 当前已选板块是否仍属于「当前展开中」的部门
+// 当前已选看板是否仍属于「当前展开中」的部门
 function boardBelongsToOpenDept(){
   if(!curBoard||!ME||!ME.boards)return false;
   const b=ME.boards.find(x=>x.board_id===curBoard);
@@ -2423,16 +2429,16 @@ function boardBelongsToOpenDept(){
   const d=b.dept||UNASSIGNED_KEY;
   return !!DEPT_OPEN[d];
 }
-// 展开某个部门时选中它的板块：
-//   ⚠️ **不自动选板块** —— 需求3：内容区域在用户主动选择板块前保持为空（显示「请选择板块」）。
-//      展开部门只是把该部门的板块 tab 显示出来，用户点哪个 tab 才是"选择板块"。
-//   无板块 → curBoard 置空 → 走「该板块暂无数据」空状态（不残留上一个部门的板块）
+// 展开某个部门时选中它的看板：
+//   ⚠️ **不自动选看板** —— 需求3：内容区域在用户主动选择看板前保持为空（显示「请选择看板」）。
+//      展开部门只是把该部门的看板 tab 显示出来，用户点哪个 tab 才是"选择看板"。
+//   无看板 → curBoard 置空 → 走「该看板暂无数据」空状态（不残留上一个部门的事项）
 function selectDeptBoards(name){
   if(!ME||!ME.boards)return;
   const list=ME.boards.filter(b=>(b.dept||UNASSIGNED_KEY)===name);
   if(list.length){
-    // 有板块但**不选中**：等用户点 tab。
-    // ⚠️ 但如果当前已选板块本来就属于这个部门（只是被折叠过），保留它。
+    // 有看板但**不选中**：等用户点 tab。
+    // ⚠️ 但如果当前已选看板本来就属于这个部门（只是被折叠过），保留它。
     if(!boardBelongsToOpenDept()){
       curBoard='';
       curYears=new Set();
@@ -2441,29 +2447,29 @@ function selectDeptBoards(name){
   }else{
     curBoard='';
     curYears=new Set();
-    LAST_EMPTY_REASON='该板块暂无数据';
+    LAST_EMPTY_REASON='该看板暂无数据';
   }
 }
-// 清空当前板块选择（回到「未选板块」状态）
+// 清空当前看板选择（回到「未选看板」状态）
 function clearBoardSelection(reason){
   curBoard='';
   curYears=new Set();
-  // 顺带清掉筛选条件里的板块相关状态？—— 不清：
-  // 筛选条件（人员/周数/状态）是用户主动设的，跨板块保留是合理的；
-  // 但**列表内容**必须清，否则会残留上一个板块的事项。
+  // 顺带清掉筛选条件里的看板相关状态？—— 不清：
+  // 筛选条件（人员/周数/状态）是用户主动设的，跨看板保留是合理的；
+  // 但**列表内容**必须清，否则会残留上一个看板的事项。
   if(reason)LAST_EMPTY_REASON=reason;
 }
 // 空状态原因（供内容区提示文案使用）
 let LAST_EMPTY_REASON='';
-// 渲染「未选板块 / 该板块无数据 / 部门已收起」的空状态
+// 渲染「未选看板 / 该看板无数据 / 部门已收起」的空状态
 function renderEmptyBoardState(){
   const c=document.getElementById('boardContent');
   if(!c)return;
   const msg=LAST_EMPTY_REASON==='部门已收起'
-    ? '部门已收起，请从上方选择板块'
-    : (LAST_EMPTY_REASON==='该板块暂无数据'
-      ? '该板块暂无数据'
-      : '请选择板块');
+    ? '部门已收起，请从上方选择看板'
+    : (LAST_EMPTY_REASON==='该看板暂无数据'
+      ? '该看板暂无数据'
+      : '请选择看板');
   c.innerHTML=`<div class="empty">${esc(msg)}</div>`;
 }
 // ---------------- 部门主页面 ----------------
@@ -3831,12 +3837,12 @@ function renderBoard(cards,cols,q,colHits){
   // 没有事项但有板块（如刚建的空板块）时仍要展示板块列表
   if(!(cards||[]).length && !(cols||[]).length){
     // 空状态文案要区分两种情形（需求2）：
-    //   ① 该板块本身没有任何板块（如空部门）→ 「该板块暂无数据」
-    //   ② 板块存在但被筛选条件过滤空了 → 「没有符合条件的工作事项」
+    //   ① 当前看板本身没有任何板块（如空看板）→ 「该看板暂无数据」
+    //   ② 看板有板块但被筛选条件过滤空了 → 「没有符合条件的工作事项」
     const cur=curBoard?((ME&&ME.boards||[]).find(x=>x.board_id===curBoard)||{}):null;
     c.innerHTML=(cur&&cur.board_name)
       ? '<div class="empty">没有符合条件的工作事项</div>'
-      : '<div class="empty">该板块暂无数据</div>';
+      : '<div class="empty">该看板暂无数据</div>';
     return}
   // 按 column_name 分组
   const groups={};
@@ -7385,14 +7391,15 @@ if(window.__IS_FILE__){showFileGuard();probeBackend();}
 var BC_EDIT_ID=0;
 var BC_BOARDS=[];
 var BC_SELECTED=null;
-var BC_SEL=new Set();     // 批量选中的板块（进入看板管理时默认【不选中】，由用户自行勾选）
-var BC_FORM={dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:''};
+var BC_SEL=new Set();     // 批量选中的**看板**（进入看板管理时默认【不选中】，由用户自行勾选）
+var BC_FORM={dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:'',
+          owner:'',participants:[]};   // ACL：负责人 / 参与人（账号）
 var BC_FILTER={dept:'',attr:'',status:''};
 var BC_DEPTS=[];          // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
 var BC_DEPTS_LOADED=false;
-// 归属部门下拉：中心级部门（财务中心）视为「全部板块」，对全员展示
+// 归属部门下拉：中心级部门（财务中心）视为「全部看板」，对全员展示
 function bcDeptLabel(d){
-  return d&&d.is_center?(d.name+'（全部板块 · 对全员展示）'):(d?d.name:'');
+  return d&&d.is_center?(d.name+'（全部看板 · 对全员展示）'):(d?d.name:'');
 }
 function bcDeptName(id){
   const d=BC_DEPTS.find(x=>String(x.id)===String(id));
@@ -7428,7 +7435,7 @@ function bcTogglePick(bid,checked){
 // 全选 / 取消全选 合并为一个切换按钮：点击时按当前状态取反
 function bcTogglePickAll(){
   const vis=bcVisibleBoards();
-  if(!vis.length){toast('当前筛选下没有板块');return;}
+  if(!vis.length){toast('当前筛选下没有看板');return;}
   const allOn=vis.every(function(b){return BC_SEL.has(b.board_id);});
   BC_SEL=allOn?new Set():new Set(vis.map(function(b){return b.board_id}));
   bcPaintPick();
@@ -7471,10 +7478,12 @@ function bcPaintPick(){
 async function openBoardConfigModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
   await loadBoardConfig();
+  await bcLoadAclMembers();          // ACL 可选账号名单
   initBcListEvents();
   BC_SELECTED=null; BC_EDIT_ID=0;
-  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
-  // 默认不选中：进入看板管理时所有板块均未勾选（需用户主动勾选）
+  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
+            owner:'',participants:[]};
+  // 默认不选中：进入看板管理时所有**看板**均未勾选（需用户主动勾选）
   BC_SEL=new Set();
   renderBoardList();
   renderEditArea();
@@ -7572,7 +7581,8 @@ function bcSelect(bid){
   if(!b)return;
   BC_SELECTED=b;
   BC_EDIT_ID=b.config_id||0;
-  BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};
+  BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',
+          owner:b.owner||'',participants:String(b.participants||'').split(',').filter(function(x){return x})};
   renderBoardList();
   renderEditArea();
 }
@@ -7581,7 +7591,7 @@ function configBoard(){
   if(!unconf.length){toast('所有看板均已配置');return;}
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
-  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
+  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
   renderBoardList();
   renderEditArea();
 }
@@ -7604,13 +7614,13 @@ function bcSetDept(name){
 function bcDeptHint(name){
   if(!name)return '归属部门取自【架构管理】的部门层级';
   const d=BC_DEPTS.find(function(x){return x.name===name;});
-  if(d&&d.is_center)return '中心级归属：该板块对全员展示（全部板块）';
-  return '该部门下的成员可见此板块；其余成员按工作组绑定进一步过滤';
+  if(d&&d.is_center)return '中心级归属：该看板对全员展示（全部看板）';
+  return '该部门下的成员可见此看板；其余成员按工作组绑定进一步过滤';
 }
-// 批量应用：把当前表单维度应用到左侧勾选的板块
+// 批量应用：把当前表单维度应用到左侧勾选的**看板**
 async function applyBulkConfig(){
   const ids=Array.from(BC_SEL);
-  if(!ids.length){toast('请先在左侧勾选板块');return;}
+  if(!ids.length){toast('请先在左侧勾选看板');return;}
   if(!BC_FORM.dept){toast('请选择归属部门');return;}
   try{
     const r=await api('/api/board-config/bulk',{method:'POST',body:JSON.stringify({
@@ -7623,7 +7633,7 @@ async function applyBulkConfig(){
     if(b){BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||''};}
     renderBoardList();
     renderEditArea();
-    toast('已应用到 '+(r.updated||0)+' 个板块（新建 '+(r.created||0)+'）');
+    toast('已应用到 '+(r.updated||0)+' 个看板（新建 '+(r.created||0)+'）');
   }catch(e){}
 }
 function bcPick(dim,val){
@@ -7658,7 +7668,8 @@ function renderEditArea(){
   const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
   let footer='<div class="bc-footer">';
   if(isEdit){footer+='<button class="btn-secondary bc-del-single" onclick="bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该看板的配置（需一次确认）">删除该看板配置</button>';}
-  footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个板块</button>'
+  footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个看板</button>'
+    +'<button class="btn-secondary" onclick="saveBoardAcl()" title="设置该看板的负责人与参与人（仅他们可见）">保存访问权限</button>'
     +'<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
     +'<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
   area.innerHTML='<div class="bc-edit">'
@@ -7671,9 +7682,81 @@ function renderEditArea(){
     +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills">'+statusPills+'</div></div>'
     +'<div class="bc-hint" style="margin-top:-4px">归属年份在【板块】层单独配置 —— 每个板块绑定唯一归属年份（点板块标题即可编辑），看板本身不再有年份。</div>'
     +'<div class="bc-section"><div class="lab">备注（可选）</div><textarea class="form-textarea" id="bc_remark" rows="2" placeholder="如：年度预算看板" oninput="BC_FORM.remark=this.value">'+esc(BC_FORM.remark||'')+'</textarea></div>'
+    +renderAclSection(b)
     +footer
     +'</div>';
 }
+// ---------- ACL（负责人 / 参与人）----------
+// 语义：给看板配置了负责人/参与人后，**仅他们可见该看板**（且仍与架构授权取交集）；
+// 两者都留空 = 不启用 ACL，可见性由【架构管理】决定。
+var BC_ACL_MEMBERS=[];      // 可选账号列表：{account, name, label}
+var BC_ACL_LOADED=false;
+async function bcLoadAclMembers(){
+  if(BC_ACL_LOADED)return;
+  try{
+    const res=await api('/api/team');
+    BC_ACL_MEMBERS=(res.members||res||[]).map(function(m){
+      const acc=m.account||'';
+      if(!acc)return null;                    // 没有登录账号的成员不能作为 ACL 主体
+      return {account:acc,name:m.name||acc,label:(m.name||acc)+(m.name&&m.name!==acc?'('+acc+')':'')};
+    }).filter(function(x){return x});
+    BC_ACL_LOADED=true;
+  }catch(e){ BC_ACL_MEMBERS=[]; }
+}
+function aclMemberLabel(acc){
+  const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
+  return m?m.label:acc;
+}
+function renderAclSection(b){
+  const owner=BC_FORM.owner||'';
+  const parts=(BC_FORM.participants||[]).slice();
+  const opts=BC_ACL_MEMBERS.map(function(m){
+    const sel=(owner===m.account)?' selected':'';
+    return '<option value="'+esc(m.account)+'"'+sel+'>'+esc(m.label)+'</option>';
+  }).join('');
+  const pOpts=BC_ACL_MEMBERS.map(function(m){
+    const sel=parts.indexOf(m.account)>=0?' selected':'';
+    return '<option value="'+esc(m.account)+'"'+sel+'>'+esc(m.label)+'</option>';
+  }).join('');
+  const pChips=parts.map(function(a){
+    return '<span class="cf-chip" title="'+esc(aclMemberLabel(a))+'">'+esc(aclMemberLabel(a))+'</span>';
+  }).join('');
+  return '<div class="bc-section"><div class="lab">访问权限（负责人 / 参与人）</div>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
+    +'<div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">负责人（单人）</label>'
+    +'<select class="form-select" id="bc_owner" style="width:200px" onchange="BC_FORM.owner=this.value">'
+    +'<option value="">（不启用 ACL）</option>'+opts+'</select></div>'
+    +'<div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">参与人（多人）</label>'
+    +'<select class="form-select" id="bc_participants" multiple size="4" style="width:220px" onchange="bcSyncParticipants()">'
+    +pOpts+'</select></div></div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px" id="bc_participant_chips">'+(pChips||'<span style="font-size:12px;color:var(--text3)">未选择</span>')+'</div>'
+    +'<div class="bc-hint">配置后仅<b>负责人与参与人</b>可见该看板（仍需在【架构管理】中被授权）；'
+    +'两者都留空则不启用 ACL，可见性完全由架构归属决定。</div></div>';
+}
+function bcSyncParticipants(){
+  const sel=document.getElementById('bc_participants');
+  if(!sel)return;
+  BC_FORM.participants=Array.from(sel.selectedOptions).map(function(o){return o.value});
+  const box=document.getElementById('bc_participant_chips');
+  if(box){
+    box.innerHTML=BC_FORM.participants.length
+      ? BC_FORM.participants.map(function(a){return '<span class="cf-chip" title="'+esc(aclMemberLabel(a))+'">'+esc(aclMemberLabel(a))+'</span>';}).join('')
+      : '<span style="font-size:12px;color:var(--text3)">未选择</span>';
+  }
+}
+async function saveBoardAcl(){
+  if(!BC_SELECTED){toast('请选择看板');return;}
+  const bid=BC_SELECTED.board_id;
+  try{
+    await api('/api/boards/'+encodeURIComponent(bid)+'/acl',{method:'PUT',
+      body:JSON.stringify({owner:BC_FORM.owner||'',participants:BC_FORM.participants||[]})});
+    await loadBoardConfig();
+    ME=await api('/api/me');
+    renderTabs();
+    toast('看板访问权限已保存');
+  }catch(e){}
+}
+
 function resetBoardConfigForm(){
   BC_EDIT_ID=0; BC_SELECTED=null;
   BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:''};
@@ -7714,18 +7797,18 @@ async function bcDeleteOne(bid){
 // 批量删除：两次确认（任一次取消 / 关闭即终止，不执行删除）
 async function bcDeleteSelected(){
   const ids=Array.from(BC_SEL);
-  if(!ids.length){toast('请先勾选要删除的板块');return;}
+  if(!ids.length){toast('请先勾选要删除的看板');return;}
   const names=ids.map(function(id){
     const b=BC_BOARDS.find(function(x){return x.board_id===id;});
     return b?(b.board_name||b.board_id):id;
   });
-  if(!bcConfirm('确认删除已勾选的 '+ids.length+' 个板块配置？\n'+names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n删除后这些板块将回到「未配置」状态。'))return;
-  if(!bcConfirm('再次确认：真的要删除这 '+ids.length+' 个板块的配置吗？\n此操作不可撤销。'))return;
+  if(!bcConfirm('确认删除已勾选的 '+ids.length+' 个看板配置？\n'+names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n删除后这些看板将回到「未配置」状态。'))return;
+  if(!bcConfirm('再次确认：真的要删除这 '+ids.length+' 个看板的配置吗？\n此操作不可撤销。'))return;
   try{
     const r=await api('/api/board-config/bulk-delete',{method:'POST',body:JSON.stringify({board_ids:ids})});
     BC_SEL=new Set();
     await bcAfterDelete();
-    toast('已删除 '+(r&&r.deleted?r.deleted:0)+' 个板块配置');
+    toast('已删除 '+(r&&r.deleted?r.deleted:0)+' 个看板配置');
   }catch(e){}
 }
 // 删除后：刷新列表 + 清空选择状态 + 同步目录树

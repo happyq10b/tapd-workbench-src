@@ -605,6 +605,170 @@ def _arch_scope_boards(username: str, dept_boards: set) -> set:
         boards &= gb
     return boards
 
+# ---------------- ACL（负责人 / 参与人）----------------
+# 层级：看板（boards）与其下属板块（board_columns）各自带一组 ACL。
+#   owner         负责人（单个账号）
+#   participants  参与人（逗号分隔的账号）
+#
+# 判定语义（**关键**，避免把现有系统锁死）：
+#   · 该层级**未配置任何 ACL**（owner 与 participants 皆空）→ **不额外收窄**，
+#     可见性完全由既有的架构/白名单链决定；
+#   · 该层级**配置了 ACL**（owner 或 participants 任一非空）→ **仅 owner /
+#     participants 命中者可见**，且仍要与既有的架构/白名单链**取交集**
+#     （fail-closed：ACL 只能**再收窄**，不能凭空放大权限）。
+#
+# ⚠️ 为什么 owner 存**账号**而不是姓名：账号是登录唯一标识，
+#    姓名可能重复或被改。展示时由 _member_display_name 映射成「姓名(账号)」。
+def _acl_set(raw) -> set:
+    """解析逗号/分号分隔的 ACL 名单 → 集合（去空白、去空项）"""
+    if not raw:
+        return set()
+    return {x.strip() for x in str(raw).replace(';', ',').split(',') if x.strip()}
+
+
+def _acl_hit(username: str, owner: str, participants: str) -> bool:
+    """该用户是否命中这条 ACL。**未配置 ACL 时返回 True（不额外收窄）**"""
+    o = (owner or '').strip()
+    parts = _acl_set(participants)
+    if not o and not parts:
+        return True                      # 未配置 → 不额外收窄
+    if o and o == username:
+        return True
+    return username in parts
+
+
+def board_acl_allows(username: str, board_id: str) -> bool:
+    """看板 ACL 判定：读 boards 表的 owner / participants"""
+    row = dbq('SELECT owner, participants FROM boards WHERE board_id=? LIMIT 1', (board_id,))
+    if not row:
+        return True                      # 看板不存在（派生看板）→ 不在此层拦截
+    d = dict(row[0])
+    return _acl_hit(username, d.get('owner'), d.get('participants'))
+
+
+def column_acl_allows(username: str, board_id: str, column_id: str) -> bool:
+    """板块 ACL 判定：读 board_columns 的 owner / participants
+
+    ⚠️ 板块没有登记元信息（历史脏数据 / cards 派生的隐式板块）→ 不在此层拦截。
+    """
+    if not column_id:
+        return True
+    row = dbq('SELECT owner, participants FROM board_columns WHERE column_id=? LIMIT 1', (column_id,))
+    if not row:
+        return True
+    d = dict(row[0])
+    return _acl_hit(username, d.get('owner'), d.get('participants'))
+
+
+def _acl_filter_boards(username: str, boards):
+    """按看板 ACL 收窄看板集合（boards=None 表示管理员全量 → 不收窄）"""
+    if boards is None:
+        return None
+    if not boards:
+        return boards
+    rows = dbq('SELECT board_id, owner, participants FROM boards')
+    denied = set()
+    for r in rows:
+        d = dict(r)
+        if d['board_id'] in boards and not _acl_hit(username, d.get('owner'), d.get('participants')):
+            denied.add(d['board_id'])
+    return boards - denied
+
+
+def _acl_filter_columns(username: str, boards, columns):
+    """按板块 ACL 收窄板块可见范围。
+
+    columns 的既有语义：None = 该看板内板块不额外收窄；
+    dict = {board_id: set(column_id)}，缺省键表示该看板不额外收窄。
+
+    ⚠️ ACL 只能在既有收窄之上**再收窄**：某板块若已被白名单排除，
+    ACL 命中也救不回来；某板块若白名单允许但 ACL 不命中 → 被排除。
+    """
+    out = {k: set(v) for k, v in (columns or {}).items()}
+    # 只处理**已可见看板**下的板块
+    targets = None if boards is None else boards
+    rows = dbq('SELECT column_id, board_id, owner, participants FROM board_columns')
+    # 预取「看板 → 全部板块 id」，避免逐条排除时反复查库（N+1）
+    board_cols = {}
+    for r in rows:
+        cid = r['column_id']
+        if cid:
+            board_cols.setdefault(r['board_id'], set()).add(cid)
+    denied = {}                          # board_id → 被 ACL 排除的板块 id
+    for r in rows:
+        cid = r['column_id']
+        if not cid:
+            continue
+        if targets is not None and r['board_id'] not in targets:
+            continue
+        if _acl_hit(username, r['owner'], r['participants']):
+            continue                      # ACL 命中 → 不额外排除
+        denied.setdefault(r['board_id'], set()).add(cid)
+    for bid, bad in denied.items():
+        cur = out.get(bid)
+        if cur is None:
+            # 该看板此前不收窄 → 现在要排除这些板块，
+            # 必须先把它在看板内的**全部板块**列出来，再排除目标。
+            cur = set(board_cols.get(bid, set()))
+        out[bid] = cur - bad
+    return out or None
+
+
+# ---------------- 数据不变量：每板块至少一个事项 ----------------
+# 用户 2026-11-02 要求：「每个板块至少保留一个事项，没有的就删除；
+#   看板若无任何板块、或所有板块都被清理为空，则一并删除该看板。」
+#
+# 本函数在**删除事项之后**调用，保证不变量持续成立；
+# 一次性全量清理由 ops/cleanup_empty.py 负责（幂等，可重复跑）。
+def cleanup_empty_columns_and_boards() -> dict:
+    """删除空板块与空看板（运行时调用，幂等）
+
+    判定口径：事项按 **column_id** 匹配板块（column_id 是权威标识）；
+    column_id 为空的历史脏数据不计入任何板块 —— 它们本就不属于任何板块，
+    不应让空板块被误判为「非空」。
+
+    ⚠️ 顺序不能颠倒：先删空板块，再据此判断哪些看板变成空看板。
+    ⚠️ 「板块全被清理为空」的看板：若它还残留未删事项（板块外的孤儿事项），
+       **不删看板** —— 那些事项会无处安放，删看板等于连带删数据。
+    """
+    dead_cols = [dict(r) for r in dbq("""
+        SELECT bc.col_key, bc.board_id, bc.column_id FROM board_columns bc
+        WHERE bc.column_id <> '' AND NOT EXISTS (
+            SELECT 1 FROM cards cd WHERE cd.deleted = 0 AND cd.column_id = bc.column_id
+        )
+    """)]
+    dead_by_board = {}
+    for c in dead_cols:
+        dead_by_board.setdefault(c['board_id'], set()).add(c['column_id'])
+
+    deleted_cols = 0
+    for c in dead_cols:
+        dbe('DELETE FROM board_columns WHERE col_key=?', (c['col_key'],))
+        deleted_cols += 1
+
+    # 看板判定：剩余板块数为 0 且无未删事项 → 空看板
+    dead_boards = []
+    for r in dbq('SELECT board_id, board_name FROM boards'):
+        bid = r['board_id']
+        total = dbq('SELECT COUNT(*) n FROM board_columns WHERE board_id=?', (bid,))[0]['n']
+        dead = len(dead_by_board.get(bid, set()))
+        if total - dead > 0:
+            continue                        # 还有存活板块 → 保留
+        cards = dbq('SELECT COUNT(*) n FROM cards WHERE deleted=0 AND board_id=?', (bid,))[0]['n']
+        if cards > 0:
+            continue                        # 还有事项（板块外的孤儿）→ 保留看板
+        dead_boards.append((bid, r['board_name']))
+
+    deleted_boards = 0
+    for bid, bname in dead_boards:
+        dbe('DELETE FROM board_columns WHERE board_id=?', (bid,))
+        dbe('DELETE FROM board_config WHERE board_id=?', (bid,))
+        dbe('DELETE FROM boards WHERE board_id=?', (bid,))
+        deleted_boards += 1
+
+    return {'deleted_columns': deleted_cols, 'deleted_boards': deleted_boards}
+
+
 def user_allowed(username: str):
     """返回 (boards, columns)：
     boards=None=全部看板，否则 set(board_id)（普通用户**永远**是显式集合）
@@ -619,7 +783,11 @@ def user_allowed(username: str):
          · 工作组绑定层：显式白名单收窄
          无任何架构归属的成员 → 只能看公共看板（未归属部门 / 归属中心）；
       ② 账号级白名单（users.allowed_boards）与①取交集 —— '*' 表示不额外收窄；
-      ③ 板块级白名单（users.allowed_columns）在可见看板内继续收窄板块。
+      ③ 板块级白名单（users.allowed_columns）在可见看板内继续收窄板块；
+      ④ ACL 层（2026-11-02）—— 看板与板块各自的 owner（负责人）+ participants
+         （参与人）：**仅该账号是负责人或参与人时**才可见。
+         ⚠️ 未配置 ACL 的层级（owner 与 participants 皆空）**不额外收窄**，
+            可见性仍由 ①~③ 决定；配置后与 ①~③ 取**交集**（ACL 只能再收窄）。
 
     【修复】此前普通用户的 boards 为 None（=全部）当且仅当「账号 allowed_boards='*'
     且架构层未收窄」，而架构层在「成员无归属」时返回 None（不收窄）→ 未接入架构的
@@ -640,12 +808,18 @@ def user_allowed(username: str):
     # ③ 账号级板块白名单（JSON: {board_id: [column_id]}）
     raw_c = u.get('allowed_columns') or '*'
     if raw_c == '*':
-        return boards, None
-    try:
-        cols = {k: set(v) for k, v in json.loads(raw_c).items() if v}
-        return boards, cols or None
-    except Exception:
-        return boards, None
+        cols = None
+    else:
+        try:
+            cols = {k: set(v) for k, v in json.loads(raw_c).items() if v} or None
+        except Exception:
+            cols = None
+    # ④ ACL 层（2026-11-02）：看板/板块各自的 owner + participants
+    #    与③取**交集**（fail-closed：ACL 只能再收窄，不能放大权限）。
+    #    未配置 ACL 的层级不额外收窄 → 现有看板（owner/participants 皆空）行为不变。
+    boards = _acl_filter_boards(username, boards)
+    cols = _acl_filter_columns(username, boards, cols)
+    return boards, cols
 
 
 def can_edit(username: str) -> bool:
@@ -2050,6 +2224,8 @@ async def delete_card(card_id: str, username: str = Depends(require_editor), req
         dbe('UPDATE cards SET deleted=1 WHERE card_id=?', (sid,))
         dbe('DELETE FROM card_subtasks WHERE card_id=?', (sid,))
     dbe('DELETE FROM card_subtasks WHERE card_id=?', (card_id,))
+    # 数据不变量：板块至少留一个事项；空板块与空看板一并清理
+    cleanup_empty_columns_and_boards()
     log_action(card_id, username, 'delete', f'subitems={len(victims)}')
     audit_log(username, client_ip(request), 'delete', f'卡片 {card_id}', f'删除卡片（含 {len(victims)} 个子事项）', 'success')
     lock_mgr.release(card_id, username)
@@ -3415,10 +3591,17 @@ def list_boards(username: str = Depends(require_auth)):
     for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, created_at'
                  ' FROM board_config'):
         cfgs[r['board_id']] = dict(r)
+    # 看板 ACL（负责人 / 参与人）—— 供【看板管理】配置与展示
+    acl = {}
+    for r in dbq('SELECT board_id, owner, participants FROM boards'):
+        d = dict(r)
+        acl[d['board_id']] = {'owner': d.get('owner', ''),
+                              'participants': d.get('participants', '')}
     out = []
     for b in boards:
         bid = b['board_id']
         c = cfgs.get(bid, {})
+        a = acl.get(bid, {'owner': '', 'participants': ''})
         out.append({
             'board_id': bid,
             'board_name': b['board_name'],
@@ -3431,6 +3614,8 @@ def list_boards(username: str = Depends(require_auth)):
             'attr': c.get('attr', ''),
             'status': c.get('status', ''),
             'remark': c.get('remark', ''),
+            'owner': a.get('owner', ''),
+            'participants': a.get('participants', ''),
         })
     return {'boards': out, 'depts': _dept_options()}
 
@@ -3476,6 +3661,78 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_adm
     audit_log(username, client_ip(request), 'board_config_create', f'{bid}/{dept}/{attr}',
               f'状态={status}', 'success')
     return {'ok': True}
+
+# ---------------- API：ACL 配置（负责人 / 参与人）----------------
+class AclReq(BaseModel):
+    """ACL 配置请求：负责人（单个账号）+ 参与人（账号列表）"""
+    owner: str = ''
+    participants: List[str] = []
+
+
+def _norm_acl_owner(v: str) -> str:
+    """负责人归一：必须是**已存在的登录账号**，否则拒绝（避免写了永远匹配不上的值）"""
+    o = (v or '').strip()
+    if not o:
+        return ''
+    if not dbq('SELECT 1 FROM users WHERE username=? LIMIT 1', (o,)):
+        raise HTTPException(400, f'负责人账号「{o}」不存在')
+    return o
+
+
+def _norm_acl_participants(items) -> str:
+    """参与人归一：去空白、去重、剔除不存在的账号 → 逗号分隔串"""
+    out, seen = [], set()
+    for x in (items or []):
+        x = (str(x or '')).strip()
+        if not x or x in seen:
+            continue
+        if not dbq('SELECT 1 FROM users WHERE username=? LIMIT 1', (x,)):
+            raise HTTPException(400, f'参与人账号「{x}」不存在')
+        seen.add(x)
+        out.append(x)
+    return ','.join(out)
+
+
+@app.put('/api/boards/{board_id}/acl')
+async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(require_admin),
+                        request: Request = None):
+    """设置看板的负责人与参与人（仅管理员）。
+
+    语义：该看板**配置了 ACL 后**，仅负责人与参与人可见（且仍与架构/白名单取交集）；
+    两者都清空 = 撤销该看板的 ACL，恢复由架构归属决定可见性。
+    """
+    bid = (board_id or '').strip()
+    if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
+        raise HTTPException(404, '看板不存在')
+    owner = _norm_acl_owner(req.owner)
+    parts = _norm_acl_participants(req.participants)
+    dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, parts, bid))
+    audit_log(username, client_ip(request), 'board_acl', f'看板 {bid}',
+              f'设置看板 ACL：负责人={owner or "(无)"}，参与人={parts or "(无)"}', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': parts}
+
+
+@app.put('/api/columns/{col_key}/acl')
+async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(require_admin),
+                         request: Request = None):
+    """设置板块的负责人与参与人（仅管理员）。
+
+    语义：与看板 ACL 同理 —— 配置后仅负责人与参与人可见该板块，
+    但**所属看板仍然可见**（只是该板块被隐藏）。
+    """
+    key = col_key or ''
+    row = dbq('SELECT board_id, column_id FROM board_columns WHERE col_key=? LIMIT 1', (key,))
+    if not row:
+        raise HTTPException(404, '板块不存在')
+    owner = _norm_acl_owner(req.owner)
+    parts = _norm_acl_participants(req.participants)
+    dbe('UPDATE board_columns SET owner=?, participants=? WHERE col_key=?', (owner, parts, key))
+    audit_log(username, client_ip(request), 'column_acl', f'板块 {key}',
+              f'设置板块 ACL：负责人={owner or "(无)"}，参与人={parts or "(无)"}', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'col_key': key, 'owner': owner, 'participants': parts}
+
 
 class BoardConfigBulkDeleteReq(BaseModel):
     board_ids: List[str] = []   # 待删除配置的板块 id 列表
