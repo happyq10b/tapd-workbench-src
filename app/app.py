@@ -1154,11 +1154,22 @@ def me(username: str = Depends(require_auth)):
     status_text = prof[0]['status_text'] if prof else ''
     # 显示名：顶栏展示「姓名(账号)」；账号未绑定成员时只显示账号
     display_name = _member_display_name(username)
+    # 部门清单：**按权限过滤** —— 只保留该账号**有可见看板**的部门。
+    # ⚠️ 此前用 _dept_order()（架构里的全部部门）→ 普通用户的目录树会列出
+    #    自己无权访问的部门（如「管理部 0」），既暴露无权部门的组织信息，
+    #    又让用户以为那里真的有事但点进去是空的。
+    #    语义与 /api/cards 的可见范围保持一致：**看不到的部门就不出现**。
+    #    管理员（boards=None=全部）仍看到全部部门。
+    if boards is None:
+        dept_list = _dept_order()
+    else:
+        seen = {item.get('dept') for item in boards_out if item.get('dept')}
+        dept_list = [d for d in _dept_order() if d in seen]
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'allowed_columns': col_info,
-            'depts': _dept_order()}   # 有序部门清单（随架构层级动态变化）：空部门同样占位
+            'depts': dept_list}   # 有序部门清单（**按权限过滤**：只含有可见看板的部门）
 
 @app.get('/api/filter-options')
 def filter_options(username: str = Depends(require_auth)):
