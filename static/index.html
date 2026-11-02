@@ -58,6 +58,10 @@ button{font-family:inherit}
 .header-avatar{width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;
   border:1px solid var(--border);background:var(--bg)}
 /* 顶栏个人状态栏 */
+/* ⚠️ [hidden] 的浏览器默认 display:none 会被下面的 display:flex 覆盖，
+   导致「个人状态文字为空时」，那个状态圆点仍孤零零地浮在顶栏左上角。
+   这里显式兜底，让 hidden 真正生效。 */
+.my-status-bar[hidden]{display:none}
 .my-status-bar{display:flex;align-items:center;gap:8px;max-width:1440px;margin:0 auto;
   padding:7px 24px 0;font-size:12.5px;color:var(--text2)}
 .my-status-bar .ms-dot{width:7px;height:7px;border-radius:50%;background:var(--primary);flex-shrink:0}
@@ -127,9 +131,10 @@ button{font-family:inherit}
   grid-template-rows:auto auto auto;gap:10px 14px;align-content:start;min-width:0}
 /* 每个「带」跨满三列；带内是小栅格（三列），条目按列优先填充 */
 .tb-band{grid-column:1/-1;min-width:0}
-.tb-band-title{font-size:11.5px;color:var(--text3);letter-spacing:.4px;margin-bottom:5px;
-  display:flex;align-items:center;gap:6px}
-.tb-band-title::before{content:'';width:3px;height:11px;border-radius:2px;background:var(--primary);opacity:.55}
+/* 三个带的标题：加粗 + 略大，作为分区的视觉锚点 */
+.tb-band-title{font-size:13px;font-weight:700;color:var(--text2);letter-spacing:.4px;margin-bottom:7px;
+  display:flex;align-items:center;gap:7px}
+.tb-band-title::before{content:'';width:3px;height:13px;border-radius:2px;background:var(--primary);opacity:.75}
 .tb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;align-items:start}
 .tb-grid>*{min-width:0}
 .topbar-aside{display:flex;flex-direction:column;min-width:0}
@@ -198,18 +203,21 @@ button{font-family:inherit}
 /* 「＋ 新建看板」按钮：虚线描边、强调色，与管理员操作呼应 */
 .wrap{max-width:1440px;margin:0 auto;padding:16px 24px 60px}
 .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px}
-.toolbar-left{display:flex;gap:10px;flex-wrap:wrap;flex:1;align-items:center;min-width:0}
+/* 筛选区保持**单行**：flex-wrap:nowrap 让「搜索 / 状态 / 人员 / 周数 / 日期区间」
+   始终排在同一行，日期区间不再被挤到第二行。
+   空间不够时由弹性项（搜索框、两个可输入控件）自行收缩，日期区间宽度固定不缩。 */
+.toolbar-left{display:flex;gap:8px;flex-wrap:nowrap;flex:1;align-items:center;min-width:0}
 .search-input,.filter-select{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text)}
 .search-input:focus,.filter-select:focus{border-color:var(--primary)}
-/* 搜索框限宽：给右侧的创建日期区间腾出空间，避免独占整行把工具栏撑成两行 */
-.search-input{min-width:140px;flex:1;max-width:280px}
+/* 搜索框限宽并可压缩：给右侧的创建日期区间腾出空间，保持整行不换行 */
+.search-input{min-width:100px;flex:1 1 150px;max-width:230px}
 /* 创建日期区间筛选：紧凑排布，起止各一个日期框。
    容器高度显式锁定为 33px（与 .filter-select 实测同高），内部日期框 31px
    （与 .search-input 实测同高）—— Chrome 的 input[type=date] 有固有内高，
    不锁高的话工具栏会比改动前高 3~4px。 */
-.date-filter{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;height:33px;padding:0 8px;border:1px dashed var(--border);border-radius:var(--radius-sm);background:#fafbfc}
+.date-filter{display:inline-flex;align-items:center;gap:5px;box-sizing:border-box;height:33px;padding:0 7px;border:1px dashed var(--border);border-radius:var(--radius-sm);background:#fafbfc;flex:0 0 auto}
 .date-filter.active{border-style:solid;border-color:var(--primary);background:#f2f7fc}
-.filter-date{box-sizing:border-box;height:31px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text);font-family:inherit;width:140px}
+.filter-date{box-sizing:border-box;height:31px;padding:0 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;outline:none;background:#fff;color:var(--text);font-family:inherit;width:122px}
 .filter-date:focus{border-color:var(--primary);box-shadow:var(--ring)}
 .date-sep{color:var(--text2);font-size:12px;user-select:none}
 .filter-clear{width:20px;height:20px;border:1px solid var(--border);background:#fff;color:var(--text2);border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center}
@@ -241,6 +249,11 @@ button{font-family:inherit}
 .notice-item-meta{font-size:11.5px;color:var(--text3);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 @media(max-width:1024px){
   .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+/* 窄屏：筛选区恢复换行（桌面端保持单行，窄屏放不下硬挤会溢出） */
+@media(max-width:1024px){
+  .toolbar-left{flex-wrap:wrap}
+  .search-input{min-width:140px;max-width:100%}
 }
 /* 统计卡片：紧凑版。原先 padding:14px 18px + 26px 字号，一行 4 张要吃掉
    近 120px 高度，用户反馈「太占地方」。压缩后仍保持左主色竖条与 hover 反馈，
@@ -962,7 +975,7 @@ function goLogin(){
       <div class="tb-grid" id="tbDepts"></div>
     </div>
     <div class="tb-band tb-board-band">
-      <div class="tb-band-title">板块</div>
+      <div class="tb-band-title">可选板块</div>
       <div class="tb-grid" id="tbBoards"></div>
     </div>
     <div class="tb-band tb-stat-band">
@@ -1014,16 +1027,14 @@ function goLogin(){
       <select class="filter-select" id="statusFilter" onchange="reload(1)">
         <option value="">全部状态</option><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option>
       </select>
-      <select class="filter-select" id="ownerFilter" onchange="reload(1)">
-        <option value="">全部负责人</option><option value="__no_owner__">无负责人</option>
-      </select>
-      <!-- 人员筛选：可输入 + 多选。锚定在「负责人」维度（owner 字段），
-           与上方「负责人」下拉指向同一字段、两者取交集，互不覆盖。 -->
+      <!-- 人员筛选：可输入 + 多选。锚定在「负责人」维度（owner 字段）——
+           原先独立的「全部负责人」下拉与之重复，已下线；
+           「无负责人」作为面板里的一个特殊候选项保留（值为 __no_owner__）。 -->
       <span class="combo-filter" id="personFilterWrap">
         <span class="cf-label">👤 人员</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="personFilterInput" autocomplete="off"
-                 placeholder="输入姓名筛选（可多选）" onfocus="openFilterCombo('person')" onclick="openFilterCombo('person')"
+                 placeholder="输入姓名（可多选）" onfocus="openFilterCombo('person')" onclick="openFilterCombo('person')"
                  oninput="onFilterComboInput('person',this.value)" onkeydown="onFilterComboKey('person',event)">
           <span class="cf-chips" id="personFilterChips"></span>
         </span>
@@ -1036,13 +1047,13 @@ function goLogin(){
         <span class="cf-label">📅 周数</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="weekFilterInput" autocomplete="off"
-                 placeholder="输入周数（如 41 或 2026-41）" onfocus="openFilterCombo('week')" onclick="openFilterCombo('week')"
+                 placeholder="41 或 2026-41" onfocus="openFilterCombo('week')" onclick="openFilterCombo('week')"
                  oninput="onFilterComboInput('week',this.value)" onkeydown="onFilterComboKey('week',event)">
           <span class="cf-chips" id="weekFilterChips"></span>
         </span>
         <div class="cf-drop" id="weekFilterDrop" hidden></div>
       </span>
-      <span id="filterHint" style="font-size:12px;color:var(--text2)"></span>
+      <span id="filterHint" style="font-size:12px;color:var(--text2);flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px"></span>
       <span class="date-filter" id="dateFilterBox" title="按创建日期区间筛选（起止都留空 = 不限；只填一端 = 单边区间）">
         <input type="date" class="filter-date" id="createdStart" onchange="onDateFilterChange()" aria-label="创建日期 起">
         <span class="date-sep">~</span>
@@ -1495,14 +1506,17 @@ function goLogin(){
 /* ---------- 可输入 + 多选的筛选控件（人员 / 周数） ----------
    形态：标签 + 输入框（可输入匹配）+ 已选 chips + 悬浮候选面板（勾选式多选）。
    两个控件共用一套 .combo-filter / .cf-* 样式，行为只差在归一化与提交参数上。 */
-.combo-filter{position:relative;display:inline-flex;align-items:flex-start;gap:6px;box-sizing:border-box;
-  min-height:33px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff}
+.combo-filter{position:relative;display:inline-flex;align-items:flex-start;gap:5px;box-sizing:border-box;
+  min-height:33px;padding:4px 7px;border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff;
+  flex:0 1 auto;min-width:0}
 .combo-filter.active{border-color:var(--primary);background:#f2f7fc}
 .combo-filter:focus-within{border-color:var(--primary);box-shadow:var(--ring)}
-.cf-label{font-size:12.5px;color:var(--text2);white-space:nowrap;padding-top:4px;user-select:none}
+.cf-label{font-size:12.5px;color:var(--text2);white-space:nowrap;padding-top:4px;user-select:none;flex-shrink:0}
 .combo-filter.active .cf-label{color:var(--primary)}
-.cf-field{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:150px;max-width:420px}
-.cf-input{border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;min-width:110px;flex:1;color:var(--text);font-family:inherit}
+/* 输入区：窄一点（人员/周数两个控件都要给同行其它控件让位），
+   已选 chips 增多时可临时撑宽，但整体不超过 220px。 */
+.cf-field{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0;width:104px;max-width:220px;flex:0 1 auto}
+.cf-input{border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;min-width:52px;flex:1 1 52px;color:var(--text);font-family:inherit}
 .cf-input::placeholder{color:var(--text3)}
 .cf-chips{display:flex;flex-wrap:wrap;gap:4px}
 .cf-chip{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:11.5px;
@@ -2953,15 +2967,8 @@ async function renderProgress(){
       <div class="stat-card"><div class="stat-label">未完成</div><div class="stat-value orange">${ov.open}</div></div>`;
   }
   await renderNoticeBar();
-  // 负责人下拉：选项 = 「全部负责人」+「无负责人」（静态 option）+ 各负责人（动态填充）
-  // 用 dataset.filled 标记是否填过，不能再用 options.length 判断 ——
-  // 「无负责人」是静态 option，options.length 恒 ≥2，会导致负责人列表永远填不进去
-  const os_=document.getElementById('ownerFilter');
-  if(!os_.dataset.filled){
-    ov.owners.forEach(o=>{const op=document.createElement('option');op.value=o.owner;op.textContent=o.owner;os_.appendChild(op)});
-    os_.dataset.filled='1';
-  }
-  // 负责人列表变化后刷新一次筛选提示（人员筛选不再改写 ownerFilter，这里只是同步展示）
+  // 负责人下拉已下线（与「人员」筛选重复）：人员候选统一走
+  // GET /api/filter-options（权限可见范围内的负责人名单 + 周数名单）。
   syncFilterHint();
 }
 // ---------- 公告栏 ----------
@@ -3098,19 +3105,19 @@ async function deleteNotice(id){
 async function reload(page){
   curPage=page;
   const ps=new URLSearchParams({page:curPage,size:pageSize});
-  const s=document.getElementById('statusFilter').value,o=document.getElementById('ownerFilter').value,
+  const s=document.getElementById('statusFilter').value,
         q=document.getElementById('searchInput').value.trim();
   const cc=window._ccFilter||'';
   // 创建日期区间：两端都空 = 不筛选；只填一端 = 单边区间（从某天起 / 到某天止）
   const ds=document.getElementById('createdStart').value,de=document.getElementById('createdEnd').value;
   if(curBoard)ps.set('board_id',curBoard);
-  if(s)ps.set('status',s);if(o)ps.set('owner',o);if(q)ps.set('q',q);
+  if(s)ps.set('status',s);if(q)ps.set('q',q);
   if(cc)ps.set('cc',cc);
   if(ds)ps.set('created_start',ds);
   if(de)ps.set('created_end',de);
   // 周数多选（任一命中）
   if(WEEK_SEL.size)ps.set('week',[...WEEK_SEL].join(','));
-  // 人员多选（锚定 owner 字段，与 owner 条件取交集 —— 见后端 /api/cards 的 person 分支）
+  // 人员多选（锚定 owner 字段 —— 见后端 /api/cards 的 person 分支）
   if(PERSON_SEL.size)ps.set('person',[...PERSON_SEL].join(','));
   const d=await api('/api/cards?'+ps);
   renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（已按权限过滤），不随勾选收缩
@@ -3121,15 +3128,19 @@ async function reload(page){
 // 设计要点：
 //  ① 控件是「输入框 + chips + 悬浮候选面板」，输入框可自由输入（人员按姓名模糊匹配，
 //     周数按数字/周标签匹配），候选面板是勾选式多选；
-//  ② 人员筛选与「负责人」下拉**指向同一字段（owner）**，两者独立提交、
-//     服务端做交集 —— 不再像旧实现那样共用一个 select 导致互相覆盖；
+//  ② 人员筛选**锚定在负责人（owner）字段上**（原独立的「全部负责人」下拉
+//     已下线，与人员筛选重复），「无负责人」作为面板里的特殊候选项保留；
 //  ③ 候选来源都是接口返回的**权限可见范围**内的数据，越权数据不出现在候选里。
 let WEEK_OPTIONS=[];      // 当前看板可选的周数（renderWeekFilter 维护）
 let FILTER_WEEK_CAND=[];  // 接口返回的全量可选周数（候选面板用，与上面互不覆盖）
 let WEEK_SEL=new Set();   // 已选周数（多选，任一命中）
 let PERSON_OPTIONS=[];    // 可选人员（权限可见范围内的负责人）
-let PERSON_SEL=new Set();  // 已选人员（多选；与 owner 条件取交集）
+let PERSON_SEL=new Set();  // 已选人员（多选；锚定 owner 字段）
 let FILTER_COMBO=null;    // 当前展开的候选面板：'person' | 'week' | null
+// 「无负责人」的特殊值（与后端 OWNER_NONE 一致）
+const OWNER_NONE='__no_owner__';
+// 人员筛选值的显示文案：特殊值翻译成「无负责人」，其余原样
+function personLabel(v){return v===OWNER_NONE?'无负责人':v}
 
 // ---------- 周数归一化 ----------
 // 接受「41」「2026-41」「2026年第41周」三种输入，统一成「2026年第41周」。
@@ -3251,14 +3262,19 @@ function paintFilterCombos(){
   const pInp=document.getElementById('personFilterInput');
   if(pWrap)pWrap.classList.toggle('active',PERSON_SEL.size>0);
   if(pChips)pChips.innerHTML=[...PERSON_SEL].map(n=>
-    `<span class="cf-chip" title="${esc(n)}"><span>${esc(n)}</span><i onclick="removeFilterChip('person','${esc(n)}')">×</i></span>`).join('');
+    `<span class="cf-chip" title="${esc(personLabel(n))}"><span>${esc(personLabel(n))}</span><i onclick="removeFilterChip('person','${esc(n)}')">×</i></span>`).join('');
   if(pDrop){
     const kw=((pInp&&pInp.value)||'').trim().toLowerCase();
     const list=PERSON_OPTIONS.filter(n=>!kw||n.toLowerCase().includes(kw));
+    // 「无负责人」是原「全部负责人」下拉里的一档，下线下拉后并入人员面板
+    const noneOpt=(!kw||'无负责人'.includes(kw)||'none'.includes(kw))
+      ? `<label class="cf-opt ${PERSON_SEL.has(OWNER_NONE)?'on':''}"><input type="checkbox"${PERSON_SEL.has(OWNER_NONE)?' checked':''} data-pick-person="${OWNER_NONE}"><span>无负责人</span></label>`
+      : '';
     pDrop.hidden=(FILTER_COMBO!=='person');
     pDrop.innerHTML=(FILTER_COMBO!=='person')?'':
-      (list.length
-        ? `<div class="cf-tip">点击勾选（可多选）；「负责人」下拉与此处指向同一字段，两者取交集</div>`
+      ((list.length||noneOpt)
+        ? `<div class="cf-tip">点击勾选（可多选）；此处的筛选条件按「负责人」维度生效</div>`
+          +noneOpt
           +list.map(n=>`<label class="cf-opt ${PERSON_SEL.has(n)?'on':''}"><input type="checkbox"${PERSON_SEL.has(n)?' checked':''} data-pick-person="${esc(n)}"><span>${esc(n)}</span></label>`).join('')
           +`<label class="cf-opt" data-clear-person="1"><span style="color:var(--text3)">清空全部</span></label>`
         : `<div class="cf-empty">${kw?'无匹配人员':'暂无可选人员（当前可见范围内没有负责人）'}</div>`);
@@ -3291,16 +3307,10 @@ function syncFilterHint(){
   const box=document.getElementById('filterHint');
   if(!box)return;
   const parts=[];
-  const o=document.getElementById('ownerFilter').value;
-  if(o&&o!=='__no_owner__')parts.push('负责人：'+o.split(',').join('、'));
-  if(o==='__no_owner__')parts.push('负责人：无负责人');
-  if(PERSON_SEL.size)parts.push('人员：'+[...PERSON_SEL].join('、'));
+  if(PERSON_SEL.size)parts.push('人员：'+[...PERSON_SEL].map(personLabel).join('、'));
   if(WEEK_SEL.size)parts.push('周数：'+[...WEEK_SEL].map(weekLabelOf).join('、'));
   if(window._ccFilter)parts.push('参与人：'+window._ccFilter.split(',').join('、'));
   box.textContent=parts.length?parts.join('  |  '):'';
-  // 负责人下拉的选中值同步高亮（人员筛选不再改写它的 value）
-  const sel=document.getElementById('ownerFilter');
-  if(sel)sel.style.color=(o?'var(--primary)':'');
 }
 function renderWeekFilter(weeks){
   const list=(weeks||[]).filter(Boolean).slice().sort();
@@ -3316,25 +3326,28 @@ function renderWeekFilter(weeks){
 }
 const _manualWeek=new Set();   // 手工输入（非候选列表）的周数：不受「选项收缩」清理
 // ---------- 从架构树批量选人（人员筛选的补充入口） ----------
-// 树里勾选的人员会并入 PERSON_SEL（同样锚定 owner 字段，与负责人条件取交集）。
+// 树里勾选的人员会并入 PERSON_SEL（同样锚定 owner 字段）。
 async function openPersonFilterPicker(anchor){
   // 强制刷新架构数据：人员筛选要反映最新的任命（免职/任命后立即生效），
   // 同时让「数据刷新后展开状态同步」这条路径被真正走到。
   try{ await ensureOrgTree(true); }catch(e){ toast('架构数据加载失败'); return; }
   if(!ORG_TREE.length){ toast('架构数据为空'); return; }
-  // 已选人员回填进树（避免每次打开都从零开始）
-  const cur=[...PERSON_SEL].map(n=>ORG_PERSON_PREFIX+n);
+  // 已选人员回填进树（避免每次打开都从零开始）。
+  // ⚠️ 特殊值「无负责人」不是架构里的真实人员，不参与树回填（否则永远匹配不上），
+  //    但它属于同一个筛选维度，勾选人员时予以保留。
+  const cur=[...PERSON_SEL].filter(n=>n!==OWNER_NONE).map(n=>ORG_PERSON_PREFIX+n);
   openTreePick(anchor, cur, (persons)=>{
     if(!persons||!persons.length){ toast('未选择人员'); return; }
+    const keepNone=PERSON_SEL.has(OWNER_NONE);
     PERSON_SEL=new Set(persons);
+    if(keepNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
   }, {mode:'filter', pickMode:'person', width:340, height:420, tree:ORG_TREE});
 }
 function applyPersonFilter(kind, persons){
   // 兼容旧调用点：人员筛选已统一锚定到「负责人」维度（owner 字段），
-  // 与负责人下拉指向同一字段、两者取交集 —— 不再改写 ownerFilter 的 value，
-  // 因此不存在「人员筛选覆盖负责人条件」的问题。
+  // 与其它筛选条件各自分开提交、由服务端做交集，不会互相覆盖。
   const names=(persons||[]).filter(Boolean);
   if(!names.length)return;
   PERSON_SEL=new Set(names);

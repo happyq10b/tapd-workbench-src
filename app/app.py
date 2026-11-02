@@ -1285,10 +1285,19 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         # 人员集合内部为「任一命中」（逗号分隔），与 owner 多值口径一致。
         # 说明：前端已把「人员」与「负责人」拆成两个独立控件、各自提交，
         # 不再互相覆盖 —— 这里保证它们组合时语义是交集而非覆盖。
+        # ⚠️ 前端已下线独立的「全部负责人」下拉（原 ownerFilter），
+        # 「无负责人」这一档改由 person 参数承载：__no_owner__ = 负责人为空。
         pnames = [x.strip() for x in person.split(',') if x.strip()]
         if pnames:
-            mine = [r for r in mine
-                    if any(nm in (r.get('owner') or '') for nm in pnames)]
+            want_none = OWNER_NONE in pnames
+            real = [p for p in pnames if p != OWNER_NONE]
+            def _person_hit(r):
+                o = r.get('owner') or ''
+                if want_none and not o.strip():
+                    return True
+                return any(nm in o for nm in real)
+            if want_none or real:
+                mine = [r for r in mine if _person_hit(r)]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]
     # 周数维度：可选周数 = 当前范围（该看板下、权限可见）里出现过的周数集合。
