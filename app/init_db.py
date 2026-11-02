@@ -160,6 +160,9 @@ CREATE TABLE IF NOT EXISTS org_nodes (
     function    TEXT NOT NULL DEFAULT '',
     sort        INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    -- 分级权限模型（2026-11-02）：架构层的负责人与参与人
+    owner         TEXT NOT NULL DEFAULT '',   -- 架构负责人（账号）
+    participants  TEXT NOT NULL DEFAULT '',   -- 架构参与人（逗号分隔的账号）
     UNIQUE(parent_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_org_nodes_parent ON org_nodes(parent_id);
@@ -691,6 +694,23 @@ def init_db(force_import=False):
         conn.execute("ALTER TABLE board_columns ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
     if 'participants' not in bcols:
         conn.execute("ALTER TABLE board_columns ADD COLUMN participants TEXT NOT NULL DEFAULT ''")
+    # ---- 分级权限模型（2026-11-02）----
+    # 四层资源统一记录「负责人 + 参与人集合」：
+    #   架构 org_nodes.owner / .participants
+    #   看板 boards.owner / .participants
+    #   板块 board_columns.owner / .participants
+    #   事项 cards.owner（负责人）/ cards.cc（参与人）
+    # ⚠️ org_nodes 的两列是**增量补列**（老库不会重跑建表）。
+    ocols = [r[1] for r in conn.execute('PRAGMA table_info(org_nodes)').fetchall()]
+    if 'owner' not in ocols:
+        conn.execute("ALTER TABLE org_nodes ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
+    if 'participants' not in ocols:
+        conn.execute("ALTER TABLE org_nodes ADD COLUMN participants TEXT NOT NULL DEFAULT ''")
+    # 索引：权限判定要按节点查负责人/参与人
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_org_nodes_owner ON org_nodes(owner)")
+    # 事项层已有 owner / cc 两列（历史语义：存**姓名**），权限判定走 cc。
+    # ⚠️ cards.owner 与 boards.owner 的存储口径不同（姓名 vs 账号），
+    #    详见 docs/调试指南.md §五点二十四 —— 权限内核按「账号或姓名」双口径匹配。
     # 归属年份默认值 = 板块创建年份：老数据回填（幂等，只补空值）
     conn.execute("UPDATE board_columns SET year=substr(created_at,1,4)"
                  " WHERE (year IS NULL OR year='') AND created_at IS NOT NULL AND created_at<>''")

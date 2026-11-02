@@ -13,8 +13,28 @@ from collections import defaultdict
 from datetime import datetime, date as _date
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from pydantic import BaseModel
+
+# 分级权限内核（2026-11-02）：架构 > 看板 > 板块 > 事项
+# 角色继承：架构负责人 ⊃ 看板负责人 ⊃ 板块负责人 ⊃ 事项负责人 ⊃ 参与人
+try:
+    from .perm import (PermError, E_DENIED, E_CROSS_SCOPE, E_NOT_OWNER, E_NOT_MEMBER,
+                       E_LEVEL, E_ADMIN_ONLY, E_SELF_LOCK,
+                       LV_NONE, LV_PARTICIPANT, LV_CARD_OWNER, LV_COLUMN_OWNER,
+                       LV_BOARD_OWNER, LV_ARCH_OWNER, LV_ADMIN, LV_SUPER,
+                       ROLE_NAMES, LEVEL_KEY,
+                       OP_VIEW, OP_CREATE, OP_UPDATE, OP_DELETE,
+                       OP_ASSIGN_OWNER, OP_ASSIGN_PARTICIPANT, OP_EDIT_CONTENT,
+                       ALL_OPS, OP_MIN_LEVEL, OP_TARGET_LEVEL,
+                       resource_chain, effective_level, has_role, can_do, require_perm,
+                       require_perm_level, can_do_level,
+                       assert_same_arch, identity_names, _split_list,
+                       _arch_scope_nodes, _arch_leader_nodes)
+    PERM_ENABLED = True
+except ImportError:                      # pragma: no cover —— 直接以脚本方式运行时
+    PERM_ENABLED = False
+    print('[WARN] perm.py 未加载 —— 分级权限校验不可用')
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, '..', 'app.db')
@@ -118,6 +138,79 @@ CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','work
     'week_no','copy_from']
 
 app = FastAPI(title="财务综合事务平台 FISP", docs_url=None, redoc_url=None)
+
+
+# ---------------- 分级权限：异常处理与辅助（2026-11-02）----------------
+if PERM_ENABLED:
+    @app.exception_handler(PermError)
+    async def _perm_error_handler(request: Request, exc: PermError):
+        # 统一越权返回形式：**HTTP 403 + 固定错误体**。
+        # 错误体结构（前端与外部调用方据此判断）：
+        # {error: PERMISSION_DENIED, code: <细分错误码>, message: <可读提示>,
+        #  need_level: 4, need_role: 看板负责人, have_level: 1, have_role: 参与人,
+        #  resource: board:xxx, op: delete}
+        return JSONResponse(status_code=403, content=exc.to_dict())
+
+
+def perm_chain(board_id=None, column_id=None, card_id=None):
+    # 定位资源链（架构 → 看板 → 板块 → 事项）
+    return resource_chain(dbq, board_id=board_id, column_id=column_id, card_id=card_id)
+
+
+def perm_check(username, chain, op, resource_level, resource_desc='', min_level=None):
+    # 分级权限校验 —— 不通过直接抛 PermError（→ 403）。
+    #
+    # ⚠️ **两个维度必须分开**（本项目踩过坑）：
+    #   · resource_level = **目标资源在哪一层**（架构/看板/板块/事项）
+    #   · min_level      = **执行该操作所需的最低角色等级**
+    #   之前把两者混用一个参数 → 「架构负责人改事项」被误判成 level_mismatch。
+    #
+    # min_level 省略时用 perm.py 的默认门槛（OP_MIN_LEVEL）。
+    # 管理员（role=admin）与超管（username=admin）超脱本体系，拥有全部权限；
+    # 但「配置管理员权限」只允许超管。
+    if not PERM_ENABLED:
+        return
+    if min_level is None:
+        require_perm(dbq, username, chain, op, resource_level,
+                     resource_desc=resource_desc,
+                     is_admin=is_admin(username), is_super=(username == SUPER_ADMIN))
+    else:
+        require_perm_level(dbq, username, chain, op, resource_level, min_level,
+                           resource_desc=resource_desc,
+                           is_admin=is_admin(username), is_super=(username == SUPER_ADMIN))
+
+
+def perm_check_arch_scope(username, op, resource_desc='', node_id=None):
+    # 「在所属架构下新增看板」这类**没有具体目标资源**的操作。
+    # 判定：操作者是否是**任一架构节点**的负责人（架构负责人及以上）。
+    # ⚠️ 边界：若操作者不是任何架构的负责人 → 拒绝（fail-closed）。
+    #   管理员/超管超脱本体系，直接放行。
+    if not PERM_ENABLED:
+        return
+    if username == SUPER_ADMIN or is_admin(username):
+        return
+    scope = _arch_scope_nodes(dbq, username)
+    if not scope:
+        raise PermError(E_NOT_OWNER,
+                        '只有架构负责人才能在该架构下新增看板',
+                        need_level=LV_ARCH_OWNER, have_level=LV_NONE,
+                        resource=resource_desc, op=op)
+    if node_id and node_id not in scope:
+        raise PermError(E_CROSS_SCOPE,
+                        '无权在该架构下执行此操作（不在你的负责范围内）',
+                        need_level=LV_ARCH_OWNER, have_level=LV_ARCH_OWNER,
+                        resource=resource_desc, op=op)
+
+
+def perm_level_of(username, chain):
+    # 取操作者对某资源的有效角色等级（供前端展示「你在这里是什么身份」）
+    if not PERM_ENABLED:
+        return LV_NONE
+    if username == SUPER_ADMIN:
+        return LV_SUPER
+    if is_admin(username):
+        return LV_ADMIN
+    return effective_level(dbq, username, chain)
 
 # ---------------- 数据库 ----------------
 _WAL_READY = False
@@ -936,6 +1029,22 @@ def require_admin(username: str = Depends(require_auth)):
         raise HTTPException(403, '需要管理员权限')
     return username
 
+
+def require_writer(username: str = Depends(require_auth)):
+    """写操作的**粗闸门**：只要求「已登录」。
+
+    ⚠️ **分级权限模型（2026-11-02）**：写权限的最终裁决权在 `perm_check()`，
+    这里**不再**用 `viewer/editor` 粗粒度角色拦截 ——
+    否则「参与人」「板块负责人」这类**细粒度身份**会在到达内核之前就被挡掉。
+
+    理由：旧模型只有三档粗角色（viewer/editor/admin），新模型有六级细角色
+    （参与人 / 事项负责人 / 板块负责人 / 看板负责人 / 架构负责人 / 管理员）。
+    粗闸门与细角色并存时，**以细角色为准** —— 有身份的人放行，没身份的人由内核拒绝。
+
+    ⚠️ `can_edit()` 仍保留给「非分级」的老接口（如资料页、公告）使用。
+    """
+    return username
+
 # ---------------- 审计日志 ----------------
 def client_ip(request: Request) -> str:
     # request 可能为 None（内部调用 / 测试直调函数时）→ 兜底返回空串，
@@ -1642,7 +1751,7 @@ class PinReq(BaseModel):
 
 
 @app.post('/api/columns')
-async def create_column(req: ColumnCreate, username: str = Depends(require_editor), request: Request = None):
+async def create_column(req: ColumnCreate, username: str = Depends(require_writer), request: Request = None):
     """新建板块：创建日期必填（默认当天），创建人取当前登录用户（前端锁定，服务端也强制）
 
     ⚠️ **归属年份在板块层绑定，且是单值必填**（年份已从看板层下沉到这里）：
@@ -1662,12 +1771,17 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_edito
         raise HTTPException(400, '创建日期为必填项')
     if not re.match(r'^\d{4}-\d{2}-\d{2}', created):
         raise HTTPException(400, '创建日期格式应为 YYYY-MM-DD')
+    if not dbq('SELECT board_id FROM boards WHERE board_id=?', (req.board_id,)):
+        raise HTTPException(404, '所属看板不存在')
+    # 分级权限（2026-11-02）：新增板块 = 看板负责人及以上（架构负责人继承）
+    # ⚠️ **权限内核先于可见性校验**（与 update_card 同款理由）：
+    #    可见性 403 会掩盖分级权限的真实原因，错误体就不统一了。
+    perm_check(username, perm_chain(board_id=req.board_id), OP_CREATE, LV_BOARD_OWNER,
+               'board:' + req.board_id, min_level=LV_BOARD_OWNER)
     # 看板必须存在且对当前用户可见
     boards, _cols = user_allowed(username)
     if boards is not None and req.board_id not in boards:
         raise HTTPException(403, '无权在该看板下新建板块')
-    if not dbq('SELECT board_id FROM boards WHERE board_id=?', (req.board_id,)):
-        raise HTTPException(404, '所属看板不存在')
     key = col_key(req.board_id, name)
     if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
         raise HTTPException(409, '该看板下已存在同名板块')
@@ -1686,7 +1800,7 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_edito
 
 
 @app.put('/api/columns')
-async def update_column(req: ColumnUpdate, username: str = Depends(require_editor), request: Request = None):
+async def update_column(req: ColumnUpdate, username: str = Depends(require_writer), request: Request = None):
     """编辑板块：名称 / 归属年份 / 创建日期 / 性质。
 
     板块尚未登记（历史数据没有 board_columns 行）时按「登记」处理，补一条元信息。
@@ -1706,14 +1820,14 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_edito
     name = (req.column_name or '').strip() or old_name
     if not name:
         raise HTTPException(400, '板块名称不能为空')
+    # 分级权限（2026-11-02）：修改板块 = 板块负责人及以上（看板/架构负责人继承）
+    # ⚠️ 权限内核先于可见性校验（原因见 update_card 的同款说明）
+    perm_check(username, perm_chain(board_id=board_id, column_id=(old['column_id'] if old else '')),
+               OP_UPDATE, LV_COLUMN_OWNER, 'column:' + (req.col_key or ''))
     # 权限：看板可见性校验
     boards, _cols = user_allowed(username)
     if boards is not None and board_id not in boards:
         raise HTTPException(403, '无权编辑该板块')
-    # 板块负责人 = 该板块的管理权（2026-11-02）→ 负责人可改本板块基本信息。
-    # 非管理员必须是该板块的负责人才能改（require_editor 已保证 editor 及以上）。
-    if old and not is_admin(username) and not is_column_manager(username, req.col_key):
-        raise HTTPException(403, '只有管理员或该板块的负责人可以编辑板块信息')
     # 负责人字段：**仅管理员可改**（负责人是板块的管理权，指定权归管理员）
     owner_val = (req.owner or '').strip()
     new_owner = None
@@ -1756,7 +1870,7 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_edito
 
 
 @app.post('/api/columns/pin')
-async def pin_column(req: ColumnPinReq, username: str = Depends(require_editor), request: Request = None):
+async def pin_column(req: ColumnPinReq, username: str = Depends(require_writer), request: Request = None):
     """板块置顶/取消置顶（作用域：所在看板内部）"""
     row = dbq('SELECT * FROM board_columns WHERE col_key=?', (req.col_key,))
     if not row:
@@ -1764,6 +1878,9 @@ async def pin_column(req: ColumnPinReq, username: str = Depends(require_editor),
     boards, _cols = user_allowed(username)
     if boards is not None and row[0]['board_id'] not in boards:
         raise HTTPException(403, '无权操作该板块')
+    # 分级权限（2026-11-02）：置顶 = 修改板块（板块负责人及以上）
+    perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
+               OP_UPDATE, LV_COLUMN_OWNER, 'column:' + req.col_key)
     val = 1 if req.pinned else 0
     dbe('UPDATE board_columns SET pinned=? WHERE col_key=?', (val, req.col_key))
     log_action('__column__', username, 'pin', f'{"置顶" if val else "取消置顶"}板块 {row[0]["column_name"]}')
@@ -1774,7 +1891,7 @@ async def pin_column(req: ColumnPinReq, username: str = Depends(require_editor),
 
 
 @app.post('/api/cards/{card_id}/pin')
-async def pin_card(card_id: str, req: PinReq, username: str = Depends(require_editor), request: Request = None):
+async def pin_card(card_id: str, req: PinReq, username: str = Depends(require_writer), request: Request = None):
     """事项置顶/取消置顶（作用域：所在板块内部）"""
     cur = dbq('SELECT card_id, board_id, card_name FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur:
@@ -1814,7 +1931,7 @@ def log_action(card_id, username, action, detail=''):
         (card_id, username, action, detail))
 
 @app.put('/api/cards/{card_id}')
-async def update_card(card_id: str, req: CardUpdate, username: str = Depends(require_editor), request: Request = None):
+async def update_card(card_id: str, req: CardUpdate, username: str = Depends(require_writer), request: Request = None):
     # 锁检查
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
@@ -1828,6 +1945,30 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     cur = dbq('SELECT version, parent_id, begin, due, board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur:
         raise HTTPException(404, '卡片不存在或已删除')
+    # 分级权限（2026-11-02）：修改事项分两档 ——
+    #   · 内容字段（状态/描述/时间/周数…）→ 参与人级即可（OP_EDIT_CONTENT）
+    #   · 归属类字段（负责人 owner / 参与人 cc）→ 需负责人级，且**单独判定**
+    #     （授予他人权限比改内容权限更高）
+    # ⚠️ 归属类字段必须**先剔除**，否则参与人改内容时会连带触发指派判定而被拒。
+    # ⚠️ **权限内核先于可见性校验**：可见性（能不能看见）是独立维度，
+    #    但它的 403 提示会掩盖分级权限的真实原因 —— 先跑内核，错误体才准确。
+    assign_fields = {}
+    if 'owner' in fields:
+        assign_fields['owner'] = fields.pop('owner')
+    if 'cc' in fields:
+        assign_fields['cc'] = fields.pop('cc')
+    _chain = perm_chain(card_id=card_id)
+    if fields:
+        perm_check(username, _chain, OP_EDIT_CONTENT, LV_CARD_OWNER, 'card:' + card_id,
+                   min_level=LV_PARTICIPANT)
+    if assign_fields.get('owner'):
+        perm_check(username, _chain, OP_ASSIGN_OWNER, LV_CARD_OWNER, 'card:' + card_id,
+                   min_level=LV_COLUMN_OWNER)
+    if assign_fields.get('cc'):
+        perm_check(username, _chain, OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'card:' + card_id,
+                   min_level=LV_CARD_OWNER)
+    # 归属字段判定通过后再合并回去（保证后续 UPDATE 语句带上它们）
+    fields.update(assign_fields)
     check_board_access(cur[0]['board_id'], username)
     # 板块级校验：账号被限定了某看板的板块白名单时，不得把事项移入不可见的板块
     if fields.get('column_id'):
@@ -1874,7 +2015,7 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     return {'ok': True}
 
 @app.post('/api/cards')
-async def create_card(req: CardCreate, username: str = Depends(require_editor), request: Request = None):
+async def create_card(req: CardCreate, username: str = Depends(require_writer), request: Request = None):
     import uuid
     new_id = 'NC' + str(int(time.time() * 1000))
     # 子事项：board 继承父卡片（防跨看板权限漏洞），并校验父存在且可见
@@ -1913,7 +2054,21 @@ async def create_card(req: CardCreate, username: str = Depends(require_editor), 
         # 全新看板（尚无任何卡片）：使用建卡请求传入的看板元数据，保证首卡正确带出 board_name/workspace_id
         vals['board_name'] = (req.board_name or req.board_id).strip()
         vals['workspace_id'] = (req.workspace_id or '').strip()
+    # 分级权限（2026-11-02）：新增事项 = 板块负责人及以上（看板/架构负责人继承）
+    # ⚠️ 权限内核先于可见性校验（与 create_column 同款理由）
+    perm_check(username, perm_chain(board_id=req.board_id, column_id=req.column_id),
+               OP_CREATE, LV_COLUMN_OWNER, 'board:' + req.board_id, min_level=LV_COLUMN_OWNER)
     check_board_access(req.board_id, username)
+    # 指派类字段（owner / cc）单独判定：授予他人权限，权限高于普通新增
+    _flds = req.fields or {}
+    if _flds.get('owner'):
+        perm_check(username, perm_chain(board_id=req.board_id, column_id=req.column_id),
+                   OP_ASSIGN_OWNER, LV_CARD_OWNER, 'board:' + req.board_id,
+                   min_level=LV_COLUMN_OWNER)
+    if _flds.get('cc'):
+        perm_check(username, perm_chain(board_id=req.board_id, column_id=req.column_id),
+                   OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'board:' + req.board_id,
+                   min_level=LV_COLUMN_OWNER)
     vals.update(req.fields)
     vals['card_id'] = new_id
     vals['board_id'] = req.board_id
@@ -1954,13 +2109,16 @@ class BoardCreateReq(BaseModel):
     sort: int = 0
 
 @app.post('/api/boards')
-def create_board(req: BoardCreateReq, username: str = Depends(require_admin), request: Request = None):
+def create_board(req: BoardCreateReq, username: str = Depends(require_writer), request: Request = None):
     """新建看板（仅管理员）。写入 boards 表，立即可在标签页看到空看板。"""
     import time
     name = (req.board_name or '').strip()
     if not name:
         raise HTTPException(400, '看板名称不能为空')
     bid = 'B' + str(int(time.time() * 1000))
+    # 分级权限（2026-11-02）：新增看板 = 架构负责人及以上
+    # 作用域：该账号所辖架构节点（含后代）。架构未配置时由管理员/超管创建。
+    perm_check_arch_scope(username, OP_CREATE, 'board:' + bid)
     dbe('INSERT OR REPLACE INTO boards (board_id, board_name, workspace_id, owner, sort, created_at) VALUES (?,?,?,?,?,?)',
         (bid, name, (req.workspace_id or '').strip(), (req.owner or username).strip(), req.sort, time.strftime('%Y-%m-%d %H:%M:%S')))
     audit_log(username, client_ip(request), 'board_create', f'看板 {bid}', f'新建看板：{name}', 'success')
@@ -2061,7 +2219,7 @@ class CopyColumnReq(BaseModel):
 
 
 @app.post('/api/columns/copy')
-async def copy_column(req: CopyColumnReq, username: str = Depends(require_editor),
+async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer),
                       request: Request = None):
     """复制板块：复制到**指定看板**（归属重选）。
 
@@ -2133,7 +2291,7 @@ CARD_COPY_FIELDS = ['owner', 'cc', 'follower', 'begin', 'due', 'description', 'p
 
 
 @app.post('/api/cards/copy')
-async def copy_card(req: CopyCardReq, username: str = Depends(require_editor),
+async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
                     request: Request = None):
     """复制主事项 / 子事项：生成一份**全新记录**，并重新选择上级归属。
 
@@ -2248,13 +2406,17 @@ def board_columns_list(board_id: str, username: str = Depends(require_auth)):
 
 
 @app.delete('/api/cards/{card_id}')
-async def delete_card(card_id: str, username: str = Depends(require_editor), request: Request = None):
+async def delete_card(card_id: str, username: str = Depends(require_writer), request: Request = None):
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法删除')
     cur_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur_row:
         raise HTTPException(404, '卡片不存在或已删除')
+    # 分级权限（2026-11-02）：删除事项 = 事项负责人及以上
+    # ⚠️ 权限内核先于可见性校验（见 update_card 的同款说明）
+    perm_check(username, perm_chain(card_id=card_id),
+               OP_DELETE, LV_CARD_OWNER, 'card:' + card_id)
     check_board_access(cur_row[0]['board_id'], username)
     res = dbe('UPDATE cards SET deleted=1 WHERE card_id=? AND deleted=0', (card_id,))
     if res.rowcount == 0:
@@ -2286,7 +2448,7 @@ async def delete_card(card_id: str, username: str = Depends(require_editor), req
 
 # ---------------- API：锁 ----------------
 @app.post('/api/cards/{card_id}/lock')
-async def lock_card(card_id: str, username: str = Depends(require_editor), request: Request = None):
+async def lock_card(card_id: str, username: str = Depends(require_writer), request: Request = None):
     ok, holder = lock_mgr.acquire(card_id, username)
     if not ok:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中')
@@ -2295,14 +2457,14 @@ async def lock_card(card_id: str, username: str = Depends(require_editor), reque
     return {'ok': True}
 
 @app.post('/api/cards/{card_id}/unlock')
-async def unlock_card(card_id: str, username: str = Depends(require_editor), request: Request = None):
+async def unlock_card(card_id: str, username: str = Depends(require_writer), request: Request = None):
     if lock_mgr.release(card_id, username):
         audit_log(username, client_ip(request), 'unlock', f'卡片 {card_id}', '解锁编辑', 'success')
         await ws_mgr.broadcast({'type': 'unlock', 'card_id': card_id, 'by': username})
     return {'ok': True}
 
 @app.post('/api/cards/{card_id}/heartbeat')
-def heartbeat(card_id: str, username: str = Depends(require_editor)):
+def heartbeat(card_id: str, username: str = Depends(require_writer)):
     lock_mgr.heartbeat(card_id, username)
     return {'ok': True}
 
@@ -2504,7 +2666,7 @@ def get_card_children(card_id: str, username: str = Depends(require_auth)):
 
 
 @app.post('/api/cards/{card_id}/subtasks')
-async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(require_editor), request: Request = None):
+async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(require_writer), request: Request = None):
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
@@ -2543,7 +2705,7 @@ async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(req
 
 @app.put('/api/cards/{card_id}/subtasks/{sid}')
 async def update_subtask(card_id: str, sid: int, req: SubtaskReq,
-                         username: str = Depends(require_editor), request: Request = None):
+                         username: str = Depends(require_writer), request: Request = None):
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
@@ -2576,7 +2738,7 @@ async def update_subtask(card_id: str, sid: int, req: SubtaskReq,
     return {'ok': True}
 
 @app.delete('/api/cards/{card_id}/subtasks/{sid}')
-async def delete_subtask(card_id: str, sid: int, username: str = Depends(require_editor), request: Request = None):
+async def delete_subtask(card_id: str, sid: int, username: str = Depends(require_writer), request: Request = None):
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
@@ -3699,8 +3861,8 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_aut
     if not dbq('SELECT 1 FROM boards WHERE board_id=?', (bid,)) and \
        not dbq('SELECT 1 FROM cards WHERE board_id=? AND deleted=0', (bid,)):
         raise HTTPException(404, '关联看板不存在')
-    if not is_board_manager(username, bid):
-        raise HTTPException(403, '只有管理员或该看板的负责人可以配置看板')
+    # 分级权限（2026-11-02）：修改看板基本信息 = 看板负责人及以上
+    perm_check(username, perm_chain(board_id=bid), OP_UPDATE, LV_BOARD_OWNER, 'board:' + bid)
     attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
     dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
@@ -3741,8 +3903,27 @@ def _norm_acl_owner(v: str) -> str:
     return o
 
 
+def _norm_acl_participants(items) -> str:
+    """参与人归一：去空白、去重、剔除不存在的账号 → 逗号分隔串
+
+    ⚠️ 参与人存**账号**（与 boards.owner 同口径）；
+       事项层的历史存量是**姓名**（cards.cc）—— 判定内核按双口径匹配，
+       写入时统一用账号。
+    """
+    out, seen = [], set()
+    for x in (items or []):
+        x = (str(x or '')).strip()
+        if not x or x in seen:
+            continue
+        if not dbq('SELECT 1 FROM users WHERE username=? LIMIT 1', (x,)):
+            raise HTTPException(400, f'参与人账号「{x}」不存在')
+        seen.add(x)
+        out.append(x)
+    return ','.join(out)
+
+
 @app.put('/api/boards/{board_id}/acl')
-async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(require_admin),
+async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(require_writer),
                         request: Request = None):
     """设置看板负责人（仅管理员）。
 
@@ -3754,6 +3935,9 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     bid = (board_id or '').strip()
     if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
         raise HTTPException(404, '看板不存在')
+    # 分级权限（2026-11-02）：指派看板负责人 = 架构负责人及以上
+    perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_OWNER, LV_BOARD_OWNER,
+               'board:' + bid, min_level=LV_ARCH_OWNER)
     owner = _norm_acl_owner(req.owner)
     # participants 一并清空：参与人机制已下线，历史值不再生效
     dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, '', bid))
@@ -3763,8 +3947,61 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': ''}
 
 
+@app.put('/api/boards/{board_id}/participants')
+async def set_board_participants(board_id: str, req: AclReq, username: str = Depends(require_writer),
+                                 request: Request = None):
+    # 指派看板参与人（仅管理员）。
+    # ⚠️ 看板参与人 = 该看板的**协作者**：可修改自己参与的事项与板块的可见内容，
+    #    但**无增删与指派权限**（见 perm.py 的 OP_MIN_LEVEL）。
+    bid = (board_id or '').strip()
+    if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
+        raise HTTPException(404, '看板不存在')
+    perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_PARTICIPANT,
+               LV_BOARD_OWNER, 'board:' + bid, min_level=LV_BOARD_OWNER)
+    parts = _norm_acl_participants(req.participants)
+    dbe('UPDATE boards SET participants=? WHERE board_id=?', (parts, bid))
+    audit_log(username, client_ip(request), 'board_participants', f'看板 {bid}',
+              f'设置看板参与人：{parts or "(无)"}', 'success')
+    return {'ok': True, 'board_id': bid, 'participants': parts}
+
+
+@app.put('/api/columns/{col_key}/participants')
+async def set_column_participants(col_key: str, req: AclReq, username: str = Depends(require_writer),
+                                  request: Request = None):
+    # 指派板块参与人（仅管理员 / 板块负责人）。
+    key = col_key or ''
+    row = dbq('SELECT board_id, column_id FROM board_columns WHERE col_key=? LIMIT 1', (key,))
+    if not row:
+        raise HTTPException(404, '板块不存在')
+    perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
+               OP_ASSIGN_PARTICIPANT, LV_COLUMN_OWNER, 'column:' + key, min_level=LV_COLUMN_OWNER)
+    parts = _norm_acl_participants(req.participants)
+    dbe('UPDATE board_columns SET participants=? WHERE col_key=?', (parts, key))
+    audit_log(username, client_ip(request), 'column_participants', f'板块 {key}',
+              f'设置板块参与人：{parts or "(无)"}', 'success')
+    return {'ok': True, 'col_key': key, 'participants': parts}
+
+
+@app.put('/api/cards/{card_id}/participants')
+async def set_card_participants(card_id: str, req: AclReq, username: str = Depends(require_writer),
+                                request: Request = None):
+    # 指派事项参与人（事项负责人及以上）。
+    # 参与人 = 可修改该事项的**可见内容**，但无增删与指派权限。
+    row = dbq('SELECT board_id, column_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if not row:
+        raise HTTPException(404, '事项不存在或已删除')
+    perm_check(username, perm_chain(card_id=card_id),
+               OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'card:' + card_id)
+    parts = _norm_acl_participants(req.participants)
+    dbe('UPDATE cards SET cc=? WHERE card_id=? AND deleted=0', (parts, card_id))
+    audit_log(username, client_ip(request), 'card_participants', f'事项 {card_id}',
+              f'设置事项参与人：{parts or "(无)"}', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id, 'by': username})
+    return {'ok': True, 'card_id': card_id, 'participants': parts}
+
+
 @app.put('/api/columns/{col_key}/acl')
-async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(require_admin),
+async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(require_writer),
                          request: Request = None):
     """设置板块负责人（仅管理员）。
 
@@ -3775,6 +4012,9 @@ async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(requ
     row = dbq('SELECT board_id, column_id FROM board_columns WHERE col_key=? LIMIT 1', (key,))
     if not row:
         raise HTTPException(404, '板块不存在')
+    # 分级权限（2026-11-02）：指派板块负责人 = 看板负责人及以上
+    perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
+               OP_ASSIGN_OWNER, LV_COLUMN_OWNER, 'column:' + key, min_level=LV_BOARD_OWNER)
     owner = _norm_acl_owner(req.owner)
     dbe('UPDATE board_columns SET owner=?, participants=? WHERE col_key=?', (owner, '', key))
     audit_log(username, client_ip(request), 'column_acl', f'板块 {key}',
@@ -3869,8 +4109,9 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     row = dbq('SELECT board_id FROM board_config WHERE id=?', (cid,))
     if not row:
         raise HTTPException(404, '配置不存在')
-    if not is_board_manager(username, row[0]['board_id']):
-        raise HTTPException(403, '只有管理员或该看板的负责人可以修改看板信息')
+    # 分级权限（2026-11-02）：修改看板基本信息 = 看板负责人及以上
+    perm_check(username, perm_chain(board_id=row[0]['board_id']),
+               OP_UPDATE, LV_BOARD_OWNER, 'board:' + row[0]['board_id'])
     attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
     dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
@@ -3889,8 +4130,9 @@ def delete_board_config(cid: int, username: str = Depends(require_auth), request
     r = dbq('SELECT board_id, dept, attr FROM board_config WHERE id=?', (cid,))
     if not r:
         raise HTTPException(404, '配置不存在')
-    if not is_board_manager(username, r[0]['board_id']):
-        raise HTTPException(403, '只有管理员或该看板的负责人可以删除看板配置')
+    # 分级权限（2026-11-02）：删除看板配置 = 看板负责人及以上
+    perm_check(username, perm_chain(board_id=r[0]['board_id']),
+               OP_DELETE, LV_BOARD_OWNER, 'board:' + r[0]['board_id'])
     dbe('DELETE FROM board_config WHERE id=?', (cid,))
     row = r[0]
     audit_log(username, client_ip(request), 'board_config_delete',
@@ -4268,6 +4510,13 @@ def admin_create_user(req: UserCreate, username: str = Depends(require_admin), r
         raise HTTPException(409, '账号已存在')
     if req.role not in ('viewer', 'editor', 'admin'):
         raise HTTPException(400, '角色必须是 viewer/editor/admin')
+    # 分级权限（2026-11-02）：**配置「管理员」权限仅超级管理员可为**。
+    # 管理员虽超脱于分层体系拥有全部权限，但不能授予他人管理员身份。
+    if req.role == 'admin' and username != SUPER_ADMIN:
+        raise PermError(E_ADMIN_ONLY,
+                        '只有超级管理员可以授予管理员权限',
+                        need_level=LV_SUPER, have_level=LV_ADMIN,
+                        resource='user:' + name, op='assign_admin')
     boards = '*' if req.boards == '*' else ','.join(x for x in req.boards.split(',') if x)
     columns = norm_columns(req.columns)
     dbe('INSERT INTO users (username, password_hash, role, allowed_boards, allowed_columns) VALUES (?,?,?,?,?)',
@@ -4283,6 +4532,16 @@ def admin_update_user(name: str, req: UserUpdateReq, username: str = Depends(req
         raise HTTPException(404, '账号不存在')
     if req.role is not None and req.role not in ('viewer', 'editor', 'admin'):
         raise HTTPException(400, '角色必须是 viewer/editor/admin')
+    # 分级权限（2026-11-02）：**变更「管理员」权限仅超级管理员可为**。
+    # · 把别人**升为** admin → 仅超管
+    # · 把 admin **降级**为 editor/viewer → 仅超管（防止管理员互相踢）
+    cur_role = (u.get('role') or '').strip()
+    if req.role is not None and username != SUPER_ADMIN:
+        if req.role == 'admin' or cur_role == 'admin':
+            raise PermError(E_ADMIN_ONLY,
+                            '只有超级管理员可以配置管理员权限',
+                            need_level=LV_SUPER, have_level=LV_ADMIN,
+                            resource='user:' + name, op='assign_admin')
     sets, vals = [], []
     if req.role is not None:
         sets.append('role=?'); vals.append(req.role)
@@ -4318,7 +4577,7 @@ class MoveReq(BaseModel):
     column_name: str = ''
 
 @app.put('/api/cards/{card_id}/move')
-async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_editor), request: Request = None):
+async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_writer), request: Request = None):
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法移动')
@@ -4327,6 +4586,10 @@ async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_
         check_board_access(src_row[0]['board_id'], username)
     if not src_row:
         raise HTTPException(404, '卡片不存在或已删除')
+    # 分级权限（2026-11-02）：移动事项 = 修改事项（事项负责人及以上）
+    # ⚠️ 权限内核先于可见性校验（原因见 update_card 的同款说明）
+    perm_check(username, perm_chain(card_id=card_id),
+               OP_UPDATE, LV_CARD_OWNER, 'card:' + card_id)
     check_board_access(req.board_id, username)
     # 板块级校验：目标板块对当前账号不可见时拒绝移动
     check_column_access(req.board_id, req.column_id, username)
