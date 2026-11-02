@@ -1287,6 +1287,8 @@ function goLogin(){
                  placeholder="点击从架构树选择" onclick="openPersonFilterPicker(this)"
                  onfocus="openPersonFilterPicker(this)" title="打开组织架构树：搜索人员、勾选「无负责人」"
                  aria-label="人员筛选，点击从组织架构树选择人员">
+          <span class="cf-count" id="personFilterCount" title="已选人员（点击打开架构树）"
+                onclick="openPersonFilterPicker(document.getElementById('personFilterInput'))"></span>
           <span class="cf-chips" id="personFilterChips"></span>
         </span>
       </span>
@@ -1298,6 +1300,8 @@ function goLogin(){
                  placeholder="41 或 2026-41" onfocus="openFilterCombo('week')" onclick="openFilterCombo('week')"
                  oninput="onFilterComboInput('week',this.value)" onkeydown="onFilterComboKey('week',event)"
                  aria-label="周数筛选，可输入数字或周标签，多选">
+          <span class="cf-count" id="weekFilterCount" title="已选周数（点击选择）"
+                onclick="openFilterCombo('week')"></span>
           <span class="cf-chips" id="weekFilterChips"></span>
         </span>
         <div class="cf-drop" id="weekFilterDrop" hidden></div>
@@ -1806,6 +1810,44 @@ function goLogin(){
   -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 18px),transparent 100%);
   mask-image:linear-gradient(to right,#000 calc(100% - 18px),transparent 100%);
   transition:max-width .18s ease}
+/* ===== 已选项改为「计数徽标」（2026-11-02 UI设计师）=====
+   需求：不要在筛选框里直接显示已选项**文本**，改为把已选项的展示
+   **合并到 ① 树状图节点（.tp-box.on 已有勾选态）② 下方筛选明细行（#filterHint 已汇总）**。
+   → 框内只留一个**固定宽度的计数徽标**（「已选 3」），既表明"有筛选生效"，
+     又**不因已选人数/名字长短而改变宽度**（原 chip 文本是宽度不稳定的根源）。
+   → 徽标宽度固定（min-width + 文字不出现在盒内）→ .cf-field 宽度恒定。
+   ⚠️ 计数无法用纯 CSS 实现（CSS counter 不跨兄弟元素生效，已实测），
+      故由 paintFilterCombos() 写入 .cf-count 的 textContent —— 仅展示层，不动数据流。 */
+.cf-count{display:none;align-items:center;justify-content:center;
+  min-width:44px;height:20px;padding:0 7px;border-radius:10px;
+  background:#e6f1fb;color:#185fa5;border:1px solid #b5d4f4;
+  font-size:11.5px;line-height:1;white-space:nowrap;flex-shrink:0;
+  font-variant-numeric:tabular-nums;letter-spacing:.2px}
+.cf-field:has(.cf-count:not(:empty)) .cf-count{display:inline-flex}
+/* 有计数徽标时，输入框不再显示 placeholder（避免与徽标语义重复、也免得挤占宽度） */
+.cf-field:has(.cf-count:not(:empty)) .cf-input::placeholder{color:transparent}
+/* 输入框收窄到最小宽度，把空间让给计数徽标（宽度固定，field 总宽不变） */
+.cf-field:has(.cf-count:not(:empty)) .cf-input{flex:0 1 24px;min-width:24px}
+/* 计数徽标可点击 → 打开对应的选择器（树/下拉），与输入框行为一致 */
+.cf-count{cursor:pointer}
+.cf-count:hover{background:#d6e9fb;border-color:#8fc2ef}
+/* ===== 已选 chip 文本不再可见（2026-11-02 UI设计师）=====
+   已选项的展示职责已转移：
+     ① 树状图节点 → .tp-box.on 勾选态（人员）/ .tp-box 节点勾选（周数）
+     ② 下方「筛选明细」行 → #filterHint 汇总「人员：… | 周数：…」
+   → 框内 chip **保留在 DOM**（不清空），但视觉上隐藏。
+     保留的理由：
+       · `removeFilterChip()` 仍可被调用（清空入口在树弹窗与下拉里）
+       · `title` 悬浮提示仍能给出完整清单（作为兜底可见性）
+       · 不破坏任何依赖 chip 结构的既有逻辑与断言
+   → 但**必须彻底不可见**：不能只是透明（会被读屏软件读到、也会被误点）。
+     用 clip-path 移出可视区（非 display:none，保留盒模型与可访问性树之外的最小副作用）。 */
+.cf-field .cf-chips{
+  position:absolute;width:1px;height:1px;overflow:hidden;
+  clip-path:inset(50%);white-space:nowrap;border:0;padding:0;margin:-1px;
+}
+/* 但计数徽标要能点开选择器 → 给它绑点击（事件委托，避免改 HTML 属性） */
+.cf-field .cf-count{position:relative;z-index:1}
 /* 悬停/聚焦 → 展开全部（可逐个点 × 移除） */
 .cf-field:hover .cf-chips,.cf-field:focus-within .cf-chips{
   flex-wrap:wrap;overflow:visible;max-width:260px;flex:0 0 auto;
@@ -3666,6 +3708,12 @@ function paintFilterCombos(){
   if(pWrap)pWrap.classList.toggle('active',PERSON_SEL.size>0);
   if(pChips)pChips.innerHTML=[...PERSON_SEL].map(n=>
     `<span class="cf-chip" title="${esc(personLabel(n))}"><span>${esc(personLabel(n))}</span><i onclick="removeFilterChip('person','${esc(n)}')">×</i></span>`).join('');
+  // 已选人数徽标（2026-11-02 UI设计师）：框内**不再显示已选项文本**，
+  // 改为计数徽标；已选项的完整清单由 ① 树状图节点的勾选态
+  // ② 下方「筛选明细」行（#filterHint）承担。
+  // ⚠️ 仅写展示层文本，不动 PERSON_SEL / WEEK_SEL 等数据与状态。
+  const pCount=document.getElementById('personFilterCount');
+  if(pCount)pCount.textContent=PERSON_SEL.size?('已选 '+PERSON_SEL.size):'';
   // 周数
   const wWrap=document.getElementById('weekFilterWrap');
   const wChips=document.getElementById('weekFilterChips');
@@ -3674,6 +3722,8 @@ function paintFilterCombos(){
   if(wWrap)wWrap.classList.toggle('active',WEEK_SEL.size>0);
   if(wChips)wChips.innerHTML=[...WEEK_SEL].map(w=>
     `<span class="cf-chip" title="${esc(w)}"><span>${esc(weekLabelOf(w))}</span><i onclick="removeFilterChip('week','${esc(w)}')">×</i></span>`).join('');
+  const wCount=document.getElementById('weekFilterCount');
+  if(wCount)wCount.textContent=WEEK_SEL.size?('已选 '+WEEK_SEL.size):'';
   if(wDrop){
     const kw=((wInp&&wInp.value)||'').trim().toLowerCase();
     // 候选 = 接口全量周数 ∪ 当前看板已出现的周数（两者口径不同，都保留）
