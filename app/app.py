@@ -2010,11 +2010,14 @@ def board_columns_list(board_id: str, username: str = Depends(require_auth)):
     if boards is not None and board_id not in boards:
         raise HTTPException(403, '无权访问该看板')
     counts = {}
-    for r in dbq("SELECT column_id, column_name, COUNT(*) n,"
-                 " SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) dn"
-                 " FROM cards WHERE deleted=0 AND board_id=? GROUP BY column_id, column_name",
-                 (board_id,)):
-        counts[col_key(board_id, r['column_name'])] = (r['n'], r['dn'] or 0)
+    # ⚠️ 计数必须按**可见范围**统计 —— 否则越权板块的条数会随 counts 下发
+    #    （虽然 visible_columns 会把越权板块过滤掉，但数据仍出了服务端）。
+    #    口径与 /api/cards 完全一致：filter_rows 走看板级 + 板块级两级权限。
+    for r in filter_rows(dbq("SELECT board_id, column_id, column_name, status FROM cards"
+                             " WHERE deleted=0 AND board_id=?", (board_id,)), boards, columns):
+        k = col_key(board_id, r['column_name'])
+        n, dn = counts.get(k, (0, 0))
+        counts[k] = (n + 1, dn + (1 if r['status'] == 'done' else 0))
     out = visible_columns(username, boards, columns, board_id, counts)
     return {'columns': out}
 
@@ -3390,16 +3393,24 @@ def list_boards(username: str = Depends(require_auth)):
        「所属板块年份」。
     """
     boards = _all_boards()
-    visible, _cols = user_allowed(username)
+    visible, cols_perm = user_allowed(username)
     if visible is not None:
         boards = [b for b in boards if b['board_id'] in visible]
-    counts = {}
-    for r in dbq('SELECT board_id, COUNT(*) AS cnt FROM cards WHERE deleted=0 GROUP BY board_id'):
-        counts[r['board_id']] = r['cnt']
+    # 卡片数：**必须按当前账号的可见范围统计**（看板级 + 板块级两级权限）。
+    # ⚠️ 此前直接对 cards 表 GROUP BY 统计 → 只做了看板级过滤，
+    #    板块级白名单（allowed_columns）收窄后的板块，其事项仍被计入
+    #    → 「看板管理」里显示的卡片数与用户实际能看到的条数对不上（实测 6 vs 2）。
+    #    口径统一：与 /api/cards 的可见集合完全一致。
+    counts = defaultdict(int)
+    for r in filter_rows(dbq('SELECT board_id, column_id FROM cards WHERE deleted=0'),
+                          visible, cols_perm):
+        counts[r['board_id']] += 1
     # 所属板块年份（年份在板块层，看板只是容器）
+    # ⚠️ 同样要按**可见板块**算 —— 越权板块的年份不该出现在列表里。
     col_years = defaultdict(set)
-    for r in dbq("SELECT board_id, year FROM board_columns WHERE year<>'' AND year IS NOT NULL"):
-        col_years[r['board_id']].add(r['year'])
+    for r in visible_columns(username, visible, cols_perm):
+        if r.get('year'):
+            col_years[r['board_id']].add(r['year'])
     cfgs = {}
     for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, created_at'
                  ' FROM board_config'):

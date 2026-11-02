@@ -1148,7 +1148,7 @@ function goLogin(){
       <button class="header-btn" onclick="toggleHeaderMore(event)" title="更多操作">⋯ 更多</button>
       <div class="header-more-menu" id="headerMoreMenu" hidden>
         <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
-        <button onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复">📥 恢复</button>
+        <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式，仅可编辑及以上）">📥 恢复</button>
         <button id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
         <button id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
         <button onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
@@ -2119,6 +2119,41 @@ function setupDraggableModals(){
   });
 }
 
+// ---------- 按权限隐藏无权使用的入口 ----------
+// 原则：**后端接口的权限要求 = 前端入口的显示条件** —— 没有权限就别显示，
+// 免得用户点进去撞 403。集中在这里，避免各处零散判断导致口径漂移。
+//
+// 权限矩阵（与后端 Depends 一一对应）：
+//   管理员 admin     → 全部入口
+//   可编辑 editor    → 全部入口（除管理员专属的成员/架构/看板/审计管理）
+//   只读 viewer      → 仅查看与导出类（备份 / 模板 / 导出）
+//
+// | 入口 | 后端接口 | 要求 |
+// |---|---|---|
+// | 成员与账号管理 | /api/users* | require_admin |
+// | 架构管理       | /api/org*   | require_admin |
+// | 看板管理       | /api/board-config(写) /api/boards(建) | require_admin |
+// | 操作日志       | /api/audit  | require_admin |
+// | 新建板块       | POST /api/columns | require_editor |
+// | 恢复(JSON导入) | POST /api/import     | require_editor |
+// | 导入(xlsx)     | POST /api/import/xlsx | require_editor |
+// | 备份(导出JSON) | GET /api/export       | require_auth（只读可用）|
+// | 模板下载       | GET /api/import/template | require_auth |
+// | 导出 xlsx      | GET /api/export/xlsx  | require_auth（只读可用）|
+function applyPermissionUI(){
+  if(!ME)return;
+  const isAdmin=!!ME.is_admin, canEdit=!!ME.can_edit;
+  // 管理员专属：成员与账号 / 架构 / 看板管理 / 操作日志
+  [['teamBtn',isAdmin],['wgBtn',isAdmin],['boardConfigBtn',isAdmin],['auditBtn',isAdmin]]
+    .forEach(function(p){const el=document.getElementById(p[0]);if(el)el.style.display=p[1]?'':'none';});
+  // 可编辑专属：新建板块
+  const nb=document.getElementById('newBtn'); if(nb)nb.style.display=canEdit?'':'none';
+  // 「更多」菜单里的写操作项：恢复（JSON 导入）、导入（xlsx）—— 需 editor 及以上
+  ['xlsxImportBtn','jsonImportBtn'].forEach(function(id){
+    const el=document.getElementById(id); if(el)el.style.display=canEdit?'':'none';
+  });
+}
+
 async function init(){
   if(!TOKEN){goLogin();return}
   try{
@@ -2130,14 +2165,7 @@ async function init(){
   if(!cropBound){ cropBindDrag(); cropBound=true; }   // 裁切编辑器拖动/缩放事件（只绑一次）
     document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
     document.getElementById('roleTag').className='role-tag role-'+ME.role;
-    if(!ME.is_admin){document.getElementById('teamBtn').style.display='none';document.getElementById('wgBtn').style.display='none';document.getElementById('auditBtn').style.display='none'}
-    if(ME.can_edit)document.getElementById('newBtn').style.display='';
-    // 导入 xlsx 需要 editor 及以上权限（后端 require_editor）；只读用户隐藏入口
-    if(!ME.can_edit){
-      const ib=document.getElementById('xlsxImportBtn'); if(ib)ib.style.display='none';
-    }
-    // 「全部看板」卡片已隐藏：默认展开一个有内容的部门并选中其首个板块，
-    // 否则进入页面时右侧是一整片空看板区，不知道该点哪里。
+    applyPermissionUI();
     ensureInitialSelection();
     updateNewBtn();
     const team=await api('/api/team');
