@@ -115,6 +115,11 @@ button{font-family:inherit}
 .header-more-menu[hidden]{display:none}
 .header-more-menu button{border:none;background:none;text-align:left;padding:7px 14px;font-size:13px;color:var(--text);cursor:pointer;white-space:nowrap}
 .header-more-menu button:hover{background:#f0f5ff;color:var(--primary)}
+/* 空菜单的占位文案（当前「更多」下拉已无内容，待确认去留） */
+.header-more-empty{padding:8px 14px;font-size:12px;color:var(--text3);white-space:nowrap}
+/* 【导入导出】按钮：与相邻「更多」按钮**等宽** → 头部按钮排布整齐，
+   且宽度固定 → 不因文案或菜单项数量变化而抖动。 */
+#headerImportExport>.header-btn{min-width:96px}
 .header-btn:hover{border-color:var(--primary);color:var(--primary)}
 .role-tag{font-size:11px;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500}
 .role-admin{background:#fff7e6;color:#b25906;border:1px solid #ffd591}
@@ -267,16 +272,18 @@ button{font-family:inherit}
    实测 1200px 时 w=1118px、1100px 时 w=823px（差 295px），
    导致左侧控件（搜索框 / 人员 / 周数 / 日期区间）位置全部左移 → 违反需求5。
    → 按**内容固有宽度**锁定（而非某视口下的偶然值）：
-       搜索框 135 + 状态 98 + 人员 149 + 周数 151 + 日期区间 278 + 4×gap(8)=32 → 合计 843px
+       搜索框 167 + 状态 98 + 人员 149 + 周数 151 + 日期区间 278 + 4×gap(8)=32 → 合计 875px
      .toolbar-right 同样固定 287px（展开/折叠按钮组）。
    → 用 flex-basis 固定，配合 flex-grow:0，避免在宽屏被拉伸。
-   ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。 */
-.toolbar-left{flex:0 0 843px;min-width:843px}
+   ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。
+   ⚠️ 搜索框宽度改过（135→167，为完整显示 placeholder）→ 本行的锁定值需**同步**调整，
+      否则左侧内容会被压缩、搜索框又被压回截断状态。 */
+.toolbar-left{flex:0 0 875px;min-width:875px}
 .toolbar-right{flex:0 0 287px;min-width:287px}
-/* 工具栏整体最小宽度：左 843 + 右 287 + gap 10 + padding 32 = 1172px。
-   容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 20px 会让右侧按钮组被挤/换行。
-   → 锁 min-width:1172px，由 html 的横向滚动承载（需求5 的既定方案）。 */
-.toolbar{min-width:1172px}
+/* 工具栏整体最小宽度：左 875 + 右 287 + gap 10 + padding 32 = 1204px。
+   容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 52px 会让右侧按钮组被挤/换行。
+   → 锁 min-width:1204px，由 html 的横向滚动承载（需求5 的既定方案）。 */
+.toolbar{min-width:1204px}
 /* 筛选明细（当前生效条件汇总）：**独占一行**，宽度不限。
    需求（2026-11-02）：原先它夹在 .toolbar-left 里、与日期区间同行，
    受 max-width:260px + ellipsis 限制 → 明细被截断（「人员：王伟娜 | 周数：2026·第1...」），
@@ -292,7 +299,12 @@ button{font-family:inherit}
 .search-input,.filter-select{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text)}
 .search-input:focus,.filter-select:focus{border-color:var(--primary)}
 /* 搜索框限宽并可压缩：给右侧的创建日期区间腾出空间，保持整行不换行 */
-.search-input{min-width:100px;flex:1 1 150px;max-width:230px}
+/* 搜索框：宽度按「placeholder 完整显示」定，不按拍脑袋。
+   实测（canvas 量字）：「搜索事项 / 看板 / 板块…」文本宽 139px，
+   加 padding(12×2)+border(1×2) → 需框宽 **167px**。
+   原 max-width:230px 但 flex-basis:150px → 实际只拿到 135px，placeholder 被截断。
+   → 改 flex-basis:170px / min-width:167px，保证提示词完整可见。 */
+.search-input{min-width:167px;flex:1 1 170px;max-width:230px}
 /* 创建日期区间筛选：紧凑排布，起止各一个日期框。
    容器高度显式锁定为 33px（与 .filter-select 实测同高），内部日期框 31px
    （与 .search-input 实测同高）—— Chrome 的 input[type=date] 有固有内高，
@@ -1169,16 +1181,29 @@ function goLogin(){
     <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
     <button class="header-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>
     <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
-    <!-- 低频操作收进「更多」下拉：11 个按钮平铺会把标题挤扁（实测标题被压成竖排单字），
-         且窄屏时按钮换行占满整屏。这里按主次分层，常用按钮常驻、其余收起。 -->
-    <div class="header-more" id="headerMore">
-      <button class="header-btn" onclick="toggleHeaderMore(event)" title="更多操作">⋯ 更多</button>
-      <div class="header-more-menu" id="headerMoreMenu" hidden>
+    <!-- 低频操作收进下拉：按钮平铺会把标题挤扁（实测标题被压成竖排单字），
+         且窄屏时按钮换行占满整屏。这里按主次分层，常用按钮常驻、其余收起。
+         【导入导出】独立成一个按钮，与【更多】分开：
+         这 5 项（备份/恢复/模板/导入/导出）是**数据进出**类操作，
+         与「更多」里的界面类操作混在一起容易被误点，也不好找。 -->
+    <div class="header-more" id="headerImportExport">
+      <button class="header-btn" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">📥📤 导入导出</button>
+      <div class="header-more-menu" id="headerImportExportMenu" hidden>
         <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
         <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式，仅可编辑及以上）">📥 恢复</button>
         <button id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
         <button id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
         <button onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
+      </div>
+    </div>
+    <div class="header-more" id="headerMore">
+      <button class="header-btn" onclick="toggleHeaderMore(event,'headerMoreMenu')" title="更多操作">更多</button>
+      <!-- ⚠️ 原「更多」下拉里只有 备份/恢复/模板/导入/导出 这 5 项，
+           已按需求整体挪到【导入导出】独立按钮 → 此菜单目前**为空**。
+           暂留空态提示（不直接删按钮：那属于产品决策，且后续可能还要往里放东西）。
+           → 已登记待主设计师确认「更多」的去留（见 HANDOFF §五）。 -->
+      <div class="header-more-menu" id="headerMoreMenu" hidden>
+        <div class="header-more-empty">（暂无更多操作）</div>
       </div>
     </div>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
@@ -5924,19 +5949,23 @@ document.addEventListener('click',e=>{
   const t=e.target;
   if(t&&t.closest&&t.closest('.status-picker'))return;   // 点在按钮或菜单内部，不处理
   closeStatusMenu();
-  // 头部「更多」下拉：点外部收起
-  if(!(t&&t.closest&&t.closest('#headerMore')))closeHeaderMore();
+  // 头部下拉（更多 / 导入导出）：点外部收起
+  if(!(t&&t.closest&&t.closest('.header-more')))closeHeaderMore();
 });
-// 头部「更多」下拉的开关
-function toggleHeaderMore(ev){
+// 头部下拉的开关（更多 / 导入导出 共用）
+// ⚠️ 2026-11-02 UI设计师：新增【导入导出】独立按钮后，本函数改为**按 id 定位菜单**，
+//    并且**两个菜单互斥**（开一个时另一个自动收起）—— 否则两个下拉可能同时展开、互相遮挡。
+function toggleHeaderMore(ev,menuId){
   if(ev)ev.stopPropagation();
-  const m=document.getElementById('headerMoreMenu');
+  const m=document.getElementById(menuId||'headerMoreMenu');
   if(!m)return;
-  m.hidden=!m.hidden;
+  const willOpen=m.hidden;
+  // 互斥：先全部收起，再打开目标菜单
+  document.querySelectorAll('.header-more-menu').forEach(function(x){x.hidden=true;});
+  m.hidden=!willOpen;
 }
 function closeHeaderMore(){
-  const m=document.getElementById('headerMoreMenu');
-  if(m)m.hidden=true;
+  document.querySelectorAll('.header-more-menu').forEach(function(x){x.hidden=true;});
 }
 // 年份筛选 chips 的点击（移除单个年份 / 展开可选列表 / 清空全部）—— 事件委托到 document，
 // 因为 chips 是 innerHTML 重建的，直接绑在元素上会在重建后失效
