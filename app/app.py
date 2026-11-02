@@ -117,7 +117,7 @@ CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','work
     'column_sort','board_status','board_creator','parent_id','pinned',
     'week_no','copy_from']
 
-app = FastAPI(title="财务工作事项平台", docs_url=None, redoc_url=None)
+app = FastAPI(title="财务综合事务平台 FISP", docs_url=None, redoc_url=None)
 
 # ---------------- 数据库 ----------------
 _WAL_READY = False
