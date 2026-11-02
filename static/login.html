@@ -15,9 +15,13 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
      ① emoji 是彩色插画风，与「更显商务」的诉求相悖；
      ② 标题旁已有 FISP 徽标，图标位再放 emoji 会与整体品牌语言不统一；
      ③ 字母标可随品牌色走，更像正经的企业系统标识。
-   做法：白字 + 品牌蓝底 + 加粗无衬线 + 收紧字距（letter-spacing 让 4 个字母更「实」）。 */
+   做法：白字 + 品牌蓝底 + 加粗无衬线 + 收紧字距（letter-spacing 让 4 个字母更「实」）。
+   字号/字重（2026-11-02 追加，用户要求「大一点、饱满一点」）：
+     实测 15px/700 时文字只占 32px（方块 56px，左右各余 12px）→ 偏小、不够饱满。
+     改为 **18px/800** → 文字占 41px（左右各余 7.5px）→ 饱满且留得住边距。
+     ⚠️ 再大（19~20px）会只剩 6~5px 边距 → 显得挤、且不同字体渲染差异可能导致溢出。 */
 .logo .icon{width:56px;height:56px;border-radius:10px;background:#1890ff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;
-  color:#fff;font-size:15px;font-weight:700;letter-spacing:.5px;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:#fff;font-size:18px;font-weight:800;letter-spacing:.5px;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   box-shadow:0 2px 6px rgba(24,144,255,.28)}
 /* 标题：加字重 + 微字距 → 更有商务的稳重感（原来是常规字重的 20px） */
 .logo h1{font-size:20px;color:#1f1f1f;font-weight:600;letter-spacing:.6px}
