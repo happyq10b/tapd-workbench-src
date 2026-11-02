@@ -74,6 +74,22 @@ def week_label(s) -> str:
 WEEK_RE = re.compile(r'^\d{4}年第(\d{1,2})周$')
 
 
+def week_sort_key(v):
+    """周数排序键：把「2026年第41周」折成 (2026, 41) 这样的组合整数。
+
+    ⚠️ 不能直接按字符串排序 —— 字典序下「第3周」会排在「第31周」**后面**
+    （比较到 '3' 与 '周' 时 '3' 更大），列表会变成
+    「第31周、第33周、第3周、第44周、第4周」这种乱序。
+    这里用 (年, 周号) 数值对排序 → 等价于 202601 ~ 202644 的整数序。
+    非标准标签统一排到最后并保持彼此的原始次序（稳定排序）。
+    """
+    s = (v or '').strip()
+    m = re.match(r'^(\d{4})年第(\d{1,2})周$', s)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), 0, s)
+    return (9999, 0, 1, s)
+
+
 def _norm_week(v) -> str:
     """周数字段归一：接受「2026年第41周」或「2026-41」，返回标准标签；非法值报错。"""
     s = str(v or '').strip()
@@ -1165,7 +1181,7 @@ def filter_options(username: str = Depends(require_auth)):
         w = (r.get('week_no') or '').strip()
         if w:
             weeks.add(w)
-    return {'people': sorted(people), 'weeks': sorted(weeks)}
+    return {'people': sorted(people), 'weeks': sorted(weeks, key=week_sort_key)}
 
 
 @app.get('/api/overview')
@@ -1302,8 +1318,10 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         mine = [r for r in mine if (r.get('column_name') or '') == column]
     # 周数维度：可选周数 = 当前范围（该看板下、权限可见）里出现过的周数集合。
     # 在**应用周数筛选之前**统计 → 勾选某周后，其余周数仍在选项里（可随时改选）。
+    # 排序用 week_sort_key（按 年*100+周号 的组合整数序），不能用字符串序。
     week_options = sorted({(r.get('week_no') or '').strip()
-                           for r in mine if (r.get('week_no') or '').strip()})
+                           for r in mine if (r.get('week_no') or '').strip()},
+                          key=week_sort_key)
     if week:
         # 多值（逗号分隔 = 任一命中），与负责人/参与人筛选口径一致
         wset = {x.strip() for x in week.split(',') if x.strip()}

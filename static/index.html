@@ -609,6 +609,12 @@ button{font-family:inherit}
 .tp-opts .tp-opts-label{font-size:11.5px;color:var(--text3);flex-shrink:0}
 .tp-opt{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text);cursor:pointer;white-space:nowrap}
 .tp-opt input{width:13px;height:13px;accent-color:var(--primary);cursor:pointer;margin:0}
+/* 树弹窗内的搜索框（person 模式）：按姓名过滤树上人员 */
+.tp-search{padding:0 10px 7px;flex-shrink:0}
+.tp-search-input{width:100%;box-sizing:border-box;height:28px;padding:0 9px;font-size:12.5px;
+  border:1px solid var(--border);border-radius:5px;outline:none;background:#fff;color:var(--text);
+  font-family:inherit}
+.tp-search-input:focus{border-color:var(--primary);box-shadow:var(--ring)}
 /* 「无负责人」节点：树上以标签样式呈现（虚线框 + 灰底），区别于真实人员 */
 .tp-none-node{margin:2px 6px 6px;padding:4px 8px;border:1px dashed #b7d4f7;border-radius:5px;
   background:#f7faff;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2)}
@@ -1050,20 +1056,18 @@ function goLogin(){
       <select class="filter-select" id="statusFilter" onchange="reload(1)">
         <option value="">全部状态</option><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option>
       </select>
-      <!-- 人员筛选：可输入 + 多选。锚定在「负责人」维度（owner 字段）——
-           原先独立的「全部负责人」下拉与之重复，已下线；
-           「无负责人」作为面板里的一个特殊候选项保留（值为 __no_owner__）。 -->
+      <!-- 人员筛选：入口**直接是【架构树】**（含全部末级人员 + 「无负责人」选项）。
+           原先的候选下拉面板只列「事项负责人」名单，多数场景为空（显示"暂无可选人员"），
+           且右侧还要另挂一个 🌳 按钮才能进树 —— 两个入口冗余、语义割裂。
+           现在统一：点击输入框 → 打开树弹窗，在树里搜索/勾选/取消。 -->
       <span class="combo-filter" id="personFilterWrap">
         <span class="cf-label">👤 人员</span>
         <span class="cf-field">
-          <input type="text" class="cf-input" id="personFilterInput" autocomplete="off"
-                 placeholder="输入姓名（可多选）" onfocus="openFilterCombo('person')" onclick="openFilterCombo('person')"
-                 oninput="onFilterComboInput('person',this.value)" onkeydown="onFilterComboKey('person',event)">
+          <input type="text" class="cf-input" id="personFilterInput" autocomplete="off" readonly
+                 placeholder="点击从架构树选择" onclick="openPersonFilterPicker(this)"
+                 onfocus="openPersonFilterPicker(this)" title="打开组织架构树：搜索人员、勾选「无负责人」">
           <span class="cf-chips" id="personFilterChips"></span>
         </span>
-        <button type="button" class="cf-tree-btn" id="personFilterTreeBtn" onclick="openPersonFilterPicker(this)"
-                title="从【架构管理】的末级人员中批量勾选">🌳</button>
-        <div class="cf-drop" id="personFilterDrop" hidden></div>
       </span>
       <!-- 周数筛选：可输入（数字/周标签）+ 多选 -->
       <span class="combo-filter" id="weekFilterWrap">
@@ -3157,7 +3161,6 @@ async function reload(page){
 let WEEK_OPTIONS=[];      // 当前看板可选的周数（renderWeekFilter 维护）
 let FILTER_WEEK_CAND=[];  // 接口返回的全量可选周数（候选面板用，与上面互不覆盖）
 let WEEK_SEL=new Set();   // 已选周数（多选，任一命中）
-let PERSON_OPTIONS=[];    // 可选人员（权限可见范围内的负责人）
 let PERSON_SEL=new Set();  // 已选人员（多选；锚定 owner 字段）
 let FILTER_COMBO=null;    // 当前展开的候选面板：'person' | 'week' | null
 // 「无负责人」的特殊值（与后端 OWNER_NONE 一致）
@@ -3189,6 +3192,15 @@ function normWeekInput(raw){
 // 候选面板里显示的周数：把「2026年第41周」拆成「2026 · 第41周」便于阅读，
 // 但选中/提交时仍用标准标签。
 function weekLabelOf(v){return v.replace(/^(\d{4})年第(\d{1,2})周$/,'$1 · 第$2周')}
+// 周数排序键：把「2026年第41周」折成 202641 这样的**组合整数**再比。
+// ⚠️ 字符串排序会把「第3周」排到「第31周」后面（字典序 '3' > '1'），
+//    列表变成「第31周、第33周、第3周、第44周、第4周」这种乱序。
+// 规则与后端 week_sort_key 一致：按 (年, 周号) 数值对排序 → 等价 202601~202644。
+function weekSortKey(v){
+  const m=/^(\d{4})年第(\d{1,2})周$/.exec(String(v||'').trim());
+  if(m)return parseInt(m[1],10)*100+parseInt(m[2],10);
+  return 999999;   // 非标准标签统一排最后
+}
 
 // ---------- 候选面板的开关 ----------
 // openFilterCombo 是**幂等的「确保打开」**（不是 toggle）：
@@ -3205,12 +3217,6 @@ function closeFilterCombo(){
   FILTER_COMBO=null;
   paintFilterCombos();
 }
-// 点外部 → 收起候选面板（与下拉/树的关闭策略一致）
-function filterComboOutside(e){
-  if(!FILTER_COMBO)return;
-  const wrap=document.getElementById(FILTER_COMBO==='person'?'personFilterWrap':'weekFilterWrap');
-  if(wrap&&!wrap.contains(e.target))closeFilterCombo();
-}
 async function loadFilterOptions(kind){
   try{
     const d=await api('/api/filter-options');
@@ -3219,23 +3225,21 @@ async function loadFilterOptions(kind){
     //   WEEK_OPTIONS       = 当前看板下实际出现过的周数（renderWeekFilter 维护）
     // 早期实现把两者混用同一个变量 → 一打开候选面板，当前看板的周数就被全量替换，
     // 勾选后又会被 renderWeekFilter 收回去，表现为「选项忽多忽少」。
-    if(kind==='person')PERSON_OPTIONS=d.people||[];
-    else FILTER_WEEK_CAND=d.weeks||[];
+    // ⚠️ 周数按**组合整数序**（202601~202644）排序，不能用字符串序
+    //    （字符串序会把「第3周」排到「第31周」后面）。
+    FILTER_WEEK_CAND=(d.weeks||[]).slice().sort((a,b)=>weekSortKey(a)-weekSortKey(b));
   }catch(e){/* 候选拉取失败不阻断筛选 */}
   paintFilterCombos();
 }
-// 输入时：先在候选里找匹配项，找不到就允许「手工输入值」（周数归一 / 人员原样）
+// 输入时：先在候选里找匹配项，找不到就允许「手工输入值」（周数归一）
+// ⚠️ 人员筛选已改为「点击即开架构树」，输入/回车逻辑只服务周数控件。
 function onFilterComboInput(kind,val){
   paintFilterCombos();
+  if(kind!=='week')return;
   if(!val||!val.trim())return;
-  const v=val.trim();
-  if(kind==='week'){
-    const n=normWeekInput(v);
-    // 输入已完全匹配某个候选 → 直接选中（体验接近「回车即选」）
-    if(n&&WEEK_SEL.has(n)&&WEEK_OPTIONS.includes(n))return;
-  }else{
-    if(PERSON_SEL.has(v))return;
-  }
+  const n=normWeekInput(val.trim());
+  // 输入已完全匹配某个候选 → 直接选中（体验接近「回车即选」）
+  if(n&&WEEK_SEL.has(n)&&WEEK_OPTIONS.includes(n))return;
 }
 function onFilterComboKey(kind,ev){
   if(ev.key!=='Enter'){
@@ -3243,16 +3247,13 @@ function onFilterComboKey(kind,ev){
     return;
   }
   ev.preventDefault();
-  const inp=document.getElementById(kind==='person'?'personFilterInput':'weekFilterInput');
+  if(kind!=='week')return;
+  const inp=document.getElementById('weekFilterInput');
   const raw=(inp.value||'').trim();
   if(!raw)return;
-  if(kind==='week'){
-    const n=normWeekInput(raw);
-    if(!n){toast('周数格式应为 41 / 2026-41 / 2026年第41周');return}
-    WEEK_SEL.add(n);
-  }else{
-    PERSON_SEL.add(raw);
-  }
+  const n=normWeekInput(raw);
+  if(!n){toast('周数格式应为 41 / 2026-41 / 2026年第41周');return}
+  WEEK_SEL.add(n);
   inp.value='';
   paintFilterCombos();
   reload(1);
@@ -3278,28 +3279,12 @@ function clearFilterSel(kind){
 }
 // ---------- 渲染两个控件 ----------
 function paintFilterCombos(){
-  // 人员
+  // 人员（入口 = 架构树弹窗，这里只渲染已选 chips）
   const pWrap=document.getElementById('personFilterWrap');
   const pChips=document.getElementById('personFilterChips');
-  const pDrop=document.getElementById('personFilterDrop');
-  const pInp=document.getElementById('personFilterInput');
   if(pWrap)pWrap.classList.toggle('active',PERSON_SEL.size>0);
   if(pChips)pChips.innerHTML=[...PERSON_SEL].map(n=>
     `<span class="cf-chip" title="${esc(personLabel(n))}"><span>${esc(personLabel(n))}</span><i onclick="removeFilterChip('person','${esc(n)}')">×</i></span>`).join('');
-  if(pDrop){
-    const kw=((pInp&&pInp.value)||'').trim().toLowerCase();
-    const list=PERSON_OPTIONS.filter(n=>!kw||n.toLowerCase().includes(kw));
-    // ⚠️ 这里**不再**放「无负责人」条目 —— 它已移入【架构树】的「显示选项」
-    //    （树上以「无负责人」标签节点呈现，见 openPersonFilterPicker 的 showNoneOwner）。
-    //    同一个筛选维度只保留一个入口，避免两处重复且语义不一致。
-    pDrop.hidden=(FILTER_COMBO!=='person');
-    pDrop.innerHTML=(FILTER_COMBO!=='person')?'':
-      (list.length
-        ? `<div class="cf-tip">点击勾选（可多选）；此处的筛选条件按「负责人」维度生效</div>`
-          +list.map(n=>`<label class="cf-opt ${PERSON_SEL.has(n)?'on':''}"><input type="checkbox"${PERSON_SEL.has(n)?' checked':''} data-pick-person="${esc(n)}"><span>${esc(n)}</span></label>`).join('')
-          +`<label class="cf-opt" data-clear-person="1"><span style="color:var(--text3)">清空全部</span></label>`
-        : `<div class="cf-empty">${kw?'无匹配人员':'暂无可选人员（当前可见范围内没有负责人）'}</div>`);
-  }
   // 周数
   const wWrap=document.getElementById('weekFilterWrap');
   const wChips=document.getElementById('weekFilterChips');
@@ -3311,9 +3296,10 @@ function paintFilterCombos(){
   if(wDrop){
     const kw=((wInp&&wInp.value)||'').trim().toLowerCase();
     // 候选 = 接口全量周数 ∪ 当前看板已出现的周数（两者口径不同，都保留）
+    // ⚠️ 排序必须用 weekSortKey（组合整数序），不能用默认字符串序
     const cand=Array.from(new Set(FILTER_WEEK_CAND.concat(WEEK_OPTIONS)))
       .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw))
-      .sort();
+      .sort((a,b)=>weekSortKey(a)-weekSortKey(b));
     wDrop.hidden=(FILTER_COMBO!=='week');
     wDrop.innerHTML=(FILTER_COMBO!=='week')?'':
       (cand.length
@@ -3334,7 +3320,8 @@ function syncFilterHint(){
   box.textContent=parts.length?parts.join('  |  '):'';
 }
 function renderWeekFilter(weeks){
-  const list=(weeks||[]).filter(Boolean).slice().sort();
+  // ⚠️ 排序用 weekSortKey（组合整数序 202601~202644），不能用字符串序
+  const list=(weeks||[]).filter(Boolean).slice().sort((a,b)=>weekSortKey(a)-weekSortKey(b));
   // 当前看板已不存在的周数（换看板 / 被删）→ 丢弃已选项，避免筛出空列表。
   // 注意：**手工输入**的周数不在接口返回里，不能被误删 —— 用 _manualWeek 标记保护。
   if(WEEK_SEL.size){
@@ -3365,7 +3352,8 @@ async function openPersonFilterPicker(anchor){
     if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
-  }, {mode:'filter', pickMode:'person', width:340, height:420, tree:ORG_TREE, showNoneOwner:true});
+  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
+      showNoneOwner:true, keyword:''});
 }
 function applyPersonFilter(kind, persons){
   // 兼容旧调用点：人员筛选已统一锚定到「负责人」维度（owner 字段），
@@ -4748,7 +4736,9 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
   })(treeSource||[]);
   // showNoneOwner：是否提供「无负责人」这一独立显示选项（仅筛选场景用）
   const showNoneOwner=!!(opts&&opts.showNoneOwner);
-  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false};
+  // keyword：树内搜索词（person 模式）
+  const keyword=(opts&&opts.keyword)||'';
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false, keyword};
   // 「无负责人」若已在选中集合里（从筛选条件回填），则同步点亮该选项
   if(showNoneOwner&&TREE_PICK.selected.includes(OWNER_NONE))TREE_PICK.noneOwner=true;
   renderTreePick();
@@ -4812,7 +4802,15 @@ function renderTreePick(){
       <span class="tn-desc">负责人为空的成员</span>
       <button type="button" class="tn-clear" onclick="tpToggleNoneOwner()" title="取消「无负责人」筛选">✕</button>
     </div>`:'';
-  p.innerHTML=toolbar+optsBar+`
+  // 搜索框（person 模式）：按姓名过滤树上的人员。
+  // 筛选栏的人员控件已改为「点击即开树」，搜索能力随之移进树里。
+  const searchBar=TREE_PICK.pickMode==='person'?`
+    <div class="tp-search">
+      <input type="text" id="tp_search" class="tp-search-input" autocomplete="off"
+             placeholder="搜索人员姓名…" value="${esc(TREE_PICK.keyword||'')}"
+             oninput="tpSearch(this.value)" onkeydown="if(event.key==='Escape'){tpSearch('')}">
+    </div>`:'';
+  p.innerHTML=toolbar+searchBar+optsBar+`
     <div style="flex:1;overflow:auto;padding:2px 6px 6px;min-height:60px">${noneNode}${treePickNodes(TREE_PICK.tree,0)}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--border)">
       <span style="font-size:12px;color:var(--text3)">已选 <span id="tp_count">${TREE_PICK.selected.length}</span> 项</span>
@@ -4866,8 +4864,31 @@ function tpToggleNoneOwner(){
   else if(i>=0)TREE_PICK.selected.splice(i,1);
   renderTreePick();
 }
+// 树内搜索：按姓名过滤树上的**人员**（节点本身保留，便于看清层级归属）。
+// 搜索只是「显示过滤」，不改变 selected —— 勾选状态与搜索词互不影响。
+function tpSearch(kw){
+  if(!TREE_PICK)return;
+  TREE_PICK.keyword=(kw||'').trim().toLowerCase();
+  renderTreePick();
+  const inp=document.getElementById('tp_search');
+  if(inp&&document.activeElement!==inp){
+    inp.value=TREE_PICK.keyword;
+    inp.focus();
+    inp.setSelectionRange(inp.value.length,inp.value.length);
+  }
+}
+// 该节点在当前搜索词下是否需要显示（节点自身命中，或其子树里有命中的人员）
+function tpNodeMatches(n,kw){
+  if(!kw)return true;
+  const hitName=(n.name||'').toLowerCase().includes(kw);
+  if(hitName)return true;
+  const mem=(n.members||[]).filter(m=>!m.node_id||m.node_id===n.id);
+  if(mem.some(m=>(m.name||'').toLowerCase().includes(kw)))return true;
+  return (n.children||[]).some(tpNodeMatches);
+}
 function treePickNodes(nodes,dep){
-  return (nodes||[]).map(n=>{
+  const kw=TREE_PICK.keyword||'';
+  return (nodes||[]).filter(n=>!kw||tpNodeMatches(n,kw)).map(n=>{
     const hasCh=n.children&&n.children.length;
     const exp=TREE_PICK.expanded.has(n.id);
     const labelText=n.label||n.name;   // 优先显示 label（虚拟节点可定制文案）
@@ -4875,10 +4896,14 @@ function treePickNodes(nodes,dep){
     // 后端 members 里含「本节点 + 全部后代」的人员，若不过滤，同一个人会在
     // 父节点与子节点各出现一次（树上看就是同一批人重复、层级错乱）。
     // 过滤后每个人只出现在真正任职的那一层。
-    const members=(TREE_PICK.pickMode==='person')
+    const allMembers=(TREE_PICK.pickMode==='person')
       ? (n.members||[]).filter(m=>!m.node_id||m.node_id===n.id) : [];
+    // 搜索时只留姓名命中的人员（节点的层级结构保持不变）
+    const members=kw
+      ? allMembers.filter(m=>(m.name||'').toLowerCase().includes(kw))
+      : allMembers;
     // 有子节点**或**有直属人员 → 该节点才可展开
-    const hasBody=hasCh||members.length>0;
+    const hasBody=hasCh||allMembers.length>0;
     const memberHtml=members.map(m=>{
       const key=ORG_PERSON_PREFIX+m.name;
       const on=TREE_PICK.selected.includes(key);
@@ -5393,10 +5418,8 @@ document.addEventListener('click',e=>{
   if(t.closest('#yearFilter')||t.closest('#yearDrop')){onYearFilterClick(e);return}
   // 点其它地方 → 收起「＋ 年份」下拉
   closeYearDrop();
-  // 可输入筛选（人员 / 周数）：面板内点击 → 勾选 / 清空；点别处 → 收起
-  const pOpt=t.closest('#personFilterDrop [data-pick-person]');
-  if(pOpt){onFilterOptionClick('person',pOpt.getAttribute('data-pick-person'));return}
-  if(t.closest('#personFilterDrop [data-clear-person]')){clearFilterSel('person');return}
+  // 可输入筛选（周数）：面板内点击 → 勾选 / 清空；点别处 → 收起
+  // ⚠️ 人员筛选的入口已改为【架构树】弹窗，没有下拉面板了
   const wOpt=t.closest('#weekFilterDrop [data-pick-week]');
   if(wOpt){
     const w=wOpt.getAttribute('data-pick-week');
@@ -5404,7 +5427,7 @@ document.addEventListener('click',e=>{
     return;
   }
   if(t.closest('#weekFilterDrop [data-clear-week]')){clearFilterSel('week');return}
-  if(t.closest('#personFilterWrap')||t.closest('#weekFilterWrap'))return;
+  if(t.closest('#weekFilterWrap'))return;
   closeFilterCombo();
 });
 // 评论 @ 提及：候选项点击 + 已插入 chip 的移除
