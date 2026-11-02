@@ -151,24 +151,20 @@ button{font-family:inherit}
    用户指定的视觉顺序（**按行优先**，三列两行）：
        财务中心 | 商务部 | 核算部
        资金部   | 总账部 | 管理部
-   实现方式：**纯 CSS order**，不改动 JS 的部门数据来源与后端排序逻辑。
-   order 只影响 grid 子项的视觉排列，DOM 顺序与点击行为完全不变。
 
-   ⚠️ 映射表按 **DOM 序号 → 视觉次序** 写：
-   DOM 实际顺序（实测，后端 _dept_order() 给出）为
-       1 财务中心 / 2 核算部 / 3 总账部 / 4 管理部 / 5 资金部 / 6 商务部
-   而目标视觉顺序要求 财务中心→商务部→核算部→资金部→总账部→管理部，
-   因此 nth-child(6)=商务部 要排到第 2 位，nth-child(5)=资金部 排第 4 位，以此类推。
-   —— 若后端部门顺序发生变化，本映射需重新核对（DOM 序号 ≠ 部门名）。
-   另：因 CSS 无法按文本选中元素，此处依赖 nth-child 是唯一可行的纯 CSS 路径；
-   若要求「按部门名而非 DOM 序号」排序，需由主设计师在 JS 侧按名排序后交回。 */
-.tb-dept-band .tb-grid>*{order:0}
-.tb-dept-band .tb-grid>.tree-dept:nth-child(1){order:1}  /* DOM1 财务中心 → 视觉第1 */
-.tb-dept-band .tb-grid>.tree-dept:nth-child(6){order:2}  /* DOM6 商务部   → 视觉第2 */
-.tb-dept-band .tb-grid>.tree-dept:nth-child(2){order:3}  /* DOM2 核算部   → 视觉第3 */
-.tb-dept-band .tb-grid>.tree-dept:nth-child(5){order:4}  /* DOM5 资金部   → 视觉第4 */
-.tb-dept-band .tb-grid>.tree-dept:nth-child(3){order:5}  /* DOM3 总账部   → 视觉第5 */
-.tb-dept-band .tb-grid>.tree-dept:nth-child(4){order:6}  /* DOM4 管理部   → 视觉第6 */
+   实现方式：**在 JS 侧按部门名排序**（`sortDeptsByName()` / `DEPT_VISUAL_ORDER`），
+   DOM 顺序即视觉顺序，**不再使用 CSS order**。
+
+   ⚠️ 为什么不留 CSS `order`（2026-11-02 修订，见 T-003）：
+     CSS 无法按文本选中元素 → `order` 只能配 `:nth-child`，
+     而 `:nth-child` 匹配的是 **DOM 序号**，不是部门名。
+     映射表必须硬编码后端 `_dept_order()` 的返回顺序
+     （实测序：财务中心/核算部/总账部/管理部/资金部/商务部）。
+     **后端顺序一变（新增部门追加到末尾），映射表立刻失效、视觉顺序错乱。**
+     实测后端顺序由 `DEPT_ORDER` 常量 + 「新增部门按名称排后」动态拼成，
+     确实可能与映射表错位 → 改为 JS 按名排序后，此风险彻底消除。
+   → 好处：后端顺序变化**不再影响**视觉；且排序集中在 `groupBoardsByDept()`，
+     顶部部门带 / 部门切换下拉 / 初始选中部门 三处同步生效。 */
 /* ===== 需求2：可选板块默认两行，超出滚动 =====
    实测（1600px 视口）：板块行高 38px、行间距 6px（行距 44px），
    故两行净高 = 38 + 44 = 82px。超出部分由容器内滚动承载。 */
@@ -2170,8 +2166,29 @@ function expandOnly(name){
   saveDeptOpen();
 }
 // 分组：部门 -> 板块列表。
-// 部门顺序 = ME.depts（后端有序，与看板配置一致）；
+// 部门顺序 = DEPT_VISUAL_ORDER（**按部门名**指定的视觉顺序，与后端返回顺序无关）；
 // 部门内板块顺序 = ME.boards 原顺序（按 board_id 排序），保持与原标签页一致。
+//
+// ⚠️ 需求1 原先用「纯 CSS order + :nth-child」实现指定顺序，
+//    但 CSS 只能按 **DOM 序号** 选中元素 → 映射表必须硬编码后端的 DOM 顺序
+//    （实测序：财务中心/核算部/总账部/管理部/资金部/商务部）。
+//    **后端顺序一变（如新增部门追加到末尾），映射表立刻失效、视觉顺序错乱。**
+// → 改为**在 JS 侧按部门名排序**：DOM 顺序即视觉顺序，
+//    CSS 的 order 映射全部删除 → 后端顺序变化不再影响视觉。
+const DEPT_VISUAL_ORDER=['财务中心','商务部','核算部','资金部','总账部','管理部'];
+// 排序用：名录内的按名录位次，名录外的按名称（拼音）兜底排到后面
+function deptVisualRank(name){
+  const i=DEPT_VISUAL_ORDER.indexOf(name);
+  if(i>=0)return i;
+  return DEPT_VISUAL_ORDER.length+1;
+}
+function sortDeptsByName(list){
+  return (list||[]).slice().sort((a,b)=>{
+    const ra=deptVisualRank(a), rb=deptVisualRank(b);
+    if(ra!==rb)return ra-rb;
+    return String(a).localeCompare(String(b),'zh-Hans-CN');
+  });
+}
 // 未配置归属部门的板块单独归入「未配置」节点，不丢失、不混入其他部门。
 function groupBoardsByDept(){
   const depts=(ME.depts&&ME.depts.length)?ME.depts.slice():[];
@@ -2182,7 +2199,11 @@ function groupBoardsByDept(){
     if(d&&Object.prototype.hasOwnProperty.call(map,d)) map[d].push(b);
     else unassigned.push(b);
   });
-  return {depts:depts.map(d=>({name:d,boards:map[d]})),unassigned:unassigned};
+  // ⚠️ 顺序：**按部门名**排序（DEPT_VISUAL_ORDER），不沿用后端返回顺序。
+  //    后端顺序只保证「配置顺序」，一旦新增部门追加到末尾，视觉顺序就会漂。
+  //    排序放在这里 → 顶部部门带 / 部门切换下拉 / 初始选中部门 三处同步生效。
+  const ordered=sortDeptsByName(depts);
+  return {depts:ordered.map(d=>({name:d,boards:map[d]})),unassigned:unassigned};
 }
 // 单个板块 tab（部门分组内）
 function boardTabHtml(b,deptLabel){

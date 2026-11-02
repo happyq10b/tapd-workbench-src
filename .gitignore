@@ -5,3 +5,6 @@ app.db
 app.db-wal
 app.db-shm
 data/
+
+# 改动前的过程备份（不入库）
+*.bak
