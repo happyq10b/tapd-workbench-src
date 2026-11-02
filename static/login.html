@@ -9,12 +9,27 @@
 body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f0f2f5 0%,#e6f0fa 100%);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
 .card{background:#fff;border-radius:12px;padding:40px 36px;width:360px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 .logo{text-align:center;margin-bottom:24px}
-.logo .icon{width:56px;height:56px;border-radius:10px;background:#1890ff;display:inline-flex;align-items:center;justify-content:center;font-size:26px;margin-bottom:12px}
-.logo h1{font-size:20px;color:#1f1f1f}
-/* 品牌缩写徽标：跟在中文全名后面，小号浅色，不喧宾夺主 */
-.logo h1 .abbr{font-size:12px;font-weight:600;color:#8c98ad;margin-left:6px;letter-spacing:.5px}
-.logo .en{font-size:10.5px;color:#a3adc0;margin-top:5px;letter-spacing:.3px}
-.logo p{font-size:12px;color:#7a88a0;margin-top:4px}
+/* ===== 品牌字母标（2026-11-02 UI设计师）=====
+   原为 📊 emoji 图标 → 改为 **FISP** 字母标（英文缩写）。
+   理由：
+     ① emoji 是彩色插画风，与「更显商务」的诉求相悖；
+     ② 标题旁已有 FISP 徽标，图标位再放 emoji 会与整体品牌语言不统一；
+     ③ 字母标可随品牌色走，更像正经的企业系统标识。
+   做法：白字 + 品牌蓝底 + 加粗无衬线 + 收紧字距（letter-spacing 让 4 个字母更「实」）。 */
+.logo .icon{width:56px;height:56px;border-radius:10px;background:#1890ff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;
+  color:#fff;font-size:15px;font-weight:700;letter-spacing:.5px;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  box-shadow:0 2px 6px rgba(24,144,255,.28)}
+/* 标题：加字重 + 微字距 → 更有商务的稳重感（原来是常规字重的 20px） */
+.logo h1{font-size:20px;color:#1f1f1f;font-weight:600;letter-spacing:.6px}
+/* 品牌缩写徽标：~~跟在中文全名后面，小号浅色~~ 
+   ⚠️ 2026-11-02 UI设计师：图标改为 FISP 字母标后，标题右侧的 FISP 徽标**已移除**
+   （同一个缩写在同一屏出现两次 → 用户会以为有两个标识）。
+   → 登录页标识区现在的分工：图标=FISP 缩写 / 标题=中文全称 / 英文行=英文全称。
+   → 本条样式规则在登录页已无对应元素，保留供主界面 index.html 的同名写法参考
+     （index.html 的标题旁仍有徽标，那里没有图标块，不重复）。 */
+/* 英文全称行：加大字距 + 略提字号 → 全大写式的商务排版感 */
+.logo .en{font-size:10.5px;color:#a3adc0;margin-top:6px;letter-spacing:1.1px;font-weight:500;text-transform:uppercase}
+.logo p{font-size:12px;color:#7a88a0;margin-top:5px;letter-spacing:.4px}
 .field{margin-bottom:16px}
 .field label{display:block;font-size:13px;color:#8c8c8c;margin-bottom:6px;font-weight:500}
 .field input{width:100%;padding:11px 14px;border:1px solid #d5dce6;border-radius:8px;font-size:14px;outline:none;transition:border-color .15s}
@@ -36,9 +51,13 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
   background:#fff7e6;border:1px solid #ffd591;color:#ad6800}
 .lock-box.err{background:#fff1f0;border-color:#ffa39e;color:#cf1322}
 .lock-box b{font-variant-numeric:tabular-nums}
-button{padding:12px;border:none;border-radius:8px;background:#1890ff;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
+button{padding:12px;border:none;border-radius:8px;background:#1890ff;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s;
+  letter-spacing:2px;font-family:inherit}
 /* 登录按钮撑满；其他按钮（如小眼睛）由各自规则控制尺寸 */
 #btn{width:100%}
+/* 输入框/按钮统一继承页面字体 —— 否则各控件会用浏览器默认字体，
+   与标题字体不一致（中文尤其明显），整体显得不专业。 */
+.field input,.btn,.field input::placeholder{font-family:inherit}
 button:hover{opacity:.9}
 button:disabled{opacity:.5;cursor:not-allowed}
 .msg{margin-top:14px;font-size:13px;text-align:center;color:#d63c3c;min-height:18px}
@@ -48,8 +67,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
 <body>
 <div class="card">
   <div class="logo">
-    <div class="icon">📊</div>
-    <h1>财务综合事务平台<span class="abbr">FISP</span></h1>
+    <div class="icon" aria-hidden="true">FISP</div>
+    <h1>财务综合事务平台</h1>
     <p class="en">Financial Integrated Service Platform</p>
     <p>财务管理创造价值</p>
   </div>
