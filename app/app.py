@@ -691,113 +691,53 @@ def _arch_scope_boards(username: str, dept_boards: set) -> set:
         boards &= gb
     return boards
 
-# ---------------- ACL（负责人 / 参与人）----------------
-# 层级：看板（boards）与其下属板块（board_columns）各自带一组 ACL。
-#   owner         负责人（单个账号）
-#   participants  参与人（逗号分隔的账号）
+# ---------------- 负责人（owner）----------------
+# ⚠️ **语义在 2026-11-02 修订过（原为 ACL「仅负责人可见」）：**
 #
-# 判定语义（**关键**，避免把现有系统锁死）：
-#   · 该层级**未配置任何 ACL**（owner 与 participants 皆空）→ **不额外收窄**，
-#     可见性完全由既有的架构/白名单链决定；
-#   · 该层级**配置了 ACL**（owner 或 participants 任一非空）→ **仅 owner /
-#     participants 命中者可见**，且仍要与既有的架构/白名单链**取交集**
-#     （fail-closed：ACL 只能**再收窄**，不能凭空放大权限）。
+#   owner（负责人）= **看板 / 板块的管理权**，**不再收窄可见性**。
+#     · 看板负责人 → 有权修改该看板的基本信息（归属部门 / 属性 / 状态 / 备注）
+#     · 板块负责人 → 在【板块编辑】里配置，有权修改该板块基本信息
+#   · **谁能看见某个看板** → 统一由【架构管理】的看板绑定决定
+#     （部门归属 + 负责人负责范围 + 工作组绑定），与 owner 无关。
+#   · **参与人（participants）机制整体下线** —— 权限来源收敛为单一出处，
+#     避免出现「两套可见性规则互相打架」的历史包袱。
 #
 # ⚠️ 为什么 owner 存**账号**而不是姓名：账号是登录唯一标识，
 #    姓名可能重复或被改。展示时由 _member_display_name 映射成「姓名(账号)」。
+def board_owner(board_id: str) -> str:
+    """看板负责人账号（无则空串）"""
+    row = dbq('SELECT owner FROM boards WHERE board_id=? LIMIT 1', (board_id,))
+    return (row[0]['owner'] or '').strip() if row else ''
+
+
+def column_owner(col_key: str) -> str:
+    """板块负责人账号（无则空串）"""
+    row = dbq('SELECT owner FROM board_columns WHERE col_key=? LIMIT 1', (col_key,))
+    return (row[0]['owner'] or '').strip() if row else ''
+
+
+def is_board_manager(username: str, board_id: str) -> bool:
+    """该账号是否可管理该看板的基本信息：管理员，或该看板的负责人"""
+    if is_admin(username):
+        return True
+    o = board_owner(board_id)
+    return bool(o) and o == username
+
+
+def is_column_manager(username: str, col_key: str) -> bool:
+    """该账号是否可管理该板块的基本信息：管理员，或该板块的负责人"""
+    if is_admin(username):
+        return True
+    o = column_owner(col_key)
+    return bool(o) and o == username
+
+
 def _acl_set(raw) -> set:
-    """解析逗号/分号分隔的 ACL 名单 → 集合（去空白、去空项）"""
+    """（兼容保留）解析逗号/分号分隔的名单 → 集合。参与人机制已下线，仅供旧数据清理用。"""
     if not raw:
         return set()
     return {x.strip() for x in str(raw).replace(';', ',').split(',') if x.strip()}
 
-
-def _acl_hit(username: str, owner: str, participants: str) -> bool:
-    """该用户是否命中这条 ACL。**未配置 ACL 时返回 True（不额外收窄）**"""
-    o = (owner or '').strip()
-    parts = _acl_set(participants)
-    if not o and not parts:
-        return True                      # 未配置 → 不额外收窄
-    if o and o == username:
-        return True
-    return username in parts
-
-
-def board_acl_allows(username: str, board_id: str) -> bool:
-    """看板 ACL 判定：读 boards 表的 owner / participants"""
-    row = dbq('SELECT owner, participants FROM boards WHERE board_id=? LIMIT 1', (board_id,))
-    if not row:
-        return True                      # 看板不存在（派生看板）→ 不在此层拦截
-    d = dict(row[0])
-    return _acl_hit(username, d.get('owner'), d.get('participants'))
-
-
-def column_acl_allows(username: str, board_id: str, column_id: str) -> bool:
-    """板块 ACL 判定：读 board_columns 的 owner / participants
-
-    ⚠️ 板块没有登记元信息（历史脏数据 / cards 派生的隐式板块）→ 不在此层拦截。
-    """
-    if not column_id:
-        return True
-    row = dbq('SELECT owner, participants FROM board_columns WHERE column_id=? LIMIT 1', (column_id,))
-    if not row:
-        return True
-    d = dict(row[0])
-    return _acl_hit(username, d.get('owner'), d.get('participants'))
-
-
-def _acl_filter_boards(username: str, boards):
-    """按看板 ACL 收窄看板集合（boards=None 表示管理员全量 → 不收窄）"""
-    if boards is None:
-        return None
-    if not boards:
-        return boards
-    rows = dbq('SELECT board_id, owner, participants FROM boards')
-    denied = set()
-    for r in rows:
-        d = dict(r)
-        if d['board_id'] in boards and not _acl_hit(username, d.get('owner'), d.get('participants')):
-            denied.add(d['board_id'])
-    return boards - denied
-
-
-def _acl_filter_columns(username: str, boards, columns):
-    """按板块 ACL 收窄板块可见范围。
-
-    columns 的既有语义：None = 该看板内板块不额外收窄；
-    dict = {board_id: set(column_id)}，缺省键表示该看板不额外收窄。
-
-    ⚠️ ACL 只能在既有收窄之上**再收窄**：某板块若已被白名单排除，
-    ACL 命中也救不回来；某板块若白名单允许但 ACL 不命中 → 被排除。
-    """
-    out = {k: set(v) for k, v in (columns or {}).items()}
-    # 只处理**已可见看板**下的板块
-    targets = None if boards is None else boards
-    rows = dbq('SELECT column_id, board_id, owner, participants FROM board_columns')
-    # 预取「看板 → 全部板块 id」，避免逐条排除时反复查库（N+1）
-    board_cols = {}
-    for r in rows:
-        cid = r['column_id']
-        if cid:
-            board_cols.setdefault(r['board_id'], set()).add(cid)
-    denied = {}                          # board_id → 被 ACL 排除的板块 id
-    for r in rows:
-        cid = r['column_id']
-        if not cid:
-            continue
-        if targets is not None and r['board_id'] not in targets:
-            continue
-        if _acl_hit(username, r['owner'], r['participants']):
-            continue                      # ACL 命中 → 不额外排除
-        denied.setdefault(r['board_id'], set()).add(cid)
-    for bid, bad in denied.items():
-        cur = out.get(bid)
-        if cur is None:
-            # 该看板此前不收窄 → 现在要排除这些板块，
-            # 必须先把它在看板内的**全部板块**列出来，再排除目标。
-            cur = set(board_cols.get(bid, set()))
-        out[bid] = cur - bad
-    return out or None
 
 
 # ---------------- 数据不变量：每板块至少一个事项 ----------------
@@ -870,10 +810,9 @@ def user_allowed(username: str):
          无任何架构归属的成员 → 只能看公共看板（未归属部门 / 归属中心）；
       ② 账号级白名单（users.allowed_boards）与①取交集 —— '*' 表示不额外收窄；
       ③ 板块级白名单（users.allowed_columns）在可见看板内继续收窄板块；
-      ④ ACL 层（2026-11-02）—— 看板与板块各自的 owner（负责人）+ participants
-         （参与人）：**仅该账号是负责人或参与人时**才可见。
-         ⚠️ 未配置 ACL 的层级（owner 与 participants 皆空）**不额外收窄**，
-            可见性仍由 ①~③ 决定；配置后与 ①~③ 取**交集**（ACL 只能再收窄）。
+      ④ 负责人（owner）**不参与可见性判定**（2026-11-02 语义修订）——
+         负责人 = 看板 / 板块的**管理权**（可改基本信息），不是可见性开关。
+         谁能看见看板，完全由 ①~③ 决定；参与人（participants）机制已下线。
 
     【修复】此前普通用户的 boards 为 None（=全部）当且仅当「账号 allowed_boards='*'
     且架构层未收窄」，而架构层在「成员无归属」时返回 None（不收窄）→ 未接入架构的
@@ -900,11 +839,10 @@ def user_allowed(username: str):
             cols = {k: set(v) for k, v in json.loads(raw_c).items() if v} or None
         except Exception:
             cols = None
-    # ④ ACL 层（2026-11-02）：看板/板块各自的 owner + participants
-    #    与③取**交集**（fail-closed：ACL 只能再收窄，不能放大权限）。
-    #    未配置 ACL 的层级不额外收窄 → 现有看板（owner/participants 皆空）行为不变。
-    boards = _acl_filter_boards(username, boards)
-    cols = _acl_filter_columns(username, boards, cols)
+    # ④ 负责人层（2026-11-02 语义修订）：**不再收窄可见性**。
+    #    负责人 = 管理权（可改看板 / 板块基本信息），可见性完全由 ①~③ 决定。
+    #    旧实现里 ACL 层会把「配了 owner/参与人」的看板对其他人藏起来，
+    #    与【架构管理】的绑定规则互相打架 —— 现已移除该层。
     return boards, cols
 
 
@@ -1425,10 +1363,19 @@ def me(username: str = Depends(require_auth)):
     else:
         seen = {item.get('dept') for item in boards_out if item.get('dept')}
         dept_list = [d for d in _dept_order() if d in seen]
+    # 我管理的看板 / 板块（2026-11-02 负责人语义）：
+    #   负责人 = 管理权（可改该看板 / 板块的基本信息），不代表可见性。
+    #   前端据此决定「看板管理」入口是否显示给非管理员。
+    managed_boards = [r['board_id'] for r in
+                      dbq('SELECT board_id FROM boards WHERE owner=? AND owner<>?', (username, ''))]
+    managed_columns = [r['col_key'] for r in
+                       dbq('SELECT col_key FROM board_columns WHERE owner=? AND owner<>?', (username, ''))]
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'allowed_columns': col_info,
+            'managed_boards': managed_boards,      # 我是负责人的看板
+            'managed_columns': managed_columns,    # 我是负责人的板块
             'depts': dept_list}   # 有序部门清单（**按权限过滤**：只含有可见看板的部门）
 
 @app.get('/api/filter-options')
@@ -1670,6 +1617,10 @@ class ColumnUpdate(BaseModel):
     created_at: str = ''     # 创建日期
     nature: str = ''         # 性质
     year: str = ''           # 归属年份
+    owner: str = ''          # 板块负责人账号（'' = 不改；'__CLEAR__' = 清除）
+    # ⚠️ owner 语义（2026-11-02）：板块负责人 = 该板块的**管理权**，
+    #    在【板块编辑】弹窗里配置；不影响板块可见性（可见性由架构绑定决定）。
+    #    仅管理员可改负责人本身；板块负责人（editor）改其他字段不受此限。
 
 
 class ColumnPinReq(BaseModel):
@@ -1759,6 +1710,17 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_edito
     boards, _cols = user_allowed(username)
     if boards is not None and board_id not in boards:
         raise HTTPException(403, '无权编辑该板块')
+    # 板块负责人 = 该板块的管理权（2026-11-02）→ 负责人可改本板块基本信息。
+    # 非管理员必须是该板块的负责人才能改（require_editor 已保证 editor 及以上）。
+    if old and not is_admin(username) and not is_column_manager(username, req.col_key):
+        raise HTTPException(403, '只有管理员或该板块的负责人可以编辑板块信息')
+    # 负责人字段：**仅管理员可改**（负责人是板块的管理权，指定权归管理员）
+    owner_val = (req.owner or '').strip()
+    new_owner = None
+    if owner_val:
+        if not is_admin(username):
+            raise HTTPException(403, '只有管理员可以设置板块负责人')
+        new_owner = _norm_acl_owner('' if owner_val == '__CLEAR__' else owner_val)
     nature = (req.nature or '').strip() or (old['nature'] if old else '日常')
     if nature not in COLUMN_NATURES:
         raise HTTPException(400, '性质只能是「日常」或「专项」')
@@ -1775,19 +1737,22 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_edito
         dbe('UPDATE cards SET column_name=? WHERE board_id=? AND column_name=? AND deleted=0',
             (name, board_id, old_name))
     if old:
+        if new_owner is not None:
+            dbe('UPDATE board_columns SET owner=? WHERE col_key=?', (new_owner, req.col_key))
         dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=? WHERE col_key=?',
             (new_key, name, year, created, nature, req.col_key))
     else:
         new_cid = 'COL' + str(int(time.time() * 1000))
-        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
-            ' VALUES (?,?,?,?,?,?,?,?,0)',
-            (new_key, new_cid, board_id, name, created, username, nature, year))
+        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner)'
+            ' VALUES (?,?,?,?,?,?,?,?,0,?)',
+            (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or ''))
     log_action('__column__', username, 'update', f'编辑板块 {name}')
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
               f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': new_key, 'column_name': name, 'year': year,
-            'nature': nature, 'created_at': created}
+            'nature': nature, 'created_at': created,
+            'owner': (new_owner if new_owner is not None else (old['owner'] if old else ''))}
 
 
 @app.post('/api/columns/pin')
@@ -3677,17 +3642,16 @@ def list_boards(username: str = Depends(require_auth)):
     for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, created_at'
                  ' FROM board_config'):
         cfgs[r['board_id']] = dict(r)
-    # 看板 ACL（负责人 / 参与人）—— 供【看板管理】配置与展示
+    # 看板负责人 —— 供【看板管理】配置与展示（2026-11-02：只留负责人，参与人已下线）
     acl = {}
-    for r in dbq('SELECT board_id, owner, participants FROM boards'):
+    for r in dbq('SELECT board_id, owner FROM boards'):
         d = dict(r)
-        acl[d['board_id']] = {'owner': d.get('owner', ''),
-                              'participants': d.get('participants', '')}
+        acl[d['board_id']] = {'owner': d.get('owner', '')}
     out = []
     for b in boards:
         bid = b['board_id']
         c = cfgs.get(bid, {})
-        a = acl.get(bid, {'owner': '', 'participants': ''})
+        a = acl.get(bid, {'owner': ''})
         out.append({
             'board_id': bid,
             'board_name': b['board_name'],
@@ -3701,7 +3665,8 @@ def list_boards(username: str = Depends(require_auth)):
             'status': c.get('status', ''),
             'remark': c.get('remark', ''),
             'owner': a.get('owner', ''),
-            'participants': a.get('participants', ''),
+            # 该账号是否为该看板的负责人（决定能否修改该看板基本信息）
+            'is_owner': a.get('owner', '') == username,
         })
     return {'boards': out, 'depts': _dept_options()}
 
@@ -3721,15 +3686,21 @@ def list_board_config(username: str = Depends(require_auth)):
     return {'items': [dict(r) for r in rows]}
 
 @app.post('/api/board-config')
-def create_board_config(req: BoardConfigReq, username: str = Depends(require_admin), request: Request = None):
-    """为真实看板登记配置（仅管理员）。每个看板仅一条配置。
-    归属年份不在这里配置 —— 请在板块层设置（每个板块绑定唯一归属年份）。"""
+def create_board_config(req: BoardConfigReq, username: str = Depends(require_auth), request: Request = None):
+    """为真实看板登记配置。每个看板仅一条配置。
+    归属年份不在这里配置 —— 请在板块层设置（每个板块绑定唯一归属年份）。
+
+    权限（2026-11-02）：**管理员，或该看板的负责人**。
+    负责人 = 看板管理权（可改本看板的基本信息），见 is_board_manager()。
+    """
     bid = (req.board_id or '').strip()
     if not bid:
         raise HTTPException(400, '必须选择关联看板')
     if not dbq('SELECT 1 FROM boards WHERE board_id=?', (bid,)) and \
        not dbq('SELECT 1 FROM cards WHERE board_id=? AND deleted=0', (bid,)):
         raise HTTPException(404, '关联看板不存在')
+    if not is_board_manager(username, bid):
+        raise HTTPException(403, '只有管理员或该看板的负责人可以配置看板')
     attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
     dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
@@ -3750,7 +3721,12 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_adm
 
 # ---------------- API：ACL 配置（负责人 / 参与人）----------------
 class AclReq(BaseModel):
-    """ACL 配置请求：负责人（单个账号）+ 参与人（账号列表）"""
+    """负责人配置请求：owner = 负责人账号（单选）。
+
+    ⚠️ **participants（参与人）已下线**（2026-11-02）——
+       权限来源收敛为【架构管理】的看板绑定，避免两套规则互相打架。
+       字段保留仅为兼容旧客户端，传入会被忽略并清空。
+    """
     owner: str = ''
     participants: List[str] = []
 
@@ -3765,59 +3741,46 @@ def _norm_acl_owner(v: str) -> str:
     return o
 
 
-def _norm_acl_participants(items) -> str:
-    """参与人归一：去空白、去重、剔除不存在的账号 → 逗号分隔串"""
-    out, seen = [], set()
-    for x in (items or []):
-        x = (str(x or '')).strip()
-        if not x or x in seen:
-            continue
-        if not dbq('SELECT 1 FROM users WHERE username=? LIMIT 1', (x,)):
-            raise HTTPException(400, f'参与人账号「{x}」不存在')
-        seen.add(x)
-        out.append(x)
-    return ','.join(out)
-
-
 @app.put('/api/boards/{board_id}/acl')
 async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(require_admin),
                         request: Request = None):
-    """设置看板的负责人与参与人（仅管理员）。
+    """设置看板负责人（仅管理员）。
 
-    语义：该看板**配置了 ACL 后**，仅负责人与参与人可见（且仍与架构/白名单取交集）；
-    两者都清空 = 撤销该看板的 ACL，恢复由架构归属决定可见性。
+    语义（2026-11-02 修订）：负责人 = **该看板的管理权** —— 负责人有权修改
+    该看板的基本信息（归属部门 / 属性 / 状态 / 备注），**不影响谁能看到这个看板**
+    （可见性统一由【架构管理】的看板绑定决定）。
+    传空 owner = 撤销负责人。
     """
     bid = (board_id or '').strip()
     if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
         raise HTTPException(404, '看板不存在')
     owner = _norm_acl_owner(req.owner)
-    parts = _norm_acl_participants(req.participants)
-    dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, parts, bid))
+    # participants 一并清空：参与人机制已下线，历史值不再生效
+    dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, '', bid))
     audit_log(username, client_ip(request), 'board_acl', f'看板 {bid}',
-              f'设置看板 ACL：负责人={owner or "(无)"}，参与人={parts or "(无)"}', 'success')
+              f'设置看板负责人：{owner or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
-    return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': parts}
+    return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': ''}
 
 
 @app.put('/api/columns/{col_key}/acl')
 async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(require_admin),
                          request: Request = None):
-    """设置板块的负责人与参与人（仅管理员）。
+    """设置板块负责人（仅管理员）。
 
-    语义：与看板 ACL 同理 —— 配置后仅负责人与参与人可见该板块，
-    但**所属看板仍然可见**（只是该板块被隐藏）。
+    语义：与看板负责人一致 —— 板块负责人 = 该板块的**管理权**，
+    不影响板块可见性。配置入口在【板块编辑】弹窗里。
     """
     key = col_key or ''
     row = dbq('SELECT board_id, column_id FROM board_columns WHERE col_key=? LIMIT 1', (key,))
     if not row:
         raise HTTPException(404, '板块不存在')
     owner = _norm_acl_owner(req.owner)
-    parts = _norm_acl_participants(req.participants)
-    dbe('UPDATE board_columns SET owner=?, participants=? WHERE col_key=?', (owner, parts, key))
+    dbe('UPDATE board_columns SET owner=?, participants=? WHERE col_key=?', (owner, '', key))
     audit_log(username, client_ip(request), 'column_acl', f'板块 {key}',
-              f'设置板块 ACL：负责人={owner or "(无)"}，参与人={parts or "(无)"}', 'success')
+              f'设置板块负责人：{owner or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
-    return {'ok': True, 'col_key': key, 'owner': owner, 'participants': parts}
+    return {'ok': True, 'col_key': key, 'owner': owner, 'participants': ''}
 
 
 class BoardConfigBulkDeleteReq(BaseModel):
@@ -3897,11 +3860,17 @@ def bulk_delete_board_config(req: BoardConfigBulkDeleteReq, username: str = Depe
     return {'ok': True, 'deleted': deleted}
 
 @app.put('/api/board-config/{cid}')
-def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(require_admin), request: Request = None):
-    """更新看板配置（仅管理员）。board_id 创建后锁定，不可改挂其他看板。
-    ⚠️ 不含归属年份 —— 年份在板块层单独配置。"""
-    if not dbq('SELECT 1 FROM board_config WHERE id=?', (cid,)):
+def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(require_auth), request: Request = None):
+    """更新看板配置。board_id 创建后锁定，不可改挂其他看板。
+    ⚠️ 不含归属年份 —— 年份在板块层单独配置。
+
+    权限（2026-11-02）：**管理员，或该看板的负责人**（负责人 = 看板管理权）。
+    """
+    row = dbq('SELECT board_id FROM board_config WHERE id=?', (cid,))
+    if not row:
         raise HTTPException(404, '配置不存在')
+    if not is_board_manager(username, row[0]['board_id']):
+        raise HTTPException(403, '只有管理员或该看板的负责人可以修改看板信息')
     attr = req.attr.strip()
     status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
     dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
@@ -3915,11 +3884,13 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     return {'ok': True}
 
 @app.delete('/api/board-config/{cid}')
-def delete_board_config(cid: int, username: str = Depends(require_admin), request: Request = None):
-    """删除看板配置（仅管理员）"""
-    r = dbq('SELECT dept, attr FROM board_config WHERE id=?', (cid,))
+def delete_board_config(cid: int, username: str = Depends(require_auth), request: Request = None):
+    """删除看板配置。权限：管理员，或该看板的负责人。"""
+    r = dbq('SELECT board_id, dept, attr FROM board_config WHERE id=?', (cid,))
     if not r:
         raise HTTPException(404, '配置不存在')
+    if not is_board_manager(username, r[0]['board_id']):
+        raise HTTPException(403, '只有管理员或该看板的负责人可以删除看板配置')
     dbe('DELETE FROM board_config WHERE id=?', (cid,))
     row = r[0]
     audit_log(username, client_ip(request), 'board_config_delete',

@@ -1494,6 +1494,14 @@ function goLogin(){
       <div class="form-group" style="font-size:12px;color:var(--text3);line-height:1.7">年份绑定在<b>板块</b>层：每个板块一个归属年份；该板块下的事项各自归属自己的周数（如 2026 年第 41 周），<b>周数与年份不做强制校验</b>。</div>
       <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
       <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
+      <div class="form-group" id="c_owner_wrap"><label>板块负责人</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="c_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
+          <button type="button" class="icon-btn" id="c_owner_pick_btn" onclick="colPickOwner(this)" title="从架构树中选择负责人（单选）">🌳 选择负责人</button>
+          <button type="button" class="icon-btn" id="c_owner_clear_btn" onclick="colClearOwner()" title="清除负责人">✕</button>
+        </div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6">负责人有权修改该板块的基本信息。<b>谁能看见这个板块</b>由【架构管理】的看板绑定决定，与负责人无关。</div>
+      </div>
       <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
         <div class="radio-group">
           <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
@@ -1913,7 +1921,7 @@ function goLogin(){
         <div class="bc-left">
           <div class="bc-left-head">
             <span class="t">真实看板</span>
-            <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-default" style="padding:4px 11px;font-size:12px" onclick="configBoard()" title="为尚未配置的看板补齐年份/归属部门/属性/状态">+ 配置</button><button class="btn-primary" style="padding:4px 11px;font-size:12px" onclick="openBoardModal()" title="创建一个全新的看板">+ 新建看板</button></span>
+            <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-default" style="padding:4px 11px;font-size:12px" onclick="configBoard()" title="为尚未配置的看板补齐年份/归属部门/属性/状态">+ 配置</button><button class="btn-primary" id="bcNewBoardBtn" style="padding:4px 11px;font-size:12px" onclick="openBoardModal()" title="创建一个全新的看板">+ 新建看板</button></span>
           </div>
           <div class="bc-filter" id="bcFilter">
             <div class="bc-filter-row"><span class="lab">归属部门</span><select id="bcf_dept" onchange="bcFilterChange('dept',this.value)"></select></div>
@@ -2259,9 +2267,12 @@ function setupDraggableModals(){
 function applyPermissionUI(){
   if(!ME)return;
   const isAdmin=!!ME.is_admin, canEdit=!!ME.can_edit;
-  // 管理员专属：成员与账号 / 架构 / 看板管理 / 操作日志
-  [['teamBtn',isAdmin],['wgBtn',isAdmin],['boardConfigBtn',isAdmin],['auditBtn',isAdmin]]
+  // 管理员专属：成员与账号 / 架构 / 操作日志
+  [['teamBtn',isAdmin],['wgBtn',isAdmin],['auditBtn',isAdmin]]
     .forEach(function(p){const el=document.getElementById(p[0]);if(el)el.style.display=p[1]?'':'none';});
+  // 看板管理：管理员，或**任一看板的负责人**（负责人有权改自己看板的基本信息）
+  const bcBtn=document.getElementById('boardConfigBtn');
+  if(bcBtn)bcBtn.style.display=(isAdmin||((ME.managed_boards||[]).length>0))?'':'none';
   // 可编辑专属：新建板块
   const nb=document.getElementById('newBtn'); if(nb)nb.style.display=canEdit?'':'none';
   // 「更多」菜单里的写操作项：恢复（JSON 导入）、导入（xlsx）—— 需 editor 及以上
@@ -3912,7 +3923,7 @@ function renderBoard(cards,cols,q,colHits){
     const year=meta?(meta.year||''):'';
     // 标题点击 = 打开板块编辑界面；展开/收起只由左侧三角控制，两者互不干扰
     const titleEditable=canEditColumn(boardId);
-    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}"`;
+    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}"`;
     const titleHtml=titleEditable
       ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnEdit(this)" title="点击编辑板块">${esc(k)}</span>`
       :`<span class="week-title">${esc(k)}</span>`;
@@ -4770,6 +4781,61 @@ function syncYearFromDate(){
   if(COLUMN_MODE==='edit'){ if(!yEl.value)yEl.value=y; return; }
   if(!YEAR_TOUCHED)yEl.value=y;
 }
+// ---------- 板块负责人（owner）----------
+// ⚠️ 语义（2026-11-02）：板块负责人 = 该板块的**管理权**（可改板块基本信息），
+//    **不影响板块可见性**（可见性由【架构管理】的看板绑定决定）。
+//    配置入口在【板块编辑】弹窗里；选择器复用筛选栏「👤 人员」那套架构树（单选）。
+var COL_OWNER='';            // 当前板块负责人（账号）
+function colOwnerLabel(acc){
+  if(!acc)return '';
+  const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
+  return m?m.label:acc;
+}
+function colRenderOwner(){
+  const box=document.getElementById('c_owner_box');
+  if(box){
+    box.innerHTML=COL_OWNER
+      ? '<span class="cf-chip" title="'+esc(colOwnerLabel(COL_OWNER))+'">'+esc(colOwnerLabel(COL_OWNER))+'</span>'
+      : '<span style="font-size:12px;color:var(--text3)">未指定</span>';
+  }
+  const pb=document.getElementById('c_owner_pick_btn');
+  const cb=document.getElementById('c_owner_clear_btn');
+  const isAdmin=!!(ME&&ME.is_admin);
+  if(pb)pb.style.display=isAdmin?'':'none';
+  if(cb)cb.style.display=(isAdmin&&COL_OWNER)?'':'none';
+  const wrap=document.getElementById('c_owner_wrap');
+  if(wrap)wrap.style.display=isAdmin?'':'none';
+}
+function colPickOwner(anchor){
+  // ⚠️ 同上：架构树 + 「姓名 → 账号」映射都要就绪才能开树
+  Promise.all([
+    ORG_TREE.length?Promise.resolve() : ensureOrgTree(),
+    bcLoadAclMembers()
+  ]).then(function(){
+    if(!ORG_TREE.length){toast('架构数据为空');return;}
+    colOpenOwnerTree(anchor);
+  }).catch(function(){toast('架构数据加载失败');});
+}
+function colOpenOwnerTree(anchor){
+  // 树里选的是**姓名**，负责人字段存**账号** → 回填时按姓名反查账号
+  const cur=COL_OWNER?colMemberName(COL_OWNER):'';
+  openTreePick(anchor, cur?[ORG_PERSON_PREFIX+cur]:[], function(persons){
+    if(!persons||!persons.length)return;
+    const acc=bcAccountByName(persons[0]);
+    if(!acc){toast('该成员没有登录账号，无法设为负责人');return;}
+    COL_OWNER=acc;
+    colRenderOwner();
+  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE, keyword:'', requireAccount:true});
+}
+// 账号 → 姓名（板块负责人回显）
+function colMemberName(acc){
+  const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
+  return m?m.name:acc;
+}
+function colClearOwner(){
+  COL_OWNER='';
+  colRenderOwner();
+}
 function openColumnModal(){
   COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
   const boards=ME.boards;
@@ -4786,6 +4852,8 @@ function openColumnModal(){
   document.getElementById('c_creator').value=ME.username||'';
   const nat=document.querySelector('input[name="c_nature"]:checked');
   if(nat)nat.checked=true;
+  COL_OWNER='';
+  colRenderOwner();
   document.getElementById('c_modal_title').textContent='🗂️ 新建板块';
   document.getElementById('c_submit').textContent='创建板块';
   document.getElementById('c_tip').textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。';
@@ -4809,6 +4877,10 @@ function openColumnEdit(el){
   document.getElementById('c_creator').value=d.creator||ME.username||'';
   const nat=document.querySelector(`input[name="c_nature"][value="${d.nature||'日常'}"]`);
   if(nat)nat.checked=true;
+  // 板块负责人回填（账号）；映射（账号 → 姓名）可能尚未加载 → 先拉再渲染
+  COL_OWNER=d.owner||'';
+  bcLoadAclMembers().then(colRenderOwner);
+  colRenderOwner();
   document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
   document.getElementById('c_submit').textContent='保存';
   document.getElementById('c_tip').innerHTML='保存后板块名称、归属年份等立即生效。<b>修改板块名称会同步更新该板块下所有事项的所属板块</b>。';
@@ -4828,7 +4900,9 @@ async function saveColumn(){
   if(!/^\d{4}$/.test(year)){toast('归属年份应为 4 位数字，如 2026');return}
   try{
     if(COLUMN_MODE==='edit'){
-      await api('/api/columns',{method:'PUT',body:JSON.stringify({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year})});
+      // owner 只在管理员改负责人时提交（清空用 __CLEAR__）；其他情况留空 = 不改
+      const ownerPayload=(ME&&ME.is_admin)?{owner:(COL_OWNER||'__CLEAR__')}:{};
+      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload))});
       toast('板块已保存：'+column_name);
       closeModal('columnModal');
       reload(1);renderProgress();
@@ -5212,7 +5286,11 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
   const showNoneOwner=!!(opts&&opts.showNoneOwner);
   // keyword：树内搜索词（person 模式）
   const keyword=(opts&&opts.keyword)||'';
-  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false, keyword, keywordRaw:keyword};
+  // requireAccount：只保留**已开通登录账号**的人员（负责人场景用 ——
+  //   没账号的人没法登录，配成负责人等于配了个空）。
+  //   名单来自 BC_ACL_MEMBERS（由 /api/team 拉取，含 account）。
+  const requireAccount=!!(opts&&opts.requireAccount);
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false, keyword, keywordRaw:keyword, requireAccount};
   // 「无负责人」若已在选中集合里（从筛选条件回填），则同步点亮该选项
   if(showNoneOwner&&TREE_PICK.selected.includes(OWNER_NONE))TREE_PICK.noneOwner=true;
   renderTreePick();
@@ -5467,9 +5545,16 @@ function treePickNodes(nodes,dep){
       const on=TREE_PICK.selected.includes(key);
       // 人员框用 data-pbox 标记（同名人员可能在多个节点出现 → id 会冲突，
       // 改用属性选择器统一处理，重名也能各自正确显示勾选态）
+      // ⚠️ requireAccount 模式（负责人选择）：**未开通登录账号的人置灰不可选** ——
+      //    让他没法登录，配成负责人等于配了个空。
+      const noAcct=TREE_PICK.requireAccount&&!bcHasAccount(m.name);
+      const click=noAcct?'':`onclick="tpPersonClick('${esc(m.name)}')"`;
+      const keydown=noAcct?'':`onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpPersonClick('${esc(m.name)}')}"`;
+      const roleTag=m.role_name?`<span style="color:var(--text3);font-size:11px">（${esc(m.role_name)}）</span>`:'';
+      const noAcctTag=noAcct?`<span style="color:var(--text3);font-size:11px">（未开通账号）</span>`:'';
       return `<div class="tp-node tp-person" style="padding-left:${(dep+1)*16}px">
         <span class="tp-arrow" style="visibility:hidden">▶</span>
-        <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择人员 ${esc(m.name)}" onclick="tpPersonClick('${esc(m.name)}')" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpPersonClick('${esc(m.name)}')}"><span class="tp-box${on?' on':''}" data-pbox="${esc(m.name)}"></span><span>👤 ${esc(m.name)}${m.role_name?`<span style="color:var(--text3);font-size:11px">（${esc(m.role_name)}）</span>`:''}</span></label>
+        <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择人员 ${esc(m.name)}" ${click} ${keydown} style="${noAcct?'opacity:.45;cursor:not-allowed':''}"><span class="tp-box${on?' on':''}" data-pbox="${esc(m.name)}"></span><span>👤 ${esc(m.name)}${roleTag}${noAcctTag}</span></label>
       </div>`;
     }).join('');
     return `<div class="tp-node" style="padding-left:${dep*16}px">
@@ -7427,7 +7512,7 @@ var BC_BOARDS=[];
 var BC_SELECTED=null;
 var BC_SEL=new Set();     // 批量选中的**看板**（进入看板管理时默认【不选中】，由用户自行勾选）
 var BC_FORM={dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:'',
-          owner:'',participants:[]};   // ACL：负责人 / 参与人（账号）
+          owner:''};        // owner = 看板负责人（账号）
 var BC_FILTER={dept:'',attr:'',status:''};
 var BC_DEPTS=[];          // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
 var BC_DEPTS_LOADED=false;
@@ -7510,13 +7595,20 @@ function bcPaintPick(){
   }
 }
 async function openBoardConfigModal(){
-  if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
+  // 管理员，或任一看板的负责人（2026-11-02：负责人 = 看板管理权）
+  const isOwner=!!(ME&&(ME.managed_boards||[]).length);
+  if(!ME||(!ME.is_admin&&!isOwner)){toast('仅管理员或看板负责人可访问');return}
   await loadBoardConfig();
-  await bcLoadAclMembers();          // ACL 可选账号名单
+  await bcLoadAclMembers();          // 负责人回显用的账号 → 姓名映射
+  // 管理员专属：新建看板 / 删除所选（负责人只能改自己看板的基本信息）
+  const nb=document.getElementById('bcNewBoardBtn');
+  if(nb)nb.style.display=ME.is_admin?'':'none';
+  const db=document.getElementById('bcDelBtn');
+  if(db)db.style.display=ME.is_admin?'':'none';
   initBcListEvents();
   BC_SELECTED=null; BC_EDIT_ID=0;
   BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
-            owner:'',participants:[]};
+            owner:''};
   // 默认不选中：进入看板管理时所有**看板**均未勾选（需用户主动勾选）
   BC_SEL=new Set();
   renderBoardList();
@@ -7541,7 +7633,11 @@ function renderFilters(){
     +'<option value="未配置"'+(BC_FILTER.status==='未配置'?' selected':'')+'>未配置</option>';
 }
 function renderBoardList(){
+  // 非管理员（看板负责人）只列出**自己负责的看板** —— 负责人只对自己的看板有管理权
+  const managed=new Set((ME&&ME.managed_boards)||[]);
+  const onlyMine=!(ME&&ME.is_admin);
   const list=BC_BOARDS.filter(function(b){
+    if(onlyMine&&!managed.has(b.board_id))return false;
     if(BC_FILTER.dept && b.dept!==BC_FILTER.dept)return false;
     if(BC_FILTER.attr && b.attr!==BC_FILTER.attr)return false;
     if(BC_FILTER.status){
@@ -7616,7 +7712,7 @@ function bcSelect(bid){
   BC_SELECTED=b;
   BC_EDIT_ID=b.config_id||0;
   BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',
-          owner:b.owner||'',participants:String(b.participants||'').split(',').filter(function(x){return x})};
+          owner:b.owner||''};
   renderBoardList();
   renderEditArea();
 }
@@ -7625,7 +7721,7 @@ function configBoard(){
   if(!unconf.length){toast('所有看板均已配置');return;}
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
-  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
+  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:''};
   renderBoardList();
   renderEditArea();
 }
@@ -7700,11 +7796,14 @@ function renderEditArea(){
   const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FORM.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>';}).join('');
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
   const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
+  const isAdmin=!!(ME&&ME.is_admin);
   let footer='<div class="bc-footer">';
   if(isEdit){footer+='<button class="btn-secondary bc-del-single" onclick="bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该看板的配置（需一次确认）">删除该看板配置</button>';}
-  footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个看板</button>'
-    +'<button class="btn-secondary" onclick="saveBoardAcl()" title="设置该看板的负责人与参与人（仅他们可见）">保存访问权限</button>'
-    +'<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
+  // 批量应用 = 跨看板的管理操作 → 仅管理员
+  if(isAdmin)footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个看板</button>';
+  // 指定负责人 = 授予管理权 → 仅管理员
+  if(isAdmin)footer+='<button class="btn-secondary" onclick="saveBoardAcl()" title="设置该看板的负责人（负责人有权修改看板基本信息）">保存负责人</button>';
+  footer+='<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
     +'<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
   area.innerHTML='<div class="bc-edit">'
     +'<div class="bc-edit-title">'+(isEdit?'✏️ 编辑看板配置':'➕ 新建看板配置')+'<span class="sub">'+(isEdit?'修改该看板的维度属性':'为真实看板登记维度属性')+'</span></div>'
@@ -7720,74 +7819,113 @@ function renderEditArea(){
     +footer
     +'</div>';
 }
-// ---------- ACL（负责人 / 参与人）----------
-// 语义：给看板配置了负责人/参与人后，**仅他们可见该看板**（且仍与架构授权取交集）；
-// 两者都留空 = 不启用 ACL，可见性由【架构管理】决定。
-var BC_ACL_MEMBERS=[];      // 可选账号列表：{account, name, label}
+// ---------- 看板负责人（owner）----------
+// ⚠️ **语义在 2026-11-02 修订**：
+//   负责人 = 该看板的**管理权**（有权修改看板基本信息：归属部门 / 属性 / 状态 / 备注），
+//   **不再收窄可见性** —— 谁能看见这个看板，统一由【架构管理】的看板绑定决定。
+//   参与人（participants）机制**已下线**：权限来源收敛为单一出处，
+//   避免「看板管理的 ACL」与「架构管理的绑定」两套规则互相打架。
+//
+// 负责人选择器：**树状图单选**（参照筛选栏「👤 人员」那套架构树）——
+// 树里勾选末级人员 → 直接回填账号。
+var BC_ACL_MEMBERS=[];      // 账号 → 展示名 的映射（用于回显负责人）
 var BC_ACL_LOADED=false;
+var BC_ACL_LOADING=null;      // 并发加载去重
 async function bcLoadAclMembers(){
+  // ⚠️ 幂等 + 按需：板块编辑弹窗也会用到「账号 → 姓名」映射，
+  //    不能只在打开看板管理时才加载（否则板块编辑里回显不出来）。
   if(BC_ACL_LOADED)return;
-  try{
-    const res=await api('/api/team');
-    BC_ACL_MEMBERS=(res.members||res||[]).map(function(m){
-      const acc=m.account||'';
-      if(!acc)return null;                    // 没有登录账号的成员不能作为 ACL 主体
-      return {account:acc,name:m.name||acc,label:(m.name||acc)+(m.name&&m.name!==acc?'('+acc+')':'')};
-    }).filter(function(x){return x});
-    BC_ACL_LOADED=true;
-  }catch(e){ BC_ACL_MEMBERS=[]; }
+  if(BC_ACL_LOADING)return BC_ACL_LOADING;
+  BC_ACL_LOADING=(async function(){
+    try{
+      const res=await api('/api/team');
+      BC_ACL_MEMBERS=(res.members||res||[]).map(function(m){
+        const acc=m.account||'';
+        if(!acc)return null;                  // 没有登录账号的成员不能作为负责人
+        return {account:acc,name:m.name||acc,label:(m.name||acc)+(m.name&&m.name!==acc?'('+acc+')':'')};
+      }).filter(function(x){return x});
+      BC_ACL_LOADED=true;
+    }catch(e){ BC_ACL_MEMBERS=[]; }
+  })();
+  return BC_ACL_LOADING;
 }
 function aclMemberLabel(acc){
+  if(!acc)return '';
   const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
   return m?m.label:acc;
 }
 function renderAclSection(b){
   const owner=BC_FORM.owner||'';
-  const parts=(BC_FORM.participants||[]).slice();
-  const opts=BC_ACL_MEMBERS.map(function(m){
-    const sel=(owner===m.account)?' selected':'';
-    return '<option value="'+esc(m.account)+'"'+sel+'>'+esc(m.label)+'</option>';
-  }).join('');
-  const pOpts=BC_ACL_MEMBERS.map(function(m){
-    const sel=parts.indexOf(m.account)>=0?' selected':'';
-    return '<option value="'+esc(m.account)+'"'+sel+'>'+esc(m.label)+'</option>';
-  }).join('');
-  const pChips=parts.map(function(a){
-    return '<span class="cf-chip" title="'+esc(aclMemberLabel(a))+'">'+esc(aclMemberLabel(a))+'</span>';
-  }).join('');
-  return '<div class="bc-section"><div class="lab">访问权限（负责人 / 参与人）</div>'
-    +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
-    +'<div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">负责人（单人）</label>'
-    +'<select class="form-select" id="bc_owner" style="width:200px" onchange="BC_FORM.owner=this.value">'
-    +'<option value="">（不启用 ACL）</option>'+opts+'</select></div>'
-    +'<div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:12px;color:var(--text2)">参与人（多人）</label>'
-    +'<select class="form-select" id="bc_participants" multiple size="4" style="width:220px" onchange="bcSyncParticipants()">'
-    +pOpts+'</select></div></div>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px" id="bc_participant_chips">'+(pChips||'<span style="font-size:12px;color:var(--text3)">未选择</span>')+'</div>'
-    +'<div class="bc-hint">配置后仅<b>负责人与参与人</b>可见该看板（仍需在【架构管理】中被授权）；'
-    +'两者都留空则不启用 ACL，可见性完全由架构归属决定。</div></div>';
+  const label=owner?aclMemberLabel(owner):'';
+  // 只有管理员可以指定负责人（负责人是管理权的载体，指定权归管理员）
+  const canSetOwner=!!(ME&&ME.is_admin);
+  const ownerChip=owner
+    ? '<span class="cf-chip" title="'+esc(label)+'">'+esc(label)+'</span>'
+    : '<span style="font-size:12px;color:var(--text3)">未指定</span>';
+  return '<div class="bc-section"><div class="lab">看板负责人</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    +'<div id="bc_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:24px">'+ownerChip+'</div>'
+    +(canSetOwner?'<button type="button" class="icon-btn" onclick="bcPickOwner(this)" title="从架构树中选择负责人（单选）">🌳 选择负责人</button>':'')
+    +(owner&&canSetOwner?'<button type="button" class="icon-btn" onclick="bcClearOwner()" title="清除负责人">✕</button>':'')
+    +'</div>'
+    +'<div class="bc-hint"><b>负责人</b>有权修改该看板的基本信息（归属部门 / 属性 / 状态 / 备注）。'
+    +'<b>谁能看见这个看板</b>统一由【架构管理】的看板绑定决定，与负责人无关。'
+    +(canSetOwner?'':'（只有管理员可以指定负责人）')+'</div></div>';
 }
-function bcSyncParticipants(){
-  const sel=document.getElementById('bc_participants');
-  if(!sel)return;
-  BC_FORM.participants=Array.from(sel.selectedOptions).map(function(o){return o.value});
-  const box=document.getElementById('bc_participant_chips');
-  if(box){
-    box.innerHTML=BC_FORM.participants.length
-      ? BC_FORM.participants.map(function(a){return '<span class="cf-chip" title="'+esc(aclMemberLabel(a))+'">'+esc(aclMemberLabel(a))+'</span>';}).join('')
-      : '<span style="font-size:12px;color:var(--text3)">未选择</span>';
-  }
+// 树状图选负责人：复用筛选栏「👤 人员」那套架构树（ORG_TREE + pickMode:'person'），
+// 但**单选** —— 负责人只能有一个人。
+function bcPickOwner(anchor){
+  // ⚠️ 两份数据都要就绪才能开树：
+  //   ORG_TREE（架构树）→ 渲染人员
+  //   BC_ACL_MEMBERS（姓名 → 账号）→ 标出「未开通账号」的人
+  Promise.all([
+    ORG_TREE.length?Promise.resolve() : ensureOrgTree(),
+    bcLoadAclMembers()
+  ]).then(function(){
+    if(!ORG_TREE.length){toast('架构数据为空');return;}
+    bcOpenOwnerTree(anchor);
+  }).catch(function(){toast('架构数据加载失败');});
+}
+function bcOpenOwnerTree(anchor){
+  // ⚠️ 树里选的是**姓名**（ORG_TREE 的 members 只有 name），
+  //    而负责人字段存的是**账号** → 回填时按姓名反查账号。
+  const cur=BC_FORM.owner?bcMemberName(BC_FORM.owner):'';
+  openTreePick(anchor, cur?[ORG_PERSON_PREFIX+cur]:[], function(persons){
+    if(!persons||!persons.length)return;
+    const acc=bcAccountByName(persons[0]);
+    if(!acc){toast('该成员没有登录账号，无法设为负责人');return;}
+    BC_FORM.owner=acc;
+    renderEditArea();
+  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE, keyword:'', requireAccount:true});
+}
+// 账号 → 姓名（负责人回显用）
+function bcMemberName(acc){
+  const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
+  return m?m.name:acc;
+}
+// 姓名 → 账号（树里选的是姓名，负责人存账号）
+function bcAccountByName(name){
+  const m=BC_ACL_MEMBERS.filter(function(x){return x.name===name})[0];
+  return m?m.account:'';
+}
+// 该成员是否已开通登录账号（负责人必须是能登录的账号）
+function bcHasAccount(name){
+  return !!bcAccountByName(name);
+}
+function bcClearOwner(){
+  BC_FORM.owner='';
+  renderEditArea();
 }
 async function saveBoardAcl(){
   if(!BC_SELECTED){toast('请选择看板');return;}
   const bid=BC_SELECTED.board_id;
   try{
     await api('/api/boards/'+encodeURIComponent(bid)+'/acl',{method:'PUT',
-      body:JSON.stringify({owner:BC_FORM.owner||'',participants:BC_FORM.participants||[]})});
+      body:JSON.stringify({owner:BC_FORM.owner||''})});
     await loadBoardConfig();
     ME=await api('/api/me');
     renderTabs();
-    toast('看板访问权限已保存');
+    toast('看板负责人已保存');
   }catch(e){}
 }
 
