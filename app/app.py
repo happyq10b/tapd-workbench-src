@@ -512,6 +512,46 @@ def _member_workgroup_names(username):
     return [], 'none'
 
 
+def _member_appointed_nodes(username):
+    """该成员**直接被任命到的**架构节点 id 集合（不做向上提升）。
+
+    与 _member_authority_nodes 的区别：
+      · _member_authority_nodes：把小组节点**提升**到最近的部门/中心祖先，
+        用于回答「这个成员属于哪个部门」（展示用）；
+      · 本函数：保留**原始任命节点**，用于权限判定 ——
+        因为「小组的成员」与「部门的成员」可见的看板**不同**：
+          · 任命到部门(dept)/中心(center) → 可见该节点**自己拥有**的看板；
+          · 任命到小组(group)             → 可见该小组**自己绑定**的看板
+            （workgroups.boards，没绑定就是没有），
+            **不继承父部门的看板** ← 2026-11-02 修复（见 _dept_stage_boards）
+
+    返回 (node_ids:set, source:str)；source 同 _member_authority_nodes。
+    """
+    nmap = _org_node_map()
+    node_ids = set()
+    member_ids = [r['id'] for r in
+                  dbq('SELECT id FROM team_members WHERE account=? OR name=?', (username, username))]
+    if member_ids:
+        marks = ','.join('?' * len(member_ids))
+        for r in dbq(f'SELECT DISTINCT node_id FROM org_appointments WHERE member_id IN ({marks})',
+                     member_ids):
+            node_ids.add(r['node_id'])
+        if node_ids:
+            return node_ids, 'org'
+    # 回退：旧 workgroups 字段 → 映射到对应 org_nodes
+    wg_by_name = {r['name']: r['id'] for r in dbq('SELECT id, name FROM workgroups')}
+    node_by_wg = {n['wg_id']: n['id'] for n in nmap.values() if n.get('wg_id')}
+    for r in dbq('SELECT workgroups FROM team_members WHERE account=? OR name=?', (username, username)):
+        for nm in (r['workgroups'] or '').split(';'):
+            nm = nm.strip()
+            if not nm:
+                continue
+            nid = node_by_wg.get(wg_by_name.get(nm, 0))
+            if nid:
+                node_ids.add(nid)
+    return node_ids, ('legacy' if node_ids else 'none')
+
+
 def _member_dept_scope(username):
     """成员的归属部门范围（部门层级节点 id 集合）。
 
@@ -527,7 +567,10 @@ def _dept_stage_boards(username):
     """第一层过滤（归属部门）：成员可见的看板集合。
 
     规则（**fail-closed**：本层永远返回显式集合，不再用 None 兼表「全部」）：
-      1) 成员挂靠部门的看板 —— 该部门拥有的看板对成员可见；
+      1) 成员**挂靠部门**的看板 —— 该部门拥有的看板对成员可见；
+         ⚠️ **小组(group)不按父部门算**（2026-11-02 修复）：
+            小组成员的可见范围 = 该小组**自己绑定**的看板，
+            小组没绑定 = 没有。详见下方注释。
       2) 中心级归属的看板 —— 对全员展示（财务中心 = 管理层全范围）；
       3) 未归属部门的看板 —— 全员可见（对应目录树里的「未配置」节点）；
       4) 成员挂靠的是中心 → 管理层全范围（全部看板）；
@@ -545,52 +588,95 @@ def _dept_stage_boards(username):
         nid = owner.get(bid, 0)
         if not nid or nid in centers:
             public.add(bid)
-    scope = _member_dept_scope(username)
+    # ⚠️ **用「原始任命节点」而不是「向上提升后的部门」**（2026-11-02 修复）
+    #
+    # 此前 scope 来自 _member_authority_nodes()，它把**小组节点提升**到最近的
+    # 部门祖先 → 小组（费用组/税务组）的成员被当成「核算部的成员」，
+    # 继承了核算部拥有的**全部看板**。
+    # 但小组既然**没有绑定任何看板**（workgroups.boards 为空），
+    # 它的成员就**不该看到那些看板** —— 小组成员与部门成员的可见范围必须不同。
+    #
+    # 修正后的分节点类型语义（与 _node_bound_boards 完全一致）：
+    #   · 任命到部门(dept)/中心(center) → 该节点**自己拥有**的看板；
+    #   · 任命到小组(group)              → 该小组**自己绑定**的看板
+    #     （workgroups.boards；没绑定 = 没有），**不继承父部门**。
+    scope = _member_appointed_nodes(username)[0]
     if not scope:
         return public                   # 无架构归属 → 只能看公共看板
-    if scope & centers:
-        return set(all_ids)             # 挂靠中心 = 管理层全范围
+    nmap = _org_node_map()
     owned = _dept_owned_boards()
+    wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+    # 挂靠中心 = 管理层全范围（中心层仍然优先）
+    if any(nmap.get(nid, {}).get('node_type') == 'center' for nid in scope):
+        return set(all_ids)
     visible = set(public)
-    for nid in scope:                    # 挂靠部门拥有的看板
-        visible |= owned.get(nid, set())
+    for nid in scope:
+        node = nmap.get(nid)
+        if not node:
+            continue
+        visible |= _node_bound_boards(node, owned, wg_by_id)
     return visible
 
 
 def _group_boards(username: str):
-    """第三层过滤（工作组绑定）：成员所属工作组的**显式**看板白名单。
+    """第三层过滤（工作组绑定）：成员**所属节点自己**的显式看板绑定。
 
-    返回 set(board_id) = 已配置白名单（按它收窄）；
+    返回 set(board_id) = 已配置白名单（按它**再收窄**）；
     返回 None = 未配置绑定（不收窄，跟随前两层的结果）。
 
-    【修复】此前这里把「归属部门自有的看板」并进白名单，导致本层算出来的
-    集合永远覆盖前面两层的可见范围 → 白名单**收窄不了任何东西**（等于失效）。
-    现在只取 workgroups.boards 里手工勾选的看板，部门自有看板归第一层管。
+    ⚠️ **不再沿父链向上收集**（2026-11-02 修复）：
+       此前会沿 workgroups 父链一路向上收，导致
+       「费用组成员」拿到「核算部」上绑的看板、「核算部成员」拿到「财务中心」旁的绑定。
+       节点的绑定**只属于该节点自己** —— 与 _node_bound_boards 的分类型口径一致：
+         · 部门/中心 → 该节点自己拥有的看板（归第一层 _dept_stage_boards 管）
+         · 小组     → 该小组自己勾选的看板（workgroups.boards；没勾 = 没有）
+
+    ⚠️ 与第一层（_dept_stage_boards）的分工（2026-11-02 澄清）：
+       · 第一层：算「成员被任命到的节点**各自**拥有/绑定了哪些看板」→ 并集，**放大**；
+         小组节点的绑定在这里就已经生效（_node_bound_boards）。
+       · 本层：**账号级显式白名单**（收窄）——
+         成员被任命到小组且该小组勾选了看板 → 该白名单把可见范围**限制**到这些看板。
+       两者语义相反，不可混用；小组成员既能看到本组绑定的看板，
+       又不会因为「同部门的其他人能看到更多」而越权。
     """
     if is_admin(username):
         return None
-    # 架构管理优先：成员在架构管理里有任命时，用任命节点推导出的工作组名；
-    # 否则回退旧 workgroups 字段。与 _member_dept_scope 同源，保证两层口径一致。
-    names, _src = _member_workgroup_names(username)
-    if not names:
-        return None
-    all_rows = dbq('SELECT id, name, parent_id, boards FROM workgroups')
-    by_id = {r['id']: r for r in all_rows}
-    by_name = {r['name']: r for r in all_rows}
+    # 架构管理优先：成员在架构管理里有任命时，用其**被任命到的节点**；
+    # 否则回退旧 workgroups 字段。
+    node_ids, _src = _member_appointed_nodes(username)
     merged = set()
     bound = False
-    for nm in names:
-        cur = by_name.get(nm)
-        # 沿父链向上收集（含自身）：上级部门绑定自动传导到部门内成员；
-        # 最顶层（财务中心）不参与成员白名单——其"全部看板"是中心管理范围，不代表成员可见范围
-        while cur and cur['parent_id'] != 0:
+    if node_ids:
+        nmap = _org_node_map()
+        wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+        for nid in node_ids:
+            node = nmap.get(nid)
+            if not node:
+                continue
+            # 只取**小组节点自己的**显式绑定（部门/中心的归属看板归第一层管）
+            if node.get('node_type') != 'group':
+                continue
+            raw = (wg_by_id.get(node.get('wg_id') or 0, {}).get('boards') or '').strip()
+            if raw == '*':
+                return None  # 显式绑定全部 → 本层不收窄
+            if raw:
+                bound = True
+                merged |= {x for x in raw.split(',') if x}
+    else:
+        # 回退：旧 workgroups 字段（只有旧字段、没有架构任命时）
+        names, _src = _member_workgroup_names(username)
+        all_rows = dbq('SELECT id, name, parent_id, boards FROM workgroups')
+        by_name = {r['name']: r for r in all_rows}
+        for nm in names:
+            cur = by_name.get(nm)
+            if not cur:
+                continue
             b = (cur['boards'] or '').strip()
             if b == '*':
-                return None  # 任一节点显式绑定全部 → 本层不收窄
+                return None
             if b:
                 bound = True
-                merged |= set(x for x in b.split(',') if x)
-            cur = by_id.get(cur['parent_id']) if cur['parent_id'] else None
+                merged |= {x for x in b.split(',') if x}
     return merged if bound else None
 
 
