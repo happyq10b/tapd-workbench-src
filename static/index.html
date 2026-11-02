@@ -596,6 +596,29 @@ button{font-family:inherit}
 .tree-pick{position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-lg);z-index:900;font-size:13px}
 .tp-node{display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:4px;white-space:nowrap}
 .tp-node:hover{background:rgba(47,128,237,.06)}
+/* 树弹窗顶部工具栏：标题 + 批量展开/折叠 */
+.tp-toolbar{display:flex;align-items:center;gap:8px;padding:7px 10px 5px;flex-shrink:0}
+.tp-toolbar .tp-title{font-size:12px;color:var(--text2);flex:1;min-width:0}
+.tp-tool-btn{border:1px solid var(--border);background:#fff;color:var(--text2);border-radius:4px;
+  font-size:11.5px;padding:2px 8px;cursor:pointer;white-space:nowrap;flex-shrink:0;line-height:1.5}
+.tp-tool-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
+.tp-tool-btn:active{background:#e6f0ff}
+/* 树弹窗的「显示选项」区：与其它筛选条件并列，各项可独立启用 */
+.tp-opts{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0 10px 7px;
+  border-bottom:1px solid var(--border);margin-bottom:4px;flex-shrink:0}
+.tp-opts .tp-opts-label{font-size:11.5px;color:var(--text3);flex-shrink:0}
+.tp-opt{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text);cursor:pointer;white-space:nowrap}
+.tp-opt input{width:13px;height:13px;accent-color:var(--primary);cursor:pointer;margin:0}
+/* 「无负责人」节点：树上以标签样式呈现（虚线框 + 灰底），区别于真实人员 */
+.tp-none-node{margin:2px 6px 6px;padding:4px 8px;border:1px dashed #b7d4f7;border-radius:5px;
+  background:#f7faff;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text2)}
+.tp-none-node:hover{background:#eef5ff}
+.tp-none-node .tn-tag{font-size:10.5px;color:#185fa5;background:#e6f1fb;border:1px solid #b5d4f4;
+  border-radius:3px;padding:0 5px;flex-shrink:0}
+.tp-none-node .tn-desc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-none-node .tn-clear{flex-shrink:0;border:none;background:transparent;color:var(--text3);
+  cursor:pointer;font-size:12px;line-height:1;padding:0 2px;border-radius:3px}
+.tp-none-node .tn-clear:hover{color:var(--danger);background:#fff}
 .tp-arrow{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);font-size:10px;flex-shrink:0;border-radius:3px}
 .tp-arrow:hover{background:rgba(47,128,237,.12);color:var(--primary)}
 .tp-label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--text);flex:1;position:relative;outline:none;border-radius:3px}
@@ -3266,15 +3289,13 @@ function paintFilterCombos(){
   if(pDrop){
     const kw=((pInp&&pInp.value)||'').trim().toLowerCase();
     const list=PERSON_OPTIONS.filter(n=>!kw||n.toLowerCase().includes(kw));
-    // 「无负责人」是原「全部负责人」下拉里的一档，下线下拉后并入人员面板
-    const noneOpt=(!kw||'无负责人'.includes(kw)||'none'.includes(kw))
-      ? `<label class="cf-opt ${PERSON_SEL.has(OWNER_NONE)?'on':''}"><input type="checkbox"${PERSON_SEL.has(OWNER_NONE)?' checked':''} data-pick-person="${OWNER_NONE}"><span>无负责人</span></label>`
-      : '';
+    // ⚠️ 这里**不再**放「无负责人」条目 —— 它已移入【架构树】的「显示选项」
+    //    （树上以「无负责人」标签节点呈现，见 openPersonFilterPicker 的 showNoneOwner）。
+    //    同一个筛选维度只保留一个入口，避免两处重复且语义不一致。
     pDrop.hidden=(FILTER_COMBO!=='person');
     pDrop.innerHTML=(FILTER_COMBO!=='person')?'':
-      ((list.length||noneOpt)
+      (list.length
         ? `<div class="cf-tip">点击勾选（可多选）；此处的筛选条件按「负责人」维度生效</div>`
-          +noneOpt
           +list.map(n=>`<label class="cf-opt ${PERSON_SEL.has(n)?'on':''}"><input type="checkbox"${PERSON_SEL.has(n)?' checked':''} data-pick-person="${esc(n)}"><span>${esc(n)}</span></label>`).join('')
           +`<label class="cf-opt" data-clear-person="1"><span style="color:var(--text3)">清空全部</span></label>`
         : `<div class="cf-empty">${kw?'无匹配人员':'暂无可选人员（当前可见范围内没有负责人）'}</div>`);
@@ -3333,17 +3354,18 @@ async function openPersonFilterPicker(anchor){
   try{ await ensureOrgTree(true); }catch(e){ toast('架构数据加载失败'); return; }
   if(!ORG_TREE.length){ toast('架构数据为空'); return; }
   // 已选人员回填进树（避免每次打开都从零开始）。
-  // ⚠️ 特殊值「无负责人」不是架构里的真实人员，不参与树回填（否则永远匹配不上），
-  //    但它属于同一个筛选维度，勾选人员时予以保留。
-  const cur=[...PERSON_SEL].filter(n=>n!==OWNER_NONE).map(n=>ORG_PERSON_PREFIX+n);
-  openTreePick(anchor, cur, (persons)=>{
-    if(!persons||!persons.length){ toast('未选择人员'); return; }
-    const keepNone=PERSON_SEL.has(OWNER_NONE);
-    PERSON_SEL=new Set(persons);
-    if(keepNone)PERSON_SEL.add(OWNER_NONE);
+  // ⚠️ 特殊值「无负责人」不是架构里的真实人员，**不带** __P__ 前缀回填
+  //    （否则永远匹配不上）—— 它由树上的独立「无负责人」选项承载，
+  //    以裸值 OWNER_NONE 放入 selected，树侧据此点亮该选项。
+  const cur=[...PERSON_SEL].map(n=>n===OWNER_NONE?OWNER_NONE:ORG_PERSON_PREFIX+n);
+  openTreePick(anchor, cur, (persons,meta)=>{
+    const wantNone=!!(meta&&meta.none);
+    if((!persons||!persons.length)&&!wantNone){ toast('未选择人员'); return; }
+    PERSON_SEL=new Set(persons||[]);
+    if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
-  }, {mode:'filter', pickMode:'person', width:340, height:420, tree:ORG_TREE});
+  }, {mode:'filter', pickMode:'person', width:340, height:420, tree:ORG_TREE, showNoneOwner:true});
 }
 function applyPersonFilter(kind, persons){
   // 兼容旧调用点：人员筛选已统一锚定到「负责人」维度（owner 字段），
@@ -4717,14 +4739,18 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
     (function flat2(ns){ (ns||[]).forEach(n=>{ (n.members||[]).forEach(m=>personNames.add(m.name)); flat2(n.children||[]); }); })(treeSource||[]);
   }
   const okSel=(x)=>pickMode==='person'
-    ? (personNames.has(x)||x.startsWith(ORG_PERSON_PREFIX))
+    ? (personNames.has(x)||x.startsWith(ORG_PERSON_PREFIX)||x===OWNER_NONE)
     : (validNames.has(x)||x.startsWith('__'));
   // 展开状态从全局存储恢复（跨弹窗、跨数据刷新保持一致）
   const expanded=new Set();
   (function collect(ns){
     (ns||[]).forEach(n=>{ if(TREE_EXPANDED.has(n.id))expanded.add(n.id); collect(n.children||[]); });
   })(treeSource||[]);
-  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames};
+  // showNoneOwner：是否提供「无负责人」这一独立显示选项（仅筛选场景用）
+  const showNoneOwner=!!(opts&&opts.showNoneOwner);
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false};
+  // 「无负责人」若已在选中集合里（从筛选条件回填），则同步点亮该选项
+  if(showNoneOwner&&TREE_PICK.selected.includes(OWNER_NONE))TREE_PICK.noneOwner=true;
   renderTreePick();
   const ph=Math.min(panel.offsetHeight, maxH);          // 真实渲染高度（关键：消除估算高度导致的空隙）
   const vh=window.innerHeight, vw=window.innerWidth;
@@ -4764,9 +4790,30 @@ function renderTreePick(){
     : (TREE_PICK.mode==='filter'
     ? '架构筛选（点击 ▶ 展开，多选）'
     : '选择工作组（点击 ▶ 展开 / 折叠，选中上级将自动全选下级）');
-  p.innerHTML=`
-    <div style="font-size:12px;color:var(--text2);padding:8px 10px 4px">${title}</div>
-    <div style="flex:1;overflow:auto;padding:2px 6px 6px;min-height:60px">${treePickNodes(TREE_PICK.tree,0)}</div>
+  // 顶部工具栏：标题 + 一键展开/折叠全部（多级批量操作）
+  // 折叠全部时**保留顶层节点可见**（顶层节点行本身不收起，只收起它的下级）
+  const toolbar=`
+    <div class="tp-toolbar">
+      <span class="tp-title">${title}</span>
+      <button type="button" class="tp-tool-btn" onclick="tpExpandAll()" title="展开全部节点（含所有层级）">展开全部</button>
+      <button type="button" class="tp-tool-btn" onclick="tpCollapseAll()" title="折叠全部节点（保留顶层节点可见）">折叠全部</button>
+    </div>`;
+  // 显示选项：与现有筛选条件并列，「无负责人」可独立启用
+  // 启用后 → 树上以「无负责人」标签/节点样式呈现（表示当前正在按「负责人为空」筛选）
+  const optsBar=TREE_PICK.showNoneOwner?`
+    <div class="tp-opts">
+      <span class="tp-opts-label">显示选项</span>
+      <label class="tp-opt"><input type="checkbox" id="tp_opt_none"${TREE_PICK.noneOwner?' checked':''} onchange="tpToggleNoneOwner()"><span>无负责人</span></label>
+    </div>`:'';
+  // 「无负责人」节点：独立的一行标签（不混入树的层级结构，保持层级不变）
+  const noneNode=TREE_PICK.showNoneOwner&&TREE_PICK.noneOwner?`
+    <div class="tp-none-node">
+      <span class="tn-tag">无负责人</span>
+      <span class="tn-desc">负责人为空的成员</span>
+      <button type="button" class="tn-clear" onclick="tpToggleNoneOwner()" title="取消「无负责人」筛选">✕</button>
+    </div>`:'';
+  p.innerHTML=toolbar+optsBar+`
+    <div style="flex:1;overflow:auto;padding:2px 6px 6px;min-height:60px">${noneNode}${treePickNodes(TREE_PICK.tree,0)}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--border)">
       <span style="font-size:12px;color:var(--text3)">已选 <span id="tp_count">${TREE_PICK.selected.length}</span> 项</span>
       <span style="display:flex;gap:8px;align-items:center">
@@ -4782,6 +4829,42 @@ function renderTreePick(){
     const _all=[]; (function w(ns){ (ns||[]).forEach(n=>{ _all.push(n.name); w(n.children||[]); }); })(TREE_PICK.tree);
     _abtn.textContent=(_all.length>0 && _all.every(x=>TREE_PICK.selected.includes(x)))?'取消全选':'全选';
   }
+}
+// ---------- 一键展开 / 折叠全部（多级批量） ----------
+// ⚠️ 只操作**展开状态**（TREE_EXPANDED / TREE_PICK.expanded），
+//    完全不碰 selected —— 展开/折叠与筛选条件互不影响。
+function tpExpandAll(){
+  if(!TREE_PICK)return;
+  const ids=[];
+  (function walk(ns){
+    (ns||[]).forEach(n=>{
+      const hasCh=n.children&&n.children.length;
+      const mem=(TREE_PICK.pickMode==='person')?((n.members||[]).length):0;
+      if(hasCh||mem)ids.push(n.id);          // 有下级才需要展开
+      walk(n.children||[]);
+    });
+  })(TREE_PICK.tree||[]);
+  ids.forEach(id=>{TREE_EXPANDED.add(id);TREE_PICK.expanded.add(id);});
+  renderTreePick();
+}
+function tpCollapseAll(){
+  if(!TREE_PICK)return;
+  // 清空展开集合 → 所有节点的下级收起，**顶层节点行仍可见**（顶层节点本身不藏）
+  TREE_EXPANDED.clear();
+  TREE_PICK.expanded.clear();
+  renderTreePick();
+}
+// 「无负责人」显示选项：独立开关，启用后树上出现「无负责人」节点
+// ⚠️ 只操作 noneOwner 与 selected 里的 OWNER_NONE，**不碰展开状态** ——
+//    展开/折叠与筛选条件互不影响。
+function tpToggleNoneOwner(){
+  if(!TREE_PICK||!TREE_PICK.showNoneOwner)return;
+  const on=!TREE_PICK.noneOwner;
+  TREE_PICK.noneOwner=on;
+  const i=TREE_PICK.selected.indexOf(OWNER_NONE);
+  if(on){ if(i<0)TREE_PICK.selected.push(OWNER_NONE); }
+  else if(i>=0)TREE_PICK.selected.splice(i,1);
+  renderTreePick();
 }
 function treePickNodes(nodes,dep){
   return (nodes||[]).map(n=>{
@@ -5018,9 +5101,12 @@ function treePickConfirm(){
   // 注意：'__P__' 是 5 个字符（下划线×2 + P + 下划线×2），slice 长度必须一致
   if(TREE_PICK&&TREE_PICK.pickMode==='person'){
     const persons=TREE_PICK.selected.filter(x=>x.startsWith(ORG_PERSON_PREFIX)).map(x=>x.slice(ORG_PERSON_PREFIX.length));
+    // 「无负责人」是独立选项（不是架构里的真实人员），单独回传，
+    // 由调用方按自己的语义处理（筛选场景 → 并入 person 集合）
+    const wantNone=TREE_PICK.showNoneOwner&&TREE_PICK.selected.includes(OWNER_NONE);
     const cb=TREE_PICK.onConfirm;
     closeTreePick();
-    if(cb)cb(persons);
+    if(cb)cb(persons,{none:wantNone});
     return;
   }
   if(TREE_PICK&&TREE_PICK.onConfirm)TREE_PICK.onConfirm([...TREE_PICK.selected]);
