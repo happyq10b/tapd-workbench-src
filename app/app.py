@@ -1185,9 +1185,14 @@ def filter_options(username: str = Depends(require_auth)):
 
 
 @app.get('/api/overview')
-def overview(username: str = Depends(require_auth)):
+def overview(board_id: Optional[str] = None, username: str = Depends(require_auth)):
     boards, columns = user_allowed(username)
     rows = filter_rows(dbq("SELECT board_id, board_name, status, owner, column_id FROM cards WHERE deleted=0 AND parent_id=''"), boards, columns)
+    # 按板块过滤统计：前端切换板块时带 board_id → 统计带只反映当前板块，
+    # 否则会出现「切到别的板块、数字却还是上一个板块的」。
+    # ⚠️ board_id 为空串 = 不按板块过滤（全局统计），保持既有语义。
+    if board_id:
+        rows = [r for r in rows if r['board_id'] == board_id]
     names = {}
     by_board = defaultdict(lambda: {'total': 0, 'done': 0, 'progressing': 0})
     owner_cnt, owner_done = defaultdict(int), defaultdict(int)

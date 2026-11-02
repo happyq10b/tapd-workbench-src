@@ -2147,25 +2147,23 @@ async function init(){
     renderTabs();renderProgress();reload(1);connectWS();setupDraggableModals();
   }catch(e){toast(e.message)}
 }
-// 初始定位：优先沿用 localStorage 里记住的展开部门；否则选第一个有板块的部门
+// 初始定位：展开一个有板块的部门，但**不自动选中板块** ——
+// 需求3：进入看板后、在用户主动选择板块之前，内容区域默认为空（显示「请选择板块」）。
+// 之前这里会自动选中第一个板块 → 用户还没选就看到满屏数据，
+// 且「板块切换不彻底」的残留问题也因此更难被发现。
 function ensureInitialSelection(){
   if(!ME||!ME.boards||!ME.boards.length)return;
   const g=groupBoardsByDept();
-  // 已记住的展开部门若仍有效，直接用
+  // 已记住的展开部门若仍有效 → 沿用（只展开，不选板块）
   const remembered=Object.keys(DEPT_OPEN).filter(k=>DEPT_OPEN[k])[0];
   if(remembered){
     const hit=g.depts.find(d=>d.name===remembered)||(remembered===UNASSIGNED_KEY?{boards:g.unassigned}:null);
-    if(hit&&hit.boards.length){curBoard=hit.boards[0].board_id;return;}
+    if(hit){expandOnly(remembered);return;}
   }
-  // 否则选第一个有板块的部门
+  // 否则展开第一个有板块的部门（仍不选板块）
   const first=g.depts.find(d=>d.boards.length);
-  if(first){
-    expandOnly(first.name);
-    curBoard=first.boards[0].board_id;
-  }else if(g.unassigned.length){
-    expandOnly(UNASSIGNED_KEY);
-    curBoard=g.unassigned[0].board_id;
-  }
+  if(first){expandOnly(first.name);return}
+  if(g.unassigned.length)expandOnly(UNASSIGNED_KEY);
 }
 // ---------- 目录树：按「归属部门」分组折叠 ----------
 // 顶层 = 部门节点（含空部门），展开后显示该部门下的板块。
@@ -2287,13 +2285,72 @@ function renderTabs(){
 }
 // 单选切换：点已展开的部门 → 收起；点其他部门 → 展开它并收起其他
 function toggleDept(name){
-  if(DEPT_OPEN[name]){
+  const wasOpen=!!DEPT_OPEN[name];
+  if(wasOpen){
     delete DEPT_OPEN[name];
     saveDeptOpen();
+    // 收起部门 → 该部门的板块不再可见 → 当前板块作废，回到「未选板块」空状态。
+    // ⚠️ 不能保留上一个板块的内容 —— 否则会残留上一个部门的板块数据。
+    if(!boardBelongsToOpenDept())clearBoardSelection('部门已收起');
   }else{
     expandOnly(name);
+    // 展开另一个部门 → 原部门的板块不再可见 → 切到新部门的板块（无板块则空状态）
+    selectDeptBoards(name);
   }
   renderTabs();
+  if(curBoard)reload(1); else renderEmptyBoardState();
+  renderProgress();
+}
+// 当前已选板块是否仍属于「当前展开中」的部门
+function boardBelongsToOpenDept(){
+  if(!curBoard||!ME||!ME.boards)return false;
+  const b=ME.boards.find(x=>x.board_id===curBoard);
+  if(!b)return false;
+  const d=b.dept||UNASSIGNED_KEY;
+  return !!DEPT_OPEN[d];
+}
+// 展开某个部门时选中它的板块：
+//   ⚠️ **不自动选板块** —— 需求3：内容区域在用户主动选择板块前保持为空（显示「请选择板块」）。
+//      展开部门只是把该部门的板块 tab 显示出来，用户点哪个 tab 才是"选择板块"。
+//   无板块 → curBoard 置空 → 走「该板块暂无数据」空状态（不残留上一个部门的板块）
+function selectDeptBoards(name){
+  if(!ME||!ME.boards)return;
+  const list=ME.boards.filter(b=>(b.dept||UNASSIGNED_KEY)===name);
+  if(list.length){
+    // 有板块但**不选中**：等用户点 tab。
+    // ⚠️ 但如果当前已选板块本来就属于这个部门（只是被折叠过），保留它。
+    if(!boardBelongsToOpenDept()){
+      curBoard='';
+      curYears=new Set();
+      LAST_EMPTY_REASON='';
+    }
+  }else{
+    curBoard='';
+    curYears=new Set();
+    LAST_EMPTY_REASON='该板块暂无数据';
+  }
+}
+// 清空当前板块选择（回到「未选板块」状态）
+function clearBoardSelection(reason){
+  curBoard='';
+  curYears=new Set();
+  // 顺带清掉筛选条件里的板块相关状态？—— 不清：
+  // 筛选条件（人员/周数/状态）是用户主动设的，跨板块保留是合理的；
+  // 但**列表内容**必须清，否则会残留上一个板块的事项。
+  if(reason)LAST_EMPTY_REASON=reason;
+}
+// 空状态原因（供内容区提示文案使用）
+let LAST_EMPTY_REASON='';
+// 渲染「未选板块 / 该板块无数据 / 部门已收起」的空状态
+function renderEmptyBoardState(){
+  const c=document.getElementById('boardContent');
+  if(!c)return;
+  const msg=LAST_EMPTY_REASON==='部门已收起'
+    ? '部门已收起，请从上方选择板块'
+    : (LAST_EMPTY_REASON==='该板块暂无数据'
+      ? '该板块暂无数据'
+      : '请选择板块');
+  c.innerHTML=`<div class="empty">${esc(msg)}</div>`;
 }
 // ---------------- 部门主页面 ----------------
 // 视图切换：部门页与事项列表页互斥显示（同一时刻只显示一个）
@@ -3206,9 +3263,10 @@ async function deleteDeptPost(pid){
 }
 function pickBoard(bid){
   curBoard=bid;curYears=new Set([YEAR_DEFAULT]);
+  LAST_EMPTY_REASON='';
   // 从部门页进入事项列表时，先切回列表视图（switchView 内部会 renderTabs）
   if(CUR_DEPT)backToBoardList();
-  ensureDeptOpen(bid);renderTabs();reload(1);updateNewBtn()
+  ensureDeptOpen(bid);renderTabs();reload(1);renderProgress();updateNewBtn()
 }
 // 选中某板块时，自动（且仅）展开其所属部门，保证该板块在目录树中始终可见
 function ensureDeptOpen(bid){
@@ -3228,7 +3286,10 @@ function updateNewBtn(){
   btn.style.display='';
 }
 async function renderProgress(){
-  const ov=await api('/api/overview');
+  // ⚠️ 统计带必须**跟随当前板块**：不带 board_id 时接口返回的是全局汇总，
+  //    会出现「切到别的板块、数字却还是上一个板块的」（需求：板块切换彻底联动）。
+  //    curBoard 为空（初始未选板块）→ 不传 board_id → 显示全局概览。
+  const ov=await api('/api/overview'+(curBoard?('?board_id='+encodeURIComponent(curBoard)):''));
   // 顶部统计带：3 张核心指标卡横排（总事项 / 已完成 / 未完成），
   // 位于顶部栏左半的第三行；公告区在右半独立展示（#noticeBar 已在 HTML 中）。
   const box=document.getElementById('progressOverview');
@@ -3376,6 +3437,9 @@ async function deleteNotice(id){
 }
 async function reload(page){
   curPage=page;
+  // ⚠️ 未选板块（curBoard 为空）→ **不拉数据**，直接渲染空状态。
+  //    否则会把全部可见板块的事项一次性灌进来（需求3：初始内容区应为空）。
+  if(!curBoard){renderEmptyBoardState();syncFilterHint();return}
   const ps=new URLSearchParams({page:curPage,size:pageSize});
   const s=document.getElementById('statusFilter').value,
         q=document.getElementById('searchInput').value.trim();
@@ -3644,7 +3708,14 @@ function renderBoard(cards,cols,q,colHits){
   window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id
   // 没有事项但有板块（如刚建的空板块）时仍要展示板块列表
   if(!(cards||[]).length && !(cols||[]).length){
-    c.innerHTML='<div class="empty">没有符合条件的工作事项</div>';return}
+    // 空状态文案要区分两种情形（需求2）：
+    //   ① 该板块本身没有任何板块（如空部门）→ 「该板块暂无数据」
+    //   ② 板块存在但被筛选条件过滤空了 → 「没有符合条件的工作事项」
+    const cur=curBoard?((ME&&ME.boards||[]).find(x=>x.board_id===curBoard)||{}):null;
+    c.innerHTML=(cur&&cur.board_name)
+      ? '<div class="empty">没有符合条件的工作事项</div>'
+      : '<div class="empty">该板块暂无数据</div>';
+    return}
   // 按 column_name 分组
   const groups={};
   (cards||[]).forEach(card=>{const k=card.column_name||'未分组';(groups[k]=groups[k]||[]).push(card)});
