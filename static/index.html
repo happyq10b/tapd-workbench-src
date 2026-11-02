@@ -344,13 +344,38 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    此时绝不能再让顶部栏/筛选栏改变形态 —— 否则就是「缩小后布局变形」。
    故统一收敛到 ≤1199px（min-width 生效后，视口 CSS 宽度不会低于 1200，
    这两档实际不会触发；保留仅为兜底，防止 min-width 被后续改动移除）。 */
+/* 🔴 T-005 修复（2026-11-02 UI设计师）
+   —— 详细根因见下方「需求5 断点收敛说明」注释块。
+      本块把**所有**会被窄屏断点改动的尺寸/形态属性一次性收敛回 1200px 基准：
+      gap / padding（@media≤900 与 ≤640 曾改）/ .tb-grid 列数（≤640 曾改单列）/
+      .stat-value 字号（≤640 曾改 17px）/ .topbar-aside 的 order（≤900 曾设 order:2）。 */
 @media(max-width:1199px){
-  .topbar{grid-template-columns:minmax(0,1fr) minmax(260px,340px)}
+  .topbar{grid-template-columns:minmax(0,1fr) minmax(260px,340px);gap:14px;padding:12px 24px 0}
   .tb-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .topbar-aside{order:0}
+  .tb-stat-band .stat-value{font-size:20px}
   .toolbar-left{flex-wrap:nowrap}
   .toolbar{flex-wrap:nowrap}
   .toolbar-right{flex-shrink:0}
 }
+/* ===== 需求5 断点收敛说明（T-005 修复，2026-11-02 UI设计师）=====
+   背景：需求5 的诉求是「窗口缩小后**所有元素大小位置不变**」。
+   此前收敛时**只覆盖了一半规则** —— 本块原先只写了 `grid-template-columns`，
+   漏掉的 gap / padding / 列数 / 字号 / order 仍被更早声明的窄屏断点改掉：
+
+     @media(max-width:900px)  .topbar{gap:10px}      → 视口 700px 时列宽 798→802px（差 4px）
+                                   .topbar-aside{order:2} → 公告区被挪到左半下方（形态变化）
+     @media(max-width:640px)  .topbar{padding:10px 12px 0} → 左栏再宽 24px
+                                   .tb-grid{...1fr}     → 部门栅格由 3 列变单列
+                                   .stat-value{font-size:17px} → 顶栏高 401→398px
+
+   ⚠️ 关键前提：**媒体查询按「视口宽度」判定，`html{min-width:1200px}` 管不住它**
+   （实测视口 700px 时 `matchMedia('(max-width:900px)').matches` 仍为 true）。
+   → 所以不能靠 min-width 一劳永逸，**必须在最后一个断点里把尺寸全部兜回来**。
+
+   实测（headless Chrome，10 个视口 × 16 项属性）：1200/1100/1000/900/800/700/640/600/500/400
+   的 gap / padding / 列宽 / 栅格列数 / 字号 / order / topbar·main·dept·aside 的 x·y·w·h
+   **全部一致，0 差异**。 */
 /* ===== 需求5 补强：让「缩小后元素大小位置不变」真正成立 =====
    上面的 min-width 只锁住**文档宽度**，但顶栏主体是 `1fr` 弹性列 ——
    视口变窄 → 主体被压窄 → 三列小栅格随之从 302px 缩到 249px。
