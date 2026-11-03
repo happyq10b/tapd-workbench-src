@@ -7891,6 +7891,26 @@ async function loadBoardConfig(){
   renderFilters();
   renderBoardList();
   renderPermissionEntries();
+  // 板块数：后端若已给 b.col_count 则直接用；否则并发补拉（不阻塞首屏渲染）
+  bcLoadColCounts().then(function(){ renderBoardList(); });
+}
+/**
+ * 补拉各看板的**可见板块数**（2026-11-03 用户要求：列表显示「N 板块」而非「N 卡片」）。
+ * - 口径：/api/boards/{id}/columns 返回的 visible_columns **已按板块级权限过滤**
+ *   （与 /api/cards 的可见集合完全一致），故 columns.length 即该用户可见的板块数。
+ * - ⚠️ col_years.length **不能用**：它是「年份去重集合」，
+ *   实测某看板 36 个板块但只有 1 个年份 → 差 36 倍。
+ * - 后端若补上 b.col_count（见 HANDOFF T-012），本函数会直接跳过 → 前端零改动。
+ */
+async function bcLoadColCounts(){
+  const need=BC_BOARDS.filter(function(b){return b.col_count==null;});
+  if(!need.length)return;
+  await Promise.all(need.map(async function(b){
+    try{
+      const r=await api('/api/boards/'+encodeURIComponent(b.board_id)+'/columns');
+      b.col_count=(r&&r.columns)?r.columns.length:0;
+    }catch(e){ b.col_count=0; }
+  }));
 }
 function renderFilters(){
   const all='<option value="">全部</option>';
@@ -8039,14 +8059,18 @@ function renderBoardList(){
     const copyBtn=(ME&&ME.is_admin)
       ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||''}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（归属部门可重选）">📋 复制</button>'
       :'';
+    // 数量：显示**看板下的板块数**（用户 2026-11-03 要求）。
+    //   b.col_count 由后端 /api/boards 提供（按可见板块口径，与 card_count 同源）；
+    //   后端未提供时由前端 bcLoadColCounts() 并发拉取后回填（同样用可见板块口径）。
+    const colTxt=(b.col_count!=null)?(b.col_count+' 板块'):'… 板块';
+    // ⚠️ 不再展示「WS 编码」与「编辑/配置 ›」跳转文字（用户 2026-11-03 要求：都多余）——
+    //   点击看板卡片本身即进入右侧配置面板（bcSelect），跳转文字是冗余的。
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
       +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
-      +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
-      +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
+      +'<div class="meta"><span class="cnt">'+colTxt+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
-      +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span>'
-      +'<span style="margin-left:auto;color:var(--primary);font-size:12px">'+(b.config_id?'编辑':'配置')+' ›</span></div>'
+      +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span></div>'
       +'</div>';
   }).join('');
   setBcListScroll(list.length);
