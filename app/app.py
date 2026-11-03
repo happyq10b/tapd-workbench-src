@@ -2256,19 +2256,28 @@ class CopyBoardReq(BaseModel):
 
 
 @app.post('/api/boards/{board_id}/copy')
-async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(require_admin),
+async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(require_writer),
                      request: Request = None):
     """复制看板：生成一份**独立副本**（配置随附，内容不复制）。
 
     · 副本与原看板不共享任何数据：新的 board_id + 独立的 board_config 行；
     · 归属重选：归属部门 / 属性 / 状态 / 备注 都能在复制弹窗里改；
-    · 看板的创建与配置都是管理员级操作 → 复制同样**仅管理员**可用。
-    · ⚠️ 归属年份不在看板层 —— 副本**不复制**原看板的板块（含其归属年份）。
+    · 权限（2026-11-03 修订）：**对该看板有管理权即可复制**（can_edit 口径）——
+      看板负责人 / 架构负责人（管辖范围内）/ 管理员。
+      与 /api/boards 的 can_edit 能力位同一判定（perm.py 的 can_do），
+      前端按钮显隐与后端放行天然一致。副本 owner = 当前账号。
+    · ⚠️ deep=True 时整套复制（板块 + 事项 + 子事项），见 _deep_copy_board_content。
+    · ⚠️ 归属年份不在看板层 —— 年份在板块层随板块复制（deep）或随配置沿用。
     """
     src = dbq('SELECT * FROM boards WHERE board_id=?', (board_id,))
     if not src:
         raise HTTPException(404, '看板不存在')
     src = dict(src[0])
+    # 分级权限（2026-11-03）：复制看板 = 对源看板的**管理权**（can_edit 口径）。
+    # ⚠️ 先于可见性校验（与 update_card 同款顺序）。
+    perm_check(username, perm_chain(board_id=board_id),
+               OP_UPDATE, LV_BOARD_OWNER, 'board:' + board_id,
+               min_level=LV_BOARD_OWNER)
     cfg = dbq('SELECT * FROM board_config WHERE board_id=?', (board_id,))
     cfg = dict(cfg[0]) if cfg else {}
     # 归属重选：未填的项沿用原看板配置

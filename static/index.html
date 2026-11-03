@@ -5330,7 +5330,8 @@ function cpWeekOf(d){                       // 本地算当前自然周（周一
 async function openCopyModal(kind,payload){
   if(!ME){toast('未登录');return}
   if(kind!=='board'&&!ME.can_edit){toast('无编辑权限');return}
-  if(kind==='board'&&!ME.is_admin){toast('仅管理员可复制看板');return}
+  // 复制看板（2026-11-03 修订）：对该看板有管理权（can_edit）即可 —— 与后端同一口径
+  if(kind==='board'&&!(P.can_edit||ME.is_admin)){toast('你对该看板没有复制权限');return}
   COPY_CTX={kind:kind,payload:payload||{}};
   const P=COPY_CTX.payload;
   const show=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?'':'none'};
@@ -8048,9 +8049,10 @@ async function openBoardConfigModal(){
   if(nb)nb.style.display=ME.is_admin?'':'none';
   const db=document.getElementById('bcDelBtn');
   if(db)db.style.display=ME.is_admin?'':'none';
-  // 批量复制同样是管理员级操作（后端 copy 接口 require_admin）
+  // 批量复制（2026-11-03 修订）：对该账号**可管理的看板集合**非空即可用
+  // （管理员=全部；看板负责人/架构负责人=自己权限下的看板）
   const cb=document.getElementById('bcCopyBtn');
-  if(cb)cb.style.display=ME.is_admin?'':'none';
+  if(cb)cb.style.display=(ME.is_admin||(ME.editable_boards||[]).length>0)?'':'none';
   initBcListEvents();
   BC_SELECTED=null; BC_EDIT_ID=0;
   BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
@@ -8232,11 +8234,12 @@ function renderBoardList(){
     // 所属板块年份：年份在【板块】层，看板只是容器 → 展示该看板下各板块的年份集合
     const years=(b.col_years||[]);
     const yearTip=years.length?('板块年份：'+esc(years.join('、'))+'年'):'板块年份：未配置';
-    // 复制入口（仅管理员：看板的新建与配置都是管理员级操作）
+    // 复制入口（2026-11-03 修订）：**对该看板有管理权（can_edit）即可复制** ——
+    //   看板负责人 / 架构负责人（范围内）/ 管理员，与后端 copy 接口同一口径。
+    //   原来写死 ME.is_admin → 架构负责人、看板负责人看不到复制入口（用户反馈）。
     // 参数用 JSON 塞进 data-* 再解析 —— 名称里带引号也不会截断内联 JS
-    // ⚠️ 2026-11-03：列表项内直接可复制（整套复制，归属部门可重选）
-    const copyBtn=(ME&&ME.is_admin)
-      ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||''}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（默认整套复制：含板块与事项）">📋 复制</button>'
+    const copyBtn=(ME&&ME.is_admin)||b.can_edit
+      ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||'',can_edit:!!b.can_edit}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（默认整套复制：含板块与事项）">📋 复制</button>'
       :'';
     // 数量：显示**看板下的板块数**（用户 2026-11-03 要求）。
     //   b.col_count 由后端 /api/boards 提供（按可见板块口径，与 card_count 同源）；
@@ -8583,13 +8586,18 @@ async function bcDeleteSelected(){
 async function bcCopySelected(){
   const ids=Array.from(BC_SEL);
   if(!ids.length){toast('请先勾选要复制的看板');return;}
-  // 未配置的看板没有归属部门，整套复制会被部门校验拦下 → 先挑出来
+  // 两类跳过（2026-11-03）：
+  //   ① 无管理权（can_edit=false）→ 越权，后端会 403 → 先挑出来提示
+  //   ② 未配置的看板（无归属部门）→ 部门校验拦下 → 挑出来提示先补配置
   const skip=[],todo=[];
   ids.forEach(function(id){
     const b=BC_BOARDS.find(function(x){return x.board_id===id;});
-    if(b&&b.config_id)todo.push(b);else skip.push(b?(b.board_name||b.board_id):id);
+    if(!b){skip.push(id);return;}
+    if(!b.can_edit){skip.push(b.board_name||b.board_id+'（无复制权限）');return;}
+    if(b.config_id)todo.push(b);else skip.push(b.board_name||b.board_id+'（未配置）');
   });
-  if(!todo.length){toast('勾选的看板均未配置（无归属部门），无法复制；请先在右侧补齐配置');return;}
+  if(!todo.length){toast('勾选的看板均无法复制（未配置或无权限）；'
+    +(skip.length?('详情：'+skip.slice(0,3).join('、')):''));return;}
   const names=todo.map(function(b){return b.board_name||b.board_id;});
   if(!bcConfirm('整套复制已勾选的 '+todo.length+' 个看板？\n'
     +names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n'
