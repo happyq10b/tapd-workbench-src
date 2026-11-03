@@ -2350,11 +2350,10 @@ function renderPermissionEntries(){
       archBand.style.display='';
       const n=p.archScope.size;
       archRow.innerHTML='<button class="tb-entry-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>'
-        +'<span class="tb-entry-note">'+(
-          p.isAdmin
-            ? '管理员 · 可维护全部架构节点与看板绑定'
-            : '架构负责人 · 可配置 <b>'+n+'</b> 个节点范围内的看板绑定'
-        )+'</span>';
+        // 权限说明只在**权限受限时**才显示 —— 管理员的可维护范围是「全部」，
+        // 这句话等于没说（用户原话「这个垃圾话就不要了」）→ 不渲染。
+        // 架构负责人则是「只管 N 个节点」，范围信息有价值 → 保留。
+        +(p.isAdmin?'':'<span class="tb-entry-note">架构负责人 · 可配置 <b>'+n+'</b> 个节点范围内的看板绑定</span>');
     }else{
       archBand.style.display='none';
       archRow.innerHTML='';
@@ -2368,9 +2367,8 @@ function renderPermissionEntries(){
     if(p.isAdmin||n>0){
       boardBand.style.display='';
       boardRow.innerHTML='<button class="tb-entry-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>'
-        +'<span class="tb-entry-note">'+(p.isAdmin
-            ? '管理员 · 可配置全部看板并指定负责人'
-            : '可配置 <b>'+n+'</b> 个看板')+'</span>';
+        // 同上：管理员范围无限制 → 不显示废话；受限用户才显示「可配置 N 个看板」
+        +(p.isAdmin?'':'<span class="tb-entry-note">可配置 <b>'+n+'</b> 个看板</span>');
     }else{
       boardBand.style.display='none';
       boardRow.innerHTML='';
