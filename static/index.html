@@ -8442,8 +8442,10 @@ function aclMemberLabel(acc){
 function renderAclSection(b){
   const owner=BC_FORM.owner||'';
   const label=owner?aclMemberLabel(owner):'';
-  // 只有管理员可以指定负责人（负责人是管理权的载体，指定权归管理员）
-  const canSetOwner=!!(ME&&ME.is_admin);
+  // 指定/变更看板负责人 = **架构负责人及以上**（与页脚「保存负责人」按钮同一能力位）。
+  // ⚠️ 2026-11-03 用户反馈：这里原来写死 ME.is_admin → 架构负责人看得到页脚的
+  //    「保存负责人」却看不到「选择负责人」按钮，没地方指定。两处口径必须一致。
+  const canSetOwner=!!b.can_assign_owner;
   const ownerChip=owner
     ? '<span class="cf-chip" title="'+esc(label)+'">'+esc(label)+'</span>'
     : '<span style="font-size:12px;color:var(--text3)">未指定</span>';
