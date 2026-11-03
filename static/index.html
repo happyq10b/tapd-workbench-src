@@ -154,7 +154,7 @@ button{font-family:inherit}
 /* 容器内的「带」不再各自跨列（已在容器内单列流），去掉原 grid-column 覆盖 */
 .tb-navgroup>.tb-band{grid-column:auto}
 /* 带之间的分隔线：让各带在整体内部仍有清晰边界
-   （现在是 架构部门 / 架构管理 / 可选看板 / 看板管理 四带） */
+   （现在是 架构部门 / 可选看板 两带 —— 两个管理入口已并入各自带的标题行） */
 .tb-navgroup>.tb-band+.tb-band{
   border-top:1px solid var(--border);padding-top:11px;
 }
@@ -195,25 +195,33 @@ button{font-family:inherit}
 /* 管辖范围外的架构节点：置灰不可点击（2026-11-03 权限渲染） */
 .org-node-ro{opacity:.45;cursor:not-allowed}
 .org-node-ro:hover{border-color:var(--border)!important;box-shadow:none!important}
-/* ===== 管理入口带（2026-11-03 菜单顺序调整）=====
-   【架构管理】入口放在【架构部门】带之后，【看板管理】入口放在【可选看板】带之后。
-   入口按**当前成员权限**动态渲染：有权限 → 可点按钮；无权限 → 隐藏整带。
+/* ===== 管理入口带（2026-11-03 菜单顺序调整 → 同日改为并入标题行）=====
+   【架构管理】入口原为【架构部门】之后的独立带，【看板管理】原为【可选看板】之后的独立带。
+   用户要求改为：入口按钮直接放在**所属内容带的标题行右侧**（不再另起一带）。
+   → 去掉 .tb-entry-band 这一层，入口槽 .tb-band-head-entry 放进 .tb-band-head 里。
+   入口按**当前成员权限**动态渲染：有权限 → 可点按钮；无权限 → 隐藏入口槽（按钮消失）。
    （「动态渲染可配置范围」见 renderPermissionEntries()） */
-.tb-entry-band{grid-column:auto}
-.tb-entry-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:26px}
+.tb-band-head{display:flex;align-items:center;gap:12px;margin-bottom:7px;min-width:0}
+/* 标题行里的入口槽：靠右排列，自身不撑破带宽 */
+.tb-band-head-entry{margin-left:auto;display:flex;align-items:center;min-width:0;max-width:100%}
+/* 入口槽内：按钮 + 说明文字排一行；说明过长时省略号（不换行，避免撑高标题行） */
+.tb-entry-row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;min-width:0;overflow:hidden}
 .tb-entry-btn{
-  display:inline-flex;align-items:center;gap:6px;
+  display:inline-flex;align-items:center;gap:6px;flex-shrink:0;
   padding:5px 14px;border:1px solid var(--border);border-radius:16px;
   background:var(--card);color:var(--text);font-size:12.5px;cursor:pointer;
   transition:all .15s;font-family:inherit;
 }
 .tb-entry-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
 .tb-entry-btn:active{transform:translateY(1px)}
-.tb-entry-note{font-size:11.5px;color:var(--text3);line-height:1.5}
+.tb-entry-note{font-size:11.5px;color:var(--text3);line-height:1.5;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .tb-entry-note b{color:var(--text2);font-weight:600}
 /* 三个带的标题：加粗 + 略大，作为分区的视觉锚点 */
 .tb-band-title{font-size:13px;font-weight:700;color:var(--text2);letter-spacing:.4px;margin-bottom:7px;
-  display:flex;align-items:center;gap:7px}
+  display:flex;align-items:center;gap:7px;flex-shrink:0}
+/* 标题在 .tb-band-head 内时，间距由父级统一控制 */
+.tb-band-head>.tb-band-title{margin-bottom:0}
 .tb-band-title::before{content:'';width:3px;height:13px;border-radius:2px;background:var(--primary);opacity:.75}
 .tb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;align-items:start}
 .tb-grid>*{min-width:0}
@@ -1205,7 +1213,7 @@ function goLogin(){
     <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
     <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
     <!-- ⚠️ 【架构管理】与【看板管理】入口已按需求移至顶部导航区：
-         分别位于【架构部门】带之后、【可选看板】带之后（见 .tb-navgroup）。 -->
+         并入【架构部门】/【可选看板】两带的标题行右侧（见 .tb-band-head）。 -->
 
     <!-- 低频操作收进下拉：按钮平铺会把标题挤扁（实测标题被压成竖排单字），
          且窄屏时按钮换行占满整屏。这里按主次分层，常用按钮常驻、其余收起。
@@ -1270,22 +1278,26 @@ function goLogin(){
     <!-- 需求3：架构部门 + 可选看板 归为一个整体（共同容器卡片） -->
     <div class="tb-navgroup">
       <div class="tb-band tb-dept-band">
-        <div class="tb-band-title">架构部门</div>
+        <div class="tb-band-head">
+          <div class="tb-band-title">架构部门</div>
+          <!-- 【架构管理】入口：并入【架构部门】带的标题行右侧（2026-11-03 用户需求）。
+               id 保持不变 → renderPermissionEntries() 的权限显隐逻辑零改动：
+               无权限时整个入口槽 display:none（按钮随之消失），语义与原「整带隐藏」一致。 -->
+          <div class="tb-band-head-entry" id="archEntryBand">
+            <div class="tb-entry-row" id="archEntryRow"></div>
+          </div>
+        </div>
         <div class="tb-grid" id="tbDepts"></div>
       </div>
-      <!-- 【架构管理】入口：位于【架构部门】带之后（2026-11-03 菜单顺序调整） -->
-      <div class="tb-band tb-entry-band" id="archEntryBand">
-        <div class="tb-band-title">架构管理</div>
-        <div class="tb-entry-row" id="archEntryRow"></div>
-      </div>
       <div class="tb-band tb-board-band">
-        <div class="tb-band-title">可选看板</div>
+        <div class="tb-band-head">
+          <div class="tb-band-title">可选看板</div>
+          <!-- 【看板管理】入口：并入【可选看板】带的标题行右侧（同上，id 不变） -->
+          <div class="tb-band-head-entry" id="boardEntryBand">
+            <div class="tb-entry-row" id="boardEntryRow"></div>
+          </div>
+        </div>
         <div class="tb-grid" id="tbBoards"></div>
-      </div>
-      <!-- 【看板管理】入口：位于【可选看板】带之后（2026-11-03 菜单顺序调整） -->
-      <div class="tb-band tb-entry-band" id="boardEntryBand">
-        <div class="tb-band-title">看板管理</div>
-        <div class="tb-entry-row" id="boardEntryRow"></div>
       </div>
     </div>
     <div class="tb-band tb-stat-band">
@@ -2322,8 +2334,12 @@ function myPermProfile(){
     canManageArch:isAdmin||leaderNodes.size>0,
   };
 }
-// 渲染【架构管理】/【看板管理】两个入口带（2026-11-03）
-// 无权限 → **整带隐藏**（不是置灰）：一个永远打不开的入口不如不出现。
+// 渲染【架构管理】/【看板管理】两个入口（2026-11-03）
+// ⚠️ 2026-11-03 用户需求：入口不再独占一带，改为**并入所属内容带的标题行右侧**
+//    （架构管理 → 架构部门带标题行；看板管理 → 可选看板带标题行）。
+//    id 保持 archEntryBand / boardEntryBand 不变 → 本函数**逻辑零改动**，
+//    display:none 现在作用在标题行内的入口槽上，效果仍是「按钮消失」。
+// 无权限 → **入口隐藏**（不是置灰）：一个永远打不开的入口不如不出现。
 function renderPermissionEntries(){
   const p=myPermProfile();
   // ── 架构管理入口 ──
@@ -2333,7 +2349,7 @@ function renderPermissionEntries(){
     if(p.canManageArch){
       archBand.style.display='';
       const n=p.archScope.size;
-      archRow.innerHTML='<button class="tb-entry-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 打开架构管理</button>'
+      archRow.innerHTML='<button class="tb-entry-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>'
         +'<span class="tb-entry-note">'+(
           p.isAdmin
             ? '管理员 · 可维护全部架构节点与看板绑定'
@@ -2351,7 +2367,7 @@ function renderPermissionEntries(){
     const n=p.editableBoards.length;
     if(p.isAdmin||n>0){
       boardBand.style.display='';
-      boardRow.innerHTML='<button class="tb-entry-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 打开看板管理</button>'
+      boardRow.innerHTML='<button class="tb-entry-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>'
         +'<span class="tb-entry-note">'+(p.isAdmin
             ? '管理员 · 可配置全部看板并指定负责人'
             : '可配置 <b>'+n+'</b> 个看板')+'</span>';
