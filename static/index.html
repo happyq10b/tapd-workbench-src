@@ -224,18 +224,33 @@ button{font-family:inherit}
 .tb-band-title::before{content:'';width:3px;height:13px;border-radius:2px;background:var(--primary);opacity:.75}
 .tb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;align-items:start}
 .tb-grid>*{min-width:0}
-.topbar-aside{display:flex;flex-direction:column;min-width:0}
-/* 公告区在右半独立成块：固定边框 + 自身留白，与左半的卡片区分开 */
+.topbar-aside{display:flex;flex-direction:column;min-width:0;gap:10px}
+/* 公告区在右半独立成块：固定边框 + 自身留白，与左半的卡片区分开。
+   ⚠️ 2026-11-03：统计带移到公告栏下方后，右半变成竖排「公告栏 + 统计带」。
+      公告栏保持 flex:1 → 吃掉右半除统计带外的**全部剩余高度**，
+      与左半等高（.topbar 的 align-items:stretch），正好把原先的空白用完；
+      统计带 flex-shrink:0 固定在下方，不被压缩。
+      公告内容超出时由 overflow:auto 内部滚动，不会把右半撑高。 */
 .topbar-aside .notice-bar{flex:1;align-items:flex-start;flex-direction:column;gap:8px;
   padding:12px 14px;border-radius:var(--radius);overflow:auto}
-/* 公告区标题条（独立展示空间的标识） */
-.topbar-aside .notice-bar::before{content:'公告';font-size:11.5px;color:var(--text3);letter-spacing:.4px;
-  display:flex;align-items:center;gap:6px;width:100%;padding-bottom:6px;border-bottom:1px solid var(--border)}
+/* 公告区标题行（2026-11-03 用户需求：【管理公告】按钮从底部移到**右上角**）。
+   原用 ::before 伪元素画「公告」标题 → 伪元素里放不下按钮，
+   改为真实 DOM 标题行：左侧「公告」标签，右侧【管理公告】按钮。
+   ::before 相应移除（避免重复的「公告」标题）。 */
+.topbar-aside .notice-bar::before{display:none}
+.topbar-aside .notice-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  width:100%;padding-bottom:6px;border-bottom:1px solid var(--border);flex-shrink:0}
+.topbar-aside .notice-head .t{font-size:11.5px;color:var(--text3);letter-spacing:.4px;
+  display:flex;align-items:center;gap:6px}
 .topbar-aside .notice-body{flex:1;min-width:0}
 .topbar-aside .notice-title,.topbar-aside .notice-text{white-space:normal;overflow:visible;text-overflow:clip}
 .topbar-aside .notice-empty{flex:1;min-width:0}
-/* 统计带：左列三列 → 卡片横排三张 */
-.tb-stat-band .progress-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0}
+/* 统计带（2026-11-03）：从左半主区移到**右半公告栏下方**。
+   右半现在是竖排：公告栏（可缩）+ 统计带（固定高度）在下。
+   ⚠️ 宽度要求「不超过公告栏」：两者同属 .topbar-aside 这一列，
+      宽度由该列宽（minmax(300px,420px)）决定 → 天然对齐，不会超出。 */
+.tb-stat-band{grid-column:auto;flex-shrink:0;width:100%}
+.tb-stat-band .progress-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}
 .tb-stat-band .progress-cards{display:contents}
 @media(max-width:1180px){
   .topbar{grid-template-columns:minmax(0,1fr) minmax(260px,320px)}
@@ -252,7 +267,7 @@ button{font-family:inherit}
   .topbar{padding:10px 12px 0}
   .tb-grid{grid-template-columns:minmax(0,1fr)}
   .tb-stat-band .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .tb-stat-band .stat-value{font-size:17px}
+  .tb-stat-band .stat-value{font-size:16px}
 }
 .board-tabs{display:flex;flex-direction:column;gap:0;padding:12px 24px 0;max-width:1440px;margin:0 auto}
 /* ---- 目录树：按归属部门分组折叠 ---- */
@@ -435,7 +450,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
   .topbar{grid-template-columns:minmax(0,1fr) minmax(260px,340px);gap:14px;padding:12px 24px 0}
   .tb-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .topbar-aside{order:0}
-  .tb-stat-band .stat-value{font-size:20px}
+  .tb-stat-band .stat-value{font-size:16px}
   .toolbar-left{flex-wrap:nowrap}
   .toolbar-right{flex-shrink:0}
 }
@@ -478,6 +493,11 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .stat-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;box-shadow:var(--shadow)}
 .stat-label{font-size:11.5px;color:var(--text2);line-height:1.4}
 .stat-value{font-size:20px;font-weight:600;margin-top:0;line-height:1.25}
+/* 统计带移到右半窄栏后（2026-11-03）：每格宽度只有 ~130px（原左半是 ~300px），
+   原 padding 8px 14px + 20px 字号会挤 → 窄版：收内边距、降字号。 */
+.tb-stat-band .stat-card{padding:7px 10px}
+.tb-stat-band .stat-label{font-size:11px}
+.tb-stat-band .stat-value{font-size:16px;letter-spacing:0}
 .stat-value.blue{color:var(--primary)}.stat-value.green{color:#178740}.stat-value.orange{color:#a46907}.stat-value.red{color:#d73d3d}
 /* 部门页顶部切换条：只在部门主页面显示 */
 .dept-switch-bar{display:flex;align-items:center;gap:10px;max-width:1440px;margin:0 auto;padding:12px 24px 0;flex-wrap:wrap}
@@ -1215,10 +1235,12 @@ function goLogin(){
       <img class="header-avatar" id="headerAvatar" alt="" hidden><span id="userName"></span><span class="role-tag" id="roleTag"></span>
     </span>
     <button class="header-btn msg-btn" id="msgBtn" onclick="openMsgPanel()" title="消息中心">🔔<span class="msg-badge" id="msgBadge" hidden>0</span></button>
-    <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
-    <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
     <!-- ⚠️ 【架构管理】与【看板管理】入口已按需求移至顶部导航区：
          并入【架构部门】/【可选看板】两带的标题行右侧（见 .tb-band-head）。 -->
+    <!-- ⚠️【账号管理】与【操作日志】已于 2026-11-03 收进下方【更多】菜单 ——
+         两者都是**管理员专属**的低频操作，常驻顶栏既占位、对普通用户又是死的。
+         菜单项 id 保持不变（teamBtn / auditBtn）→
+         applyPermissionUI() 按 id 控制显隐的逻辑照旧生效。 -->
 
     <!-- 低频操作收进下拉：按钮平铺会把标题挤扁（实测标题被压成竖排单字），
          且窄屏时按钮换行占满整屏。这里按主次分层，常用按钮常驻、其余收起。
@@ -1227,12 +1249,12 @@ function goLogin(){
             顶栏只留界面级操作，避免顶栏按钮过长把标题挤扁。 -->
     <div class="header-more" id="headerMore">
       <button class="header-btn" onclick="toggleHeaderMore(event,'headerMoreMenu')" title="更多操作">更多</button>
-      <!-- ⚠️ 原「更多」下拉里只有 备份/恢复/模板/导入/导出 这 5 项，
-           已按需求整体挪到【导入导出】独立按钮 → 此菜单目前**为空**。
-           暂留空态提示（不直接删按钮：那属于产品决策，且后续可能还要往里放东西）。
-           → 已登记待主设计师确认「更多」的去留（见 HANDOFF §五）。 -->
+      <!-- 「更多」下拉：管理员专属的低频操作（账号管理 / 操作日志）。
+           原先此菜单因 5 项数据操作被挪走而空置（曾登记 T-007 问去留），
+           现按 2026-11-03 需求把这两个低频项收进来 → 菜单不再空置，T-007 自然闭环。 -->
       <div class="header-more-menu" id="headerMoreMenu" hidden>
-        <div class="header-more-empty">（暂无更多操作）</div>
+        <button id="teamBtn" onclick="openTeamModal()" title="账号管理（仅管理员）">👥 账号管理</button>
+        <button id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
       </div>
     </div>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
@@ -1303,15 +1325,18 @@ function goLogin(){
         <div class="tb-grid" id="tbBoards"></div>
       </div>
     </div>
-    <div class="tb-band tb-stat-band">
-      <!-- 「统计概览」标题已按用户要求去掉（2026-11-03）——
-           三张统计卡自身已有数字与进度条，标题行纯属占位、白占一行高度。
-           卡片含义保留在各卡片的标题文字里，不丢信息。 -->
-      <div class="progress-overview" id="progressOverview"></div>
-    </div>
   </div>
   <aside class="topbar-aside" id="topbarAside">
     <div class="notice-bar" id="noticeBar"></div>
+    <!-- 统计带（2026-11-03 用户需求）：从左半主区移到**公告栏下方**。
+         左半原本被「公告」+「统计概览」两块撑高，右半公告区却有大片空白；
+         统计卡挪到右半后 → 公告栏可显著缩短，整页顶部更紧凑。
+         「统计概览」标题已按用户要求去掉 —— 三张卡片自带「总数/已完成/未完成」标签。
+         ⚠️ 宽度不超过公告栏：.tb-stat-band 宽度由 .topbar-aside 的列宽决定
+            （grid-template-columns:minmax(300px,420px)），不设独立宽度 → 天然对齐。 -->
+    <div class="tb-band tb-stat-band">
+      <div class="progress-overview" id="progressOverview"></div>
+    </div>
   </aside>
 </div>
 <!-- 部门页顶部切换条：只在部门主页面显示（部门之间切换 + 返回事项列表） -->
@@ -3638,18 +3663,22 @@ async function renderNoticeBar(){
   const usable=list.filter(n=>n.enabled&&(n.scope==='all'||(dept&&n.scope===dept)));
   const n=usable[0];
   const canEdit=ME&&ME.is_admin;
+  // 标题行（2026-11-03）：左侧「公告」标签，右侧【管理公告】按钮（右上角）。
+  // 原先标题是 ::before 伪元素、按钮在卡片底部 → 改为真实 DOM 标题行。
+  const head='<div class="notice-head"><span class="t">📢 公告</span>'
+    +(canEdit?'<button class="btn-default notice-mgr" onclick="openNoticeModal()">管理公告</button>':'')
+    +'</div>';
   if(!n){
-    box.innerHTML=`<span class="notice-empty">📢 暂无公告${canEdit?' · 可点击右侧「管理公告」发布':''}</span>`
-      +(canEdit?`<button class="btn-default notice-mgr" onclick="openNoticeModal()">管理公告</button>`:'');
+    box.innerHTML=head
+      +`<span class="notice-empty">暂无公告${canEdit?' · 可点击右上角「管理公告」发布':''}</span>`;
     return;
   }
-  box.innerHTML=`<span class="notice-tag">📢 公告</span>`
+  box.innerHTML=head
     +`<div class="notice-body">`
     +`<div class="notice-title" title="${esc(n.title||'')}">${esc(n.title||'（无标题）')}</div>`
     +(n.content?`<div class="notice-text" title="${esc(n.content)}">${esc(n.content)}</div>`:'')
     +`</div>`
-    +(n.author?`<span class="notice-text" style="flex-shrink:0">${esc(n.author)}</span>`:'')
-    +(canEdit?`<button class="btn-default notice-mgr" onclick="openNoticeModal()">管理公告</button>`:'');
+    +(n.author?`<span class="notice-text" style="flex-shrink:0">${esc(n.author)}</span>`:'');
 }
 // 公告管理弹窗：列出全部公告，可新增/编辑/删除/启停
 async function openNoticeModal(){
