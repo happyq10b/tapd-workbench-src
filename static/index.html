@@ -135,7 +135,15 @@ button{font-family:inherit}
    每带内部也是三列小栅格 → 形成「三列多行」的矩阵式排布。
    右列 .topbar-aside：独立边框的公告区，跨整列高度（align-self:stretch）。 */
 .topbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,420px);
-  gap:14px;align-items:stretch;max-width:1440px;margin:0 auto;padding:12px 24px 0}
+  gap:14px;align-items:stretch;max-width:1440px;margin:0 auto;padding:12px 24px 0;
+  /* 右半（公告栏+统计带）需与左半「可选看板」带的底边对齐。
+     左半 .topbar-main 是 grid 且声明了 3 行，实际只有 1 个子项(.tb-navgroup)
+     → 末尾产生 2 个空行的 gap(10px×2=20px)；
+     .tb-navgroup 自身 padding-bottom:13px + 1px 边框
+     → 「可选看板」带底比 topbar 底高 34px。
+     右侧用 margin-bottom 抵消这 34px → 统计卡底 == 可选看板带底。
+     ⚠️ 若改动 .topbar-main 的行数/gap 或 .tb-navgroup 的 padding-bottom，需同步此值。 */
+  --topbar-aside-bottom-offset:34px}
 .topbar-main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
   grid-template-rows:auto auto auto;gap:10px 14px;align-content:start;min-width:0}
 /* 每个「带」跨满三列；带内是小栅格（三列），条目按列优先填充 */
@@ -224,7 +232,7 @@ button{font-family:inherit}
 .tb-band-title::before{content:'';width:3px;height:13px;border-radius:2px;background:var(--primary);opacity:.75}
 .tb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;align-items:start}
 .tb-grid>*{min-width:0}
-.topbar-aside{display:flex;flex-direction:column;min-width:0;gap:10px}
+.topbar-aside{display:flex;flex-direction:column;min-width:0;gap:10px;margin-bottom:var(--topbar-aside-bottom-offset)}
 /* 公告区在右半独立成块：固定边框 + 自身留白，与左半的卡片区分开。
    ⚠️ 2026-11-03：统计带移到公告栏下方后，右半变成竖排「公告栏 + 统计带」。
       公告栏保持 flex:1 → 吃掉右半除统计带外的**全部剩余高度**，
@@ -240,7 +248,7 @@ button{font-family:inherit}
 .topbar-aside .notice-bar::before{display:none}
 .topbar-aside .notice-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
   width:100%;padding-bottom:6px;border-bottom:1px solid var(--border);flex-shrink:0}
-.topbar-aside .notice-head .t{font-size:11.5px;color:var(--text3);letter-spacing:.4px;
+.topbar-aside .notice-head .t{font-size:13px;font-weight:700;color:var(--text2);letter-spacing:.4px;
   display:flex;align-items:center;gap:6px}
 .topbar-aside .notice-body{flex:1;min-width:0}
 .topbar-aside .notice-title,.topbar-aside .notice-text{white-space:normal;overflow:visible;text-overflow:clip}
@@ -276,7 +284,7 @@ button{font-family:inherit}
 .tree-dept{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);font-size:13.5px;cursor:pointer;transition:all .15s;font-weight:600;flex-shrink:0}
 /* 部门主页入口：独立的「🏠 主页」小按钮，与「点击展开板块」区分开。
    stopPropagation 阻止冒泡到外层 .tree-dept（否则会同时触发展开/收起）。 */
-.dept-home{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:3px 7px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text2);font-size:11.5px;font-weight:400;cursor:pointer;white-space:nowrap;transition:all .15s}
+.dept-home{display:inline-flex;align-items:center;gap:3px;margin-left:auto;padding:3px 7px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text2);font-size:11.5px;font-weight:400;cursor:pointer;white-space:nowrap;transition:all .15s}
 .dept-home:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
 /* 当前打开的部门页（进入部门主页后，该节点高亮） */
 .tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
@@ -331,8 +339,16 @@ button{font-family:inherit}
    ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。
    ⚠️ 搜索框宽度改过（135→167，为完整显示 placeholder）→ 本行的锁定值需**同步**调整，
       否则左侧内容会被压缩、搜索框又被压回截断状态。 */
-.toolbar-left{flex:0 0 875px;min-width:875px}
-.toolbar-right{flex:0 0 400px;min-width:400px}
+.toolbar-left{flex:1 1 875px;min-width:875px}
+/* ↑ flex-grow:1 —— 宽屏时吸收工具栏右侧的剩余空白（实测 1600px 视口下
+   工具栏内宽 1360 > 左 875 + 右 402 + gap 10 = 1287，多出 73px 无处可去，
+   表现为「导入导出」按钮右侧一条空白带）。改为可 grow 后，
+   剩余空间进 .toolbar-left，其中只有搜索框是 flex-grow:1 → 由搜索框吸收，
+   其余控件（状态/人员/周数/日期区间）宽度不变、位置不飘。
+   ⚠️ 1200px 基线不变：此时工具栏内容正好填满，无剩余 → left 仍是 875px。 */
+.toolbar-right{flex:0 0 402px;min-width:402px}
+/* ↑ 402px = 四个按钮实测自然宽度 99+86+86+107 + 3×gap(8)=24。
+   原锁 400px → 内容比容器宽 2px，最后一个按钮会溢出 2px。 */
 /* 工具栏右侧按钮组：四个按钮（新建板块 / 展开板块 / 折叠板块 / 导入导出）
    宽度不足时按钮内文字会折行（「导入导出」变成上下两行）→ 按钮禁止折行，
    由外层锁宽保证空间充足。 */
@@ -340,7 +356,11 @@ button{font-family:inherit}
 /* 工具栏整体最小宽度：左 875 + 右 400 + gap 10 + padding 32 = 1317px。
    容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 165px 会让右侧按钮组被挤/换行。
    → 锁 min-width:1317px，由 html 的横向滚动承载（需求5 的既定方案）。 */
-.toolbar{min-width:1317px}
+/* 工具栏整体最小宽度：左 875 + 右 402 + gap 10 + padding 32 = 1319px。
+   容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 167px 会让右侧按钮组被挤/换行。
+   → 锁 min-width:1319px，由 html 的横向滚动承载（需求5 的既定方案）。
+   ⚠️ 改任一子控件宽度都要同步此值，否则控件会被压回折行/截断状态。 */
+.toolbar{min-width:1319px}
 /* 筛选明细（当前生效条件汇总）：**独占一行**，宽度不限。
    需求（2026-11-02）：原先它夹在 .toolbar-left 里、与日期区间同行，
    受 max-width:260px + ellipsis 限制 → 明细被截断（「人员：王伟娜 | 周数：2026·第1...」），
@@ -361,7 +381,11 @@ button{font-family:inherit}
    加 padding(12×2)+border(1×2) → 需框宽 **167px**。
    原 max-width:230px 但 flex-basis:150px → 实际只拿到 135px，placeholder 被截断。
    → 改 flex-basis:170px / min-width:167px，保证提示词完整可见。 */
-.search-input{min-width:167px;flex:1 1 170px;max-width:230px}
+.search-input{min-width:167px;flex:1 1 170px;max-width:360px}
+/* ↑ max-width 230→360：搜索框要能吃掉 .toolbar-left 的 grow 空间，
+   让整行「饱满」、导入导出按钮右侧不留空白。
+   实际生效宽度：1200px 基线 167px（无剩余空间可吃）→
+                1600px 视口 167+73 = 240px（受 max-width 360 约束，未触顶）。 */
 /* 创建日期区间筛选：紧凑排布，起止各一个日期框。
    容器高度显式锁定为 33px（与 .filter-select 实测同高），内部日期框 31px
    （与 .search-input 实测同高）—— Chrome 的 input[type=date] 有固有内高，
