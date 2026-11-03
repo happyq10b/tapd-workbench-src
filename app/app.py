@@ -383,6 +383,46 @@ def _node_bound_boards(node: dict, owned=None, wg_by_id=None) -> set:
     return {x for x in raw.split(',') if x} if raw else set()
 
 
+def _node_arch_boards(node: dict, owned=None, wg_by_id=None, nmap=None) -> set:
+    """节点「**架构下所有看板**」（2026-11-03）。
+
+    = ① 本节点归属的看板（dept/center 口径：board_config.dept_node_id）
+    + ② 本节点**及其全部后代**小组节点**已手工绑定**的看板（workgroups.boards）
+
+    ⚠️ 为什么需要它（用户反馈的根因）：
+      【架构管理】的「板块绑定」勾选池原来取 `parentBoardLimit(父节点)`
+      = 父部门的**归属**看板 → 部门下的小组永远显示「未绑定板块」且勾不到任何东西
+      （子组被父部门的归属范围卡死）。部门长/组长需要的恰恰是
+      「本部门架构下所有看板」，才能给子组绑定。
+
+    ⚠️ 不改变可见性口径 —— 只用于【架构管理】的绑定勾选池。
+    """
+    if not node:
+        return set()
+    if owned is None:
+        owned = _dept_owned_boards()
+    if wg_by_id is None:
+        wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+    out = set()
+    nid = node['id']
+    # ① 本节点归属的看板
+    out |= set(owned.get(nid, set()))
+    # ② 本节点及其全部后代小组已绑定的看板
+    if nmap is None:
+        nmap = _org_node_map()
+    for sub in [nid] + list(_org_node_descendants(nid, list(nmap.values()))):
+        sub_node = nmap.get(sub)
+        if not sub_node:
+            continue
+        wg = wg_by_id.get(sub_node.get('wg_id') or 0)
+        raw = (wg['boards'] or '').strip() if wg else ''
+        if raw == '*':
+            out |= _all_board_ids()
+        elif raw:
+            out |= {x for x in raw.split(',') if x}
+    return out
+
+
 def _leader_scope_boards(username: str) -> set:
     """负责范围层：负责人额外拥有的看板（其负责节点 **及其全部后代** 绑定的看板）。"""
     nodes = _org_leader_nodes(username)
@@ -1535,7 +1575,10 @@ def filter_options(username: str = Depends(require_auth)):
       输入的内容按同样的语义参与过滤（找不到就查不到结果）。
     """
     boards, columns = user_allowed(username)
-    rows = filter_rows(dbq('SELECT owner, week_no FROM cards WHERE deleted=0'), boards, columns)
+    # ⚠️ 必须带 board_id / column_id —— perm_pass() 要用它们做两级过滤，
+    #    只 SELECT owner/week_no 会抛 KeyError（非管理员调用时 500）。
+    rows = filter_rows(dbq('SELECT owner, week_no, board_id, column_id FROM cards WHERE deleted=0'),
+                       boards, columns)
     people, weeks = set(), set()
     for r in rows:
         for n in (r.get('owner') or '').split(';'):
@@ -1754,6 +1797,9 @@ class ColumnCreate(BaseModel):
     created_at: str = ''     # 创建日期（必填，允许 YYYY-MM-DD 或含时分秒）
     nature: str = '日常'      # 性质：日常 / 专项
     year: str = ''           # 归属年份（如 2026）
+    # 板块参与人（2026-11-03）：账号列表（逗号分隔）。
+    # 参与人 = 可修改该板块的**可见内容**，但无增删与指派权（见 perm.py）。
+    participants: str = ''
 
 
 class ColumnUpdate(BaseModel):
@@ -1764,6 +1810,10 @@ class ColumnUpdate(BaseModel):
     nature: str = ''         # 性质
     year: str = ''           # 归属年份
     owner: str = ''          # 板块负责人账号（'' = 不改；'__CLEAR__' = 清除）
+    # 板块参与人（2026-11-03）：账号列表。
+    # ⚠️ 语义与 owner 不同：**None = 不改**（不传该字段）；
+    #    传空串 = 清空参与人；传列表 = 覆盖。
+    participants: str = None
     # ⚠️ owner 语义（2026-11-02）：板块负责人 = 该板块的**管理权**，
     #    在【板块编辑】弹窗里配置；不影响板块可见性（可见性由架构绑定决定）。
     #    仅管理员可改负责人本身；板块负责人（editor）改其他字段不受此限。
@@ -1890,13 +1940,23 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     if old:
         if new_owner is not None:
             dbe('UPDATE board_columns SET owner=? WHERE col_key=?', (new_owner, req.col_key))
+        # 板块参与人（2026-11-03）：None = 不改；传值 = 覆盖（空串 = 清空）
+        if req.participants is not None:
+            # ⚠️ 指派参与人是**上级权限**（板块负责人及以上）——
+            #    与 owner 不同，owner 仅管理员可改。
+            perm_check(username, perm_chain(board_id=board_id, column_id=old['column_id']),
+                       OP_ASSIGN_PARTICIPANT, LV_COLUMN_OWNER, 'column:' + req.col_key,
+                       min_level=LV_COLUMN_OWNER)
+            dbe('UPDATE board_columns SET participants=? WHERE col_key=?',
+                (_norm_acl_participants(req.participants), req.col_key))
         dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=? WHERE col_key=?',
             (new_key, name, year, created, nature, req.col_key))
     else:
         new_cid = 'COL' + str(int(time.time() * 1000))
-        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner)'
-            ' VALUES (?,?,?,?,?,?,?,?,0,?)',
-            (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or ''))
+        parts = _norm_acl_participants(req.participants) if req.participants else ''
+        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants)'
+            ' VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+            (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or '', parts))
     log_action('__column__', username, 'update', f'编辑板块 {name}')
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
               f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
@@ -2185,6 +2245,8 @@ def _unique_copy_name(base: str, exists) -> str:
 
 
 class CopyBoardReq(BaseModel):
+    # deep=True → **整套复制**：连带复制原看板下的板块、事项与子事项（2026-11-03）
+    deep: bool = False
     board_name: str = ''       # 副本名称（留空 = 原名 +（副本））
     dept: str = ''             # 归属重选：归属部门
     dept_node_id: int = 0      # 归属重选：归属部门对应的架构节点 id
@@ -2237,12 +2299,21 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
     except Exception:
         conn.rollback()
         raise
+    # ── 整套复制（deep）：连带板块 + 事项 + 子事项（2026-11-03）──
+    copied_cols = copied_cards = 0
+    if getattr(req, 'deep', False):
+        copied_cols, copied_cards = _deep_copy_board_content(
+            board_id, new_bid, name, username, src.get('workspace_id') or '')
     log_action('__board__', username, 'copy', f'复制看板 {name}')
     audit_log(username, client_ip(request), 'board_copy', f'看板 {board_id}',
-              f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，属性 {attr}）', 'success')
+              f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，属性 {attr}'
+              + (f'；整套复制：板块 {copied_cols} 个、事项 {copied_cards} 条'
+                 if getattr(req, 'deep', False) else '') + '）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'board_id': new_bid, 'board_name': name, 'copy_from': board_id,
-            'dept': dept, 'dept_node_id': dept_node_id, 'attr': attr, 'status': status}
+            'dept': dept, 'dept_node_id': dept_node_id, 'attr': attr, 'status': status,
+            'deep': bool(getattr(req, 'deep', False)),
+            'copied_columns': copied_cols, 'copied_cards': copied_cards}
 
 
 class CopyColumnReq(BaseModel):
@@ -2325,6 +2396,103 @@ class CopyCardReq(BaseModel):
 CARD_COPY_FIELDS = ['owner', 'cc', 'follower', 'begin', 'due', 'description', 'priority',
                      'label', 'entity_type', 'cover_setted', 'cover_info', 'b_sort',
                      'column_sort', 'board_status', 'board_creator', 'workspace_id']
+
+
+def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, username, workspace_id):
+    """看板**整套复制**的正文部分（2026-11-03）：板块 + 事项 + 子事项。
+
+    返回 (板块数, 事项数)。
+
+    口径与既有 copy_column / copy_card 保持一致：
+      · 板块：col_key = board_id::column_name → 新板块用新 board_id 前缀；
+        归属年份 / 性质 / 负责人 / 参与人随附。
+      · 事项：主事项与子事项都复制；**子事项的 parent_id 指向新主事项**，
+        保持「主 → 子」结构；状态重置为未完成，创建人/时间重置为当前账号与当前时间。
+      · copy_from 记录来源，便于溯源。
+    """
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_conn()
+    stamp = str(int(time.time() * 1000))
+    # ── ① 板块 ──
+    src_cols = [dict(r) for r in dbq(
+        'SELECT * FROM board_columns WHERE board_id=? ORDER BY id', (src_board_id,))]
+    col_id_map = {}          # 原 column_id → 新 column_id
+    key_map = {}             # 原 col_key → 新 col_key
+    for i, c in enumerate(src_cols):
+        new_cid = 'COLD' + stamp + str(i)
+        new_key = new_board_id + '::' + c['column_name']
+        conn.execute(
+            'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
+            ' creator, nature, pinned, year, copy_from, owner, participants)'
+            ' VALUES (?,?,?,?,?,?,?,0,?,?,?,?)',
+            (new_key, new_cid, new_board_id, c['column_name'], c['created_at'],
+             username, c['nature'], c['year'], c['col_key'],
+             c.get('owner') or '', c.get('participants') or ''))
+        col_id_map[c['column_id']] = new_cid
+        key_map[c['col_key']] = new_key
+    # ── ② 事项（主事项 + 子事项）──
+    # ⚠️ cards 表**没有 id 列**（主键是 card_id）→ ORDER BY card_id
+    src_cards = [dict(r) for r in dbq(
+        'SELECT * FROM cards WHERE board_id=? AND deleted=0 ORDER BY card_id', (src_board_id,))]
+    card_id_map = {}         # 原 card_id → 新 card_id
+    # 先建主事项（parent_id 为空），再建子事项（parent_id 指向新主事项）
+    ordered = [c for c in src_cards if not (c.get('parent_id') or '')]
+    ordered += [c for c in src_cards if (c.get('parent_id') or '')]
+    for i, c in enumerate(ordered):
+        new_cid = 'CDP' + stamp + str(i)
+        new_col_id = col_id_map.get(c['column_id'], '')
+        new_col_name = c['column_name']
+        # 新板块名：从 col_key 反查（原 col_key = board::name）
+        src_key = src_board_id + '::' + (c['column_name'] or '')
+        new_key = key_map.get(src_key, '')
+        if new_key and '::' in new_key:
+            new_col_name = new_key.split('::', 1)[1]
+        new_parent = card_id_map.get(c.get('parent_id') or '', '')
+        vals = {
+            'card_id': new_cid,
+            'board_id': new_board_id,
+            'board_name': new_board_name,
+            'column_id': new_col_id,
+            'column_name': new_col_name,
+            'workspace_id': workspace_id,
+            'card_name': c['card_name'],
+            'status': 'todo',
+            'status_name': '未完成',
+            'creator': username,
+            'created': now,
+            'modified': now,
+            'completed': '',
+            'b_sort': c.get('b_sort') or '',
+            'entity_type': c.get('entity_type') or '',
+            'cover_setted': c.get('cover_setted') or '',
+            'cover_info': c.get('cover_info') or '',
+            'is_filed': c.get('is_filed') or '',
+            'created_from': c.get('created_from') or '',
+            'date_status': c.get('date_status') or '',
+            'due_time_ux': c.get('due_time_ux') or '',
+            'begin_date_status': c.get('begin_date_status') or '',
+            'begin_time_ux': c.get('begin_time_ux') or '',
+            'comments': '',
+            'column_sort': c.get('column_sort') or '',
+            'board_status': c.get('board_status') or '',
+            'board_creator': c.get('board_creator') or '',
+            'parent_id': new_parent,
+            'version': 0,
+            'deleted': 0,
+            'pinned': 0,
+            'week_no': c.get('week_no') or '',
+            'copy_from': c['card_id'],
+        }
+        for f in CARD_COPY_FIELDS:
+            if f == 'workspace_id':
+                continue
+            vals[f] = c.get(f) or ''
+        cols = list(vals.keys())
+        marks = ','.join('?' * len(cols))
+        conn.execute('INSERT INTO cards (%s) VALUES (%s)' % (','.join(cols), marks),
+                     [vals[k] for k in cols])
+        card_id_map[c['card_id']] = new_cid
+    return len(col_id_map), len(card_id_map)
 
 
 @app.post('/api/cards/copy')
@@ -3037,11 +3205,32 @@ def _all_boards():
 def get_workgroups(username: str = Depends(require_auth)):
     """工作组管理：返回树形工作组架构 + 全部看板列表（供板块绑定配置）
 
-    普通用户只返回其可见看板（与 /api/me 口径一致）。"""
+    · 普通用户返回其可见看板（与 /api/me 口径一致）；
+    · **架构负责人额外能看到「本部门架构下所有看板」**（2026-11-03 用户反馈）：
+      部门长/组长需要能给子组绑定本部门架构下的看板，只给「可见的」不够用。
+      这里的看板列表**仅用于【架构管理】的绑定勾选池**，
+      不改变 /api/me 的 boards，也不改变任何读接口的可见性口径。
+    """
     all_boards = _all_boards()
     visible, _cols = user_allowed(username)
     if visible is not None:
         all_boards = [b for b in all_boards if b['board_id'] in visible]
+    # 架构负责人：补上「管辖范围内」的看板（自己负责的节点 + 其后代所绑定的看板）
+    if not is_admin(username):
+        scope = _arch_scope_nodes(dbq, username)
+        if scope:
+            owned = _dept_owned_boards()
+            wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+            nmap = _org_node_map()
+            extra = set()
+            for nid in scope:
+                node = nmap.get(nid)
+                if node:
+                    extra |= _node_arch_boards(node, owned=owned, wg_by_id=wg_by_id, nmap=nmap)
+            if extra:
+                _known = {b['board_id'] for b in all_boards}
+                all_boards = all_boards + [b for b in _all_boards()
+                                           if b['board_id'] in extra and b['board_id'] not in _known]
     return {'groups': _wg_tree(_wg_rows()), 'all_boards': all_boards}
 
 @app.get('/api/org')
@@ -3509,6 +3698,9 @@ def get_org_tree(username: str = Depends(require_auth)):
         by_parent[n['parent_id']].append(n)
     # 归属部门拥有的板块（看板管理 → 架构管理的联动）
     owned = _dept_owned_boards()
+    # 预取工作组绑定与节点映射（算「架构下所有看板」用，避免逐节点查库）
+    wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+    nmap = _org_node_map()
     # 普通用户只看到自己可见的看板（与 /api/me 口径一致）
     visible, _cols = user_allowed(username)
     if visible is not None:
@@ -3534,6 +3726,13 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['can_manage_node'] = bool(is_admin(username))
             node['is_leader'] = (n['id'] in leader_ids)
             node['in_my_scope'] = bool(in_scope)
+            # 「架构下所有看板」（2026-11-03）：本节点归属的 + 全部后代小组已绑定的。
+            # → 部门长/组长在板块绑定里能看到本部门架构下的全部看板。
+            _arch_boards = sorted(_node_arch_boards(n, owned=owned, wg_by_id=wg_by_id, nmap=nmap))
+            node['arch_boards'] = _arch_boards
+            # 可勾选池：架构下所有看板 ∪ 自身已绑定（小组节点自身绑定不在 arch_boards 时也保底）
+            node['bindable_boards'] = sorted(set(_arch_boards) | set(_node_bound_boards(
+                n, owned=owned, wg_by_id=wg_by_id)))
             # 该节点的末级人员名单（姓名 + 岗位），供前端树形组件渲染「人员」层。
             # 取该节点的任职人 + 其所有后代节点的任职人（末级=最深层的实际人员）。
             node['members'] = _collect_node_members(n['id'], nodes, appts)
@@ -3994,6 +4193,10 @@ def _norm_acl_participants(items) -> str:
        事项层的历史存量是**姓名**（cards.cc）—— 判定内核按双口径匹配，
        写入时统一用账号。
     """
+    # ⚠️ 入参可能是**列表**（AclReq.participants）或**逗号分隔字符串**
+    #   （ColumnUpdate.participants）→ 先统一拆成列表，避免逐字符迭代。
+    if isinstance(items, str):
+        items = [x for x in re.split(r'[,;、]', items)]
     out, seen = [], set()
     for x in (items or []):
         x = (str(x or '')).strip()

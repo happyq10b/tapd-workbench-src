@@ -678,6 +678,11 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    再配合字段列的 margin-left:auto，字段列起点在所有行上完全一致（纵向对齐）。 */
 .item-tail{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
 .sub-tail{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* 行尾槽位：复制（2026-11-03 新增，与置顶/子事项同级） */
+.slot-copy,.item-tail .slot-copy{display:inline-flex;align-items:center;flex-shrink:0}
+.copy-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:3px 9px;
+  font-size:11.5px;border-radius:12px;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
+.copy-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
 /* 行尾固定槽位：可选元素（逾期 / 代办 / 状态 / 置顶 / 子事项）无论有无都占同样宽度，
    行内结构恒定 → 字段列的起始位置在所有行上完全一致（纵向对齐）。
    display:inline-block + 定宽，空内容时也保留占位宽度。 */
@@ -1619,6 +1624,14 @@ function goLogin(){
         </div>
         <div style="font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6">负责人有权修改该板块的基本信息。<b>谁能看见这个板块</b>由【架构管理】的看板绑定决定，与负责人无关。</div>
       </div>
+      <div class="form-group" id="c_parts_wrap"><label>板块参与人</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="c_parts_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
+          <button type="button" class="icon-btn" id="c_parts_pick_btn" onclick="colPickParticipants(this)" title="从架构树中选择参与人（可多选）">🌳 选择参与人</button>
+          <button type="button" class="icon-btn" id="c_parts_clear_btn" onclick="colClearParticipants()" title="清空参与人">✕</button>
+        </div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6">参与人可修改该板块的<b>可见内容</b>，但<b>无增删与指派权限</b>。<b>谁能看见这个板块</b>仍由【架构管理】的看板绑定决定。</div>
+      </div>
       <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
         <div class="radio-group">
           <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
@@ -1652,6 +1665,17 @@ function goLogin(){
         <div class="form-row">
           <div class="form-group"><label>属性</label><select class="form-select" id="cp_attr"><option value="日常">日常</option><option value="专项">专项</option></select></div>
           <div class="form-group"><label>状态</label><select class="form-select" id="cp_status"><option value="启用">启用</option><option value="封存">封存</option></select></div>
+        </div>
+        <!-- 整套复制（2026-11-03）：连带复制该看板下的板块、事项与子事项 -->
+        <div class="form-group" id="cp_deep_wrap">
+          <label class="checkbox-item" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="cp_deep" checked>
+            <span>整套复制（连同该看板下的板块、事项与子事项）</span>
+          </label>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:3px;line-height:1.6">
+            副本是<b>全新记录</b>：板块与事项都是新的 ID，不与原看板共享任何数据。<br>
+            事项状态会重置为「未完成」，创建人/时间重置为当前账号与当前时间，评论与附件不复制。
+          </div>
         </div>
       </div>
       <!-- 板块复制的元信息 -->
@@ -1871,7 +1895,12 @@ function goLogin(){
 .bc-filter{padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card);flex-shrink:0;display:grid;grid-template-columns:repeat(2,1fr);gap:8px 10px}
 .bc-filter-row{display:flex;flex-direction:column;gap:4px}
 .bc-filter-row .lab{font-size:11px;color:var(--text2);font-weight:500}
-.bc-filter-row select{padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);outline:none;cursor:pointer;transition:all .15s}
+.bc-filter-row select{padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);outline:none;cursor:pointer;transition:all .15s;
+  width:100%;min-width:0;box-sizing:border-box}
+/* 筛选区对齐（2026-11-03 用户反馈）：四个筛选项（归属部门/属性/状态/负责人）两列排布，
+   select 与负责人按钮都必须**撑满所在列**，否则各自按内容自适应 → 左右两列宽窄不齐。 */
+.bc-filter-row #bcf_owner_box{width:100%;min-width:0}
+.bc-filter-row #bcf_owner_box .bc-owner-filter{width:100%;box-sizing:border-box;justify-content:space-between}
 .bc-filter-row select:hover{border-color:var(--primary)}
 .bc-filter-row select:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(0,45,116,.12)}
 /* ⚠️ 2026-11-03 用户反馈「看板管理滚轮没了」：
@@ -4095,6 +4124,20 @@ function syncDateFilterUI(){
   const btn=document.getElementById('dateClearBtn');
   if(btn)btn.hidden=!on;
 }
+// 是否有任何筛选条件激活（2026-11-03）：
+//   状态 / 搜索（q 由调用方传入）/ 参与 / 创建日期区间 / 周数 / 人员。
+//   → 供「筛选后无事项的板块整块隐藏」判定；无筛选时空板块照常显示。
+function filtersActive(q){
+  if(q)return true;
+  if(document.getElementById('statusFilter')&&document.getElementById('statusFilter').value)return true;
+  if(window._ccFilter)return true;
+  if(document.getElementById('createdStart')&&document.getElementById('createdStart').value)return true;
+  if(document.getElementById('createdEnd')&&document.getElementById('createdEnd').value)return true;
+  if(WEEK_SEL&&WEEK_SEL.size)return true;
+  if(PERSON_SEL&&PERSON_SEL.size)return true;
+  if(typeof curYears!=='undefined'&&curYears&&curYears.size)return true;   // 归属年份筛选
+  return false;
+}
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
@@ -4134,6 +4177,16 @@ function renderBoard(cards,cols,q,colHits){
       return;
     }
   }
+  // 筛选后无事项的板块整块隐藏（2026-11-03 用户需求）：
+  //   仅在**有筛选条件激活**时生效 —— 无筛选时空板块照常显示（刚建的板块要能看见）。
+  //   ⚠️ 全部板块都被筛空 → 走下方「没有符合条件的工作事项」空状态。
+  if(filtersActive(q)){
+    names=names.filter(k=>(groups[k]||[]).length>0);
+    if(!names.length){
+      c.innerHTML='<div class="empty">没有符合条件的工作事项</div>';
+      return;
+    }
+  }
   names.sort((a,b)=>cmpColumn(a,b,cmeta));
   c.innerHTML=names.map((k,i)=>{
     const list=groups[k]||[];
@@ -4152,7 +4205,7 @@ function renderBoard(cards,cols,q,colHits){
     const year=meta?(meta.year||''):'';
     // 标题点击 = 打开板块编辑界面；展开/收起只由左侧三角控制，两者互不干扰
     const titleEditable=canEditColumn(boardId);
-    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}"`;
+    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}"`;
     const titleHtml=titleEditable
       ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnEdit(this)" title="点击编辑板块">${esc(k)}</span>`
       :`<span class="week-title">${esc(k)}</span>`;
@@ -4430,6 +4483,10 @@ function cardItem(c,seq){
   // 置顶是**个人设置**：读当前账号自己的置顶集合，不读服务端的共享字段
   const pinned=isPinned('card',c.card_id);
   const pinBtnHtml=pinBtn(c.card_id,pinned,'toggleCardPin','📌 事项置顶');
+  // 复制按钮（2026-11-03）：事项行内直接复制（此前只在编辑弹窗里能复制）
+  const copyBtnHtml=ME.can_edit
+    ?`<button class="copy-btn" onclick="event.stopPropagation();copyCardFromRow('${c.card_id}','card')" title="复制该事项（副本需重新选择归属）">📋 复制</button>`
+    :'';
   // 有子事项时给出目录展开箭头
   const hasSubs=(c.sub_count||0)>0;
   const subArrow=hasSubs
@@ -4451,6 +4508,7 @@ function cardItem(c,seq){
       <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}</span>
       <span class="slot-status">${statusTag(c.card_id,c.status)}</span>
       <span class="slot-pin">${pinBtnHtml}</span>
+      <span class="slot-copy">${copyBtnHtml}</span>
       <span class="slot-sub">${subBtn}</span>
     </span>
   </div>
@@ -4513,6 +4571,7 @@ function subNodeHtml(n,level){
       <span class="slot-subtask"></span>
       <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
       <span class="slot-pin">${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}</span>
+      <span class="slot-copy">${ME.can_edit?`<button class="copy-btn" onclick="event.stopPropagation();copyCardFromRow('${n.card_id}','sub')" title="复制该子事项（副本需重新选择归属）">📋 复制</button>`:''}</span>
       <span class="slot-sub"></span>
     </span>
   </div>`;
@@ -5015,6 +5074,7 @@ function syncYearFromDate(){
 //    **不影响板块可见性**（可见性由【架构管理】的看板绑定决定）。
 //    配置入口在【板块编辑】弹窗里；选择器复用筛选栏「👤 人员」那套架构树（单选）。
 var COL_OWNER='';            // 当前板块负责人（账号）
+var COL_PARTS=[];            // 当前板块参与人（账号数组）
 function colOwnerLabel(acc){
   if(!acc)return '';
   const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
@@ -5034,6 +5094,66 @@ function colRenderOwner(){
   if(cb)cb.style.display=(isAdmin&&COL_OWNER)?'':'none';
   const wrap=document.getElementById('c_owner_wrap');
   if(wrap)wrap.style.display=isAdmin?'':'none';
+}
+// ---------- 板块参与人（2026-11-03）----------
+function colPartsLabel(acc){
+  if(!acc)return '';
+  const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
+  return m?m.label:acc;
+}
+function colRenderParticipants(){
+  const box=document.getElementById('c_parts_box');
+  if(box){
+    box.innerHTML=COL_PARTS.length
+      ? COL_PARTS.map(function(a){return '<span class="cf-chip" title="'+esc(colPartsLabel(a))+'">'+esc(colPartsLabel(a))+'</span>';}).join('')
+      : '<span style="font-size:12px;color:var(--text3)">未指定</span>';
+  }
+  // 指派参与人是**上级权限**（板块负责人及以上）→ 无权的人只读展示
+  const canSet=colCanAssignParticipants();
+  const pb=document.getElementById('c_parts_pick_btn');
+  const cb=document.getElementById('c_parts_clear_btn');
+  const wrap=document.getElementById('c_parts_wrap');
+  if(pb)pb.style.display=canSet?'':'none';
+  if(cb)cb.style.display=(canSet&&COL_PARTS.length)?'':'none';
+  if(wrap)wrap.style.display='';
+}
+// 当前板块上，我是否有权指定参与人（管理员 或 该板块负责人）
+function colCanAssignParticipants(){
+  if(ME&&ME.is_admin)return true;
+  const colKey=COLUMN_MODE==='edit'?COLUMN_EDIT_KEY:'';
+  if(!colKey)return !!(ME&&ME.can_edit);
+  const me=(ME&&ME.managed_columns)||[];
+  return me.indexOf(colKey)>=0;
+}
+function colPickParticipants(anchor){
+  // 与负责人同源：架构树 + 「姓名 → 账号」映射都要就绪才能开树
+  Promise.all([
+    ORG_TREE.length?Promise.resolve() : ensureOrgTree(),
+    bcLoadAclMembers()
+  ]).then(function(){
+    if(!ORG_TREE.length){toast('架构数据为空');return;}
+    colOpenParticipantsTree(anchor);
+  }).catch(function(){toast('架构数据加载失败');});
+}
+function colOpenParticipantsTree(anchor){
+  // 树里选的是**姓名**，参与人存**账号** → 回填时按姓名反查账号（多选）
+  const cur=COL_PARTS.map(function(a){return colMemberName(a);}).filter(Boolean);
+  const preselect=cur.map(function(n){return ORG_PERSON_PREFIX+n;});
+  openTreePick(anchor, preselect, function(persons){
+    if(!persons||!persons.length){COL_PARTS=[];colRenderParticipants();return;}
+    const accs=[];
+    persons.forEach(function(n){
+      const acc=bcAccountByName(n);
+      if(!acc){toast('成员「'+n+'」没有登录账号，无法设为参与人');return;}
+      if(accs.indexOf(acc)<0)accs.push(acc);
+    });
+    COL_PARTS=accs;
+    colRenderParticipants();
+  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE, keyword:'', requireAccount:true});
+}
+function colClearParticipants(){
+  COL_PARTS=[];
+  colRenderParticipants();
 }
 function colPickOwner(anchor){
   // ⚠️ 同上：架构树 + 「姓名 → 账号」映射都要就绪才能开树
@@ -5067,6 +5187,7 @@ function colClearOwner(){
 }
 function openColumnModal(){
   COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
+  COL_PARTS=[];          // 新建板块：无参与人
   const boards=ME.boards;
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
   document.getElementById('c_board_wrap').style.display='';
@@ -5108,8 +5229,11 @@ function openColumnEdit(el){
   if(nat)nat.checked=true;
   // 板块负责人回填（账号）；映射（账号 → 姓名）可能尚未加载 → 先拉再渲染
   COL_OWNER=d.owner||'';
-  bcLoadAclMembers().then(colRenderOwner);
+  // 板块参与人回填（账号数组）
+  COL_PARTS=(d.parts||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+  bcLoadAclMembers().then(function(){colRenderOwner();colRenderParticipants();});
   colRenderOwner();
+  colRenderParticipants();
   document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
   document.getElementById('c_submit').textContent='保存';
   document.getElementById('c_tip').innerHTML='保存后板块名称、归属年份等立即生效。<b>修改板块名称会同步更新该板块下所有事项的所属板块</b>。';
@@ -5131,12 +5255,14 @@ async function saveColumn(){
     if(COLUMN_MODE==='edit'){
       // owner 只在管理员改负责人时提交（清空用 __CLEAR__）；其他情况留空 = 不改
       const ownerPayload=(ME&&ME.is_admin)?{owner:(COL_OWNER||'__CLEAR__')}:{};
-      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload))});
+      // 参与人：仅在有权指定时提交（传值 = 覆盖；不传 = 不改）
+      const partsPayload=colCanAssignParticipants()?{participants:COL_PARTS.join(',')}:{};
+      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload))});
       toast('板块已保存：'+column_name);
       closeModal('columnModal');
       reload(1);renderProgress();
     }else{
-      await api('/api/columns',{method:'POST',body:JSON.stringify({board_id,column_name,created_at,nature,year})});
+      await api('/api/columns',{method:'POST',body:JSON.stringify({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(',')})});
       toast('板块已创建：'+column_name);
       closeModal('columnModal');
       if(curBoard!==board_id){curBoard=board_id;ensureDeptOpen(board_id)}
@@ -5154,6 +5280,27 @@ function copyCurrentCard(){
     board_id:c.board_id, column_id:c.column_id||'', column_name:c.column_name||'',
     parent_id:c.parent_id||''
   });
+}
+// ---------- 事项行内复制（2026-11-03）----------
+// 复用复制弹窗（归属重选）：按 card_id 拉一次事项详情 → 打开复制弹窗。
+// ⚠️ 行上只有 card_id，复制弹窗需要 board_id / column_id / parent_id → 必须取详情。
+async function copyCardFromRow(cardId,kind){
+  if(!ME||!ME.can_edit){toast('无编辑权限');return}
+  try{
+    // ⚠️ 没有 GET /api/cards/{id} —— 详情走列表接口的 card_id 精确取
+    const d=await api('/api/cards?card_id='+encodeURIComponent(cardId));
+    const c=(d.cards&&d.cards[0])||{};
+    if(!c.card_id){toast('事项不存在');return}
+    openCopyModal(kind||(c.parent_id?'sub':'card'),{
+      card_id:c.card_id,
+      card_name:c.card_name||'',
+      week_no:c.week_no||'',
+      board_id:c.board_id||'',
+      column_id:c.column_id||'',
+      column_name:c.column_name||'',
+      parent_id:c.parent_id||''
+    });
+  }catch(e){toast(e.message||'复制失败')}
 }
 // ---------- 复制：看板 / 板块 / 主事项 / 子事项 ----------
 // 统一入口：openCopyModal(kind, payload)
@@ -5191,6 +5338,11 @@ async function openCopyModal(kind,payload){
   show('cp_week_wrap',kind==='card'||kind==='sub');
   show('cp_board_cfg',kind==='board');
   show('cp_col_cfg',kind==='column');
+  // 「整套复制」只在复制看板时出现（2026-11-03）
+  const deepWrap=document.getElementById('cp_deep_wrap');
+  if(deepWrap)deepWrap.style.display=kind==='board'?'':'none';
+  const deepBox=document.getElementById('cp_deep');
+  if(deepBox)deepBox.checked=kind==='board';   // 默认整套复制
   const titleEl=document.getElementById('cp_name_label');
   const tipEl=document.getElementById('cp_tip');
   if(kind==='board'){
@@ -5203,7 +5355,9 @@ async function openCopyModal(kind,payload){
       `<option value="${esc(d.name)}"${P.dept===d.name?' selected':''}>${esc(bcDeptLabel(d))}</option>`).join('');
     document.getElementById('cp_attr').value=P.attr||'日常';
     document.getElementById('cp_status').value=P.status||'启用';
-    tipEl.innerHTML='副本是<b>独立的看板记录</b>（新的看板 ID），归属部门等配置随附并可修改。<b>不复制</b>原看板下的板块与事项 —— 需要的话请再分别复制板块 / 事项。<br>归属年份在【板块】层绑定，看板层不设置年份。';
+    tipEl.innerHTML='副本是<b>独立的看板记录</b>（新的看板 ID），归属部门等配置随附并可修改。'
+      +'勾选「整套复制」可<b>连带复制该看板下的板块、事项与子事项</b>；不勾选则只复制看板本身。<br>'
+      +'归属年份在【板块】层绑定，看板层不设置年份。';
   }else if(kind==='column'){
     document.getElementById('cp_title').textContent='📋 复制板块';
     titleEl.textContent='板块名称';
@@ -5278,11 +5432,17 @@ async function submitCopy(){
     if(kind==='board'){
       const dept=document.getElementById('cp_dept').value;
       const dn=((typeof BC_DEPTS!=='undefined')?BC_DEPTS:[]).find(d=>d.name===dept)||{};
+      // deep=true → 整套复制（连带板块、事项、子事项）（2026-11-03）
+      const deepBox=document.getElementById('cp_deep');
+      const deep=!!(deepBox&&deepBox.checked);
       const r=await api('/api/boards/'+encodeURIComponent(P.board_id)+'/copy',{method:'POST',body:JSON.stringify({
         board_name:name, dept:dept, dept_node_id:dn.id||0,
         attr:document.getElementById('cp_attr').value,
-        status:document.getElementById('cp_status').value})});
-      toast('看板副本已创建：'+(r.board_name||name));
+        status:document.getElementById('cp_status').value,
+        deep:deep})});
+      toast(deep
+        ? ('看板副本已创建：'+(r.board_name||name)+'（含 '+r.copied_columns+' 个板块、'+r.copied_cards+' 条事项）')
+        : ('看板副本已创建：'+(r.board_name||name)));
       closeModal('copyModal');
       if(typeof loadBoardConfig==='function')loadBoardConfig();
       ME=await api('/api/me');
@@ -7175,6 +7335,11 @@ function rebuildWgParentOptions(exceptId, selected){
 function nodeBoardScope(node){
   if(!node) return null;
   if(node.node_type==='center') return null;          // null = 不限制（全部板块）
+  // ⚠️ 2026-11-03（用户反馈）：部门/小组的绑定范围 = **本节点架构下所有看板**
+  //   （本节点归属的 + 全部后代小组已绑定的），后端算好放在 bindable_boards。
+  //   原来用 owned_boards（仅「归属该部门的看板」）→ 部门下的小组永远「未绑定板块」
+  //   且勾不到任何东西（被父部门的归属范围卡死）。
+  if(node.bindable_boards&&node.bindable_boards.length) return node.bindable_boards.slice();
   if(node.node_type==='dept'){
     const owned=(node.owned_boards||[]);
     return owned.length?owned:[];                      // 空数组 = 该部门暂无归属板块
@@ -7188,7 +7353,12 @@ function parentBoardLimit(parentId){
   if(!parentId) return null;
   // parentId 可能是新模型 org 节点 id，也可能是旧 workgroups id —— 两者都支持
   const on=ORG_FLAT.find(x=>x.id===parentId);
-  if(on) return nodeBoardScope(on);
+  // ⚠️ 2026-11-03：上级（部门/小组）的限制改为「架构下所有看板」（bindable_boards），
+  //   不再用 owned_boards（仅归属看板）—— 否则子组被卡死，无法绑定。
+  if(on){
+    if(on.bindable_boards&&on.bindable_boards.length) return on.bindable_boards.slice();
+    return nodeBoardScope(on);
+  }
   const w=WG_FLAT.find(x=>x.id===parentId);
   if(w){
     const b=(w.boards||'').trim();
@@ -8056,8 +8226,9 @@ function renderBoardList(){
     const yearTip=years.length?('板块年份：'+esc(years.join('、'))+'年'):'板块年份：未配置';
     // 复制入口（仅管理员：看板的新建与配置都是管理员级操作）
     // 参数用 JSON 塞进 data-* 再解析 —— 名称里带引号也不会截断内联 JS
+    // ⚠️ 2026-11-03：列表项内直接可复制（整套复制，归属部门可重选）
     const copyBtn=(ME&&ME.is_admin)
-      ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||''}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（归属部门可重选）">📋 复制</button>'
+      ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||''}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（默认整套复制：含板块与事项）">📋 复制</button>'
       :'';
     // 数量：显示**看板下的板块数**（用户 2026-11-03 要求）。
     //   b.col_count 由后端 /api/boards 提供（按可见板块口径，与 card_count 同源）；
@@ -8281,10 +8452,7 @@ function renderAclSection(b){
     +'<div id="bc_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:24px">'+ownerChip+'</div>'
     +(canSetOwner?'<button type="button" class="icon-btn" onclick="bcPickOwner(this)" title="从架构树中选择负责人（单选）">🌳 选择负责人</button>':'')
     +(owner&&canSetOwner?'<button type="button" class="icon-btn" onclick="bcClearOwner()" title="清除负责人">✕</button>':'')
-    +'</div>'
-    +'<div class="bc-hint"><b>负责人</b>有权修改该看板的基本信息（归属部门 / 属性 / 状态 / 备注）。'
-    +'<b>谁能看见这个看板</b>统一由【架构管理】的看板绑定决定，与负责人无关。'
-    +(canSetOwner?'':'（只有管理员可以指定负责人）')+'</div></div>';
+    +'</div></div>';
 }
 // 树状图选负责人：复用筛选栏「👤 人员」那套架构树（ORG_TREE + pickMode:'person'），
 // 但**单选** —— 负责人只能有一个人。
