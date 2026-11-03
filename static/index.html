@@ -153,7 +153,8 @@ button{font-family:inherit}
 }
 /* 容器内的「带」不再各自跨列（已在容器内单列流），去掉原 grid-column 覆盖 */
 .tb-navgroup>.tb-band{grid-column:auto}
-/* 两个带之间的分隔线：让「架构部门」与「可选看板」在整体内部仍有清晰边界 */
+/* 带之间的分隔线：让各带在整体内部仍有清晰边界
+   （现在是 架构部门 / 架构管理 / 可选看板 / 看板管理 四带） */
 .tb-navgroup>.tb-band+.tb-band{
   border-top:1px solid var(--border);padding-top:11px;
 }
@@ -191,6 +192,25 @@ button{font-family:inherit}
 .tb-board-band .tb-grid::-webkit-scrollbar-thumb:hover{background:#d0d3d8}
 /* 滚动区内的条目：两行封顶后第三行起可滚动；给网格底部留一点呼吸感 */
 .tb-board-band .tb-grid>*{align-self:start}
+/* 管辖范围外的架构节点：置灰不可点击（2026-11-03 权限渲染） */
+.org-node-ro{opacity:.45;cursor:not-allowed}
+.org-node-ro:hover{border-color:var(--border)!important;box-shadow:none!important}
+/* ===== 管理入口带（2026-11-03 菜单顺序调整）=====
+   【架构管理】入口放在【架构部门】带之后，【看板管理】入口放在【可选看板】带之后。
+   入口按**当前成员权限**动态渲染：有权限 → 可点按钮；无权限 → 隐藏整带。
+   （「动态渲染可配置范围」见 renderPermissionEntries()） */
+.tb-entry-band{grid-column:auto}
+.tb-entry-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:26px}
+.tb-entry-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 14px;border:1px solid var(--border);border-radius:16px;
+  background:var(--card);color:var(--text);font-size:12.5px;cursor:pointer;
+  transition:all .15s;font-family:inherit;
+}
+.tb-entry-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
+.tb-entry-btn:active{transform:translateY(1px)}
+.tb-entry-note{font-size:11.5px;color:var(--text3);line-height:1.5}
+.tb-entry-note b{color:var(--text2);font-weight:600}
 /* 三个带的标题：加粗 + 略大，作为分区的视觉锚点 */
 .tb-band-title{font-size:13px;font-weight:700;color:var(--text2);letter-spacing:.4px;margin-bottom:7px;
   display:flex;align-items:center;gap:7px}
@@ -1183,9 +1203,10 @@ function goLogin(){
     </span>
     <button class="header-btn msg-btn" id="msgBtn" onclick="openMsgPanel()" title="消息中心">🔔<span class="msg-badge" id="msgBadge" hidden>0</span></button>
     <button class="header-btn" id="teamBtn" onclick="openTeamModal()" title="成员与账号管理">👥 成员与账号管理</button>
-    <button class="header-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>
-    <button class="header-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>
     <button class="header-btn" id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
+    <!-- ⚠️ 【架构管理】与【看板管理】入口已按需求移至顶部导航区：
+         分别位于【架构部门】带之后、【可选看板】带之后（见 .tb-navgroup）。 -->
+
     <!-- 低频操作收进下拉：按钮平铺会把标题挤扁（实测标题被压成竖排单字），
          且窄屏时按钮换行占满整屏。这里按主次分层，常用按钮常驻、其余收起。
          【导入导出】独立成一个按钮，与【更多】分开：
@@ -1252,9 +1273,19 @@ function goLogin(){
         <div class="tb-band-title">架构部门</div>
         <div class="tb-grid" id="tbDepts"></div>
       </div>
+      <!-- 【架构管理】入口：位于【架构部门】带之后（2026-11-03 菜单顺序调整） -->
+      <div class="tb-band tb-entry-band" id="archEntryBand">
+        <div class="tb-band-title">架构管理</div>
+        <div class="tb-entry-row" id="archEntryRow"></div>
+      </div>
       <div class="tb-band tb-board-band">
         <div class="tb-band-title">可选看板</div>
         <div class="tb-grid" id="tbBoards"></div>
+      </div>
+      <!-- 【看板管理】入口：位于【可选看板】带之后（2026-11-03 菜单顺序调整） -->
+      <div class="tb-band tb-entry-band" id="boardEntryBand">
+        <div class="tb-band-title">看板管理</div>
+        <div class="tb-entry-row" id="boardEntryRow"></div>
       </div>
     </div>
     <div class="tb-band tb-stat-band">
@@ -1762,6 +1793,11 @@ function goLogin(){
 .bc-pick-wrap{display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0}
 .bc-pick{cursor:pointer;width:14px;height:14px;margin:0}
 .bc-hint{font-size:11.5px;color:var(--text3);line-height:1.6}
+/* 只读态（2026-11-03）：无权限的条目置灰不可点击 */
+.bc-ro{opacity:.5;pointer-events:none}
+/* 身份徽标：显示当前成员在该看板的角色 */
+.bc-role-tag{font-size:10.5px;color:var(--primary);background:#f0f5ff;border:1px solid #d6e4ff;
+  border-radius:3px;padding:0 5px;flex-shrink:0;font-weight:500}
 .bc-right{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
 .bc-edit{margin:0 auto;padding:20px 22px;display:flex;flex-direction:column;gap:18px;max-width:640px;width:100%;box-sizing:border-box}
 .bc-edit-title{font-size:15px;font-weight:600;color:var(--text);display:flex;align-items:baseline;gap:8px}
@@ -2264,15 +2300,75 @@ function setupDraggableModals(){
 // | 备份(导出JSON) | GET /api/export       | require_auth（只读可用）|
 // | 模板下载       | GET /api/import/template | require_auth |
 // | 导出 xlsx      | GET /api/export/xlsx  | require_auth（只读可用）|
+// ---------- 管理入口的权限画像（2026-11-03）----------
+// 判定口径**全部来自后端**，前端只做展示决策：
+//   ME.arch_scope        → 我管辖的架构节点 id 集合（架构负责人）
+//   ME.arch_leader_nodes → 我担任负责人的节点 id
+//   /api/boards 的 can_edit → 我能配置哪些看板
+function myPermProfile(){
+  const isAdmin=!!(ME&&ME.is_admin);
+  const archScope=new Set((ME&&ME.arch_scope)||[]);
+  const leaderNodes=new Set((ME&&ME.arch_leader_nodes)||[]);
+  // 我能配置的看板：后端在 /api/me 直接给（权威口径）
+  // ⚠️ 不用 BC_BOARDS —— 那个要等打开看板管理才加载，首屏为空会把入口误判成「无权限」。
+  const editableBoards=((ME&&ME.editable_boards)||[]);
+  return {
+    isAdmin:isAdmin,
+    archScope:archScope,
+    leaderNodes:leaderNodes,
+    isArchOwner:leaderNodes.size>0,
+    editableBoards:editableBoards,
+    // 有没有任何架构层的管理权（管理员天然有）
+    canManageArch:isAdmin||leaderNodes.size>0,
+  };
+}
+// 渲染【架构管理】/【看板管理】两个入口带（2026-11-03）
+// 无权限 → **整带隐藏**（不是置灰）：一个永远打不开的入口不如不出现。
+function renderPermissionEntries(){
+  const p=myPermProfile();
+  // ── 架构管理入口 ──
+  const archBand=document.getElementById('archEntryBand');
+  const archRow=document.getElementById('archEntryRow');
+  if(archBand&&archRow){
+    if(p.canManageArch){
+      archBand.style.display='';
+      const n=p.archScope.size;
+      archRow.innerHTML='<button class="tb-entry-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 打开架构管理</button>'
+        +'<span class="tb-entry-note">'+(
+          p.isAdmin
+            ? '管理员 · 可维护全部架构节点与看板绑定'
+            : '架构负责人 · 可配置 <b>'+n+'</b> 个节点范围内的看板绑定'
+        )+'</span>';
+    }else{
+      archBand.style.display='none';
+      archRow.innerHTML='';
+    }
+  }
+  // ── 看板管理入口 ──
+  const boardBand=document.getElementById('boardEntryBand');
+  const boardRow=document.getElementById('boardEntryRow');
+  if(boardBand&&boardRow){
+    const n=p.editableBoards.length;
+    if(p.isAdmin||n>0){
+      boardBand.style.display='';
+      boardRow.innerHTML='<button class="tb-entry-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 打开看板管理</button>'
+        +'<span class="tb-entry-note">'+(p.isAdmin
+            ? '管理员 · 可配置全部看板并指定负责人'
+            : '可配置 <b>'+n+'</b> 个看板')+'</span>';
+    }else{
+      boardBand.style.display='none';
+      boardRow.innerHTML='';
+    }
+  }
+}
 function applyPermissionUI(){
   if(!ME)return;
   const isAdmin=!!ME.is_admin, canEdit=!!ME.can_edit;
-  // 管理员专属：成员与账号 / 架构 / 操作日志
-  [['teamBtn',isAdmin],['wgBtn',isAdmin],['auditBtn',isAdmin]]
+  // 管理员专属：成员与账号 / 操作日志
+  [['teamBtn',isAdmin],['auditBtn',isAdmin]]
     .forEach(function(p){const el=document.getElementById(p[0]);if(el)el.style.display=p[1]?'':'none';});
-  // 看板管理：管理员，或**任一看板的负责人**（负责人有权改自己看板的基本信息）
-  const bcBtn=document.getElementById('boardConfigBtn');
-  if(bcBtn)bcBtn.style.display=(isAdmin||((ME.managed_boards||[]).length>0))?'':'none';
+  // 架构管理 / 看板管理入口 → 由 renderPermissionEntries() 按权限动态渲染
+  renderPermissionEntries();
   // 可编辑专属：新建板块
   const nb=document.getElementById('newBtn'); if(nb)nb.style.display=canEdit?'':'none';
   // 「更多」菜单里的写操作项：恢复（JSON 导入）、导入（xlsx）—— 需 editor 及以上
@@ -6787,6 +6883,8 @@ function renderOrgRoles(){
   }
   const node=ORG_FLAT.find(x=>x.id===nid);
   if(!node){box.innerHTML='';return}
+  // 岗位任命 = 组织架构结构维护 → 管理员专属（2026-11-03）
+  const canAppt=node.can_manage_node!==false;
   const roles=node.roles||[];
   const appts=node.appointments||[];
   const byRole={};
@@ -6807,18 +6905,19 @@ function renderOrgRoles(){
       const multi=a.other_org_count>0
         ?`<span title="该成员另有 ${a.other_org_count} 个组织任职" style="font-size:10px;color:var(--primary);margin-left:3px">+${a.other_org_count}</span>`:'';
       html+=`<span class="org-chip" title="点击移除任职">${esc(a.member_name)}${multi}
-        <button class="org-chip-x" onclick="removeOrgAppt(${a.id},${esc(JSON.stringify(a.member_name))})" title="移除">✕</button></span>`;
+        ${canAppt?`<button class="org-chip-x" onclick="removeOrgAppt(${a.id},${esc(JSON.stringify(a.member_name))})" title="移除">✕</button>`:''}</span>`;
     });
     if(!list.length){
       html+='<span style="font-size:11.5px;color:var(--text3)">未配置</span>';
     }
     html+=`</div>
       <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
-        <select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''">
+        <select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${canAppt?'':' disabled'}>
           <option value="">选择成员…</option>
           ${ORG_MEMBERS.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
         </select>
-        <button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>
+        ${canAppt?`<button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>`
+          :'<span style="font-size:11px;color:var(--text3);white-space:nowrap">任命由管理员操作</span>'}
       </div>
     </div>`;
   });
@@ -6882,8 +6981,14 @@ function clearOrgSelection(){
 // 选中节点 → 右侧展示该节点的岗位槽位；重复点击同一节点 = 取消选中
 function selectOrgNode(nid){
   if(ORG_SELECTED===nid){clearOrgSelection();return;}
-  ORG_SELECTED=nid;
   const node=ORG_FLAT.find(x=>x.id===nid);
+  // 越权拦截（2026-11-03）：管辖范围外的节点**不可进入配置**。
+  // ⚠️ 前端拦截只是体验；服务端写接口另有 require_admin 兜底。
+  if(node&&node.can_config_bind===false){
+    toast('该节点不在你的管辖范围内，仅可查看');
+    return;
+  }
+  ORG_SELECTED=nid;
   // 同步编辑表单（点节点 = 查看其岗位；编辑按钮进编辑模式）
   document.getElementById('g_form_title').textContent=(node?node.name:'新增节点')+' · 岗位与任职';
   document.getElementById('g_submit_btn').textContent='保存修改';
@@ -6964,6 +7069,10 @@ function renderBoardChecks(boards, limit, searchTerm, readonly){
   const hint=document.getElementById('g_boards_hint');
   const input=document.getElementById('g_boards_search');
   const search=(searchTerm!==undefined?searchTerm:(input?input.value:'')).trim().toLowerCase();
+  // 权限渲染（2026-11-03）：当前节点不在管辖范围 → 绑定勾选框禁用（不可越权改绑定）。
+  const node=ORG_FLAT.find(x=>x.id===ORG_SELECTED);
+  const bindAllowed=!node||node.can_config_bind!==false;
+  if(!bindAllowed)readonly=true;
   if(input){ input.style.display=readonly?'none':''; input.disabled=!!readonly; }
   const sel=boards==='*'?[]:(boards||'').split(',').filter(Boolean);
   wrap.dataset.boards=sel.join(',');
@@ -6975,7 +7084,9 @@ function renderBoardChecks(boards, limit, searchTerm, readonly){
   if(search) pool=pool.filter(b=>((b.board_name||'').toLowerCase().includes(search))||((b.board_id||'').toLowerCase().includes(search)));
   const chk=pool.map(b=>`<label class="tm-grp-opt" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}${readonly?' disabled':''}><span style="font-size:12.5px">${esc(b.board_name)}</span></label>`).join('');
   wrap.innerHTML=(chk||'<span style="color:var(--text3);font-size:12px">'+(search?'无匹配板块':(limit?'上级部门未绑定看板，暂无可用选项':'暂无看板数据'))+'</span>');
-  if(readonly){
+  if(!bindAllowed){
+    hint.textContent='⚠ 该节点不在你的管辖范围内，看板绑定为只读，不可修改。';
+  }else if(readonly){
     hint.textContent='部门/中心节点的板块由「看板管理 · 归属部门」统一决定（当前 '+sel.length+' 个）；小组级节点仍可在此手动勾选。';
   }else if(limit){
     hint.textContent='上级部门已绑定 '+totalPool+' 个看板，子级仅能选择其中部分（或留空不限制）。';
@@ -7049,7 +7160,10 @@ async function ensureOrgTree(force){
   try{ return await _ORG_TREE_P; } finally { _ORG_TREE_P=null; }
 }
 async function openWgModal(){
-  if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
+  // 准入（2026-11-03）：管理员，或**架构负责人**（有管辖节点）。
+  // 架构负责人进入后只能配置自己范围内的节点（见 renderWgList 的能力位）。
+  const p=myPermProfile();
+  if(!ME||!p.canManageArch){toast('仅管理员或架构负责人可访问');return}
   const [gd, td] = await Promise.all([api('/api/workgroups'), api('/api/team')]);
   WG_ALL=gd.groups||[];
   WG_FLAT=wgFlat(WG_ALL);
@@ -7100,19 +7214,28 @@ function renderWgList(){
   const apptCount=(n)=>(n.appointments||[]).length;
   const row=(n,dep)=>{
     const st=ORG_TYPE_STYLE[n.node_type]||ORG_TYPE_STYLE.group;
+    // 权限渲染（2026-11-03）：
+    //   can_config_bind=false → 管辖范围外 → **置灰不可点**
+    //   can_manage_node=false → 不能增删改该节点 → 隐藏节点维护按钮
+    const canBind=n.can_config_bind!==false;
+    const canNode=n.can_manage_node!==false;
+    const rowCls=(n.parent_id?'':' root')+(canBind?'':' org-node-ro');
+    const clickAttr=canBind?('onclick="selectOrgNode('+n.id+')"'):'';
+    const roTitle=canBind?'':' title="该节点不在你的管辖范围内（仅查看）"';
     return `
-    <div class="org-node-row${n.parent_id?'':' root'}" data-org-id="${n.id}" style="padding-left:${10+dep*20}px" onclick="selectOrgNode(${n.id})">
+    <div class="org-node-row${rowCls}" data-org-id="${n.id}" style="padding-left:${10+dep*20}px"${clickAttr}${roTitle}>
       ${(n.children&&n.children.length)?`<button class="icon-btn" onclick="event.stopPropagation();toggleWg(${n.id})" style="padding:0;width:20px;height:20px;flex-shrink:0" title="展开/折叠">${WG_COLLAPSED.has(n.id)?'▶':'▼'}</button>`:'<span style="width:20px;flex-shrink:0"></span>'}
       <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:76px">${st.icon} ${esc(n.name)}</span>
       <span style="font-size:10.5px;color:${st.color};background:${st.bg};border:1px solid ${st.bd};border-radius:3px;padding:0 5px;flex-shrink:0">${esc(n.type_name||'')}</span>
       <span style="color:var(--text2);font-size:11.5px;width:66px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(()=>{const l=leaderOf(n);return l?esc(l):'<span style="color:var(--text3)">未任命</span>'})()}</span>
       <span style="font-size:11.5px;color:var(--text3);flex-shrink:0;min-width:44px;text-align:right" title="任职人数">${apptCount(n)} 人</span>
       <span style="color:${(n.node_type==='dept'||n.node_type==='center')?(n.owned_boards&&n.owned_boards.length?'var(--primary)':'var(--text3)'):(n.wg_boards?'var(--primary)':'var(--text3)')};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;padding-left:8px">${n.node_type==='center'?'🔒 全部看板（中心）':(n.node_type==='dept'?((n.owned_boards&&n.owned_boards.length)?('板块：'+boardNames(n.owned_boards.join(','))):'未归属板块（看板管理中指定）'):(n.wg_boards?('板块：'+boardNames(n.wg_boards)):'未绑定板块'))}</span>
-      ${canEdit?`<span style="flex-shrink:0" onclick="event.stopPropagation()">
+      ${canEdit&&canNode?`<span style="flex-shrink:0" onclick="event.stopPropagation()">
         <button class="icon-btn" onclick="addWgChild(${n.id})" title="在此节点下新增子节点">+ 子节点</button>
         <button class="icon-btn" onclick="editWg(${n.id})">编辑</button>
         ${n.node_type==='center'?'':`<button class="icon-btn delete" onclick="removeWg(${n.id})">删除</button>`}
       </span>`:''}
+      ${(!canEdit&&canNode)?`<span style="flex-shrink:0;font-size:11px;color:var(--text3);white-space:nowrap" title="组织架构结构的增删改由管理员维护">结构由管理员维护</span>`:''}
     </div>
     ${(n.children&&!WG_COLLAPSED.has(n.id))?n.children.map(c=>row(c,dep+1)).join(''):''}
   `;
@@ -7595,9 +7718,13 @@ function bcPaintPick(){
   }
 }
 async function openBoardConfigModal(){
-  // 管理员，或任一看板的负责人（2026-11-02：负责人 = 看板管理权）
+  // 准入（2026-11-03）：管理员，或**任一看板可配置**。
+  // ⚠️ 口径来自后端 /api/me 的 editable_boards（权威）——
+  //    不用前端缓存的列表，避免与后端漂移。
+  const isAdmin=!!(ME&&ME.is_admin);
+  const canAny=!!(ME&&(ME.editable_boards||[]).length);
   const isOwner=!!(ME&&(ME.managed_boards||[]).length);
-  if(!ME||(!ME.is_admin&&!isOwner)){toast('仅管理员或看板负责人可访问');return}
+  if(!ME||(!isAdmin&&!isOwner&&!canAny)){toast('你没有可配置的看板');return}
   await loadBoardConfig();
   await bcLoadAclMembers();          // 负责人回显用的账号 → 姓名映射
   // 管理员专属：新建看板 / 删除所选（负责人只能改自己看板的基本信息）
@@ -7622,6 +7749,7 @@ async function loadBoardConfig(){
   BC_DEPTS=(res.depts||[]).slice();
   renderFilters();
   renderBoardList();
+  renderPermissionEntries();
 }
 function renderFilters(){
   const all='<option value="">全部</option>';
@@ -7633,11 +7761,12 @@ function renderFilters(){
     +'<option value="未配置"'+(BC_FILTER.status==='未配置'?' selected':'')+'>未配置</option>';
 }
 function renderBoardList(){
-  // 非管理员（看板负责人）只列出**自己负责的看板** —— 负责人只对自己的看板有管理权
-  const managed=new Set((ME&&ME.managed_boards)||[]);
+  // 列表按**后端给的 can_edit** 过滤（2026-11-03）：
+  //   管理员 → 全部；看板负责人 → 自己负责的；架构负责人 → 其管辖范围内的。
+  // ⚠️ 不再在前端用 managed_boards 推断 —— 那是另一套口径，会与后端漂移。
   const onlyMine=!(ME&&ME.is_admin);
   const list=BC_BOARDS.filter(function(b){
-    if(onlyMine&&!managed.has(b.board_id))return false;
+    if(onlyMine&&!b.can_edit)return false;
     if(BC_FILTER.dept && b.dept!==BC_FILTER.dept)return false;
     if(BC_FILTER.attr && b.attr!==BC_FILTER.attr)return false;
     if(BC_FILTER.status){
@@ -7652,6 +7781,8 @@ function renderBoardList(){
   box.innerHTML=list.map(function(b){
     const st = b.status==='封存' ? '<span class="badge-locked">封存</span>'
             : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
+    // 身份徽标：一眼看出自己在这个看板是什么角色（2026-11-03）
+    const roleTag=b.perm_role?'<span class="bc-role-tag" title="你在该看板的身份">'+esc(b.perm_role)+'</span>':'';
     const sel = (BC_SELECTED && BC_SELECTED.board_id===b.board_id) ? ' active':'';
     const deptTip = b.dept?('归属：'+esc(b.dept)):'';
     // 所属板块年份：年份在【板块】层，看板只是容器 → 展示该看板下各板块的年份集合
@@ -7664,7 +7795,7 @@ function renderBoardList(){
       :'';
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
+      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+roleTag+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
       +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
@@ -7797,24 +7928,34 @@ function renderEditArea(){
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
   const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
   const isAdmin=!!(ME&&ME.is_admin);
+  // 逐项按后端能力位控制（2026-11-03）：
+  //   can_edit         → 能改基本信息（归属部门/属性/状态/备注）+ 能保存配置
+  //   can_delete       → 能删除该看板配置
+  //   can_assign_owner → 能指定/变更看板负责人（架构负责人及以上）
+  const canEdit=!!b.can_edit, canDelete=!!b.can_delete, canAssign=!!b.can_assign_owner;
   let footer='<div class="bc-footer">';
-  if(isEdit){footer+='<button class="btn-secondary bc-del-single" onclick="bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该看板的配置（需一次确认）">删除该看板配置</button>';}
+  if(isEdit&&canDelete)footer+='<button class="btn-secondary bc-del-single" onclick="bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该看板的配置（需一次确认）">删除该看板配置</button>';
   // 批量应用 = 跨看板的管理操作 → 仅管理员
   if(isAdmin)footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个看板</button>';
-  // 指定负责人 = 授予管理权 → 仅管理员
-  if(isAdmin)footer+='<button class="btn-secondary" onclick="saveBoardAcl()" title="设置该看板的负责人（负责人有权修改看板基本信息）">保存负责人</button>';
-  footer+='<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>'
-    +'<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
+  // 指定负责人 = 授予管理权 → 架构负责人及以上（can_assign_owner）
+  if(canAssign)footer+='<button class="btn-secondary" onclick="saveBoardAcl()" title="设置该看板的负责人（负责人有权修改看板基本信息）">保存负责人</button>';
+  if(canEdit)footer+='<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>';
+  footer+='<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
+  // 无权编辑时：表单整体只读（置灰不可改），并给出身份说明
+  const roAttr=canEdit?'':' disabled';
+  const permNote='<div class="bc-hint" style="margin-top:-2px">你在该看板的身份：<b>'+esc(b.perm_role||'无权限')+'</b>'
+    +(canEdit?(canAssign?' · 可改基本信息并指定负责人':' · 可改基本信息'):' · 仅可查看，不可修改')+'</div>';
   area.innerHTML='<div class="bc-edit">'
     +'<div class="bc-edit-title">'+(isEdit?'✏️ 编辑看板配置':'➕ 新建看板配置')+'<span class="sub">'+(isEdit?'修改该看板的维度属性':'为真实看板登记维度属性')+'</span></div>'
     +boardBlock
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div>'
-    +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="max-width:320px">'+deptOpts+'</select>'
+    +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="max-width:320px"'+roAttr+'>'+deptOpts+'</select>'
     +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+'</div></div>'
-    +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills">'+attrPills+'</div></div>'
-    +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills">'+statusPills+'</div></div>'
+    +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+attrPills+'</div></div>'
+    +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+statusPills+'</div></div>'
     +'<div class="bc-hint" style="margin-top:-4px">归属年份在【板块】层单独配置 —— 每个板块绑定唯一归属年份（点板块标题即可编辑），看板本身不再有年份。</div>'
-    +'<div class="bc-section"><div class="lab">备注（可选）</div><textarea class="form-textarea" id="bc_remark" rows="2" placeholder="如：年度预算看板" oninput="BC_FORM.remark=this.value">'+esc(BC_FORM.remark||'')+'</textarea></div>'
+    +'<div class="bc-section"><div class="lab">备注（可选）</div><textarea class="form-textarea" id="bc_remark" rows="2" placeholder="如：年度预算看板" oninput="BC_FORM.remark=this.value"'+roAttr+'>'+esc(BC_FORM.remark||'')+'</textarea></div>'
+    +permNote
     +renderAclSection(b)
     +footer
     +'</div>';

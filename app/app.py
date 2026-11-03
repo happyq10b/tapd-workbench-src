@@ -27,7 +27,8 @@ try:
                        OP_VIEW, OP_CREATE, OP_UPDATE, OP_DELETE,
                        OP_ASSIGN_OWNER, OP_ASSIGN_PARTICIPANT, OP_EDIT_CONTENT,
                        ALL_OPS, OP_MIN_LEVEL, OP_TARGET_LEVEL,
-                       resource_chain, effective_level, has_role, can_do, require_perm,
+                       resource_chain, effective_level, has_role, can_do, can_do_level,
+                       require_perm,
                        require_perm_level, can_do_level,
                        assert_same_arch, identity_names, _split_list,
                        _arch_scope_nodes, _arch_leader_nodes)
@@ -178,6 +179,25 @@ def perm_check(username, chain, op, resource_level, resource_desc='', min_level=
         require_perm_level(dbq, username, chain, op, resource_level, min_level,
                            resource_desc=resource_desc,
                            is_admin=is_admin(username), is_super=(username == SUPER_ADMIN))
+
+
+def perm_check_pass(username, chain, op, resource_level, min_level=None):
+    # 「能不能做」的**布尔版**判定 —— 不抛异常，用于给前端渲染能力标记。
+    # 与 perm_check() 共用同一套判定逻辑（perm.py 的 can_do），
+    # 保证「前端显示能做」与「后端真放行」永不打架。
+    if not PERM_ENABLED:
+        return True
+    if username == SUPER_ADMIN:
+        return True
+    if is_admin(username):
+        return True
+    if min_level is None:
+        ok, _info = can_do(dbq, username, chain, op, resource_level,
+                           is_admin=False, is_super=False)
+    else:
+        ok, _info = can_do_level(dbq, username, chain, op, resource_level, min_level,
+                                 is_admin=False, is_super=False)
+    return bool(ok)
 
 
 def perm_check_arch_scope(username, op, resource_desc='', node_id=None):
@@ -1479,12 +1499,29 @@ def me(username: str = Depends(require_auth)):
                       dbq('SELECT board_id FROM boards WHERE owner=? AND owner<>?', (username, ''))]
     managed_columns = [r['col_key'] for r in
                        dbq('SELECT col_key FROM board_columns WHERE owner=? AND owner<>?', (username, ''))]
+    # 权限画像（2026-11-03）：前端据此**动态渲染可配置范围**。
+    # ⚠️ 判定口径全部来自 perm.py（effective_level），前端不做二次推断。
+    arch_scope = sorted(_arch_scope_nodes(dbq, username))       # 我管辖的架构节点（含后代）
+    leader_nodes = sorted(_arch_leader_nodes(dbq, username))    # 我担任负责人的节点
+    # 可配置的看板（2026-11-03）：入口渲染需要这个数字，
+    # ⚠️ **不能在前端数** —— 前端的看板列表要等打开看板管理才加载，首屏为空会误判成「无权限」。
+    editable_boards = []
+    if not is_admin(username):
+        for b in dbq('SELECT board_id FROM boards'):
+            if perm_check_pass(username, perm_chain(board_id=b['board_id']),
+                               OP_UPDATE, LV_BOARD_OWNER):
+                editable_boards.append(b['board_id'])
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'allowed_columns': col_info,
             'managed_boards': managed_boards,      # 我是负责人的看板
             'managed_columns': managed_columns,    # 我是负责人的板块
+            # ↓↓↓ 权限画像（新增）
+            'arch_scope': arch_scope,              # 我管辖的架构节点 id（含后代）
+            'arch_leader_nodes': leader_nodes,     # 我担任负责人的节点 id
+            'is_arch_owner': bool(leader_nodes),   # 是否架构负责人
+            'editable_boards': editable_boards,    # 我能配置基本信息的看板（管理员=全部，前端不依赖列表加载时机）
             'depts': dept_list}   # 有序部门清单（**按权限过滤**：只含有可见看板的部门）
 
 @app.get('/api/filter-options')
@@ -3477,6 +3514,12 @@ def get_org_tree(username: str = Depends(require_auth)):
     if visible is not None:
         owned = {nid: {b for b in bs if b in visible} for nid, bs in owned.items()}
 
+    # 逐节点能力位（2026-11-03）：架构负责人只能配置自己管辖范围内的节点。
+    #   can_config_bind → 能否在本节点配置看板绑定（架构负责人：范围内即可）
+    #   can_manage_node → 能否增删改本节点（仅管理员）
+    scope = set() if is_admin(username) else _arch_scope_nodes(dbq, username)
+    leader_ids = set() if is_admin(username) else _arch_leader_nodes(dbq, username)
+
     def build(pid):
         out = []
         for n in by_parent.get(pid, []):
@@ -3485,6 +3528,12 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['roles'] = roles_by_type.get(n['node_type'], [])
             node['appointments'] = appts.get(n['id'], [])
             node['owned_boards'] = sorted(owned.get(n['id'], set()))
+            # 能力位
+            in_scope = n['id'] in scope
+            node['can_config_bind'] = bool(is_admin(username) or in_scope)
+            node['can_manage_node'] = bool(is_admin(username))
+            node['is_leader'] = (n['id'] in leader_ids)
+            node['in_my_scope'] = bool(in_scope)
             # 该节点的末级人员名单（姓名 + 岗位），供前端树形组件渲染「人员」层。
             # 取该节点的任职人 + 其所有后代节点的任职人（末级=最深层的实际人员）。
             node['members'] = _collect_node_members(n['id'], nodes, appts)
@@ -3785,6 +3834,26 @@ def list_boards(username: str = Depends(require_auth)):
     visible, cols_perm = user_allowed(username)
     if visible is not None:
         boards = [b for b in boards if b['board_id'] in visible]
+    # 【看板管理】列表 = 可见看板 ∪ **可管理看板**（2026-11-03）
+    # ⚠️ 原因：负责人 = 管理权，但**不放大可见性** →
+    #    若某人只靠「负责人」身份拿到管理权，他负责的看板可能不在可见集里，
+    #    列表里就没有它 → 无法配置自己负责的看板。
+    #    这里补上**管理范围内**的看板，不改变任何读接口的可见性口径。
+    _managed_extra = set()
+    if not is_admin(username):
+        _managed_extra = {b['board_id'] for b in boards
+                          if board_owner(b['board_id']) == username}
+        for _b in _all_boards():
+            _bid = _b['board_id']
+            if _bid in _managed_extra:
+                continue
+            if perm_check_pass(username, perm_chain(board_id=_bid),
+                               OP_UPDATE, LV_BOARD_OWNER):
+                _managed_extra.add(_bid)
+        if _managed_extra:
+            _known = {b['board_id'] for b in boards}
+            boards = boards + [b for b in _all_boards() if b['board_id'] in _managed_extra
+                               and b['board_id'] not in _known]
     # 卡片数：**必须按当前账号的可见范围统计**（看板级 + 板块级两级权限）。
     # ⚠️ 此前直接对 cards 表 GROUP BY 统计 → 只做了看板级过滤，
     #    板块级白名单（allowed_columns）收窄后的板块，其事项仍被计入
@@ -3830,6 +3899,21 @@ def list_boards(username: str = Depends(require_auth)):
             # 该账号是否为该看板的负责人（决定能否修改该看板基本信息）
             'is_owner': a.get('owner', '') == username,
         })
+    # 逐看板给出「可配置能力」（2026-11-03）
+    # ⚠️ 前端按这个渲染：能改基本信息 / 能改负责人 / 完全不可动。
+    #    判定走 perm.py 的 can_do，与后端写接口的门槛**完全一致**。
+    for item in out:
+        bid = item['board_id']
+        chain = perm_chain(board_id=bid)
+        lv = perm_level_of(username, chain)
+        item['perm_level'] = lv
+        item['perm_role'] = ROLE_NAMES.get(lv, '无权限')
+        can_update = perm_check_pass(username, chain, OP_UPDATE, LV_BOARD_OWNER)
+        can_assign = perm_check_pass(username, chain, OP_ASSIGN_OWNER, LV_BOARD_OWNER,
+                                      min_level=LV_ARCH_OWNER)
+        item['can_edit'] = can_update          # 能否改基本信息（归属部门/属性/状态/备注）
+        item['can_assign_owner'] = can_assign  # 能否指定/变更看板负责人（架构负责人及以上）
+        item['can_delete'] = perm_check_pass(username, chain, OP_DELETE, LV_BOARD_OWNER)
     return {'boards': out, 'depts': _dept_options()}
 
 @app.get('/api/board-config')
