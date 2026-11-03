@@ -1301,7 +1301,9 @@ function goLogin(){
       </div>
     </div>
     <div class="tb-band tb-stat-band">
-      <div class="tb-band-title">统计概览</div>
+      <!-- 「统计概览」标题已按用户要求去掉（2026-11-03）——
+           三张统计卡自身已有数字与进度条，标题行纯属占位、白占一行高度。
+           卡片含义保留在各卡片的标题文字里，不丢信息。 -->
       <div class="progress-overview" id="progressOverview"></div>
     </div>
   </div>
@@ -1357,7 +1359,7 @@ function goLogin(){
         <span class="cf-label">👤 人员</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="personFilterInput" autocomplete="off" readonly
-                 placeholder="点击从架构树选择" onclick="openPersonFilterPicker(this)"
+                 placeholder="" onclick="openPersonFilterPicker(this)"
                  onfocus="openPersonFilterPicker(this)" title="打开组织架构树：搜索人员、勾选「无负责人」"
                  aria-label="人员筛选，点击从组织架构树选择人员">
           <span class="cf-count" id="personFilterCount" title="已选人员（点击打开架构树）"
@@ -1370,7 +1372,7 @@ function goLogin(){
         <span class="cf-label">📅 周数</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="weekFilterInput" autocomplete="off"
-                 placeholder="41 或 2026-41" onfocus="openFilterCombo('week')" onclick="openFilterCombo('week')"
+                 placeholder="" onfocus="openFilterCombo('week')" onclick="openFilterCombo('week')"
                  oninput="onFilterComboInput('week',this.value)" onkeydown="onFilterComboKey('week',event)"
                  aria-label="周数筛选，可输入数字或周标签，多选">
           <span class="cf-count" id="weekFilterCount" title="已选周数（点击选择）"
@@ -1785,7 +1787,12 @@ function goLogin(){
 <!-- 看板管理弹窗：主从布局（左=真实看板列表，右=编辑区域） -->
 <style>
 .bc-wrap{display:flex;gap:0;flex:1;min-height:0;overflow:hidden}
-.bc-left{width:340px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+/* 左列宽度（2026-11-03 加宽）：
+   原 340px → 看板卡片挤成一团（名称被压成两行、「启用」徽标竖排、meta 行换行）。
+   实测 meta 行内容合计 324px + 4×gap(8) = 356px > 340-24(padding×2)-2(border) 可用宽
+   → 宽度定在 **410px**：可用 384px，比 356px 多 28px 余量，meta 行稳落一行。
+   右侧编辑面板相应变窄（原 672 → 602px），但它内部是表单，所需宽度远小于此。 */
+.bc-left{width:410px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
 .bc-left-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);flex-shrink:0}
 .bc-left-head .t{font-size:13px;font-weight:600;color:var(--text)}
 .bc-left-head .c{font-size:11px;color:var(--text2);background:var(--bg);padding:1px 8px;border-radius:10px}
@@ -1800,7 +1807,12 @@ function goLogin(){
 .bc-item:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
 .bc-item.active{border-color:var(--primary);background:#faf7ef;box-shadow:0 0 0 2px rgba(0,45,116,.14)}
 .bc-item .nm{font-size:13.5px;font-weight:500;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:8px}
-.bc-item .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2)}
+.bc-item .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2);flex-wrap:wrap}
+/* 状态徽标与复制按钮：不被压缩、不换行（此前「启用」被挤成竖排两行） */
+.bc-item .nm>.badge-active,.bc-item .nm>.badge-locked,.bc-item .nm>.badge-muted{flex-shrink:0;white-space:nowrap}
+.bc-item .nm>.cp-copy-btn{flex-shrink:0;white-space:nowrap}
+/* 看板名称：可换行但不被压成竖排（保留整词换行） */
+.bc-item .nm>span:not(.bc-pick-wrap){min-width:0;overflow-wrap:break-word;line-height:1.35}
 .bc-item .cnt{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:0 8px;font-size:11px}
 .bc-pick-wrap{display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0}
 .bc-pick{cursor:pointer;width:14px;height:14px;margin:0}
@@ -2503,7 +2515,21 @@ function groupBoardsByDept(){
 function boardTabHtml(b,deptLabel){
   const base=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
   const title=base;
-  return `<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')" title="${esc(title)}">${esc(b.board_name)}</button>`;
+  // 双击 = 取消选择（2026-11-03 用户需求）。
+  // 放在 onclick 旁边而非替换它 → 单击照常选中，双击才触发取消。
+  // ⚠️ 双击会先触发两次 click（选中）再触发 dblclick，所以 dblclick 里
+  //    要判断「当前是否就是它」，是则取消；否则说明用户想切换到别的看板。
+  return `<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')" ondblclick="pickBoardToggle('${b.board_id}')" title="${esc(title)}">${esc(b.board_name)}</button>`;
+}
+// 双击看板 tab → 取消选择（回到「未选看板」空状态）
+// 复用已有的 clearBoardSelection()，不新增状态字段、不改 pickBoard()。
+function pickBoardToggle(bid){
+  if(curBoard!==bid){pickBoard(bid);return;}   // 不是当前选中的 → 视为切换
+  clearBoardSelection('已取消选择');
+  renderTabs();
+  renderEmptyBoardState();
+  renderProgress();
+  syncFilterHint();
 }
 function renderTabs(){
   const tabs=document.getElementById('boardTabs');
@@ -2525,7 +2551,7 @@ function renderTabs(){
     const tip=cnt?('点击展开/收起该部门的看板'):(d.name+' 下暂无看板（可在「看板管理」中把看板挂载到该部门）');
     dhtml+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
       +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span>`
-      +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">🏠 主页</span>`
+      +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">主页</span>`
       +`</span>`;
   });
   if(g.unassigned.length){
@@ -2620,7 +2646,9 @@ function renderEmptyBoardState(){
     ? '部门已收起，请从上方选择看板'
     : (LAST_EMPTY_REASON==='该看板暂无数据'
       ? '该看板暂无数据'
-      : '请选择看板');
+      : (LAST_EMPTY_REASON==='已取消选择'
+        ? '已取消选择，请从上方选择看板'
+        : '请选择看板'));
   c.innerHTML=`<div class="empty">${esc(msg)}</div>`;
 }
 // ---------------- 部门主页面 ----------------
@@ -3711,6 +3739,7 @@ async function reload(page){
   // ⚠️ 未选板块（curBoard 为空）→ **不拉数据**，直接渲染空状态。
   //    否则会把全部可见板块的事项一次性灌进来（需求3：初始内容区应为空）。
   if(!curBoard){renderEmptyBoardState();syncFilterHint();return}
+  const reqBoard=curBoard;   // 记下本次请求对应的看板（响应回来时用于判别是否已过期）
   const ps=new URLSearchParams({page:curPage,size:pageSize});
   const s=document.getElementById('statusFilter').value,
         q=document.getElementById('searchInput').value.trim();
@@ -3727,6 +3756,11 @@ async function reload(page){
   // 人员多选（锚定 owner 字段 —— 见后端 /api/cards 的 person 分支）
   if(PERSON_SEL.size)ps.set('person',[...PERSON_SEL].join(','));
   const d=await api('/api/cards?'+ps);
+  // ⚠️ 竞态防护（2026-11-03 UI设计师）：请求在途期间看板可能已被取消选择
+  //    （双击 tab 取消 / 收起部门 / 快速切换看板）→ 此时响应属于**旧看板**，
+  //    直接渲染会把已取消的内容又灌回内容区。
+  //    判据：请求发出时记下的 board_id 与当前 curBoard 不一致 → 丢弃本次响应。
+  if(reqBoard!==curBoard){return;}
   renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（已按权限过滤），不随勾选收缩
   renderBoard(d.cards,d.columns,q,d.column_hits);
   syncFilterHint();
@@ -7795,8 +7829,9 @@ function renderBoardList(){
   box.innerHTML=list.map(function(b){
     const st = b.status==='封存' ? '<span class="badge-locked">封存</span>'
             : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
-    // 身份徽标：一眼看出自己在这个看板是什么角色（2026-11-03）
-    const roleTag=b.perm_role?'<span class="bc-role-tag" title="你在该看板的身份">'+esc(b.perm_role)+'</span>':'';
+    // 身份徽标已按用户要求移除（2026-11-03）：「超级管理员」等身份标签在列表里
+    // 每人都是同一个，重复 N 次没有信息量，还把看板名称挤成两行。
+    // 需要确认身份的地方仍在【看板管理】右侧面板（permNote）里，不丢信息。
     const sel = (BC_SELECTED && BC_SELECTED.board_id===b.board_id) ? ' active':'';
     const deptTip = b.dept?('归属：'+esc(b.dept)):'';
     // 所属板块年份：年份在【板块】层，看板只是容器 → 展示该看板下各板块的年份集合
@@ -7809,7 +7844,7 @@ function renderBoardList(){
       :'';
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+roleTag+copyBtn+'</div>'
+      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+(b.card_count||0)+' 卡片</span>'
       +'<span>WS '+esc(b.workspace_id||'-')+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
