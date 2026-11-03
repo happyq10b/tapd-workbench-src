@@ -1874,7 +1874,18 @@ function goLogin(){
 .bc-filter-row select{padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);outline:none;cursor:pointer;transition:all .15s}
 .bc-filter-row select:hover{border-color:var(--primary)}
 .bc-filter-row select:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(0,45,116,.12)}
-.bc-list{flex:1;min-height:0;overflow:hidden;padding:10px}
+/* ⚠️ 2026-11-03 用户反馈「看板管理滚轮没了」：
+   原 overflow:hidden + JS 里「看板 ≤7 个时设 overflow:hidden」→ 内容超出被裁且无法滚动。
+   → 改为 overflow-y:auto，超出即可滚动（setBcListScroll 仍负责限高）。 */
+.bc-list{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px}
+/* 负责人筛选按钮：外观与同区 select 保持一致（高度/边框/圆角/悬停反馈） */
+.bc-owner-filter{padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;
+  background:var(--card);color:var(--text);outline:none;cursor:pointer;transition:all .15s;
+  display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;text-align:left}
+.bc-owner-filter:hover{border-color:var(--primary)}
+.bc-owner-filter.on{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
+.bc-owner-filter .caret{flex-shrink:0;color:var(--text3);font-size:10px}
+.bc-owner-filter.on .caret{color:var(--primary)}
 .bc-item{display:flex;flex-direction:column;gap:5px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:all .15s;background:var(--card)}
 .bc-item:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
 .bc-item.active{border-color:var(--primary);background:#faf7ef;box-shadow:0 0 0 2px rgba(0,45,116,.14)}
@@ -2059,6 +2070,7 @@ function goLogin(){
             <div class="bc-filter-row"><span class="lab">归属部门</span><select id="bcf_dept" onchange="bcFilterChange('dept',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">属性</span><select id="bcf_attr" onchange="bcFilterChange('attr',this.value)"></select></div>
             <div class="bc-filter-row"><span class="lab">状态</span><select id="bcf_status" onchange="bcFilterChange('status',this.value)"></select></div>
+            <div class="bc-filter-row"><span class="lab">负责人</span><div id="bcf_owner_box"></div></div>
             <div class="bc-filter-row bc-opbar" style="grid-column:1/-1">
               <div class="bc-opbar-btns">
                 <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的看板）">全选</button>
@@ -7757,12 +7769,14 @@ var BC_SELECTED=null;
 var BC_SEL=new Set();     // 批量选中的**看板**（进入看板管理时默认【不选中】，由用户自行勾选）
 var BC_FORM={dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:'',
           owner:''};        // owner = 看板负责人（账号）
-var BC_FILTER={dept:'',attr:'',status:''};
+var BC_FILTER={dept:'',attr:'',status:'',owner:''};   // owner: 负责人筛选（存**账号**；'__no_owner__' = 无负责人）
 var BC_DEPTS=[];          // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
 var BC_DEPTS_LOADED=false;
 // 归属部门下拉：中心级部门（财务中心）视为「全部看板」，对全员展示
 function bcDeptLabel(d){
-  return d&&d.is_center?(d.name+'（全部看板 · 对全员展示）'):(d?d.name:'');
+  // ⚠️ 2026-11-03 用户要求：中心节点的「（全部看板 · 对全员展示）」附注**去掉**。
+  //    该说明只对管理员成立（普通用户看不到中心节点），却对所有人显示在同一个下拉里 → 冗余。
+  return d?d.name:'';
 }
 function bcDeptName(id){
   const d=BC_DEPTS.find(x=>String(x.id)===String(id));
@@ -7813,6 +7827,11 @@ function bcVisibleBoards(){
       if(BC_FILTER.status==='未配置'){if(b.status)return false;}
       else if(b.status!==BC_FILTER.status)return false;
     }
+    // 负责人筛选（2026-11-03）：BC_FILTER.owner 存账号，b.owner 也是账号 → 直接比对
+    if(BC_FILTER.owner){
+      if(BC_FILTER.owner===OWNER_NONE){if(b.owner)return false;}
+      else if(b.owner!==BC_FILTER.owner)return false;
+    }
     return true;
   });
 }
@@ -7848,6 +7867,7 @@ async function openBoardConfigModal(){
   if(!ME||(!isAdmin&&!isOwner&&!canAny)){toast('你没有可配置的看板');return}
   await loadBoardConfig();
   await bcLoadAclMembers();          // 负责人回显用的账号 → 姓名映射
+  renderOwnerFilterBtn();           // 映射到手后，控件可能从「降级下拉」切回「树弹窗按钮」
   // 管理员专属：新建看板 / 删除所选（负责人只能改自己看板的基本信息）
   const nb=document.getElementById('bcNewBoardBtn');
   if(nb)nb.style.display=ME.is_admin?'':'none';
@@ -7874,12 +7894,109 @@ async function loadBoardConfig(){
 }
 function renderFilters(){
   const all='<option value="">全部</option>';
-  document.getElementById('bcf_dept').innerHTML=all+BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FILTER.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>'}).join('');
+  // 归属部门选项：**按当前用户权限过滤**（2026-11-03 用户要求：「这个筛选也要跟着用户权限来显示」）。
+  // 只列出**有可编辑看板**的部门 —— 管理员 can_edit 全为 true → 看到全部；
+  // 受限用户只能看到自己管辖/可配的部门 → 下拉里不会出现无权限的部门。
+  const allowed=new Set(BC_BOARDS.filter(function(b){return b.can_edit;})
+                                   .map(function(b){return b.dept;}).filter(Boolean));
+  const depts=BC_DEPTS.filter(function(d){return allowed.has(d.name);});
+  document.getElementById('bcf_dept').innerHTML=all+depts.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FILTER.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>'}).join('');
   document.getElementById('bcf_attr').innerHTML=all+['日常','专项'].map(function(a){return '<option value="'+a+'"'+(BC_FILTER.attr===a?' selected':'')+'>'+a+'</option>'}).join('');
   document.getElementById('bcf_status').innerHTML=all
     +'<option value="启用"'+(BC_FILTER.status==='启用'?' selected':'')+'>启用</option>'
     +'<option value="封存"'+(BC_FILTER.status==='封存'?' selected':'')+'>封存</option>'
     +'<option value="未配置"'+(BC_FILTER.status==='未配置'?' selected':'')+'>未配置</option>';
+  renderOwnerFilterBtn();
+}
+/** 负责人筛选按钮的显示（当前筛选值 → 按钮文字） */
+/**
+ * 负责人筛选控件的渲染（2026-11-03）。
+ *
+ * ⚠️ 关键口径：**看板的 b.owner 存的是「登录账号」**，而组织架构树里选的是「人名」——
+ *    两者之间必须有「人名 → 账号」映射，该映射来自 /api/team 的 account 字段。
+ *    而后端对**非管理员**会清空 account（app.py get_team 的脱敏分支）
+ *    → 受限用户拿不到映射，树里所有人都会被判为「无账号」而不可选。
+ *
+ * → 故做**两级形态**：
+ *    ① 有映射（管理员等）→ **树弹窗按钮**，参照板块栏的人员筛选（需求原话）。
+ *    ② 无映射（受限用户）→ **下拉降级**，选项直接取自「当前用户可见看板的 owner 账号」
+ *       —— 筛选逻辑是纯前端过滤（比对 b.owner），**不需要映射也能筛**，
+ *          只是显示的是账号而非姓名。
+ *    → 后端一旦放开 account（T-011），会自动切回 ①，前端无需再改。
+ */
+function renderOwnerFilterBtn(){
+  const box=document.getElementById('bcf_owner_box');
+  if(!box)return;
+  const hasMap=BC_ACL_MEMBERS.length>0;
+  if(hasMap){
+    box.innerHTML='<button type="button" class="bc-owner-filter" id="bcf_owner" onclick="bcPickOwnerFilter(this)" title="按看板负责人筛选（点击从组织架构树选择）"><span class="txt"></span><span class="caret">▾</span></button>';
+    const btn=document.getElementById('bcf_owner');
+    const t=btn.querySelector('.txt');
+    if(!t)return;
+    if(!BC_FILTER.owner){ t.textContent='全部'; btn.classList.remove('on'); return; }
+    if(BC_FILTER.owner===OWNER_NONE){ t.textContent='无负责人'; }
+    else{
+      const m=BC_ACL_MEMBERS.filter(function(x){return x.account===BC_FILTER.owner;})[0];
+      t.textContent=m?m.name:BC_FILTER.owner;
+    }
+    btn.classList.add('on');
+  }else{
+    // 降级：下拉选项 = 当前用户可见看板的 owner 账号
+    const owners={};
+    BC_BOARDS.forEach(function(b){
+      if(ME&&ME.is_admin){ if(b.owner)owners[b.owner]=1; return; }
+      if(b.can_edit&&b.owner)owners[b.owner]=1;
+    });
+    const list=Object.keys(owners);
+    box.innerHTML='<select id="bcf_owner" onchange="bcFilterChange(\'owner\',this.value)">'
+      +'<option value="">全部</option>'
+      +'<option value="'+OWNER_NONE+'"'+(BC_FILTER.owner===OWNER_NONE?' selected':'')+'>无负责人</option>'
+      +list.map(function(a){return '<option value="'+esc(a)+'"'+(BC_FILTER.owner===a?' selected':'')+'>'+esc(a)+'</option>';}).join('')
+      +'</select>';
+  }
+}
+/**
+ * 负责人筛选（2026-11-03 用户需求：「追加一个负责人筛选，参照板块栏的人员筛选」）。
+ * 复用板块栏的**组织架构树选择弹窗**（openTreePick，pickMode:'person'），
+ * 但状态独立存放在 BC_FILTER.owner（存**账号**，便于与 b.owner 直接比对），
+ * 不污染板块栏的 PERSON_SEL。
+ * requireAccount:true → 只列出已开通登录账号的人（没账号的人配成负责人等于配了个空）。
+ */
+async function bcPickOwnerFilter(anchor){
+  if(!BC_ACL_MEMBERS.length){
+    // 拿不到「人名 → 账号」映射 → 树里所有人都会被判为无账号、不可选。
+    // 直接说明原因（此时界面已降级为下拉筛选，功能仍然可用）。
+    toast('当前权限下无法按姓名选负责人，请使用下拉筛选');
+    return;
+  }
+  try{ await ensureOrgTree(true); }catch(e){ toast('架构数据加载失败'); return; }
+  if(!ORG_TREE.length){ toast('架构数据为空'); return; }
+  // 回填当前选中（账号 → 人名 → 树内前缀）
+  const cur=[];
+  if(BC_FILTER.owner && BC_FILTER.owner!==OWNER_NONE){
+    const m=BC_ACL_MEMBERS.filter(function(x){return x.account===BC_FILTER.owner;})[0];
+    if(m && m.name)cur.push(ORG_PERSON_PREFIX+m.name);
+  }
+  openTreePick(anchor, cur, function(persons, meta){
+    const wantNone=!!(meta&&meta.none);
+    if((!persons||!persons.length)&&!wantNone){ toast('未选择负责人'); return; }
+    // 人名 → 账号（BC_ACL_MEMBERS 是 account→name，需反查）
+    const accs=(persons||[]).map(function(n){
+      const m=BC_ACL_MEMBERS.filter(function(x){return x.name===n;})[0];
+      return m?m.account:'';
+    }).filter(Boolean);
+    if(!accs.length && !wantNone){ toast('所选人员没有登录账号，无法作为负责人'); return; }
+    // 负责人筛选只支持单人 → 取第一个
+    BC_FILTER.owner=wantNone?OWNER_NONE:(accs[0]||'');
+    if(!wantNone && accs.length>1){
+      const m0=BC_ACL_MEMBERS.filter(function(x){return x.account===accs[0];})[0];
+      toast('负责人筛选仅支持单选，已取「'+((m0&&m0.name)||accs[0])+'」');
+    }
+    BC_SEL=new Set();
+    renderOwnerFilterBtn();
+    renderBoardList();
+  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
+      showNoneOwner:true, requireAccount:true, keyword:''});
 }
 function renderBoardList(){
   // 列表按**后端给的 can_edit** 过滤（2026-11-03）：
@@ -7893,6 +8010,13 @@ function renderBoardList(){
     if(BC_FILTER.status){
       if(BC_FILTER.status==='未配置'){if(b.status)return false;}
       else if(b.status!==BC_FILTER.status)return false;
+    }
+    // 负责人筛选（2026-11-03）：BC_FILTER.owner 存账号，b.owner 也是账号 → 直接比对
+    // ⚠️ 此前这段被误加到 bcVisibleBoards()（两处代码几乎相同，replace 只命中第一个），
+    //    导致列表本身没过滤 → 这里补上真正生效的位置。
+    if(BC_FILTER.owner){
+      if(BC_FILTER.owner===OWNER_NONE){if(b.owner)return false;}
+      else if(b.owner!==BC_FILTER.owner)return false;
     }
     return true;
   });
@@ -7933,7 +8057,10 @@ function setBcListScroll(n){
   if(!box)return;
   if(n<=7){
     box.style.maxHeight='none';
-    box.style.overflow='hidden';
+    // ⚠️ 原为 'hidden' → 看板 ≤7 个时列表超高会被裁掉且**无法滚动**
+    //    （用户反馈「看板管理，滚轮没了」；恰好 7 个时中招）。
+    //    改为 'auto'：内容装得下就不出滚动条，装不下就能滚。
+    box.style.overflow='auto';
   }else{
     const first=box.querySelector('.bc-item');
     if(first){
