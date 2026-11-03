@@ -136,16 +136,23 @@ button{font-family:inherit}
    右列 .topbar-aside：独立边框的公告区，跨整列高度（align-self:stretch）。 */
 .topbar{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,420px);
   gap:14px;align-items:stretch;max-width:1440px;margin:0 auto;padding:12px 24px 0;
-  /* 右半（公告栏+统计带）需与左半「可选看板」带的底边对齐。
-     左半 .topbar-main 是 grid 且声明了 3 行，实际只有 1 个子项(.tb-navgroup)
-     → 末尾产生 2 个空行的 gap(10px×2=20px)；
-     .tb-navgroup 自身 padding-bottom:13px + 1px 边框
-     → 「可选看板」带底比 topbar 底高 34px。
-     右侧用 margin-bottom 抵消这 34px → 统计卡底 == 可选看板带底。
-     ⚠️ 若改动 .topbar-main 的行数/gap 或 .tb-navgroup 的 padding-bottom，需同步此值。 */
-  --topbar-aside-bottom-offset:34px}
+  /* 底边对齐（2026-11-03 用户需求）：右侧统计卡的底边 == 左侧**白底卡片**（.tb-navgroup）的底边。
+     ✅ 天然对齐，无需任何偏移量：
+       .topbar 是两列 grid + align-items:stretch → 左右两列底边天然齐平；
+       左侧 navgroup 是 .topbar-main 的唯一子项，main 底 = navgroup 底；
+       右侧 .topbar-aside 内的统计带是最后一个子元素 → 统计卡底 = aside 底 = topbar 底。
+       三者同底 → 自动满足。
+     ⚠️ 反面教训：曾用 margin-bottom 抵消「可选看板带底」与「白卡底」之间的 9px 差
+        （navgroup 的 padding-bottom 8px + 边框 1px）→ 变成对齐到「带」而不是「白卡」，
+        用户明确指出「要和左边可选看板的底色白的部分对齐」。
+     ⚠️ 另：.topbar-main 原声明 3 个 grid 行但只有 1 个子项 → 末尾凭空多 2 个空行 gap(20px)，
+        已改为 grid-template-rows:auto 消除（见下方注释）。 */}
+/* ⚠️ grid-template-rows 原本写死 3 行（auto auto auto），但本容器**只有 1 个子项**
+   （.tb-navgroup）→ 末尾凭空多出 2 个空行的 gap（10px×2 = 20px），
+   使左半比右半低 20px、顶部区下方多出一大片空白。
+   → 改为 grid-template-rows:auto（按实际行数），省下 20px。 */
 .topbar-main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
-  grid-template-rows:auto auto auto;gap:10px 14px;align-content:start;min-width:0}
+  grid-template-rows:auto;gap:10px 14px;align-content:start;min-width:0}
 /* 每个「带」跨满三列；带内是小栅格（三列），条目按列优先填充 */
 .tb-band{grid-column:1/-1;min-width:0}
 /* ===== 需求3：架构部门 + 可选看板 归为一个整体 =====
@@ -155,7 +162,7 @@ button{font-family:inherit}
 .tb-navgroup{
   grid-column:1/-1;min-width:0;
   background:#fff;border:1px solid var(--border);border-radius:var(--radius);
-  box-shadow:var(--shadow);padding:12px 14px 13px;
+  box-shadow:var(--shadow);padding:12px 14px 8px;
   display:flex;flex-direction:column;gap:11px;
 }
 /* 容器内的「带」不再各自跨列（已在容器内单列流），去掉原 grid-column 覆盖 */
@@ -232,7 +239,7 @@ button{font-family:inherit}
 .tb-band-title::before{content:'';width:3px;height:13px;border-radius:2px;background:var(--primary);opacity:.75}
 .tb-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 10px;align-items:start}
 .tb-grid>*{min-width:0}
-.topbar-aside{display:flex;flex-direction:column;min-width:0;gap:10px;margin-bottom:var(--topbar-aside-bottom-offset)}
+.topbar-aside{display:flex;flex-direction:column;min-width:0;gap:10px}
 /* 公告区在右半独立成块：固定边框 + 自身留白，与左半的卡片区分开。
    ⚠️ 2026-11-03：统计带移到公告栏下方后，右半变成竖排「公告栏 + 统计带」。
       公告栏保持 flex:1 → 吃掉右半除统计带外的**全部剩余高度**，
@@ -315,7 +322,7 @@ button{font-family:inherit}
 .tab-btn:hover{color:var(--primary)}
 .tab-btn.active{background:#fff;color:var(--primary);border-color:var(--border);box-shadow:0 -2px 6px rgba(0,0,0,.03);font-weight:600}
 /* 「＋ 新建看板」按钮：虚线描边、强调色，与管理员操作呼应 */
-.wrap{max-width:1440px;margin:0 auto;padding:16px 24px 60px}
+.wrap{max-width:1440px;margin:0 auto;padding:12px 24px 60px}
 .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px}
 /* 筛选区保持**单行**：flex-wrap:nowrap 让「搜索 / 状态 / 人员 / 周数 / 日期区间」
    始终排在同一行，日期区间不再被挤到第二行。
