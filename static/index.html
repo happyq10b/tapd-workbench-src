@@ -122,9 +122,8 @@ button{font-family:inherit}
 .header-more-menu button:hover{background:#f0f5ff;color:var(--primary)}
 /* 空菜单的占位文案（当前「更多」下拉已无内容，待确认去留） */
 .header-more-empty{padding:8px 14px;font-size:12px;color:var(--text3);white-space:nowrap}
-/* 【导入导出】按钮：与相邻「更多」按钮**等宽** → 头部按钮排布整齐，
-   且宽度固定 → 不因文案或菜单项数量变化而抖动。 */
-#headerImportExport>.header-btn{min-width:96px}
+/* ⚠️ 【导入导出】已于 2026-11-03 移到下方工具栏（.toolbar-right），
+   原顶栏的 `#headerImportExport>.header-btn{min-width:96px}` 等宽规则随之移除。 */
 .header-btn:hover{border-color:var(--primary);color:var(--primary)}
 .role-tag{font-size:11px;padding:2px 8px;border-radius:var(--radius-sm);font-weight:500}
 .role-admin{background:#fff7e6;color:#b25906;border:1px solid #ffd591}
@@ -306,17 +305,27 @@ button{font-family:inherit}
    导致左侧控件（搜索框 / 人员 / 周数 / 日期区间）位置全部左移 → 违反需求5。
    → 按**内容固有宽度**锁定（而非某视口下的偶然值）：
        搜索框 167 + 状态 98 + 人员 149 + 周数 151 + 日期区间 278 + 4×gap(8)=32 → 合计 875px
-     .toolbar-right 同样固定 287px（展开/折叠按钮组）。
+     .toolbar-right 同样固定（展开/折叠/导入导出按钮组）：
+       2026-11-03 起右侧多了【导入导出】按钮。
+       实测四个按钮的**自然宽度**（scrollWidth，未被压缩时的需求）：
+         新建板块 97 + 展开板块 84 + 折叠板块 84 + 导入导出 105 = 370px
+         + 3×gap(8) = 24 → **394px**
+       → 锁 400px（394 + 6px 余量）。曾试 360px 差 34px →
+         按钮被压缩 → 文字折行（「导入导出」变成上下两行）。
    → 用 flex-basis 固定，配合 flex-grow:0，避免在宽屏被拉伸。
    ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。
    ⚠️ 搜索框宽度改过（135→167，为完整显示 placeholder）→ 本行的锁定值需**同步**调整，
       否则左侧内容会被压缩、搜索框又被压回截断状态。 */
 .toolbar-left{flex:0 0 875px;min-width:875px}
-.toolbar-right{flex:0 0 287px;min-width:287px}
-/* 工具栏整体最小宽度：左 875 + 右 287 + gap 10 + padding 32 = 1204px。
-   容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 52px 会让右侧按钮组被挤/换行。
-   → 锁 min-width:1204px，由 html 的横向滚动承载（需求5 的既定方案）。 */
-.toolbar{min-width:1204px}
+.toolbar-right{flex:0 0 400px;min-width:400px}
+/* 工具栏右侧按钮组：四个按钮（新建板块 / 展开板块 / 折叠板块 / 导入导出）
+   宽度不足时按钮内文字会折行（「导入导出」变成上下两行）→ 按钮禁止折行，
+   由外层锁宽保证空间充足。 */
+.toolbar-right .btn-default,.toolbar-right .btn-primary{white-space:nowrap;flex-shrink:0}
+/* 工具栏整体最小宽度：左 875 + 右 400 + gap 10 + padding 32 = 1317px。
+   容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 165px 会让右侧按钮组被挤/换行。
+   → 锁 min-width:1317px，由 html 的横向滚动承载（需求5 的既定方案）。 */
+.toolbar{min-width:1317px}
 /* 筛选明细（当前生效条件汇总）：**独占一行**，宽度不限。
    需求（2026-11-02）：原先它夹在 .toolbar-left 里、与日期区间同行，
    受 max-width:260px + ellipsis 限制 → 明细被截断（「人员：王伟娜 | 周数：2026·第1...」），
@@ -1200,10 +1209,6 @@ function goLogin(){
 <header class="app-header">
   <div class="header-left">
     <h1>财务综合事务平台<span class="abbr">FISP</span></h1>
-    <div class="year-picker">
-      <div class="year-filter" id="yearFilter" title="按归属年份筛选板块（可多选；点「＋ 年份」选择，点 ✕ 移除）"></div>
-      <div class="year-drop" id="yearDrop" hidden></div>
-    </div>
   </div>
   <div class="header-actions">
     <span class="header-user" id="headerUser" onclick="openProfileModal()" title="个人界面（头像 / 状态 / 修改密码）">
@@ -1217,19 +1222,9 @@ function goLogin(){
 
     <!-- 低频操作收进下拉：按钮平铺会把标题挤扁（实测标题被压成竖排单字），
          且窄屏时按钮换行占满整屏。这里按主次分层，常用按钮常驻、其余收起。
-         【导入导出】独立成一个按钮，与【更多】分开：
-         这 5 项（备份/恢复/模板/导入/导出）是**数据进出**类操作，
-         与「更多」里的界面类操作混在一起容易被误点，也不好找。 -->
-    <div class="header-more" id="headerImportExport">
-      <button class="header-btn" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">🔄 导入导出</button>
-      <div class="header-more-menu" id="headerImportExportMenu" hidden>
-        <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
-        <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式，仅可编辑及以上）">📥 恢复</button>
-        <button id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
-        <button id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
-        <button onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
-      </div>
-    </div>
+         ⚠️ 【导入导出】已于 2026-11-03 移到**下方工具栏右侧**（见 .toolbar-right）——
+            它是「数据进出」类操作，与界面操作（展开/折叠板块）放在一起更顺手；
+            顶栏只留界面级操作，避免顶栏按钮过长把标题挤扁。 -->
     <div class="header-more" id="headerMore">
       <button class="header-btn" onclick="toggleHeaderMore(event,'headerMoreMenu')" title="更多操作">更多</button>
       <!-- ⚠️ 原「更多」下拉里只有 备份/恢复/模板/导入/导出 这 5 项，
@@ -1292,6 +1287,14 @@ function goLogin(){
       <div class="tb-band tb-board-band">
         <div class="tb-band-head">
           <div class="tb-band-title">可选看板</div>
+          <!-- 归属年份筛选（2026-11-03 用户需求）：原在顶栏标题右侧，
+               与「可选看板」的内容割裂（年份筛的是看板下的板块，却放在平台标题旁）。
+               → 移到【可选看板】带标题行内，紧跟标题、位于【看板管理】入口左侧。
+               id 不变 → renderYearFilter() / renderYearDrop() 零改动。 -->
+          <div class="year-picker">
+            <div class="year-filter" id="yearFilter" title="按归属年份筛选板块（可多选；点「＋ 年份」选择，点 ✕ 移除）"></div>
+            <div class="year-drop" id="yearDrop" hidden></div>
+          </div>
           <!-- 【看板管理】入口：并入【可选看板】带的标题行右侧（同上，id 不变） -->
           <div class="tb-band-head-entry" id="boardEntryBand">
             <div class="tb-entry-row" id="boardEntryRow"></div>
@@ -1398,6 +1401,22 @@ function goLogin(){
       <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
       <button class="btn-default" onclick="expandAll()" title="展开当前看板下的所有板块分组">展开板块</button>
       <button class="btn-default" onclick="collapseAll()" title="折叠当前看板下的所有板块分组">折叠板块</button>
+      <!-- 【导入导出】按钮（2026-11-03 用户需求）：从顶栏移到**板块筛选栏后面**。
+           这 5 项（备份/恢复/模板/导入/导出）是「数据进出」类操作，
+           与「展开/折叠板块」同属对当前看板数据的操作，放一起更顺手；
+           顶栏则只留界面级操作，不再被这组按钮撑长。
+           id 保持不变 → toggleHeaderMore(event,'headerImportExportMenu') 与
+           applyPermissionUI() 的按 id 权限控制全部照旧。 -->
+      <div class="header-more" id="headerImportExport">
+        <button class="btn-default" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">🔄 导入导出</button>
+        <div class="header-more-menu" id="headerImportExportMenu" hidden>
+          <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
+          <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式，仅可编辑及以上）">📥 恢复</button>
+          <button id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
+          <button id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
+          <button onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
+        </div>
+      </div>
     </div>
   </div>
   <main class="board-content" id="boardContent"></main>
