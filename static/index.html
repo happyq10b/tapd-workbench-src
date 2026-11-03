@@ -2103,6 +2103,8 @@ function goLogin(){
             <div class="bc-filter-row bc-opbar" style="grid-column:1/-1">
               <div class="bc-opbar-btns">
                 <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的看板）">全选</button>
+                <!-- 批量复制（2026-11-03 用户需求）：勾选看板 → 整套复制（含板块与事项），归属配置沿用各自原值 -->
+                <button class="btn-default" id="bcCopyBtn" style="padding:4px 10px;font-size:12px" onclick="bcCopySelected()" title="整套复制已勾选的看板（连同板块与事项），归属部门等配置沿用各自原值" disabled>复制</button>
                 <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选看板的配置（需两次确认）" disabled>删除所选</button>
               </div>
               <span class="bc-opbar-count">已选 <b id="bcPickCount">0</b> 个</span>
@@ -8026,6 +8028,9 @@ function bcPaintPick(){
     db.textContent='删除所选';
     db.disabled=BC_SEL.size===0;
   }
+  // 批量复制按钮：与删除所选同一 disabled 口径（2026-11-03）
+  const cb=document.getElementById('bcCopyBtn');
+  if(cb)cb.disabled=BC_SEL.size===0;
 }
 async function openBoardConfigModal(){
   // 准入（2026-11-03）：管理员，或**任一看板可配置**。
@@ -8043,6 +8048,9 @@ async function openBoardConfigModal(){
   if(nb)nb.style.display=ME.is_admin?'':'none';
   const db=document.getElementById('bcDelBtn');
   if(db)db.style.display=ME.is_admin?'':'none';
+  // 批量复制同样是管理员级操作（后端 copy 接口 require_admin）
+  const cb=document.getElementById('bcCopyBtn');
+  if(cb)cb.style.display=ME.is_admin?'':'none';
   initBcListEvents();
   BC_SELECTED=null; BC_EDIT_ID=0;
   BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
@@ -8566,6 +8574,42 @@ async function bcDeleteSelected(){
     await bcAfterDelete();
     toast('已删除 '+(r&&r.deleted?r.deleted:0)+' 个看板配置');
   }catch(e){}
+}
+// ---------- 批量复制（2026-11-03 用户需求）----------
+// 勾选若干看板 → 逐个**整套复制**（deep：连同板块、事项、子事项）。
+// 归属部门 / 属性 / 状态 / 备注 **不传** → 后端自动沿用各自原配置。
+// ⚠️ 未配置的看板（无归属部门）后端会因部门校验失败 → 跳过并提示，
+//    不让单个失败中断整批。
+async function bcCopySelected(){
+  const ids=Array.from(BC_SEL);
+  if(!ids.length){toast('请先勾选要复制的看板');return;}
+  // 未配置的看板没有归属部门，整套复制会被部门校验拦下 → 先挑出来
+  const skip=[],todo=[];
+  ids.forEach(function(id){
+    const b=BC_BOARDS.find(function(x){return x.board_id===id;});
+    if(b&&b.config_id)todo.push(b);else skip.push(b?(b.board_name||b.board_id):id);
+  });
+  if(!todo.length){toast('勾选的看板均未配置（无归属部门），无法复制；请先在右侧补齐配置');return;}
+  const names=todo.map(function(b){return b.board_name||b.board_id;});
+  if(!bcConfirm('整套复制已勾选的 '+todo.length+' 个看板？\n'
+    +names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n'
+    +'将连同其下的板块与事项一起复制；归属部门等配置沿用各自原值。'
+    +(skip.length?'\n（另有 '+skip.length+' 个未配置的看板会被跳过）':'')))return;
+  let okCnt=0;const failed=[];
+  for(const b of todo){
+    try{
+      await api('/api/boards/'+encodeURIComponent(b.board_id)+'/copy',
+        {method:'POST',body:JSON.stringify({deep:true})});
+      okCnt++;
+    }catch(e){failed.push((b.board_name||b.board_id)+'：'+(e.message||'失败'));}
+  }
+  BC_SEL=new Set();
+  await bcAfterDelete();
+  if(failed.length){
+    toast('已复制 '+okCnt+' 个；失败 '+failed.length+' 个：'+failed.slice(0,2).join('；')+(failed.length>2?' 等':''));
+  }else{
+    toast('已整套复制 '+okCnt+' 个看板（含板块与事项）');
+  }
 }
 // 删除后：刷新列表 + 清空选择状态 + 同步目录树
 async function bcAfterDelete(){
