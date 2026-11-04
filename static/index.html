@@ -645,7 +645,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .week-title.edit:hover{color:var(--primary)}
 /* 归属年份徽标 */
 .week-year{font-size:11.5px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;flex-shrink:0;white-space:nowrap}
-.week-meta{font-size:12px;color:var(--text2)}
+.week-meta{font-size:12px;color:var(--text2);margin-right:24px}
+/* ⚠️ margin-right 只推开 meta 自己（标题 flex:1 吸收），**不影响** fcols 的
+   宽度与右端锚点 → 负责人/创建/截止三列与事项行的对齐关系保持不变。 */
 /* 2026-11-04 需求2：板块进度条**宽度固定**（≈ 两个周数列的宽度），不做伸缩。
    它现在是板块行字段网格的**第一格**（原为独立的弹性元素）：
      板块行 fcols = [进度条 192px][负责人 118][创建 104][截止 104]
@@ -689,11 +691,13 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    板块本身没有周数 → 第一格（周数位）复用为**进度条位**。
    ⚠️ 两行 fcols 宽度必须相同（都 446px），否则右端锚点相同但左端错位。 */
 .fcols.week-fcols{grid-template-columns:96px 118px 104px 104px;width:446px;flex:0 0 446px}
-/* 进度条：长 60px（原 200px 的 30%），**右对齐**紧贴「负责人」列左侧，
-   右侧留 8px 小间距（= grid 列间距），多出来的空间全部让给左侧标题。 */
+/* 进度条：长 84px，落在周数位格内并**右对齐**。
+   ⚠️ 不再用负 margin 溢出到列间距里 —— 那样终点会**紧贴**「负责人」（实测仅 4px）。
+   现在右端停在格右端，与「负责人」列之间保留 **8px**（= grid 标准列间距）。
+   起点在格起点 +12px，距「n/N 完成」文字右端 48px（见 .week-meta 的 margin-right）。 */
 .fcols.week-fcols .fcol-bar{display:flex;align-items:center;justify-content:flex-end;
-  padding-right:0;margin-right:-4px;box-sizing:border-box;overflow:visible}
-.fcols.week-fcols .fcol-bar .week-bar{width:60px;flex:0 0 60px}
+  padding-right:0;margin-right:0;box-sizing:border-box;overflow:visible}
+.fcols.week-fcols .fcol-bar .week-bar{width:84px;flex:0 0 84px}
 /* 2026-11-04 #55：列宽 648→446（-202px 全部让给标题）——
    周数值压缩为「2026·W32」、列序调整为 周数/负责人/创建/截止。 */
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
