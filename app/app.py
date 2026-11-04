@@ -1641,7 +1641,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
           parent_id: Optional[str] = None, card_id: Optional[str] = None,
           created_start: Optional[str] = None, created_end: Optional[str] = None,
           cc: Optional[str] = None, week: Optional[str] = None,
-          person: Optional[str] = None,
+          person: Optional[str] = None, years: Optional[str] = None,
           username: str = Depends(require_auth), request: Request = None):
     if card_id:
         audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
@@ -1683,6 +1683,22 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         mine = [r for r in mine if not r.get('parent_id')]
     if board_id:
         mine = [r for r in mine if r['board_id'] == board_id]
+    # 归属年份过滤（2026-11-04 用户反馈）：年份绑定在**板块**层（board_columns.year）。
+    # 之前只由前端隐藏不合年份的板块 → week_options 仍统计到其它年份板块里的
+    # 事项，周数下拉出现「2025·第48周」这类**当前视图里没有事项的周**。
+    # 现在下推到后端，在一切统计（week_options / 计数 / 分页）之前生效。
+    if years:
+        yset = {y.strip() for y in years.split(',') if y.strip()}
+        if yset:
+            if board_id:
+                _yrows = dbq('SELECT column_name, year FROM board_columns WHERE board_id=?',
+                             (board_id,))
+                _ymap = {(board_id, r['column_name']): (r['year'] or '') for r in _yrows}
+            else:
+                _yrows = dbq('SELECT board_id, column_name, year FROM board_columns')
+                _ymap = {(r['board_id'], r['column_name']): (r['year'] or '') for r in _yrows}
+            mine = [r for r in mine
+                    if _ymap.get((r['board_id'], r.get('column_name') or ''), '') in yset]
     if status == 'done':
         mine = [r for r in mine if r['status'] == 'done']
     elif status == 'progressing':
