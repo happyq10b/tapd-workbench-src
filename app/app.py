@@ -11,7 +11,7 @@ TAPD 看板 Web 应用 v2 - 多人协作编辑版
 import json, os, time, hmac, hashlib, base64, secrets, sqlite3, threading, re
 from collections import defaultdict
 from datetime import datetime, date as _date
-from typing import Optional, List
+from typing import Optional, List, Union
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, Response, JSONResponse
 from pydantic import BaseModel
@@ -1505,12 +1505,17 @@ def me(username: str = Depends(require_auth)):
     # 未在「看板管理」里配置归属的看板 dept=''，前端归入「未配置」节点，不会丢失。
     dept_map = {r['board_id']: (r['dept'], r['dept_node_id'])
                 for r in dbq('SELECT board_id, dept, dept_node_id FROM board_config')}
+    # 人员选择层级约束（2026-11-04）：板块弹窗的选人池 = **所属看板**的负责人与参与人
+    # → /api/me 每看板下发 owner / participants（boards 表字段，_all_boards 不查这两列）
+    _acl_map = {r['board_id']: (r['owner'] or '', r['participants'] or '')
+                for r in dbq('SELECT board_id, owner, participants FROM boards')}
     boards_out = []
     for b in allb:
         item = dict(b)
         dn, dnode = dept_map.get(b['board_id'], ('', 0))
         item['dept'] = dn
         item['dept_node_id'] = dnode or 0
+        item['owner'], item['participants'] = _acl_map.get(b['board_id'], ('', ''))
         # 板块弹窗的负责人/参与人指派门槛（2026-11-04）：与后端写接口**同一判定**，
         # 前端不再手写 is_admin（#43 同款问题的教训）。
         #   can_edit          → 可指派板块参与人（板块负责人及以上，看板/架构负责人继承）
@@ -4315,11 +4320,14 @@ def list_boards(username: str = Depends(require_auth)):
     for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, created_at'
                  ' FROM board_config'):
         cfgs[r['board_id']] = dict(r)
-    # 看板负责人 —— 供【看板管理】配置与展示（2026-11-02：只留负责人，参与人已下线）
+    # 看板负责人与参与人 —— 供【看板管理】配置与展示。
+    # ⚠️ 2026-11-04 恢复参与人下发：人员选择层级约束要求「板块的负责人与参与人
+    #    从所属看板的负责人与参与人中选」，前端需要读到看板的参与人名单。
     acl = {}
-    for r in dbq('SELECT board_id, owner FROM boards'):
+    for r in dbq('SELECT board_id, owner, participants FROM boards'):
         d = dict(r)
-        acl[d['board_id']] = {'owner': d.get('owner', '')}
+        acl[d['board_id']] = {'owner': d.get('owner', ''),
+                              'participants': d.get('participants', '') or ''}
     out = []
     for b in boards:
         bid = b['board_id']
@@ -4338,6 +4346,7 @@ def list_boards(username: str = Depends(require_auth)):
             'status': c.get('status', ''),
             'remark': c.get('remark', ''),
             'owner': a.get('owner', ''),
+            'participants': a.get('participants', ''),
             # 该账号是否为该看板的负责人（决定能否修改该看板基本信息）
             'is_owner': a.get('owner', '') == username,
         })
@@ -4411,12 +4420,15 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_aut
 class AclReq(BaseModel):
     """负责人配置请求：owner = 负责人账号（单选）。
 
-    ⚠️ **participants（参与人）已下线**（2026-11-02）——
-       权限来源收敛为【架构管理】的看板绑定，避免两套规则互相打架。
-       字段保留仅为兼容旧客户端，传入会被忽略并清空。
+    2026-11-04：participants（参与人）**恢复使用** —— 人员选择层级约束要求
+       「板块的负责人与参与人从所属看板的负责人与参与人中选」，看板需要
+       维护自己的参与人名单作为板块的选人池。负责人与参与人**互斥**。
     """
     owner: str = ''
-    participants: List[str] = []
+    # 参与人兼容两种入参：逗号串（前端 saveBoardAcl）或列表（旧客户端）——
+    # _norm_acl_participants 内部都会归一（2026-11-04：此前写死 List[str]，
+    # 前端传逗号串直接 422）
+    participants: Union[str, List[str]] = []
 
 
 def _norm_acl_owner(v: str) -> str:
@@ -4469,12 +4481,18 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_OWNER, LV_BOARD_OWNER,
                'board:' + bid, min_level=LV_ARCH_OWNER)
     owner = _norm_acl_owner(req.owner)
-    # participants 一并清空：参与人机制已下线，历史值不再生效
-    dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, '', bid))
+    # 2026-11-04 恢复：参与人字段重新启用（人员选择层级约束 —— 板块的选人池
+    # 来自所属看板的负责人与参与人），不再随负责人保存清空。
+    # 负责人/参与人**互斥**：设为负责人时自动从参与人中移除。
+    _row = dbq('SELECT participants FROM boards WHERE board_id=?', (bid,))
+    parts = ((_row[0]['participants'] if _row else '') or '')
+    if owner:
+        parts = ','.join([p for p in parts.split(',') if p and p != owner])
+    dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, parts, bid))
     audit_log(username, client_ip(request), 'board_acl', f'看板 {bid}',
               f'设置看板负责人：{owner or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
-    return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': ''}
+    return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': parts}
 
 
 @app.put('/api/boards/{board_id}/participants')
@@ -4489,6 +4507,11 @@ async def set_board_participants(board_id: str, req: AclReq, username: str = Dep
     perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_PARTICIPANT,
                LV_BOARD_OWNER, 'board:' + bid, min_level=LV_BOARD_OWNER)
     parts = _norm_acl_participants(req.participants)
+    # 负责人/参与人互斥（2026-11-04）：参与人名单里剔除当前负责人
+    _row = dbq('SELECT owner FROM boards WHERE board_id=?', (bid,))
+    _own = ((_row[0]['owner'] if _row else '') or '')
+    if _own:
+        parts = ','.join([p for p in parts.split(',') if p and p != _own])
     dbe('UPDATE boards SET participants=? WHERE board_id=?', (parts, bid))
     audit_log(username, client_ip(request), 'board_participants', f'看板 {bid}',
               f'设置看板参与人：{parts or "(无)"}', 'success')
