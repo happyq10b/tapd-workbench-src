@@ -684,12 +684,16 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
   width:446px;flex:0 0 446px}
 /* 板块行的字段网格（2026-11-04 需求2）：第一格是**固定宽度的进度条**（192px ≈ 两个周数列），
    后面三格与事项行同宽同序 → 负责人列起点与事项行完全一致。 */
-/* 进度条格：占 192px（≈两个周数列），并向右溢出 8px 吃掉列间距
-   → 进度条右端**精确**落在「负责人」列的起始位置（192+8=200px 处）。
-   width:200px + margin-right:-8px = 视觉占满到负责人列起点。 */
-.fcols.week-fcols{grid-template-columns:192px 118px 104px 104px;width:542px;flex:0 0 542px}
-.fcols.week-fcols .fcol-bar{width:200px;margin-right:-8px;box-sizing:border-box}
-.fcols.week-fcols .fcol-bar .week-bar{width:200px}
+/* 板块行字段网格：**与事项行完全同构**（96/118/104/104 = 446px）
+   → 板块的「负责人/创建/截止」三列与事项行的对应列**像素级一一对齐**。
+   板块本身没有周数 → 第一格（周数位）复用为**进度条位**。
+   ⚠️ 两行 fcols 宽度必须相同（都 446px），否则右端锚点相同但左端错位。 */
+.fcols.week-fcols{grid-template-columns:96px 118px 104px 104px;width:446px;flex:0 0 446px}
+/* 进度条：长 60px（原 200px 的 30%），**右对齐**紧贴「负责人」列左侧，
+   右侧留 8px 小间距（= grid 列间距），多出来的空间全部让给左侧标题。 */
+.fcols.week-fcols .fcol-bar{display:flex;align-items:center;justify-content:flex-end;
+  padding-right:0;margin-right:-4px;box-sizing:border-box;overflow:visible}
+.fcols.week-fcols .fcol-bar .week-bar{width:60px;flex:0 0 60px}
 /* 2026-11-04 #55：列宽 648→446（-202px 全部让给标题）——
    周数值压缩为「2026·W32」、列序调整为 周数/负责人/创建/截止。 */
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
