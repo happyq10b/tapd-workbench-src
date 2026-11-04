@@ -343,8 +343,9 @@ button{font-family:inherit}
    ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。
    ⚠️ 搜索框宽度改过（135→167，为完整显示 placeholder）→ 本行的锁定值需**同步**调整，
       否则左侧内容会被压缩、搜索框又被压回截断状态。 */
-.toolbar-left{flex:1 1 769px;min-width:769px}
-/* ↑ 2026-11-04：状态下拉移除（-98px -8gap）→ 875-106=769px；搜索框 min-width 260 吸收 */
+.toolbar-left{flex:1 1 719px;min-width:719px}
+/* ↑ 2026-11-04 二次调整：右侧加【清空筛选】(86+8gap) → 右锁 402→452，
+   左侧对应 769→719px 给右侧让位（搜索框 min-width 260 仍吸收剩余）。 */
 
 /* ↑ flex-grow:1 —— 宽屏时吸收工具栏右侧的剩余空白（实测 1600px 视口下
    工具栏内宽 1360 > 左 875 + 右 402 + gap 10 = 1287，多出 73px 无处可去，
@@ -352,10 +353,11 @@ button{font-family:inherit}
    剩余空间进 .toolbar-left，其中只有搜索框是 flex-grow:1 → 由搜索框吸收，
    其余控件（状态/人员/周数/日期区间）宽度不变、位置不飘。
    ⚠️ 1200px 基线不变：此时工具栏内容正好填满，无剩余 → left 仍是 875px。 */
-.toolbar-right{flex:0 0 402px;min-width:402px}
-/* ↑ 402px = 四个按钮实测自然宽度 99+86+86+107 + 3×gap(8)=24。
-   原锁 400px → 内容比容器宽 2px，最后一个按钮会溢出 2px。 */
-/* 工具栏右侧按钮组：四个按钮（新建板块 / 展开板块 / 折叠板块 / 导入导出）
+.toolbar-right{flex:0 0 452px;min-width:452px}
+/* ↑ 452px = 五个按钮自然宽度 清空筛选86+展开62+折叠62+导入导出107+新建板块97
+   + 4×gap(8)=32（2026-11-04：加【清空筛选】、【新建板块】移到最后、文案精简）。
+   原锁 402px（四按钮）→ 加按钮后不放宽会把「导入导出」压折行。 */
+/* 工具栏右侧按钮组：五个按钮（清空筛选 / 展开 / 折叠 / 导入导出 / 新建板块）
    宽度不足时按钮内文字会折行（「导入导出」变成上下两行）→ 按钮禁止折行，
    由外层锁宽保证空间充足。 */
 .toolbar-right .btn-default,.toolbar-right .btn-primary{white-space:nowrap;flex-shrink:0}
@@ -1460,9 +1462,11 @@ function goLogin(){
          → 宽度放宽到 100%，明细完整可读。 -->
     <span id="filterHint" class="filter-hint"></span>
     <div class="toolbar-right" style="display:flex;gap:8px">
-      <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
-      <button class="btn-default" onclick="expandAll()" title="展开当前看板下的所有板块分组">展开板块</button>
-      <button class="btn-default" onclick="collapseAll()" title="折叠当前看板下的所有板块分组">折叠板块</button>
+      <!-- 2026-11-04 用户需求：①【清空筛选】放在新建板块原位置；②新建板块移到最后；
+           ③【展开板块/折叠板块】精简为【展开/折叠】（title 保留完整语义） -->
+      <button class="btn-default" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/人员/周数/日期区间）">清空筛选</button>
+      <button class="btn-default" onclick="expandAll()" title="展开当前看板下的所有板块分组">展开</button>
+      <button class="btn-default" onclick="collapseAll()" title="折叠当前看板下的所有板块分组">折叠</button>
       <!-- 【导入导出】按钮（2026-11-03 用户需求）：从顶栏移到**板块筛选栏后面**。
            这 5 项（备份/恢复/模板/导入/导出）是「数据进出」类操作，
            与「展开/折叠板块」同属对当前看板数据的操作，放一起更顺手；
@@ -1479,6 +1483,8 @@ function goLogin(){
           <button onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
         </div>
       </div>
+      <!-- 【+ 新建板块】移到本行最后（2026-11-04 用户需求）；id/显隐逻辑不变 -->
+      <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
     </div>
   </div>
   <main class="board-content" id="boardContent"></main>
@@ -3940,24 +3946,18 @@ const OWNER_NONE='__no_owner__';
 function personLabel(v){return v===OWNER_NONE?'无负责人':v}
 
 // ---------- 周数归一化 ----------
-// 接受「41」「2026-41」「2026年第41周」三种输入，统一成「2026年第41周」。
-// 纯数字时按「输入时的当前年」补全年份（与后端 _norm_week 的口径一致）。
+// 2026-11-04 用户要求：输入格式统一为「年份-周数」，移除纯周数「41」的支持。
+// 现接受「2026-41」（推荐，提示文案口径）与「2026年第41周」两种写法，
+// 统一成「2026年第41周」标准标签。
 function normWeekInput(raw){
   let s=(raw||'').trim();
   if(!s)return '';
   // 「2026年第41周」/「2026第41周」
   let m=s.match(/^(\d{4})\s*年?\s*第\s*(\d{1,2})\s*周?$/);
   if(m)return m[1]+'年第'+parseInt(m[2],10)+'周';
-  // 「2026-41」
+  // 「2026-41」/「2026/41」
   m=s.match(/^(\d{4})\s*[-/]\s*(\d{1,2})$/);
   if(m)return m[1]+'年第'+parseInt(m[2],10)+'周';
-  // 纯数字「41」→ 当年第 41 周
-  m=s.match(/^(\d{1,2})\s*周?$/);
-  if(m){
-    const w=parseInt(m[1],10);
-    if(w<1||w>53)return '';
-    return new Date().getFullYear()+'年第'+w+'周';
-  }
   return '';
 }
 // 候选面板里显示的周数：把「2026年第41周」拆成「2026 · 第41周」便于阅读，
@@ -4023,7 +4023,7 @@ function onFilterComboKey(kind,ev){
   const raw=(inp.value||'').trim();
   if(!raw)return;
   const n=normWeekInput(raw);
-  if(!n){toast('周数格式应为 41 / 2026-41 / 2026年第41周');return}
+  if(!n){toast('周数格式应为 2026-41（年份-周数）');return}
   WEEK_SEL.add(n);
   inp.value='';
   paintFilterCombos();
@@ -4039,6 +4039,20 @@ function onFilterOptionClick(kind,val){
 function removeFilterChip(kind,val){
   const set=(kind==='person')?PERSON_SEL:WEEK_SEL;
   set.delete(val);
+  paintFilterCombos();
+  reload(1);
+}
+// 【清空筛选】（2026-11-04）：一键清空筛选行的全部条件 ——
+//   搜索词 / 人员 / 周数 / 创建日期区间（统计卡的状态筛选与年份 chip 不在本行，不受影响）
+function clearAllRowFilters(){
+  const q=document.getElementById('searchInput');
+  if(q)q.value='';
+  PERSON_SEL=new Set();
+  WEEK_SEL=new Set();
+  const s=document.getElementById('createdStart'),e=document.getElementById('createdEnd');
+  if(s)s.value='';
+  if(e)e.value='';
+  syncDateFilterUI();
   paintFilterCombos();
   reload(1);
 }
@@ -4082,9 +4096,8 @@ function paintFilterCombos(){
     wDrop.hidden=(FILTER_COMBO!=='week');
     wDrop.innerHTML=(FILTER_COMBO!=='week')?'':
       (cand.length
-        ? `<div class="cf-tip">点击勾选（可多选）；也可直接输入「41」「2026-41」后回车</div>`
+        ? `<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px"><span>点击勾选（可多选）；可直接输入「2026-41」回车</span><span style="display:flex;gap:4px;flex-shrink:0"><button class="icon-btn" style="padding:2px 8px;font-size:11px" data-week-all="1" title="勾选当前列表全部周数">全选</button><button class="icon-btn" style="padding:2px 8px;font-size:11px" data-week-clear="1" title="清空已选周数">清空</button></span></div>`
           +cand.map(w=>`<label class="cf-opt ${WEEK_SEL.has(w)?'on':''}"><input type="checkbox"${WEEK_SEL.has(w)?' checked':''} data-pick-week="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
-          +`<label class="cf-opt" data-clear-week="1"><span style="color:var(--text3)">清空全部</span></label>`
         : `<div class="cf-empty">${kw?'无匹配周数':'暂无可选周数（当前可见范围内没有周数）'}</div>`);
   }
 }
@@ -4127,13 +4140,14 @@ async function openPersonFilterPicker(anchor){
   const cur=[...PERSON_SEL].map(n=>n===OWNER_NONE?OWNER_NONE:ORG_PERSON_PREFIX+n);
   openTreePick(anchor, cur, (persons,meta)=>{
     const wantNone=!!(meta&&meta.none);
-    if((!persons||!persons.length)&&!wantNone){ toast('未选择人员'); return; }
+    // ⚠️ bug 修复（2026-11-04）：全部取消勾选后点确定 → 应视为「清空该筛选」，
+    //    原来在这里 toast('未选择人员') 拦截 return，导致已选人员无法被确认清空。
     PERSON_SEL=new Set(persons||[]);
     if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
   }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
-      showNoneOwner:true, keyword:''});
+      showNoneOwner:true, clearable:true, keyword:''});
 }
 function applyPersonFilter(kind, persons){
   // 兼容旧调用点：人员筛选已统一锚定到「负责人」维度（owner 字段），
@@ -5773,7 +5787,7 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
   //   没账号的人没法登录，配成负责人等于配了个空）。
   //   名单来自 BC_ACL_MEMBERS（由 /api/team 拉取，含 account）。
   const requireAccount=!!(opts&&opts.requireAccount);
-  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, pickMode, personNames, showNoneOwner, noneOwner:false, keyword, keywordRaw:keyword, requireAccount};
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, clearable: !!opts.clearable, pickMode, personNames, showNoneOwner, noneOwner:false, keyword, keywordRaw:keyword, requireAccount};
   // 「无负责人」若已在选中集合里（从筛选条件回填），则同步点亮该选项
   if(showNoneOwner&&TREE_PICK.selected.includes(OWNER_NONE))TREE_PICK.noneOwner=true;
   renderTreePick();
@@ -5854,6 +5868,7 @@ function renderTreePick(){
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--border)">
       <span style="font-size:12px;color:var(--text3)">已选 <span id="tp_count">${TREE_PICK.selected.length}</span> 项</span>
       <span style="display:flex;gap:8px;align-items:center">
+        ${TREE_PICK.clearable?'<button class="icon-btn" onclick="tpClearSelected()" title="清空已选人员">清空</button>':''}
         ${TREE_PICK.showSelectAll?'<button id="tp_select_all_btn" class="icon-btn" onclick="tpSelectAll()" title="全选所有节点">全选</button>':''}
         <button class="btn-secondary" onclick="closeTreePick()">取消</button>
         <button class="btn-primary" onclick="treePickConfirm()">确定</button>
@@ -6251,6 +6266,16 @@ function tpCheck(name,checked){
   });
   paintAll();   // 只更新视觉，不重建 DOM
 }
+// 【清空】按钮：一键清空本弹窗的临时已选（不关闭弹窗，确认才应用）
+// 2026-11-04 用户需求：筛选器逐个取消勾选太繁琐 → 底栏直接给清空入口
+function tpClearSelected(){
+  if(!TREE_PICK)return;
+  TREE_PICK.selected=[];
+  TREE_PICK.noneOwner=false;
+  const cnt=document.getElementById('tp_count');
+  if(cnt)cnt.textContent='0';
+  if(typeof paintAll==='function')paintAll();
+}
 function treePickConfirm(){
   // person 模式：把 __P__ 前缀还原成纯人员姓名回传
   // 注意：'__P__' 是 5 个字符（下划线×2 + P + 下划线×2），slice 长度必须一致
@@ -6560,7 +6585,16 @@ document.addEventListener('click',e=>{
     onFilterOptionClick('week',w);
     return;
   }
-  if(t.closest('#weekFilterDrop [data-clear-week]')){clearFilterSel('week');return}
+  // 【全选】勾选面板当前可见的全部候选（受搜索词过滤）；【清空】清空已选
+  if(t.closest('#weekFilterDrop [data-week-all]')){
+    const inp=document.getElementById('weekFilterInput');
+    const kw=((inp&&inp.value)||'').trim().toLowerCase();
+    const cand=Array.from(new Set(FILTER_WEEK_CAND.concat(WEEK_OPTIONS)))
+      .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw));
+    WEEK_SEL=new Set(cand);
+    paintFilterCombos(); reload(1); return;
+  }
+  if(t.closest('#weekFilterDrop [data-week-clear]')){clearFilterSel('week');return}
   if(t.closest('#weekFilterWrap'))return;
   closeFilterCombo();
 });
@@ -8316,7 +8350,11 @@ async function bcPickOwnerFilter(anchor){
   }
   openTreePick(anchor, cur, function(persons, meta){
     const wantNone=!!(meta&&meta.none);
-    if((!persons||!persons.length)&&!wantNone){ toast('未选择负责人'); return; }
+    // ⚠️ 2026-11-04：全取消后确定 = 清空负责人筛选（原来 toast 拦截无法清空）
+    if((!persons||!persons.length)&&!wantNone){
+      BC_FILTER.owner=''; BC_SEL=new Set();
+      renderOwnerFilterBtn(); renderBoardList(); return;
+    }
     // 人名 → 账号（BC_ACL_MEMBERS 是 account→name，需反查）
     const accs=(persons||[]).map(function(n){
       const m=BC_ACL_MEMBERS.filter(function(x){return x.name===n;})[0];
@@ -8333,7 +8371,7 @@ async function bcPickOwnerFilter(anchor){
     renderOwnerFilterBtn();
     renderBoardList();
   }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
-      showNoneOwner:true, requireAccount:true, keyword:''});
+      showNoneOwner:true, requireAccount:true, clearable:true, keyword:''});
 }
 function renderBoardList(){
   // 列表按**后端给的 can_edit** 过滤（2026-11-03）：
