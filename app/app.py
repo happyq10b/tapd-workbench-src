@@ -2440,6 +2440,131 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
             'copied_columns': copied_cols, 'copied_cards': copied_cards}
 
 
+# ---------------- API：删除看板（连同其板块与事项） ----------------
+# ⚠️ 语义（2026-11-04 用户要求）：「删除看板配置」这个操作**没用** ——
+#    看板配置只是看板的一组维度（归属部门/属性/状态/备注），删掉配置并不删看板，
+#    看板还在、事项还在，只是回到「未配置」状态 → 用户视角等于什么都没删掉。
+#    改为**删除看板本身**：连同板块、事项、子事项、配置一起清掉。
+#
+# ① 单条：DELETE /api/boards/{board_id}
+#    权限 = **看板负责人及以上**（can_delete 能力位，后端口径一致）。
+# ② 批量：POST /api/boards/bulk-delete（仅管理员，与原「删除所选」口径相同）
+#
+# 事项采用**软删**（cards.deleted=1）—— 数据仍可通过全局备份/恢复找回，
+# 但看板不会再出现在任何列表里（列表口径 = boards 表 ∪ 未删卡片派生的看板）。
+BOARD_DELETE_FIELDS = ('board_config', 'board_columns', 'cards', 'card_subtasks')
+
+
+def _purge_board(bid: str) -> dict:
+    """物理清除一个看板及其附属数据（板块 / 事项 / 子事项 / 配置 / 绑定残留）。
+
+    返回 {'cards': n, 'columns': n} —— 供接口回显删了什么。
+    ⚠️ 事项走**软删**（deleted=1），便于事后用全局备份恢复找回。
+    """
+    bid = (bid or '').strip()
+    conn = get_conn()
+    try:
+        n_cards = conn.execute('SELECT COUNT(*) FROM cards WHERE board_id=? AND deleted=0',
+                                (bid,)).fetchone()[0]
+        n_cols = conn.execute('SELECT COUNT(*) FROM board_columns WHERE board_id=?',
+                               (bid,)).fetchone()[0]
+        # ① 事项软删（主事项与子事项同表 → 一并处理）
+        conn.execute('UPDATE cards SET deleted=1 WHERE board_id=? AND deleted=0', (bid,))
+        # ② 子事项清单（card_subtasks）与评论/操作记录随事项失效
+        conn.execute('DELETE FROM card_subtasks WHERE card_id IN '
+                     '(SELECT card_id FROM cards WHERE board_id=?)', (bid,))
+        # ③ 板块 / 配置 / 看板本体
+        conn.execute('DELETE FROM board_columns WHERE board_id=?', (bid,))
+        conn.execute('DELETE FROM board_config WHERE board_id=?', (bid,))
+        conn.execute('DELETE FROM boards WHERE board_id=?', (bid,))
+        # ④ 清掉绑定残留：工作组绑定的看板列表（逗号分隔）里去掉该 board_id
+        for r in conn.execute('SELECT id, boards FROM workgroups').fetchall():
+            raw = (r['boards'] or '').strip()
+            if not raw or raw == '*':
+                continue
+            items = [x for x in raw.split(',') if x]
+            kept = [x for x in items if x != bid]
+            if len(kept) != len(items):
+                conn.execute('UPDATE workgroups SET boards=? WHERE id=?',
+                             (','.join(kept), r['id']))
+        # ⑤ 账号可见看板白名单（users.allowed_boards，'*' 表示全部 → 不动）
+        for r in conn.execute('SELECT id, allowed_boards FROM users').fetchall():
+            raw = (r['allowed_boards'] or '').strip()
+            if not raw or raw == '*':
+                continue
+            items = [x for x in raw.split(',') if x]
+            kept = [x for x in items if x != bid]
+            if len(kept) != len(items):
+                conn.execute('UPDATE users SET allowed_boards=? WHERE id=?',
+                             (','.join(kept), r['id']))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return {'cards': n_cards, 'columns': n_cols}
+
+
+@app.delete('/api/boards/{board_id}')
+async def delete_board(board_id: str, username: str = Depends(require_writer),
+                       request: Request = None):
+    """删除**看板本身**（连同板块、事项、子事项、配置）。
+
+    权限（2026-11-04）：看板负责人及以上（与 /api/boards 的 can_delete 能力位同口径）。
+    ⚠️ 不可逆（事项为软删，可用全局备份恢复找回）。
+    """
+    bid = (board_id or '').strip()
+    row = dbq('SELECT board_name FROM boards WHERE board_id=?', (bid,))
+    if not row:
+        # 兼容「仅有卡片、未登记 boards 元数据」的历史看板
+        crow = dbq('SELECT board_name FROM cards WHERE board_id=? AND deleted=0 LIMIT 1', (bid,))
+        if not crow:
+            raise HTTPException(404, '看板不存在')
+        name = crow[0]['board_name']
+    else:
+        name = row[0]['board_name']
+    # 分级权限：删除看板 = 看板负责人及以上（min_level 显式给定，与能力位一致）
+    perm_check(username, perm_chain(board_id=bid), OP_DELETE, LV_BOARD_OWNER,
+               'board:' + bid, min_level=LV_BOARD_OWNER)
+    stat = _purge_board(bid)
+    audit_log(username, client_ip(request), 'board_delete', f'看板 {bid}',
+              f'删除看板「{name}」（连带板块 {stat["columns"]} 个、事项 {stat["cards"]} 条）',
+              'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'board_id': bid, 'board_name': name,
+            'deleted_columns': stat['columns'], 'deleted_cards': stat['cards']}
+
+
+class BoardBulkDeleteReq(BaseModel):
+    board_ids: List[str] = []   # 待删除的看板 id 列表
+
+
+@app.post('/api/boards/bulk-delete')
+def bulk_delete_boards(req: BoardBulkDeleteReq, username: str = Depends(require_admin),
+                       request: Request = None):
+    """批量删除看板（仅管理员）—— 连同板块、事项、子事项、配置一起清掉。
+
+    ⚠️ 与单条删除同语义：删的是**看板本身**，不是「看板配置」。
+    """
+    ids = []
+    for b in (req.board_ids or []):
+        b = (b or '').strip()
+        if b and b not in ids:
+            ids.append(b)
+    if not ids:
+        raise HTTPException(400, '未选择任何看板')
+    deleted = 0
+    n_cards = n_cols = 0
+    for bid in ids:
+        stat = _purge_board(bid)
+        deleted += 1
+        n_cards += stat['cards']
+        n_cols += stat['columns']
+    audit_log(username, client_ip(request), 'board_bulk_delete', f'{len(ids)} 个看板',
+              f'删除 {deleted} 个看板（连带板块 {n_cols} 个、事项 {n_cards} 条）', 'success')
+    return {'ok': True, 'deleted': deleted, 'deleted_columns': n_cols,
+            'deleted_cards': n_cards}
+
+
 class CopyColumnReq(BaseModel):
     col_key: str = ''          # 源板块
     board_id: str = ''         # 归属重选：目标看板
@@ -4412,7 +4537,10 @@ def list_boards(username: str = Depends(require_auth)):
                                       min_level=LV_ARCH_OWNER)
         item['can_edit'] = can_update          # 能否改基本信息（归属部门/属性/状态/备注）
         item['can_assign_owner'] = can_assign  # 能否指定/变更看板负责人（架构负责人及以上）
-        item['can_delete'] = perm_check_pass(username, chain, OP_DELETE, LV_BOARD_OWNER)
+        # can_delete = 能否**删除看板本身**（2026-11-04：删除配置已下线）
+        #   min_level 显式给 LV_BOARD_OWNER → 与 DELETE /api/boards/{id} 的后端校验完全同口径。
+        item['can_delete'] = perm_check_pass(username, chain, OP_DELETE, LV_BOARD_OWNER,
+                                             min_level=LV_BOARD_OWNER)
     return {'boards': out, 'depts': _dept_options()}
 
 @app.get('/api/board-config')
@@ -4624,81 +4752,11 @@ async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(requ
     return {'ok': True, 'col_key': key, 'owner': owner, 'participants': ''}
 
 
-class BoardConfigBulkDeleteReq(BaseModel):
-    board_ids: List[str] = []   # 待删除配置的板块 id 列表
-
-class BoardConfigBulkReq(BaseModel):
-    board_ids: List[str] = []   # 批量应用的板块（board_id 列表）
-    dept: str = ''
-    dept_node_id: int = 0
-    attr: str = ''
-    status: str = '启用'
-    remark: str = ''
-
-@app.post('/api/board-config/bulk')
-def bulk_board_config(req: BoardConfigBulkReq, username: str = Depends(require_admin), request: Request = None):
-    """批量应用看板配置（仅管理员）。
-
-    用于「看板管理」中多选板块后统一设置归属部门等维度：
-    归属部门取自【架构管理】的部门层级（中心 + 部门），
-    归属中心的板块视为全部板块、对全员展示。
-    ⚠️ 不含归属年份 —— 年份在板块层单独配置。
-    """
-    ids = []
-    for b in (req.board_ids or []):
-        b = (b or '').strip()
-        if b and b not in ids:
-            ids.append(b)
-    if not ids:
-        raise HTTPException(400, '未选择任何板块')
-    attr = req.attr.strip()
-    status = (req.status or '启用').strip(); remark = (req.remark or '').strip()
-    dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
-    if not (dept and attr):
-        raise HTTPException(400, '归属部门 / 属性 均必填')
-    _validate_board_config(dept, attr, status)
-    created = updated = skipped = 0
-    for bid in ids:
-        if not dbq('SELECT 1 FROM boards WHERE board_id=?', (bid,)) and \
-           not dbq('SELECT 1 FROM cards WHERE board_id=? AND deleted=0', (bid,)):
-            skipped += 1
-            continue
-        row = dbq('SELECT id FROM board_config WHERE board_id=?', (bid,))
-        if row:
-            dbe('UPDATE board_config SET dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
-                (dept, dept_node_id, attr, status, remark, row[0]['id']))
-            updated += 1
-        else:
-            dbe('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark)'
-                ' VALUES (?,?,?,?,?,?)', (bid, dept, dept_node_id, attr, status, remark))
-            created += 1
-    audit_log(username, client_ip(request), 'board_config_bulk', f'{len(ids)} 个板块',
-              f'{dept}/{attr} 状态={status}（新建 {created} / 更新 {updated}）', 'success')
-    return {'ok': True, 'created': created, 'updated': updated, 'skipped': skipped}
-
-@app.post('/api/board-config/bulk-delete')
-def bulk_delete_board_config(req: BoardConfigBulkDeleteReq, username: str = Depends(require_admin), request: Request = None):
-    """批量删除看板配置（仅管理员）。
-
-    按 board_id 删除对应的 board_config 行；只删配置，不动看板本身与卡片。
-    删除后这些板块回到「未配置」状态（归属部门清空 → 对全员可见）。
-    """
-    ids = []
-    for b in (req.board_ids or []):
-        b = (b or '').strip()
-        if b and b not in ids:
-            ids.append(b)
-    if not ids:
-        raise HTTPException(400, '未选择任何板块')
-    deleted = 0
-    for bid in ids:
-        row = dbq('SELECT id FROM board_config WHERE board_id=?', (bid,))
-        if row:
-            dbe('DELETE FROM board_config WHERE id=?', (row[0]['id'],))
-            deleted += 1
-    audit_log(username, client_ip(request), 'board_config_bulk_delete', f'{len(ids)} 个板块',
-              f'删除 {deleted} 条看板配置（板块回到未配置状态）', 'success')
-    return {'ok': True, 'deleted': deleted}
+# ⚠️ 2026-11-04 下线两个批量接口（用户需求）：
+#   ① POST /api/board-config/bulk   ——「应用到已选 N 个看板」（功能没用，已下线）
+#   ② POST /api/board-config/bulk-delete ——「批量删除看板配置」（已改为删除看板本身，
+#      新接口：POST /api/boards/bulk-delete）
+# 删除看板本体请用 DELETE /api/boards/{board_id} 与 POST /api/boards/bulk-delete。
 
 @app.put('/api/board-config/{cid}')
 def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(require_auth), request: Request = None):

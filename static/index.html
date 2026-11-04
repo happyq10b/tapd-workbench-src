@@ -2162,7 +2162,7 @@ function goLogin(){
                 <button class="btn-default" id="bcPickAllBtn" style="padding:4px 10px;font-size:12px" onclick="bcTogglePickAll()" title="全选 / 取消全选（当前筛选下的看板）">全选</button>
                 <!-- 批量复制（2026-11-03 用户需求）：勾选看板 → 整套复制（含板块与事项），归属配置沿用各自原值 -->
                 <button class="btn-default" id="bcCopyBtn" style="padding:4px 10px;font-size:12px" onclick="bcCopySelected()" title="整套复制已勾选的看板（连同板块与事项），归属部门等配置沿用各自原值" disabled>复制</button>
-                <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选看板的配置（需两次确认）" disabled>删除所选</button>
+                <button class="bc-del-btn" id="bcDelBtn" onclick="bcDeleteSelected()" title="删除已勾选的看板（连同其下的板块与事项，需两次确认）" disabled>删除所选</button>
               </div>
               <span class="bc-opbar-count">已选 <b id="bcPickCount">0</b> 个</span>
             </div>
@@ -8751,25 +8751,6 @@ function bcDeptHint(name){
   if(d&&d.is_center)return '中心级归属：该看板对全员展示（全部看板）';
   return '该部门下的成员可见此看板；其余成员按工作组绑定进一步过滤';
 }
-// 批量应用：把当前表单维度应用到左侧勾选的**看板**
-async function applyBulkConfig(){
-  const ids=Array.from(BC_SEL);
-  if(!ids.length){toast('请先在左侧勾选看板');return;}
-  if(!BC_FORM.dept){toast('请选择归属部门');return;}
-  try{
-    const r=await api('/api/board-config/bulk',{method:'POST',body:JSON.stringify({
-      board_ids:ids, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id,
-      attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark})});
-    await loadBoardConfig();
-    ME=await api('/api/me');
-    renderTabs();
-    const b=BC_BOARDS.find(function(x){return x.board_id===BC_SELECTED&&BC_SELECTED.board_id});
-    if(b){BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',participants:(b.participants||'').split(',').filter(Boolean)};}
-    renderBoardList();
-    renderEditArea();
-    toast('已应用到 '+(r.updated||0)+' 个看板（新建 '+(r.created||0)+'）');
-  }catch(e){}
-}
 function bcPick(dim,val){
   BC_FORM[dim]=val;
   document.querySelectorAll('[data-dim="'+dim+'"]').forEach(function(p){
@@ -8800,19 +8781,16 @@ function renderEditArea(){
   const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FORM.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>';}).join('');
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
   const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
-  const isAdmin=!!(ME&&ME.is_admin);
   // 逐项按后端能力位控制（2026-11-03）：
-  //   can_edit         → 能改基本信息（归属部门/属性/状态/备注）+ 能保存配置
-  //   can_delete       → 能删除该看板配置
+  //   can_edit         → 能改基本信息（归属部门/属性/状态/备注）并保存
+  //   can_delete       → 能**删除看板本身**（2026-11-04：删配置已下线）
   //   can_assign_owner → 能指定/变更看板负责人（架构负责人及以上）
   const canEdit=!!b.can_edit, canDelete=!!b.can_delete, canAssign=!!b.can_assign_owner;
   let footer='<div class="bc-footer">';
-  if(isEdit&&canDelete)footer+='<button class="btn-secondary bc-del-single" onclick="bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该看板的配置（需一次确认）">删除该看板配置</button>';
-  // 批量应用 = 跨看板的管理操作 → 仅管理员
-  if(isAdmin)footer+='<button class="btn-secondary" onclick="applyBulkConfig()">应用到已选 '+BC_SEL.size+' 个看板</button>';
-  // 指定负责人 = 授予管理权 → 架构负责人及以上（can_assign_owner）
-  if(canAssign)footer+='<button class="btn-secondary" onclick="saveBoardAcl()" title="设置该看板的负责人（负责人有权修改看板基本信息）">保存负责人</button>';
-  if(canEdit)footer+='<button class="btn-primary" onclick="submitBoardConfigForm()">保存配置</button>';
+  // 删除 = **删除看板本身**（连同板块、事项、子事项、配置一起清掉）—— 高危操作 → 两次确认
+  if(canDelete)footer+='<button class="btn-secondary bc-del-single" onclick="bcDeleteOne(\''+esc(b.board_id)+'\')" title="删除该看板本身（连同其下的板块与事项，不可撤销）">删除看板</button>';
+  // 保存 = **一个按钮搞定**：能改配置就存配置（+参与人），能指派负责人就存负责人
+  if(canEdit||canAssign)footer+='<button class="btn-primary" onclick="saveBoardAll()" title="保存该看板的基本信息、负责人与参与人">保存看板</button>';
   footer+='<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
   // 无权编辑时：表单整体只读（置灰不可改），并给出身份说明
   const roAttr=canEdit?'':' disabled';
@@ -8889,7 +8867,7 @@ function renderAclSection(b){
   const owner=BC_FORM.owner||'';
   const parts=BC_FORM.participants||[];
   const label=owner?aclMemberLabel(owner):'';
-  // 指定/变更看板负责人 = **架构负责人及以上**（与页脚「保存负责人」按钮同一能力位）。
+  // 指定/变更看板负责人 = **架构负责人及以上**（与页脚【保存看板】内的负责人分支同一能力位）。
   const canSetOwner=!!b.can_assign_owner;
   // 指派看板参与人 = 看板负责人及以上（与后端 participants 接口 min_level=LV_BOARD_OWNER 同口径）
   const canSetParts=!!b.can_edit;
@@ -9005,22 +8983,50 @@ function bcRemoveParticipant(acc){
   BC_FORM.participants=(BC_FORM.participants||[]).filter(function(a){return a!==acc;});
   renderEditArea();
 }
-async function saveBoardAcl(){
+// ---------- 保存看板（2026-11-04：统一成一个按钮） ----------
+// ⚠️ 此前是「保存负责人」+「保存配置」两个按钮，两个接口分开调、分开刷新 ——
+//    用户要求合并为单一【保存看板】。
+// 口径：**各写各的、各存各的权限位** ——
+//    · can_assign_owner（架构负责人及以上）→ 保存负责人（owner）
+//    · can_edit（看板负责人及以上）→ 保存基本信息（归属部门/属性/状态/备注）+ 参与人
+//    没有对应权限的部分**不发起请求**（避免 403 打断整次保存）。
+async function saveBoardAll(){
   if(!BC_SELECTED){toast('请选择看板');return;}
-  const bid=BC_SELECTED.board_id;
+  const b=BC_SELECTED, bid=b.board_id;
+  const canEdit=!!b.can_edit, canAssign=!!b.can_assign_owner;
+  if(!canEdit&&!canAssign){toast('你没有修改该看板的权限');return;}
+  const saved=[];
   try{
-    await api('/api/boards/'+encodeURIComponent(bid)+'/acl',{method:'PUT',
-      body:JSON.stringify({owner:BC_FORM.owner||''})});
-    // 参与人一并保存（2026-11-04 恢复）：门槛 = 看板负责人及以上（can_edit 同口径）
-    if(BC_SELECTED&&BC_SELECTED.can_edit){
+    // ① 负责人（架构负责人及以上）
+    if(canAssign){
+      await api('/api/boards/'+encodeURIComponent(bid)+'/acl',{method:'PUT',
+        body:JSON.stringify({owner:BC_FORM.owner||''})});
+      saved.push('负责人');
+    }
+    // ② 基本信息 + 参与人（看板负责人及以上）
+    if(canEdit){
+      const payload={board_id:bid, dept:BC_FORM.dept,
+        dept_node_id:BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept),
+        attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
+      if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
+      else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
       await api('/api/boards/'+encodeURIComponent(bid)+'/participants',{method:'PUT',
         body:JSON.stringify({participants:(BC_FORM.participants||[]).join(',')})});
+      saved.push('基本信息');
     }
     await loadBoardConfig();
+    // 归属部门可能已变更，刷新 ME 并重渲染目录树，保证「板块↔部门」归属关系一致
     ME=await api('/api/me');
     renderTabs();
-    toast('看板负责人已保存');
-  }catch(e){}
+    const nb=BC_BOARDS.find(function(x){return x.board_id===bid;});
+    if(nb){BC_SELECTED=nb;BC_EDIT_ID=nb.config_id||0;
+      BC_FORM={dept:nb.dept||'',dept_node_id:nb.dept_node_id||bcDeptNodeId(nb.dept||''),
+        attr:nb.attr||'日常',status:nb.status||'启用',remark:nb.remark||'',
+        owner:nb.owner||'',participants:(nb.participants||'').split(',').filter(Boolean)};}
+    renderBoardList();
+    renderEditArea();
+    toast('已保存'+(saved.length?('（'+saved.join('、')+'）'):''));
+  }catch(e){ /* api 内部已 toast 错误 */ }
 }
 
 function resetBoardConfigForm(){
@@ -9029,38 +9035,22 @@ function resetBoardConfigForm(){
   renderBoardList();
   renderEditArea();
 }
-async function submitBoardConfigForm(){
-  if(!BC_SELECTED){toast('请选择看板');return;}
-  const bid=BC_SELECTED.board_id;
-  const payload={board_id:bid, dept:BC_FORM.dept, dept_node_id:BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept), attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
-  try{
-    if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
-    else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
-    await loadBoardConfig();
-    // 归属部门可能已变更，刷新 ME 并重渲染目录树，保证「板块↔部门」归属关系一致
-    ME=await api('/api/me');
-    renderTabs();
-    const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
-    if(b){BC_SELECTED=b;BC_EDIT_ID=b.config_id||0;BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',participants:(b.participants||'').split(',').filter(Boolean)};}
-    renderBoardList();
-    renderEditArea();
-    toast('已保存');
-  }catch(e){ /* api 内部已 toast 错误 */ }
-}
-// 单条删除：一次确认
+// 单条删除：**删除看板本身**（连同板块、事项、子事项、配置一起清掉）
+// ⚠️ 高危且不可逆 → **两次确认**（与批量删除同口径）
 async function bcDeleteOne(bid){
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
   if(!b)return;
   const name=b.board_name||bid;
-  if(!bcConfirm('删除板块「'+name+'」的配置？\n删除后该板块将回到「未配置」状态（看板与卡片不受影响）。'))return;
+  if(!bcConfirm('确认删除看板「'+name+'」？\n该看板下的板块、事项与子事项将一并删除。'))return;
+  if(!bcConfirm('再次确认：真的要删除看板「'+name+'」吗？\n此操作不可撤销。'))return;
   try{
-    await api('/api/board-config/bulk-delete',{method:'POST',body:JSON.stringify({board_ids:[bid]})});
+    const r=await api('/api/boards/'+encodeURIComponent(bid),{method:'DELETE'});
     BC_SEL.delete(bid);
-    await bcAfterDelete();
-    toast('已删除「'+name+'」的配置');
+    await bcAfterDelete([bid]);
+    toast('已删除看板「'+name+'」（连带板块 '+(r.deleted_columns||0)+' 个、事项 '+(r.deleted_cards||0)+' 条）');
   }catch(e){}
 }
-// 批量删除：两次确认（任一次取消 / 关闭即终止，不执行删除）
+// 批量删除：**删除看板本身**（两次确认；任一次取消 / 关闭即终止，不执行删除）
 async function bcDeleteSelected(){
   const ids=Array.from(BC_SEL);
   if(!ids.length){toast('请先勾选要删除的看板');return;}
@@ -9068,13 +9058,13 @@ async function bcDeleteSelected(){
     const b=BC_BOARDS.find(function(x){return x.board_id===id;});
     return b?(b.board_name||b.board_id):id;
   });
-  if(!bcConfirm('确认删除已勾选的 '+ids.length+' 个看板配置？\n'+names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n删除后这些看板将回到「未配置」状态。'))return;
-  if(!bcConfirm('再次确认：真的要删除这 '+ids.length+' 个看板的配置吗？\n此操作不可撤销。'))return;
+  if(!bcConfirm('确认删除已勾选的 '+ids.length+' 个看板？\n'+names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n这些看板下的板块、事项与子事项将一并删除。'))return;
+  if(!bcConfirm('再次确认：真的要删除这 '+ids.length+' 个看板吗？\n此操作不可撤销。'))return;
   try{
-    const r=await api('/api/board-config/bulk-delete',{method:'POST',body:JSON.stringify({board_ids:ids})});
+    const r=await api('/api/boards/bulk-delete',{method:'POST',body:JSON.stringify({board_ids:ids})});
     BC_SEL=new Set();
-    await bcAfterDelete();
-    toast('已删除 '+(r&&r.deleted?r.deleted:0)+' 个看板配置');
+    await bcAfterDelete(ids);
+    toast('已删除 '+(r&&r.deleted?r.deleted:0)+' 个看板（连带板块 '+(r&&r.deleted_columns?r.deleted_columns:0)+' 个、事项 '+(r&&r.deleted_cards?r.deleted_cards:0)+' 条）');
   }catch(e){}
 }
 // ---------- 批量复制（2026-11-03 用户需求）----------
@@ -9119,11 +9109,23 @@ async function bcCopySelected(){
   }
 }
 // 删除后：刷新列表 + 清空选择状态 + 同步目录树
-async function bcAfterDelete(){
+async function bcAfterDelete(deletedIds){
   BC_SEL=new Set();
   BC_SELECTED=null; BC_EDIT_ID=0;
   await loadBoardConfig();
   ME=await api('/api/me');
+  // ⚠️ 看板本身被删 → 内容区若正打开它，必须一并撤掉（否则 tab 与列表会指向空看板）
+  if(deletedIds&&deletedIds.length&&typeof curBoards!=='undefined'){
+    let changed=false;
+    deletedIds.forEach(function(id){
+      if(curBoards.has(id)){curBoards.delete(id);changed=true;}
+    });
+    if(changed){
+      curBoard=curBoards.size?[...curBoards][curBoards.size-1]:'';
+      if(curBoards.size){reload(1);}
+      else{renderEmptyBoardState();syncFilterHint();}
+    }
+  }
   renderTabs();
   renderBoardList();
   renderEditArea();
