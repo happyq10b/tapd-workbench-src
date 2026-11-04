@@ -645,9 +645,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .week-title.edit:hover{color:var(--primary)}
 /* 归属年份徽标 */
 .week-year{font-size:11.5px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;flex-shrink:0;white-space:nowrap}
-.week-meta{font-size:12px;color:var(--text2);margin-right:24px}
-/* ⚠️ margin-right 只推开 meta 自己（标题 flex:1 吸收），**不影响** fcols 的
-   宽度与右端锚点 → 负责人/创建/截止三列与事项行的对齐关系保持不变。 */
+.week-meta{font-size:12px;color:var(--text2)}
+/* ⚠️ 进度条向左溢出 8px 进入列间距 → 「n/N 完成」与条起点只差 4px（紧靠）。
+   meta 不加任何 margin；标题 flex:1 仍吸收全部剩余空间。 */
 /* 2026-11-04 需求2：板块进度条**宽度固定**（≈ 两个周数列的宽度），不做伸缩。
    它现在是板块行字段网格的**第一格**（原为独立的弹性元素）：
      板块行 fcols = [进度条 192px][负责人 118][创建 104][截止 104]
@@ -691,13 +691,13 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    板块本身没有周数 → 第一格（周数位）复用为**进度条位**。
    ⚠️ 两行 fcols 宽度必须相同（都 446px），否则右端锚点相同但左端错位。 */
 .fcols.week-fcols{grid-template-columns:96px 118px 104px 104px;width:446px;flex:0 0 446px}
-/* 进度条：长 84px，落在周数位格内并**右对齐**。
-   ⚠️ 不再用负 margin 溢出到列间距里 —— 那样终点会**紧贴**「负责人」（实测仅 4px）。
-   现在右端停在格右端，与「负责人」列之间保留 **8px**（= grid 标准列间距）。
-   起点在格起点 +12px，距「n/N 完成」文字右端 48px（见 .week-meta 的 margin-right）。 */
+/* 进度条：**占满整个周数位格（96px）**，并向左溢出 8px 进入列间距区。
+   - margin-left:-8px  → 起点 = 格起点 - 8 = -8 → 紧靠「n/N 完成」（间距 4px）
+   - margin-right:8px  → 终点 = 格右端 - 8 = 88 → 距「负责人」列 16px
+   垂直居中由 fcol-bar 的 align-items:center 保证。 */
 .fcols.week-fcols .fcol-bar{display:flex;align-items:center;justify-content:flex-end;
-  padding-right:0;margin-right:0;box-sizing:border-box;overflow:visible}
-.fcols.week-fcols .fcol-bar .week-bar{width:84px;flex:0 0 84px}
+  padding-right:0;margin-left:-8px;margin-right:8px;box-sizing:border-box;overflow:visible}
+.fcols.week-fcols .fcol-bar .week-bar{width:96px;flex:0 0 96px}
 /* 2026-11-04 #55：列宽 648→446（-202px 全部让给标题）——
    周数值压缩为「2026·W32」、列序调整为 周数/负责人/创建/截止。 */
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -5531,7 +5531,9 @@ async function saveColumn(){
       await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(',')},ownerCreate,compCreate))});
       toast('板块已创建：'+column_name);
       closeModal('columnModal');
-      if(curBoard!==board_id){curBoard=board_id;ensureDeptOpen(board_id)}
+      // ⚠️ curBoards 是内容区的**权威选择**（#51 多看板语义）——
+      //    只改 curBoard 会让两者不一致 → reload 守卫早退 → 内容区停在「请选择看板」
+      if(curBoard!==board_id){curBoard=board_id;curBoards=new Set([board_id]);ensureDeptOpen(board_id)}
       reload(1);renderProgress();
     }
   }catch(e){toast(e.message)}
@@ -5769,6 +5771,7 @@ async function createBoard(){
     closeModal('boardModal');
     ME=await api('/api/me');           // 刷新看板列表（含新建看板）
     curBoard=r.board_id;               // 自动切换到新看板（初始为空）
+    curBoards=new Set([r.board_id]);   // ⚠️ 同步集合（curBoards 才是权威选择，见 saveColumn 同款注释）
     ensureDeptOpen(r.board_id);        // 新建板块尚未配置归属部门，自动展开「未配置」节点
     renderTabs();updateNewBtn();
     reload(1);renderProgress();
