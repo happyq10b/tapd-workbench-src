@@ -343,9 +343,9 @@ button{font-family:inherit}
    ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。
    ⚠️ 搜索框宽度改过（135→167，为完整显示 placeholder）→ 本行的锁定值需**同步**调整，
       否则左侧内容会被压缩、搜索框又被压回截断状态。 */
-.toolbar-left{flex:1 1 719px;min-width:719px}
-/* ↑ 2026-11-04 二次调整：右侧加【清空筛选】(86+8gap) → 右锁 402→452，
-   左侧对应 769→719px 给右侧让位（搜索框 min-width 260 仍吸收剩余）。 */
+.toolbar-left{flex:1 1 auto;min-width:640px}
+/* ↑ 2026-11-04 #56：右侧四按钮（展开/折叠/导入导出/新建板块）并入「操作 ▾」→
+   右锁 452→158px，左侧不再需要定宽补偿（flex 吸收全部剩余 → 搜索框拉宽填满）。 */
 
 /* ↑ flex-grow:1 —— 宽屏时吸收工具栏右侧的剩余空白（实测 1600px 视口下
    工具栏内宽 1360 > 左 875 + 右 402 + gap 10 = 1287，多出 73px 无处可去，
@@ -353,13 +353,9 @@ button{font-family:inherit}
    剩余空间进 .toolbar-left，其中只有搜索框是 flex-grow:1 → 由搜索框吸收，
    其余控件（状态/人员/周数/日期区间）宽度不变、位置不飘。
    ⚠️ 1200px 基线不变：此时工具栏内容正好填满，无剩余 → left 仍是 875px。 */
-.toolbar-right{flex:0 0 452px;min-width:452px}
-/* ↑ 452px = 五个按钮自然宽度 清空筛选86+展开62+折叠62+导入导出107+新建板块97
-   + 4×gap(8)=32（2026-11-04：加【清空筛选】、【新建板块】移到最后、文案精简）。
-   原锁 402px（四按钮）→ 加按钮后不放宽会把「导入导出」压折行。 */
-/* 工具栏右侧按钮组：五个按钮（清空筛选 / 展开 / 折叠 / 导入导出 / 新建板块）
-   宽度不足时按钮内文字会折行（「导入导出」变成上下两行）→ 按钮禁止折行，
-   由外层锁宽保证空间充足。 */
+.toolbar-right{flex:0 0 158px;min-width:158px}
+/* ↑ 158px = 清空筛选86 + 操作64 + gap(8)（2026-11-04 #56：四按钮并入「操作 ▾」）。
+   原锁 452px（五按钮）→ 合并后大幅缩窄，剩余空间全部由搜索框吸收。 */
 .toolbar-right .btn-default,.toolbar-right .btn-primary{white-space:nowrap;flex-shrink:0}
 /* 工具栏整体最小宽度：左 875 + 右 400 + gap 10 + padding 32 = 1317px。
    容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 165px 会让右侧按钮组被挤/换行。
@@ -389,7 +385,9 @@ button{font-family:inherit}
    加 padding(12×2)+border(1×2) → 需框宽 **167px**。
    原 max-width:230px 但 flex-basis:150px → 实际只拿到 135px，placeholder 被截断。
    → 改 flex-basis:170px / min-width:167px，保证提示词完整可见。 */
-.search-input{min-width:260px;flex:1 1 260px;max-width:520px}
+.search-input{min-width:260px;flex:1 1 260px;max-width:760px}
+/* ↑ 2026-11-04 #56：max-width 520→760 —— 工具栏右侧合并出一个按钮位后，
+   多出的 ~300px 空白全部由搜索框吸收（需求：拉宽搜索栏、无浪费空间）。 */
 /* ↑ max-width 230→360：搜索框要能吃掉 .toolbar-left 的 grow 空间，
    让整行「饱满」、导入导出按钮右侧不留空白。
    实际生效宽度：1200px 基线 167px（无剩余空间可吃）→
@@ -699,13 +697,16 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .slot-status{width:58px;flex-shrink:0;display:inline-block;text-align:center}
 .slot-ops{width:64px;flex-shrink:0;display:inline-block;text-align:center}
 /* 2026-11-04 #55：置顶/复制（板块行还有折叠/展开）合并为「操作 ▾」下拉菜单 */
-.ops-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:3px 9px;
+.ops-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:4px 10px;
   font-size:11.5px;border-radius:12px;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
+/* ↑ 2026-11-04 #56 用户反馈：尺寸与行内其他按钮（fold-btn/pin-btn）适配 */
 .ops-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
 .row-ops-menu{position:fixed;z-index:3000;background:#fff;border:1px solid var(--border);border-radius:8px;
   box-shadow:0 6px 20px rgba(0,0,0,.12);padding:4px;min-width:128px}
 .row-ops-item{padding:7px 12px;font-size:12.5px;color:var(--text);cursor:pointer;border-radius:5px;white-space:nowrap}
 .row-ops-item:hover{background:#f0f5ff;color:var(--primary)}
+.row-ops-sep{padding:5px 12px 3px;font-size:11px;color:var(--text3);border-top:1px solid var(--border);margin-top:4px;cursor:default}
+.row-ops-item + .row-ops-sep{border-top:none;margin-top:0}
 .slot-sub{width:72px;flex-shrink:0;display:inline-block;text-align:center}
 /* 标题占剩余空间并可收缩；行尾各槽位宽度固定 → 字段列纵向对齐 */
 .item-title{flex:1;min-width:0}
@@ -1308,6 +1309,11 @@ function goLogin(){
       <div class="header-more-menu" id="headerMoreMenu" hidden>
         <button id="teamBtn" onclick="openTeamModal()" title="账号管理（仅管理员）">👥 账号管理</button>
         <button id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
+        <!-- 2026-11-04 #56 用户反馈（最终口径）：备份/恢复 = **管理员级**，放顶部【更多】，
+             非管理员不展现（backupBtn/jsonImportBtn → applyPermissionUI 按 isAdmin 显隐）；
+             模板/导入/导出 留在板块筛选的「操作 ▾」里 -->
+        <button id="backupBtn" onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复；仅管理员）">💾 备份</button>
+        <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式；仅管理员）">📥 恢复</button>
       </div>
     </div>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
@@ -1477,26 +1483,11 @@ function goLogin(){
       <!-- 2026-11-04 用户需求：①【清空筛选】放在新建板块原位置；②新建板块移到最后；
            ③【展开板块/折叠板块】精简为【展开/折叠】（title 保留完整语义） -->
       <button class="btn-default" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/人员/周数/日期区间）">清空筛选</button>
-      <button class="btn-default" onclick="expandAll()" title="展开当前看板下的所有板块分组">展开</button>
-      <button class="btn-default" onclick="collapseAll()" title="折叠当前看板下的所有板块分组">折叠</button>
-      <!-- 【导入导出】按钮（2026-11-03 用户需求）：从顶栏移到**板块筛选栏后面**。
-           这 5 项（备份/恢复/模板/导入/导出）是「数据进出」类操作，
-           与「展开/折叠板块」同属对当前看板数据的操作，放一起更顺手；
-           顶栏则只留界面级操作，不再被这组按钮撑长。
-           id 保持不变 → toggleHeaderMore(event,'headerImportExportMenu') 与
-           applyPermissionUI() 的按 id 权限控制全部照旧。 -->
-      <div class="header-more" id="headerImportExport">
-        <button class="btn-default" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">导入导出</button>
-        <div class="header-more-menu" id="headerImportExportMenu" hidden>
-          <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
-          <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式，仅可编辑及以上）">📥 恢复</button>
-          <button id="xlsxTplBtn" onclick="downloadImportTemplate()" title="下载 xlsx 导入模板（含字段说明）">📄 模板</button>
-          <button id="xlsxImportBtn" onclick="document.getElementById('xlsxFile').click()" title="从 xlsx 导入原 TAPD 数据（追加式，不删除现有数据）">📥 导入</button>
-          <button onclick="exportXlsx()" title="导出当前看板数据为 Excel（.xlsx）">📊 导出</button>
-        </div>
-      </div>
-      <!-- 【+ 新建板块】移到本行最后（2026-11-04 用户需求）；id/显隐逻辑不变 -->
-      <button class="btn-primary" id="newBtn" style="display:none" onclick="openColumnModal()">+ 新建板块</button>
+      <!-- 2026-11-04 #56：展开/折叠/导入导出/新建板块 全部并入「操作 ▾」菜单
+           （refreshToolbarOps 按 ME 权限注册，行尾唯一按钮）。
+           applyPermissionUI 对 newBtn/xlsxImportBtn/jsonImportBtn 的 getElementById
+           均为 null 安全 → 原 id 移除后无需改权限代码。 -->
+      <span class="slot-ops"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
     </div>
   </div>
   <main class="board-content" id="boardContent"></main>
@@ -2549,10 +2540,32 @@ function applyPermissionUI(){
   renderPermissionEntries();
   // 可编辑专属：新建板块
   const nb=document.getElementById('newBtn'); if(nb)nb.style.display=canEdit?'':'none';
-  // 「更多」菜单里的写操作项：恢复（JSON 导入）、导入（xlsx）—— 需 editor 及以上
-  ['xlsxImportBtn','jsonImportBtn'].forEach(function(id){
+  // 数据导入导出权限（#56 修正）：备份/恢复 = **仅管理员**（用户明确）；
+  // 导入（xlsx）= editor 及以上；模板/导出 = 登录即可见
+  ['backupBtn','jsonImportBtn'].forEach(function(id){
+    const el=document.getElementById(id); if(el)el.style.display=isAdmin?'':'none';
+  });
+  ['xlsxImportBtn'].forEach(function(id){
     const el=document.getElementById(id); if(el)el.style.display=canEdit?'':'none';
   });
+  refreshToolbarOps(canEdit);   // #56：工具栏「操作 ▾」菜单按权限重建
+}
+
+// 工具栏「操作 ▾」菜单（#56）：展开/折叠/导入导出/新建板块 收进一个按钮，
+// 放在筛选栏行尾唯一位置。每次 applyPermissionUI 重建（ME 权限就绪后才调用）。
+function refreshToolbarOps(canEdit){
+  // 2026-11-04 #56 用户反馈（最终口径）：备份/恢复 → 顶部【更多】（管理员级）；
+  // 模板/导入/导出 → 留在本菜单。新建板块/导入 = editor 门槛；模板/导出 = 登录即可见。
+  const items=[];
+  if(canEdit)items.push({label:'＋ 新建板块',fn:function(){openColumnModal();}});
+  items.push(
+    {label:'展开板块',fn:function(){expandAll();}},
+    {label:'折叠板块',fn:function(){collapseAll();}},
+    {label:'— 数据导入导出 —',disabled:true},
+    {label:'📄 下载导入模板',fn:function(){downloadImportTemplate();}},
+    {label:'📊 导出 Excel',fn:function(){exportXlsx();}});
+  if(canEdit)items.push({label:'📥 导入（xlsx）',fn:function(){document.getElementById('xlsxFile').click();}});
+  ROW_OPS['toolbarOps']=items;
 }
 
 async function init(){
@@ -4304,6 +4317,7 @@ function renderBoard(cards,cols,q,colHits){
     const _copyPayload=JSON.stringify({col_key:colKey,column_name:k,board_id:boardId,column_id:meta?(meta.column_id||''):'',nature:meta?(meta.nature||'日常'):'日常',year:year,created_at:meta?(meta.created_at||''):''});
     const _wg='wg_'+i;
     const _colOps=[
+      {label:'＋ 新建事项',fn:function(){openNewModal(boardId,colKey);}},
       {label:pinned?'📌 取消置顶':'📌 置顶',fn:function(){toggleColumnPin(colKey,pinned?0:1);}},
       {label:'📋 复制',fn:function(){openCopyModal('column',JSON.parse(_copyPayload));}},
       {label:'折叠子事项',fn:function(){foldItems(_wg,false);}},
@@ -4322,8 +4336,7 @@ function renderBoard(cards,cols,q,colHits){
           <span class="slot-overdue"></span>
           <span class="slot-subtask"></span>
           <span class="slot-status"></span>
-          <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_colOpsId}')" title="置顶 / 复制 / 折叠 / 展开">操作 ▾</button></span>
-          <span class="slot-sub"><button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button></span>
+          <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_colOpsId}')" title="新建事项 / 置顶 / 复制 / 折叠 / 展开">操作 ▾</button></span>
         </span>
       </div>
       <div class="week-body">${list.map((c,i)=>cardItem(c,i+1)).join('')}</div>
@@ -4590,10 +4603,8 @@ function cardItem(c,seq){
   // 「添加子事项」是行内唯一的子事项入口：原来的「子事项 N」按钮已移除 ——
   // 已有子事项时左侧展开箭头就能看到目录，计数再单独占一个操作位属于重复
   // 点击直接打开「新建子事项」弹窗完成输入与保存（不再经过右侧抽屉）
+  // 2026-11-04 #56：「＋ 子事项」并入「操作 ▾」菜单 → tail 少一个槽位，宽度让给标题
   const canAddSub=ME.can_edit&&canEditCard(c);
-  const subBtn=canAddSub
-    ?`<button class="sub-toggle" onclick="openNewSubModal('${c.card_id}')" title="为该事项新增子事项">＋ 子事项</button>`
-    :'';
   // 事项置顶：与「板块置顶」完全一致 —— 按钮带文字标签，无条件渲染，
   // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶。
   // 置顶是**个人设置**：读当前账号自己的置顶集合，不读服务端的共享字段
@@ -4602,6 +4613,7 @@ function cardItem(c,seq){
   const _cid=c.card_id;
   const _opsItems=[{label:pinned?'📌 取消置顶':'📌 置顶',fn:function(){toggleCardPin(_cid,pinned?0:1);}}];
   if(ME.can_edit)_opsItems.push({label:'📋 复制',fn:function(){copyCardFromRow(_cid,'card');}});
+  if(canAddSub)_opsItems.push({label:'＋ 子事项',fn:function(){openNewSubModal(_cid);}});
   const opsId=rowOpsRegister(_opsItems);
   // 有子事项时给出目录展开箭头
   const hasSubs=(c.sub_count||0)>0;
@@ -4623,8 +4635,7 @@ function cardItem(c,seq){
       <span class="slot-overdue">${overdue?'<span class="lock-tag lock-tag-overdue">逾期</span>':''}</span>
       <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}</span>
       <span class="slot-status">${statusTag(c.card_id,c.status)}</span>
-      <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${opsId}')" title="置顶 / 复制">操作 ▾</button></span>
-      <span class="slot-sub">${subBtn}</span>
+      <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${opsId}')" title="置顶 / 复制 / 子事项">操作 ▾</button></span>
     </span>
   </div>
   <div class="sub-tree" id="subtree_${c.card_id}" style="display:none"></div>
@@ -4692,7 +4703,6 @@ function subNodeHtml(n,level){
       <span class="slot-subtask"></span>
       <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
       <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_opsId}')" title="置顶 / 复制">操作 ▾</button></span>
-      <span class="slot-sub"></span>
     </span>
   </div>`;
 }
@@ -5785,7 +5795,9 @@ function rowOpsShow(ev,id){
   const m=document.createElement('div');
   m.className='row-ops-menu';
   m.id='rowOpsMenu';
-  m.innerHTML=items.map((it,i)=>`<div class="row-ops-item" onclick="ROW_OPS_EXEC('${id}',${i})">${it.label}</div>`).join('');
+  m.innerHTML=items.map((it,i)=>it.disabled
+    ?`<div class="row-ops-sep">${it.label}</div>`
+    :`<div class="row-ops-item" onclick="ROW_OPS_EXEC('${id}',${i})">${it.label}</div>`).join('');
   document.body.appendChild(m);
   const r=ev.currentTarget.getBoundingClientRect();
   const mw=148,mh=items.length*32+8;
@@ -5798,7 +5810,7 @@ function rowOpsShow(ev,id){
 function ROW_OPS_EXEC(id,i){
   const it=(ROW_OPS[id]||[])[i];
   closeRowOps();
-  if(it&&it.fn)it.fn();
+  if(it&&!it.disabled&&it.fn)it.fn();
 }
 function closeRowOps(){const m=document.getElementById('rowOpsMenu');if(m)m.remove();}
 document.addEventListener('click',function(e){
