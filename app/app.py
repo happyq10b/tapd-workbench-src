@@ -1233,7 +1233,7 @@ def ensure_column(board_id, column_name, column_id='', creator='', created_at=''
     return key
 
 
-def visible_columns(username, boards, columns, board_id=None, counts=None):
+def visible_columns(username, boards, columns, board_id=None, counts=None, board_ids=None):
     """列出当前用户可见的板块元信息（按置顶优先、创建时间降序）
 
     counts: {col_key: (总数, 已完成数)}，用于板块进度条
@@ -1245,6 +1245,8 @@ def visible_columns(username, boards, columns, board_id=None, counts=None):
         if boards is not None and d['board_id'] not in boards:
             continue
         if board_id and d['board_id'] != board_id:
+            continue
+        if board_ids and d['board_id'] not in board_ids:
             continue
         # 板块级权限：用户被限定在某几个 column_id 时，看板内未授权的板块不展示
         if columns is not None:
@@ -1600,13 +1602,19 @@ def filter_options(username: str = Depends(require_auth)):
 
 
 @app.get('/api/overview')
-def overview(board_id: Optional[str] = None, username: str = Depends(require_auth)):
+def overview(board_id: Optional[str] = None, board_ids: Optional[str] = None,
+             username: str = Depends(require_auth)):
     boards, columns = user_allowed(username)
     rows = filter_rows(dbq("SELECT board_id, board_name, status, owner, column_id FROM cards WHERE deleted=0 AND parent_id=''"), boards, columns)
     # 按板块过滤统计：前端切换板块时带 board_id → 统计带只反映当前板块，
     # 否则会出现「切到别的板块、数字却还是上一个板块的」。
     # ⚠️ board_id 为空串 = 不按板块过滤（全局统计），保持既有语义。
-    if board_id:
+    # 多看板（2026-11-04）：board_ids 逗号分隔 → 统计带反映多选看板的合计。
+    if board_ids and not board_id:
+        _bset = {x.strip() for x in board_ids.split(',') if x.strip()}
+        if _bset:
+            rows = [r for r in rows if r['board_id'] in _bset]
+    elif board_id:
         rows = [r for r in rows if r['board_id'] == board_id]
     names = {}
     by_board = defaultdict(lambda: {'total': 0, 'done': 0, 'progressing': 0})
@@ -1650,6 +1658,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
           created_start: Optional[str] = None, created_end: Optional[str] = None,
           cc: Optional[str] = None, week: Optional[str] = None,
           person: Optional[str] = None, years: Optional[str] = None,
+          board_ids: Optional[str] = None,
           username: str = Depends(require_auth), request: Request = None):
     if card_id:
         audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
@@ -1691,6 +1700,11 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         mine = [r for r in mine if not r.get('parent_id')]
     if board_id:
         mine = [r for r in mine if r['board_id'] == board_id]
+    elif board_ids:
+        # 多看板（2026-11-04 用户需求）：可选看板支持多选 → 逗号分隔 board_ids
+        _bset = {x.strip() for x in board_ids.split(',') if x.strip()}
+        if _bset:
+            mine = [r for r in mine if r['board_id'] in _bset]
     # 归属年份过滤（2026-11-04 用户反馈）：年份绑定在**板块**层（board_columns.year）。
     # 之前只由前端隐藏不合年份的板块 → week_options 仍统计到其它年份板块里的
     # 事项，周数下拉出现「2025·第48周」这类**当前视图里没有事项的周**。
@@ -1707,12 +1721,21 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
                 _ymap = {(r['board_id'], r['column_name']): (r['year'] or '') for r in _yrows}
             mine = [r for r in mine
                     if _ymap.get((r['board_id'], r.get('column_name') or ''), '') in yset]
-    if status == 'done':
-        mine = [r for r in mine if r['status'] == 'done']
-    elif status == 'progressing':
-        mine = [r for r in mine if r['status'] == 'progressing']
-    elif status == 'open':
-        mine = [r for r in mine if r['status'] != 'done' and r['status'] != 'progressing']
+    # 状态多选（2026-11-04 用户需求：统计卡片点击筛选，支持多选组合）——
+    # 逗号分隔（如 done,progressing）；单值保持兼容。open = 未完成（非 done 且非 progressing）。
+    if status:
+        _sset = {x.strip() for x in status.split(',') if x.strip()}
+        if _sset:
+            def _status_hit(r):
+                st = r['status']
+                if 'done' in _sset and st == 'done':
+                    return True
+                if 'progressing' in _sset and st == 'progressing':
+                    return True
+                if 'open' in _sset and st != 'done' and st != 'progressing':
+                    return True
+                return False
+            mine = [r for r in mine if _status_hit(r)]
     if owner == OWNER_NONE:
         # 「无负责人」：负责人为空或纯空白（负责人字段多人时以 ; 分隔）
         mine = [r for r in mine if not (r.get('owner') or '').strip()]
@@ -1794,7 +1817,10 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         if r['status'] == 'done':
             dcnt[k] += 1
     counts = {k: (ccnt[k], dcnt[k]) for k in ccnt}
-    cols_meta = visible_columns(username, boards, columns, board_id, counts)
+    _vc_ids = None
+    if not board_id and board_ids:
+        _vc_ids = {x.strip() for x in board_ids.split(',') if x.strip()}
+    cols_meta = visible_columns(username, boards, columns, board_id, counts, board_ids=_vc_ids)
     if column:
         cols_meta = [c for c in cols_meta if c['column_name'] == column]
     # 板块命中清单（供前端把该板块的事项归到一起展示）

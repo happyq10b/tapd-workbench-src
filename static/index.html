@@ -262,23 +262,23 @@ button{font-family:inherit}
    ⚠️ 宽度要求「不超过公告栏」：两者同属 .topbar-aside 这一列，
       宽度由该列宽（minmax(300px,420px)）决定 → 天然对齐，不会超出。 */
 .tb-stat-band{grid-column:auto;flex-shrink:0;width:100%}
-.tb-stat-band .progress-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}
+.tb-stat-band .progress-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0}
 .tb-stat-band .progress-cards{display:contents}
 @media(max-width:1180px){
   .topbar{grid-template-columns:minmax(0,1fr) minmax(260px,320px)}
   .tb-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .tb-stat-band .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tb-stat-band .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media(max-width:900px){
   /* 窄屏：公告区移到左半下方（上下堆叠），左半保持双列 */
   .topbar{grid-template-columns:minmax(0,1fr);gap:10px}
   .topbar-aside{order:2}
-  .tb-stat-band .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tb-stat-band .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media(max-width:640px){
   .topbar{padding:10px 12px 0}
   .tb-grid{grid-template-columns:minmax(0,1fr)}
-  .tb-stat-band .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .tb-stat-band .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
   .tb-stat-band .stat-value{font-size:16px}
 }
 .board-tabs{display:flex;flex-direction:column;gap:0;padding:12px 24px 0;max-width:1440px;margin:0 auto}
@@ -343,7 +343,9 @@ button{font-family:inherit}
    ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。
    ⚠️ 搜索框宽度改过（135→167，为完整显示 placeholder）→ 本行的锁定值需**同步**调整，
       否则左侧内容会被压缩、搜索框又被压回截断状态。 */
-.toolbar-left{flex:1 1 875px;min-width:875px}
+.toolbar-left{flex:1 1 769px;min-width:769px}
+/* ↑ 2026-11-04：状态下拉移除（-98px -8gap）→ 875-106=769px；搜索框 min-width 260 吸收 */
+
 /* ↑ flex-grow:1 —— 宽屏时吸收工具栏右侧的剩余空白（实测 1600px 视口下
    工具栏内宽 1360 > 左 875 + 右 402 + gap 10 = 1287，多出 73px 无处可去，
    表现为「导入导出」按钮右侧一条空白带）。改为可 grow 后，
@@ -385,7 +387,7 @@ button{font-family:inherit}
    加 padding(12×2)+border(1×2) → 需框宽 **167px**。
    原 max-width:230px 但 flex-basis:150px → 实际只拿到 135px，placeholder 被截断。
    → 改 flex-basis:170px / min-width:167px，保证提示词完整可见。 */
-.search-input{min-width:167px;flex:1 1 170px;max-width:360px}
+.search-input{min-width:260px;flex:1 1 260px;max-width:520px}
 /* ↑ max-width 230→360：搜索框要能吃掉 .toolbar-left 的 grow 空间，
    让整行「饱满」、导入导出按钮右侧不留空白。
    实际生效宽度：1200px 基线 167px（无剩余空间可吃）→
@@ -411,7 +413,7 @@ button{font-family:inherit}
 .btn-secondary:hover{border-color:var(--primary);color:var(--primary)}
 /* 统计带：顶部栏左半第三行，3 张核心指标卡横排（总事项 / 已完成 / 未完成）。
    公告区已独立到顶部栏右半（.topbar-aside），这里只管卡片行。 */
-.progress-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px;align-items:stretch}
+.progress-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px;align-items:stretch}
 .progress-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-content:start}
 /* 公告栏：独立展示块（右半），标题与内容纵向排列、可换行 */
 .notice-bar{background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:10px 14px;display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden}
@@ -427,7 +429,7 @@ button{font-family:inherit}
 .notice-item-text{font-size:12.5px;color:var(--text2);line-height:1.7;margin-top:5px;white-space:pre-wrap}
 .notice-item-meta{font-size:11.5px;color:var(--text3);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 @media(max-width:1024px){
-  .progress-overview{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 /* ===== 需求5：窗口缩小后的布局稳定性 =====
    实测（headless Chrome，2026-11-02）：
@@ -1121,6 +1123,10 @@ body{
 .stat-card{position:relative;overflow:hidden;border-radius:var(--radius);box-shadow:var(--shadow);transition:transform .25s,box-shadow .25s;animation:fadeUp .35s ease both}
 .stat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--primary);opacity:.92}
 .stat-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md)}
+/* 统计卡片点击筛选（2026-11-04）：可点击的三张卡（已完成/进行中/未完成） */
+.stat-click{cursor:pointer}
+.stat-click.on{border-color:var(--primary);background:#f0f5ff;box-shadow:0 0 0 2px rgba(22,119,255,.18)}
+.stat-click.on .stat-label::after{content:' ✓';color:var(--primary)}
 .stat-label{font-weight:500}
 .stat-value{letter-spacing:.5px}
 
@@ -1409,9 +1415,7 @@ function goLogin(){
   <div class="toolbar">
     <div class="toolbar-left">
       <input type="text" class="search-input" id="searchInput" placeholder="搜索事项 / 看板 / 板块…" oninput="debounceReload()">
-      <select class="filter-select" id="statusFilter" onchange="reload(1)">
-        <option value="">全部状态</option><option value="done">已完成</option><option value="progressing">进行中</option><option value="open">未完成</option>
-      </select>
+      <!-- 状态下拉已移除（2026-11-04）：状态筛选改由顶部统计卡片点击承担（支持多选组合） -->
       <!-- 人员筛选：入口**直接是【架构树】**（含全部末级人员 + 「无负责人」选项）。
            原先的候选下拉面板只列「事项负责人」名单，多数场景为空（显示"暂无可选人员"），
            且右侧还要另挂一个 🌳 按钮才能进树 —— 两个入口冗余、语义割裂。
@@ -2211,6 +2215,17 @@ let TOKEN=localStorage.getItem('tk')||'';
 // 能否看到/进入该板块由【架构管理】的归属 + 可见性判定。
 function canEditCard(c){return !!(ME&&ME.can_edit)}
 let ME=null, curBoard='', curPage=1, pageSize=2000, debounceT=null, editing=null, editLockTimer=null;
+// 多看板选择（2026-11-04 用户需求）：可选看板「单击取消选择」并支持**同时多选**。
+// curBoards = 内容区的权威选择集；curBoard 保留为「主看板」（最后点击的），
+// 供新建事项/板块等单看板流程取默认值。
+let curBoards=new Set();
+// 统计卡片点击筛选的状态集合（2026-11-04）：done / progressing / open，空 = 全部
+let STATUS_SEL=new Set();
+function toggleStatCard(st){
+  if(STATUS_SEL.has(st))STATUS_SEL.delete(st);else STATUS_SEL.add(st);
+  renderProgress();
+  reload(1);
+}
 // 年份筛选默认落在「当前年份」：切换看板时统一重置回默认年份（保证各板块一致）
 const YEAR_DEFAULT=String(new Date().getFullYear());
 // 年份筛选（多选）：curYears 是一组被选中的归属年份；空集合 = 全部年份
@@ -2312,6 +2327,7 @@ async function jumpToCard(cardId){
     if(!c){toast('事项不存在或无权查看');return}
     if(c.board_id&&c.board_id!==curBoard){
       curBoard=c.board_id;
+      curBoards=new Set([c.board_id]);
       ensureDeptOpen(c.board_id);
       renderTabs();
       await reload(1);
@@ -2633,22 +2649,11 @@ function groupBoardsByDept(){
 function boardTabHtml(b,deptLabel){
   const base=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
   const title=base;
-  // 双击 = 取消选择（2026-11-03 用户需求）。
-  // 放在 onclick 旁边而非替换它 → 单击照常选中，双击才触发取消。
-  // ⚠️ 双击会先触发两次 click（选中）再触发 dblclick，所以 dblclick 里
-  //    要判断「当前是否就是它」，是则取消；否则说明用户想切换到别的看板。
-  return `<button class="tab-btn ${curBoard===b.board_id?'active':''}" onclick="pickBoard('${b.board_id}')" ondblclick="pickBoardToggle('${b.board_id}')" title="${esc(title)}">${esc(b.board_name)}</button>`;
+  // 单击 = 切换选中/取消（2026-11-04 用户需求：由「双击取消」改为「单击取消」，支持多选）。
+  // 选中态看 curBoards 集合（多选高亮），curBoard 仅是主看板。
+  return `<button class="tab-btn ${curBoards.has(b.board_id)?'active':''}" onclick="pickBoard('${b.board_id}')" title="${esc(title)}（单击选中 / 再次单击取消，可多选）">${esc(b.board_name)}</button>`;
 }
-// 双击看板 tab → 取消选择（回到「未选看板」空状态）
-// 复用已有的 clearBoardSelection()，不新增状态字段、不改 pickBoard()。
-function pickBoardToggle(bid){
-  if(curBoard!==bid){pickBoard(bid);return;}   // 不是当前选中的 → 视为切换
-  clearBoardSelection('已取消选择');
-  renderTabs();
-  renderEmptyBoardState();
-  renderProgress();
-  syncFilterHint();
-}
+function pickBoardToggle(bid){pickBoard(bid);}   // 兼容旧引用（2026-11-04 起单击即切换）
 function renderTabs(){
   const tabs=document.getElementById('boardTabs');
   const g=groupBoardsByDept();
@@ -2736,11 +2741,13 @@ function selectDeptBoards(name){
     // ⚠️ 但如果当前已选看板本来就属于这个部门（只是被折叠过），保留它。
     if(!boardBelongsToOpenDept()){
       curBoard='';
+      curBoards.clear();
       curYears=new Set();
       LAST_EMPTY_REASON='';
     }
   }else{
     curBoard='';
+    curBoards.clear();
     curYears=new Set();
     LAST_EMPTY_REASON='该看板暂无数据';
   }
@@ -2748,6 +2755,7 @@ function selectDeptBoards(name){
 // 清空当前看板选择（回到「未选看板」状态）
 function clearBoardSelection(reason){
   curBoard='';
+  curBoards.clear();
   curYears=new Set();
   // 顺带清掉筛选条件里的看板相关状态？—— 不清：
   // 筛选条件（人员/周数/状态）是用户主动设的，跨看板保留是合理的；
@@ -3679,10 +3687,20 @@ async function deleteDeptPost(pid){
   }catch(e){toast(e.message)}
 }
 function pickBoard(bid){
-  curBoard=bid;curYears=new Set([YEAR_DEFAULT]);
-  LAST_EMPTY_REASON='';
+  // 单击切换（2026-11-04）：未选中 → 选中；已选中 → 取消（可多选并存）。
+  if(curBoards.has(bid)){
+    curBoards.delete(bid);
+  }else{
+    curBoards.add(bid);
+  }
+  curBoard=curBoards.size?[...curBoards][curBoards.size-1]:'';
+  curYears=new Set([YEAR_DEFAULT]);
+  LAST_EMPTY_REASON=curBoards.size?'':'已取消选择';
   // 从部门页进入事项列表时，先切回列表视图（switchView 内部会 renderTabs）
   if(CUR_DEPT)backToBoardList();
+  if(!curBoards.size){
+    renderTabs();renderEmptyBoardState();renderProgress();syncFilterHint();updateNewBtn();return;
+  }
   ensureDeptOpen(bid);renderTabs();reload(1);renderProgress();updateNewBtn()
 }
 // 选中某板块时，自动（且仅）展开其所属部门，保证该板块在目录树中始终可见
@@ -3706,15 +3724,26 @@ async function renderProgress(){
   // ⚠️ 统计带必须**跟随当前板块**：不带 board_id 时接口返回的是全局汇总，
   //    会出现「切到别的板块、数字却还是上一个板块的」（需求：板块切换彻底联动）。
   //    curBoard 为空（初始未选板块）→ 不传 board_id → 显示全局概览。
-  const ov=await api('/api/overview'+(curBoard?('?board_id='+encodeURIComponent(curBoard)):''));
-  // 顶部统计带：3 张核心指标卡横排（总事项 / 已完成 / 未完成），
-  // 位于顶部栏左半的第三行；公告区在右半独立展示（#noticeBar 已在 HTML 中）。
+  // 多看板（2026-11-04）：单选带 board_id，多选带 board_ids（统计反映多看板合计）
+  const ovq=curBoards.size===1
+    ? ('?board_id='+encodeURIComponent([...curBoards][0]))
+    : (curBoards.size>1?('?board_ids='+encodeURIComponent([...curBoards].join(','))):'');
+  const ov=await api('/api/overview'+ovq);
+  // 顶部统计带：4 张核心指标卡（总事项 / 已完成 / 进行中 / 未完成）。
+  // 除「总事项」外的三张可点击筛选：单击选中 / 再击取消，支持多选组合（默认全不选）。
   const box=document.getElementById('progressOverview');
   if(box){
+    const card=(st,label,cls,val)=>{
+      const on=STATUS_SEL.has(st);
+      return `<div class="stat-card stat-click${on?' on':''}" onclick="toggleStatCard('${st}')"
+        title="单击筛选「${label}」的事项；再次单击取消（可多选组合）">
+        <div class="stat-label">${label}</div><div class="stat-value ${cls}">${val}</div></div>`;
+    };
     box.innerHTML=`
       <div class="stat-card"><div class="stat-label">总事项</div><div class="stat-value blue">${ov.total}</div></div>
-      <div class="stat-card"><div class="stat-label">已完成</div><div class="stat-value green">${ov.done}</div></div>
-      <div class="stat-card"><div class="stat-label">未完成</div><div class="stat-value orange">${ov.open}</div></div>`;
+      ${card('done','已完成','green',ov.done)}
+      ${card('progressing','进行中','blue',ov.progressing||0)}
+      ${card('open','未完成','orange',ov.open)}`;
   }
   await renderNoticeBar();
   // 负责人下拉已下线（与「人员」筛选重复）：人员候选统一走
@@ -3860,16 +3889,18 @@ async function reload(page){
   curPage=page;
   // ⚠️ 未选板块（curBoard 为空）→ **不拉数据**，直接渲染空状态。
   //    否则会把全部可见板块的事项一次性灌进来（需求3：初始内容区应为空）。
-  if(!curBoard){renderEmptyBoardState();syncFilterHint();return}
-  const reqBoard=curBoard;   // 记下本次请求对应的看板（响应回来时用于判别是否已过期）
+  if(!curBoards.size){renderEmptyBoardState();syncFilterHint();return}
+  const reqBoard=[...curBoards].join(',');   // 记下本次请求对应的多选看板（判别响应是否过期）
   const ps=new URLSearchParams({page:curPage,size:pageSize});
-  const s=document.getElementById('statusFilter').value,
-        q=document.getElementById('searchInput').value.trim();
+  const q=document.getElementById('searchInput').value.trim();
+  // 状态筛选：来自统计卡片的点击多选（2026-11-04，状态下拉已移除）
+  const st=[...STATUS_SEL].join(',');
   const cc=window._ccFilter||'';
   // 创建日期区间：两端都空 = 不筛选；只填一端 = 单边区间（从某天起 / 到某天止）
   const ds=document.getElementById('createdStart').value,de=document.getElementById('createdEnd').value;
-  if(curBoard)ps.set('board_id',curBoard);
-  if(s)ps.set('status',s);if(q)ps.set('q',q);
+  // 多看板：board_ids 逗号分隔（单个时也走 board_ids，后端同一处理）
+  if(curBoards.size)ps.set('board_ids',[...curBoards].join(','));
+  if(st)ps.set('status',st);if(q)ps.set('q',q);
   if(cc)ps.set('cc',cc);
   if(ds)ps.set('created_start',ds);
   if(de)ps.set('created_end',de);
@@ -3886,7 +3917,7 @@ async function reload(page){
   //    （双击 tab 取消 / 收起部门 / 快速切换看板）→ 此时响应属于**旧看板**，
   //    直接渲染会把已取消的内容又灌回内容区。
   //    判据：请求发出时记下的 board_id 与当前 curBoard 不一致 → 丢弃本次响应。
-  if(reqBoard!==curBoard){return;}
+  if(reqBoard!==[...curBoards].join(',')){return;}
   renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（已按权限过滤），不随勾选收缩
   renderBoard(d.cards,d.columns,q,d.column_hits);
   syncFilterHint();
@@ -4069,7 +4100,8 @@ function syncFilterHint(){
 }
 function renderWeekFilter(weeks){
   // ⚠️ 排序用 weekSortKey（组合整数序 202601~202644），不能用字符串序
-  const list=(weeks||[]).filter(Boolean).slice().sort((a,b)=>weekSortKey(a)-weekSortKey(b));
+  // 周数候选**倒序**（2026-11-04 用户需求）：最新的周排最前
+  const list=(weeks||[]).filter(Boolean).slice().sort((a,b)=>weekSortKey(b)-weekSortKey(a));
   // 当前看板已不存在的周数（换看板 / 被删）→ 丢弃已选项，避免筛出空列表。
   // 注意：**手工输入**的周数不在接口返回里，不能被误删 —— 用 _manualWeek 标记保护。
   if(WEEK_SEL.size){
@@ -4141,7 +4173,7 @@ function syncDateFilterUI(){
 //   → 供「筛选后无事项的板块整块隐藏」判定；无筛选时空板块照常显示。
 function filtersActive(q){
   if(q)return true;
-  if(document.getElementById('statusFilter')&&document.getElementById('statusFilter').value)return true;
+  if(STATUS_SEL&&STATUS_SEL.size)return true;   // 统计卡片点击筛选（2026-11-04 起）
   if(window._ccFilter)return true;
   if(document.getElementById('createdStart')&&document.getElementById('createdStart').value)return true;
   if(document.getElementById('createdEnd')&&document.getElementById('createdEnd').value)return true;
@@ -4175,7 +4207,9 @@ function renderBoard(cards,cols,q,colHits){
   // 板块列表：以接口返回的板块为准（含暂无事项的空板块），排序规则见 cmpColumn
   let names;
   if(cols&&cols.length){
-    names=cols.map(x=>x.column_name);
+    // ⚠️ 多看板（2026-11-04）：不同看板可能有同名板块 → 按名称去重，
+    //    否则同名板块的组会被渲染两次（卡片面板翻倍，实测 4 卡渲染出 8 个）。
+    names=[...new Set(cols.map(x=>x.column_name))];
     // 兜底：分组里出现、但接口未返回的板块名（历史脏数据 / 并发新建）
     Object.keys(groups).forEach(k=>{if(k!=='未分组'&&names.indexOf(k)<0)names.push(k)});
   }else{
@@ -4199,7 +4233,16 @@ function renderBoard(cards,cols,q,colHits){
       return;
     }
   }
-  names.sort((a,b)=>cmpColumn(a,b,cmeta));
+  // 末级排序数据源：板块内卡片的 column_sort（板块自身的排序字段，2026-11-04）
+  const csort={};
+  Object.keys(groups).forEach(k=>{
+    const g=groups[k];
+    if(g.length&&g[0].column_sort!==undefined&&g[0].column_sort!==''){
+      const v=Number(g[0].column_sort);
+      if(!isNaN(v))csort[k]=v;
+    }
+  });
+  names.sort((a,b)=>cmpColumn(a,b,cmeta,csort));
   c.innerHTML=names.map((k,i)=>{
     const list=groups[k]||[];
     const meta=cmeta[k];
@@ -4406,12 +4449,19 @@ function srItemHtml(x){
 // 排序比较：置顶优先 → 创建时间降序 → 名称（保证同分时顺序稳定）
 // 置顶是**个人设置**，因此这里读的是当前账号的置顶集合，而不是服务端的共享字段
 function colPinKey(name,meta){return (meta&&meta.col_key)?meta.col_key:(curBoard+'::'+name)}
-function cmpColumn(a,b,cmeta){
+function cmpColumn(a,b,cmeta,csort){
   const ma=cmeta[a]||{},mb=cmeta[b]||{};
   const pa=isPinned('column',colPinKey(a,ma))?0:1,pb=isPinned('column',colPinKey(b,mb))?0:1;
   if(pa!==pb)return pa-pb;
   const ta=tsVal(ma.created_at),tb=tsVal(mb.created_at);
   if(ta!==tb)return tb-ta;
+  // 末级排序（2026-11-04 用户需求）：按**板块自身的排序字段**（cards.column_sort，
+  // TAPD 导入的板块排序值）；未携带排序值的板块排最后，再按名称兜底。
+  if(csort){
+    const va=(csort[a]===undefined)?Number.MAX_SAFE_INTEGER:csort[a];
+    const vb=(csort[b]===undefined)?Number.MAX_SAFE_INTEGER:csort[b];
+    if(va!==vb)return va-vb;
+  }
   return String(a).localeCompare(String(b),'zh');
 }
 function cmpCard(a,b){
