@@ -276,7 +276,12 @@ CREATE TABLE IF NOT EXISTS board_columns (
     pinned      INTEGER NOT NULL DEFAULT 0,
     copy_from   TEXT NOT NULL DEFAULT '',
     owner       TEXT NOT NULL DEFAULT '',   -- 板块负责人（ACL：owner + participants 命中才可见）
-    participants TEXT NOT NULL DEFAULT ''   -- 板块参与人（ACL，逗号分隔的账号）
+    participants TEXT NOT NULL DEFAULT '',  -- 板块参与人（ACL，逗号分隔的账号）
+    -- 板块「完成情况」（2026-11-04 需求3）：由**板块负责人**手动标记的完成状态
+    --   open=未完成 / progressing=进行中 / done=已完成
+    -- ⚠️ 与进度条（done/total，自动统计）**互不冲突**：进度条是统计口径，
+    --    completion 是负责人对整体完成度的**声明**，两者并存展示。
+    completion  TEXT NOT NULL DEFAULT 'open'
 );
 CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
 CREATE INDEX IF NOT EXISTS idx_board_columns_name ON board_columns(column_name);
@@ -694,6 +699,9 @@ def init_db(force_import=False):
         conn.execute("ALTER TABLE board_columns ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
     if 'participants' not in bcols:
         conn.execute("ALTER TABLE board_columns ADD COLUMN participants TEXT NOT NULL DEFAULT ''")
+    # 板块「完成情况」（2026-11-04 需求3）：负责人手动标记的完成状态
+    if 'completion' not in bcols:
+        conn.execute("ALTER TABLE board_columns ADD COLUMN completion TEXT NOT NULL DEFAULT 'open'")
     # ---- 分级权限模型（2026-11-02）----
     # 四层资源统一记录「负责人 + 参与人集合」：
     #   架构 org_nodes.owner / .participants

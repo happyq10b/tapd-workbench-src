@@ -1190,6 +1190,9 @@ def filter_rows(rows, boards, columns):
 #   column_id 在同一看板内唯一，但历史数据存在 column_id 为空的分组，
 #   用组合键更稳妥，也不会因 column_id 缺失而无法定位板块。
 COLUMN_NATURES = {'日常', '专项'}
+# 板块「完成情况」取值（2026-11-04 需求3）——与事项 status 同一套语义
+# open=未完成 / progressing=进行中 / done=已完成
+COLUMN_COMPLETIONS = ('open', 'progressing', 'done')
 
 
 def col_key(board_id, column_name):
@@ -1655,27 +1658,35 @@ def overview(board_id: Optional[str] = None, board_ids: Optional[str] = None,
             'open': sum(s['open'] for s in board_stats),
             'boards': board_stats, 'owners': owner_stats[:20]}
 
-@app.get('/api/cards')
-def cards(board_id: Optional[str] = None, status: Optional[str] = None,
-          owner: Optional[str] = None, column: Optional[str] = None,
-          q: Optional[str] = None, page: int = 1, size: int = 50,
-          parent_id: Optional[str] = None, card_id: Optional[str] = None,
-          created_start: Optional[str] = None, created_end: Optional[str] = None,
-          cc: Optional[str] = None, week: Optional[str] = None,
-          person: Optional[str] = None, years: Optional[str] = None,
-          board_ids: Optional[str] = None,
-          username: str = Depends(require_auth), request: Request = None):
-    if card_id:
-        audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
-    boards, columns = user_allowed(username)
-    # 全量行：子事项计数（sub_count）必须看到所有卡片，不能被筛选条件裁剪
-    all_rows = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
-    # 创建日期区间：条件下推到 SQL。用 substr(created,1,10) 取日期部分比较，
-    # 这样 created 里带时分秒时也不会与纯日期做字符串比较而出错
+def _status_text(st):
+    """状态 → 中文文案（与前端 statusText 同口径）"""
+    return '已完成' if st == 'done' else ('进行中' if st == 'progressing' else '未完成')
+
+
+def _completion_text(st):
+    """板块完成情况 → 中文文案（与事项 status 同一套语义）"""
+    return '已完成' if st == 'done' else ('进行中' if st == 'progressing' else '未完成')
+
+
+def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_ids=None,
+                            status=None, owner=None, column=None, q=None,
+                            created_start=None, created_end=None, cc=None, week=None,
+                            person=None, years=None, card_id=None, parent_id=None,
+                            level='top', board_set=None):
+    """按用户可见范围 + 页面筛选条件过滤事项（**列表与导出共用**）
+
+    返回 (mine, week_options, col_hit_keys)：
+      mine         —— 过滤后的事项行（dict 列表）
+      week_options —— 当前范围内出现过的周数集合（按 年*100+周号 排序）
+      col_hit_keys —— 搜索命中板块的 col_key 集合
+
+    ⚠️ 参数与 /api/cards 的查询参数**一一对应**，保证「页面筛选 → 导出结果」一致。
+    """
+    # 创建日期区间：条件下推到 SQL（substr 取日期部分，带时分秒也能正确比较）
     cf = _norm_date(created_start)
     ct = _norm_date(created_end)
     if cf and ct and cf > ct:
-        cf, ct = ct, cf          # 起止颠倒时自动纠正，避免查出一片空结果
+        cf, ct = ct, cf          # 起止颠倒时自动纠正
     if cf or ct:
         w, p = ['deleted=0'], []
         if cf:
@@ -1686,34 +1697,26 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
             p.append(ct)
         pool = [dict(r) for r in dbq('SELECT * FROM cards WHERE ' + ' AND '.join(w), p)]
     else:
-        pool = all_rows
+        pool = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
     mine = filter_rows(pool, boards, columns)
-    # 子事项计数（全量统计 parent 指向）
-    sub_count = defaultdict(int)
-    # 注意：父事项与子事项的负责人**各自独立存储**，不做任何关联或继承，
-    # 因此这里不汇总子事项负责人（此前 sub_owners 汇总会让父事项行
-    # 显示子事项的责任人，违背「父事项负责人单独设置」的语义，已移除）
-    for r in all_rows:
-        if r.get('parent_id'):
-            sub_count[r['parent_id']] += 1
-    # 层级过滤：parent_id 指定 → 查子事项；否则默认只看顶层（card_id 精确查询不受层级限制）
+    # 层级过滤：card_id 精确查询不受层级限制；parent_id → 该父项的子事项；
+    # level='top' → 只看顶层；level='all' → 全部层级（导出用）
     if card_id:
         mine = [r for r in mine if r['card_id'] == card_id]
     elif parent_id:
         mine = [r for r in mine if r.get('parent_id') == parent_id]
-    else:
+    elif level == 'top':
         mine = [r for r in mine if not r.get('parent_id')]
-    if board_id:
+    # 看板维度
+    if board_set is not None:
+        mine = [r for r in mine if r['board_id'] in board_set]
+    elif board_id:
         mine = [r for r in mine if r['board_id'] == board_id]
     elif board_ids:
-        # 多看板（2026-11-04 用户需求）：可选看板支持多选 → 逗号分隔 board_ids
         _bset = {x.strip() for x in board_ids.split(',') if x.strip()}
         if _bset:
             mine = [r for r in mine if r['board_id'] in _bset]
-    # 归属年份过滤（2026-11-04 用户反馈）：年份绑定在**板块**层（board_columns.year）。
-    # 之前只由前端隐藏不合年份的板块 → week_options 仍统计到其它年份板块里的
-    # 事项，周数下拉出现「2025·第48周」这类**当前视图里没有事项的周**。
-    # 现在下推到后端，在一切统计（week_options / 计数 / 分页）之前生效。
+    # 归属年份（绑定在板块层）—— 在一切统计之前生效
     if years:
         yset = {y.strip() for y in years.split(',') if y.strip()}
         if yset:
@@ -1726,8 +1729,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
                 _ymap = {(r['board_id'], r['column_name']): (r['year'] or '') for r in _yrows}
             mine = [r for r in mine
                     if _ymap.get((r['board_id'], r.get('column_name') or ''), '') in yset]
-    # 状态多选（2026-11-04 用户需求：统计卡片点击筛选，支持多选组合）——
-    # 逗号分隔（如 done,progressing）；单值保持兼容。open = 未完成（非 done 且非 progressing）。
+    # 状态多选（逗号分隔 = 任一命中）；open = 未完成（非 done 且非 progressing）
     if status:
         _sset = {x.strip() for x in status.split(',') if x.strip()}
         if _sset:
@@ -1742,11 +1744,8 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
                 return False
             mine = [r for r in mine if _status_hit(r)]
     if owner == OWNER_NONE:
-        # 「无负责人」：负责人为空或纯空白（负责人字段多人时以 ; 分隔）
         mine = [r for r in mine if not (r.get('owner') or '').strip()]
     elif owner:
-        # 负责人筛选：支持多值（逗号分隔 = 任一命中），单值时保持既有的子串匹配语义
-        # （多人负责人以 ; 分隔，名字互为前缀时仍能命中）
         onames = [x.strip() for x in owner.split(',') if x.strip()]
         if len(onames) > 1:
             mine = [r for r in mine
@@ -1754,19 +1753,11 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         else:
             mine = [r for r in mine if owner in (r.get('owner') or '')]
     if cc:
-        # 参与人筛选：同样支持多值（逗号分隔 = 任一命中）
         cnames = [x.strip() for x in cc.split(',') if x.strip()]
         if cnames:
             mine = [r for r in mine
                     if any(nm in (r.get('cc') or '') for nm in cnames)]
     if person:
-        # 人员筛选：**锚定在负责人（owner）字段上** —— 与 owner 条件指向同一字段，
-        # 两者在服务端做交集（AND）：owner 命中的集合 ∩ person 命中的集合。
-        # 人员集合内部为「任一命中」（逗号分隔），与 owner 多值口径一致。
-        # 说明：前端已把「人员」与「负责人」拆成两个独立控件、各自提交，
-        # 不再互相覆盖 —— 这里保证它们组合时语义是交集而非覆盖。
-        # ⚠️ 前端已下线独立的「全部负责人」下拉（原 ownerFilter），
-        # 「无负责人」这一档改由 person 参数承载：__no_owner__ = 负责人为空。
         pnames = [x.strip() for x in person.split(',') if x.strip()]
         if pnames:
             want_none = OWNER_NONE in pnames
@@ -1780,19 +1771,15 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
                 mine = [r for r in mine if _person_hit(r)]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]
-    # 周数维度：可选周数 = 当前范围（该看板下、权限可见）里出现过的周数集合。
-    # 在**应用周数筛选之前**统计 → 勾选某周后，其余周数仍在选项里（可随时改选）。
-    # 排序用 week_sort_key（按 年*100+周号 的组合整数序），不能用字符串序。
+    # 周数维度：可选周数在**应用周数筛选之前**统计 → 勾选某周后其余周仍可选
     week_options = sorted({(r.get('week_no') or '').strip()
                            for r in mine if (r.get('week_no') or '').strip()},
                           key=week_sort_key)
     if week:
-        # 多值（逗号分隔 = 任一命中），与负责人/参与人筛选口径一致
         wset = {x.strip() for x in week.split(',') if x.strip()}
         if wset:
             mine = [r for r in mine if (r.get('week_no') or '').strip() in wset]
     # 搜索：同时命中「事项」（名称/描述）与「板块」（板块名）
-    # 板块名命中时，该板块下的全部事项都算命中；返回结果按 match_type 区分
     col_hit_keys = set()
     if q:
         ql = q.lower()
@@ -1812,6 +1799,40 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
             r['match_type'] = ('column'
                                if col_key(r['board_id'], r.get('column_name') or '') in col_hit_keys
                                else 'card')
+    return mine, week_options, col_hit_keys
+
+
+@app.get('/api/cards')
+def cards(board_id: Optional[str] = None, status: Optional[str] = None,
+          owner: Optional[str] = None, column: Optional[str] = None,
+          q: Optional[str] = None, page: int = 1, size: int = 50,
+          parent_id: Optional[str] = None, card_id: Optional[str] = None,
+          created_start: Optional[str] = None, created_end: Optional[str] = None,
+          cc: Optional[str] = None, week: Optional[str] = None,
+          person: Optional[str] = None, years: Optional[str] = None,
+          board_ids: Optional[str] = None,
+          username: str = Depends(require_auth), request: Request = None):
+    if card_id:
+        audit_log(username, client_ip(request), 'view', f'卡片 {card_id}', '查看卡片详情', 'success')
+    boards, columns = user_allowed(username)
+    # 全量行：子事项计数（sub_count）必须看到所有卡片，不能被筛选条件裁剪
+    all_rows = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
+    # 子事项计数（全量统计 parent 指向）
+    sub_count = defaultdict(int)
+    # 注意：父事项与子事项的负责人**各自独立存储**，不做任何关联或继承，
+    # 因此这里不汇总子事项负责人（此前 sub_owners 汇总会让父事项行
+    # 显示子事项的责任人，违背「父事项负责人单独设置」的语义，已移除）
+    for r in all_rows:
+        if r.get('parent_id'):
+            sub_count[r['parent_id']] += 1
+    # ★ 过滤逻辑抽到 _filter_cards_for_user —— /api/export/xlsx 共用同一套，
+    #   保证「页面筛选条件对导出结果生效」（2026-11-04 需求5）
+    mine, week_options, col_hit_keys = _filter_cards_for_user(
+        username, boards, columns,
+        board_id=board_id, board_ids=board_ids, status=status, owner=owner,
+        column=column, q=q, created_start=created_start, created_end=created_end,
+        cc=cc, week=week, person=person, years=years,
+        card_id=card_id, parent_id=parent_id, level='top')
     total = len(mine)
     # 板块元信息 + 进度统计：基于**全量**过滤结果，不受分页影响，
     # 否则板块进度条上的「已完成/总数」会与实际列出的事项对不上
@@ -1857,6 +1878,10 @@ class ColumnCreate(BaseModel):
     participants: str = ''
     # 板块负责人（2026-11-04）：指定权 = 架构负责人及以上（与编辑板块同口径）。
     owner: str = ''
+    # 板块「完成情况」（2026-11-04 需求3）：open / progressing / done
+    # ⚠️ 与进度条（done/total 自动统计）**互不冲突**：
+    #    进度条是统计口径，本字段是**板块负责人对整体完成度的声明**。
+    completion: str = 'open'
 
 
 class ColumnUpdate(BaseModel):
@@ -1867,6 +1892,10 @@ class ColumnUpdate(BaseModel):
     nature: str = ''         # 性质
     year: str = ''           # 归属年份
     owner: str = ''          # 板块负责人账号（'' = 不改；'__CLEAR__' = 清除）
+    # 板块「完成情况」（2026-11-04 需求3）：open / progressing / done
+    # None = 不改；非 None = 覆盖。
+    # ⚠️ 只有**该板块负责人本人或管理员**能改（其他成员提交会被 403 拒绝）。
+    completion: Optional[str] = None
     # 板块参与人（2026-11-03）：账号列表。
     # ⚠️ 语义与 owner 不同：**None = 不改**（不传该字段）；
     #    传空串 = 清空参与人；传列表 = 覆盖。
@@ -1939,9 +1968,13 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     # ⚠️ 参与人此前**模型有字段但 create 没落库**（静默丢弃）—— 一并补上
     parts = _norm_acl_participants(req.participants) if (req.participants or '').strip() else ''
     new_cid = 'COL' + str(int(time.time() * 1000))
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants)'
-        ' VALUES (?,?,?,?,?,?,?,?,0,?,?)',
-        (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts))
+    # 新建板块的完成情况（2026-11-04 需求3）：创建者声明，默认未完成
+    new_completion = (req.completion or '').strip() or 'open'
+    if new_completion not in COLUMN_COMPLETIONS:
+        raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion)'
+        ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?)',
+        (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts, new_completion))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
               f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year}，创建日期 {created}）', 'success')
@@ -1992,6 +2025,19 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     nature = (req.nature or '').strip() or (old['nature'] if old else '日常')
     if nature not in COLUMN_NATURES:
         raise HTTPException(400, '性质只能是「日常」或「专项」')
+    # ---- 板块「完成情况」（2026-11-04 需求3）----
+    # 语义：由**板块负责人本人**（board_columns.owner == 当前账号）或管理员手动声明，
+    #      其他成员**不可修改**（403）。None = 不改。
+    new_completion = None
+    if req.completion is not None:
+        cv = (req.completion or '').strip() or 'open'
+        if cv not in COLUMN_COMPLETIONS:
+            raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
+        _col_owner = (old['owner'] if old else '') or ''
+        _is_col_owner = bool(_col_owner) and (_col_owner == username)
+        if not (_is_col_owner or is_admin(username)):
+            raise HTTPException(403, '仅板块负责人可设置完成情况')
+        new_completion = cv
     year = _norm_year(req.year)
     created = (req.created_at or '').strip() or (old['created_at'] if old else '')
     if not created:
@@ -2007,6 +2053,8 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     if old:
         if new_owner is not None:
             dbe('UPDATE board_columns SET owner=? WHERE col_key=?', (new_owner, req.col_key))
+        if new_completion is not None:
+            dbe('UPDATE board_columns SET completion=? WHERE col_key=?', (new_completion, req.col_key))
         # 板块参与人（2026-11-03）：None = 不改；传值 = 覆盖（空串 = 清空）
         if req.participants is not None:
             # ⚠️ 指派参与人是**上级权限**（板块负责人及以上）——
@@ -5162,23 +5210,57 @@ async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_
 
 # ---------------- API：导出 / 导入 ----------------
 # xlsx 导出的列定义（与 TAPD 平台导出格式对齐，全部平铺，无合并单元格）
+# 事项级导出列（一维表，每行一个事项）——2026-11-04 需求5
+# 覆盖事项**关联的全部信息**：看板 / 板块 / 负责人 / 参与人 / 周数 /
+# 日期类 / 描述类信息（除评论外）。
+# ⚠️ 列名与 key 一一对应；key 为 cards 表列名或本文件内定义的派生列（_ 前缀）。
 XLSX_COLUMNS = [
-    ('卡片名称',   'card_name',    50),
-    ('详细描述',   'description',  50),
-    ('板块标题',   'column_name',  15),
-    ('状态',       'status_name',  15),
-    ('开始时间',   'begin',        15),
-    ('截止时间',   'due',          15),
+    ('事项名称',   'card_name',    40),
+    ('事项编号',   'card_id',      18),
+    ('所属看板',   'board_name',   22),
+    ('所属板块',   'column_name',  18),
+    ('板块年份',   '_col_year',    10),
+    ('板块性质',   '_col_nature',  10),
+    ('板块负责人', '_col_owner',   12),
+    ('板块完成情况', '_col_completion', 12),
+    ('完成情况',   '_status_text', 10),
+    ('事项状态',   'status_name',  10),
+    ('负责人',     'owner',        12),
+    ('参与人',     'cc',           18),
+    ('关注人',     'follower',     12),
+    ('周数',       'week_no',      14),
+    ('开始时间',   'begin',        14),
+    ('截止时间',   'due',          14),
+    ('创建时间',   'created',      18),
+    ('修改时间',   'modified',     18),
+    ('完成时间',   'completed',    14),
+    ('优先级',     'priority',     10),
+    ('创建人',     'creator',      12),
+    ('描述',       'description',  50),
+    ('标签',       'label',        14),
+    ('归档状态',   'is_filed',     10),
+    ('是否子事项', '_is_sub',      10),
+    ('父事项名称', '_parent_name', 24),
 ]
 
 @app.get('/api/export/xlsx')
-def export_xlsx(board_id: str = '', username: str = Depends(require_auth), request: Request = None):
-    """导出当前用户可见范围的卡片为 xlsx（.xlsx）
+def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
+                owner: str = '', column: str = '', q: str = '',
+                created_start: str = '', created_end: str = '',
+                cc: str = '', week: str = '', person: str = '', years: str = '',
+                username: str = Depends(require_auth), request: Request = None):
+    """导出**当前筛选结果**的事项为 xlsx（.xlsx，一维表，每行一个事项）
 
-    - board_id 非空时只导出该看板（仍受用户看板/板块权限约束）
-    - 严格遵循用户可见性（看板 + 板块双层过滤）
-    - 全平铺结构，**不使用任何合并单元格**（merge_cells 一次都不调用）
-    - 表头加粗居中、首行冻结、自动筛选
+    2026-11-04 需求5：
+    - 导出对象 = **事项**（不是全局数据）；
+    - **页面上的筛选条件对导出结果生效** —— 本接口接受与 /api/cards 完全相同的
+      筛选参数（status / q / cc / person / week / created_start / created_end /
+      years / board_id(s) / owner / column），并**复用 /api/cards 的同一套过滤逻辑**
+      （见 _filter_cards_for_user）→ 页面看到什么就导出什么；
+    - 字段涵盖事项关联的全部信息（看板 / 板块 / 负责人 / 参与人 / 周数 /
+      日期类 / 描述类信息，**除评论外**）；
+    - 仍受用户可见性约束（看板 + 板块双层过滤）；
+    - 全平铺结构，**不使用任何合并单元格**；表头加粗居中、首行冻结、自动筛选。
     """
     import io
     from openpyxl import Workbook
@@ -5195,10 +5277,39 @@ def export_xlsx(board_id: str = '', username: str = Depends(require_auth), reque
             target_boards = {board_id}
         else:
             target_boards = set()
-    cards = [dict(r) for r in filter_rows(
-        dbq('SELECT * FROM cards WHERE deleted=0'), target_boards, columns)]
+    elif board_ids:
+        _bs = {x.strip() for x in board_ids.split(',') if x.strip()}
+        if boards is not None:
+            _bs = {b for b in _bs if b in boards}
+        target_boards = _bs or set()
+    # ★ 复用 /api/cards 的同一套过滤逻辑 → 页面筛选条件对导出结果生效
+    cards, _week_opts, _col_hits = _filter_cards_for_user(
+        username, boards, columns,
+        board_id=board_id, board_ids=board_ids, status=status, owner=owner,
+        column=column, q=q, created_start=created_start, created_end=created_end,
+        cc=cc, week=week, person=person, years=years, board_set=target_boards)
     # 稳定排序：按开始时间、卡片名，保证多次导出一致
     cards.sort(key=lambda c: (str(c.get('begin') or ''), str(c.get('card_name') or '')))
+    # 派生列需要板块元信息与父事项名称
+    _colmap = {}
+    for r in dbq('SELECT board_id, column_name, year, nature, owner, completion '
+                 'FROM board_columns'):
+        _colmap[(r['board_id'], r['column_name'])] = r
+    _pmap = {}
+    _pids = [c.get('parent_id') for c in cards if c.get('parent_id')]
+    if _pids:
+        _marks = ','.join('?' * len(_pids))
+        for r in dbq('SELECT card_id, card_name FROM cards WHERE card_id IN (%s)' % _marks, _pids):
+            _pmap[r['card_id']] = r['card_name']
+    for c in cards:
+        _cm = _colmap.get((c.get('board_id'), c.get('column_name') or ''))
+        c['_col_year'] = (_cm['year'] if _cm else '') or ''
+        c['_col_nature'] = (_cm['nature'] if _cm else '') or ''
+        c['_col_owner'] = (_cm['owner'] if _cm else '') or ''
+        c['_col_completion'] = _completion_text((_cm['completion'] if _cm else '') or 'open')
+        c['_status_text'] = _status_text(c.get('status'))
+        c['_is_sub'] = '是' if c.get('parent_id') else '否'
+        c['_parent_name'] = _pmap.get(c.get('parent_id') or '', '')
 
     wb = Workbook()
     ws = wb.active
@@ -5248,20 +5359,15 @@ def export_xlsx(board_id: str = '', username: str = Depends(require_auth), reque
 
     # 文件名沿用 TAPD 命名习惯：看板名_YYYYMMDDHHMMSS.xlsx
     ts = time.strftime('%Y%m%d%H%M%S')
-    if target_boards is not None and len(target_boards) == 1:
-        bid = list(target_boards)[0]
-        row = dbq('SELECT board_name FROM boards WHERE board_id=? LIMIT 1', (bid,))
-        board_label = (row[0]['board_name'] if row else '') or '看板'
+    names = sorted({c.get('board_name') or '' for c in cards if c.get('board_name')})
+    if len(names) == 1:
+        board_label = names[0]
+    elif names:
+        board_label = f'{len(names)}个看板'
     else:
-        names = sorted({c.get('board_name') or '' for c in cards if c.get('board_name')})
-        if len(names) == 1:
-            board_label = names[0]
-        elif names:
-            board_label = f'{len(names)}个看板'
-        else:
-            board_label = '全部看板'
+        board_label = '全部看板'
     safe = re.sub(r'[\\/:*?"<>|]', '_', board_label)
-    filename = f'看板_{safe}_{ts}.xlsx'
+    filename = f'事项_{safe}_{ts}.xlsx'
     # RFC 5987 编码，兼容中文文件名
     from urllib.parse import quote
     disposition = f"attachment; filename*=UTF-8''{quote(filename)}"
@@ -5274,40 +5380,137 @@ def export_xlsx(board_id: str = '', username: str = Depends(require_auth), reque
 
 
 @app.get('/api/export')
-def export_data(username: str = Depends(require_auth), request: Request = None):
-    """导出当前用户可见范围全部数据为 JSON（含团队、评论、子事项）"""
-    boards, columns = user_allowed(username)
-    cards = [dict(r) for r in filter_rows(
-        dbq('SELECT * FROM cards WHERE deleted=0'), boards, columns)]
-    teams = [dict(r) for r in dbq('SELECT id, name FROM team_members ORDER BY id')]
-    # 子事项：仅导出可见卡片的
-    cids = [c['card_id'] for c in cards]
-    subtasks = []
-    if cids:
-        marks = ','.join('?' * len(cids))
-        subtasks = [dict(r) for r in dbq(
-            f'SELECT id, card_id, title, done, sort, done_by, done_at, created_by, created_at '
-            f'FROM card_subtasks WHERE card_id IN ({marks}) ORDER BY card_id, sort', cids)]
-    audit_log(username, client_ip(request), 'export', '数据导出', f'导出备份：卡片 {len(cards)} 张、子事项 {len(subtasks)} 条', 'success')
+def export_data(username: str = Depends(require_admin), request: Request = None):
+    """备份：导出**整个架构下的全部数据**为 JSON（2026-11-04 需求4）
+
+    ⚠️ 语义变更：此前只导出「当前用户可见范围」的数据 → 恢复时会丢数据。
+    现在备份/恢复面向**全局**：看板 / 板块 / 事项 / 子事项 / 成员 / 架构节点
+    全部导出，与操作者的可见范围无关（备份/恢复是管理员级操作）。
+
+    仍**不包含**账号与密码（users 表）—— 账号体系独立管理，不随数据快照覆盖。
+    """
+    cards = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
+    teams = [dict(r) for r in dbq(
+        'SELECT id, name, workgroups, account, created_at FROM team_members ORDER BY id')]
+    subtasks = [dict(r) for r in dbq(
+        'SELECT id, card_id, title, done, sort, done_by, done_at, created_by, created_at, parent_id '
+        'FROM card_subtasks ORDER BY card_id, sort')]
+    boards = [dict(r) for r in dbq('SELECT * FROM boards ORDER BY sort, board_id')]
+    columns = [dict(r) for r in dbq('SELECT * FROM board_columns ORDER BY id')]
+    board_cfg = [dict(r) for r in dbq('SELECT * FROM board_config ORDER BY id')]
+    # 组织架构（节点树 + 任职关系）—— 备份的一部分
+    org_nodes = [dict(r) for r in dbq('SELECT * FROM org_nodes ORDER BY id')]
+    org_apps = [dict(r) for r in dbq('SELECT * FROM org_appointments ORDER BY id')]
+    workgroups = [dict(r) for r in dbq('SELECT * FROM workgroups ORDER BY id')]
+    audit_log(username, client_ip(request), 'export', '数据导出',
+              f'导出全局备份：事项 {len(cards)} 张、板块 {len(columns)} 个、'
+              f'看板 {len(boards)} 个、子事项 {len(subtasks)} 条、成员 {len(teams)} 人', 'success')
     return {'exported_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'exported_by': username,
-            'boards': list(set((c['board_id'], c['board_name']) for c in cards)),
+            'scope': 'global',
+            'boards': boards,
+            'columns': columns,
+            'board_config': board_cfg,
             'cards': cards,
             'subtasks': subtasks,
-            'team': teams}
+            'team': teams,
+            'org_nodes': org_nodes,
+            'org_appointments': org_apps,
+            'workgroups': workgroups}
 
 class ImportReq(BaseModel):
     cards: List[dict] = []
     subtasks: List[dict] = []
-    team: List[str] = []
+    team: List[dict] = []
+    # 2026-11-04 需求4：恢复面向全局 → 看板 / 板块 / 板块配置 / 组织架构
+    boards: List[dict] = []
+    columns: List[dict] = []
+    board_config: List[dict] = []
+    org_nodes: List[dict] = []
+    org_appointments: List[dict] = []
+    workgroups: List[dict] = []
 
 @app.post('/api/import')
-async def import_data(req: ImportReq, username: str = Depends(require_editor), request: Request = None):
-    """导入 JSON 备份（覆盖式恢复卡片、团队、子事项）"""
-    if not req.cards and not req.team and not req.subtasks:
+async def import_data(req: ImportReq, username: str = Depends(require_admin), request: Request = None):
+    """恢复：覆盖式还原 JSON 备份（2026-11-04 需求4 —— 全局快照）
+
+    覆盖范围：事项 / 子事项 / 成员 / 看板 / 板块 / 板块配置 / 组织架构节点与任职。
+    ⚠️ 不涉及账号与密码（users 表）—— 账号体系独立管理。
+    """
+    if not (req.cards or req.team or req.subtasks or req.boards or req.columns
+            or req.board_config or req.org_nodes or req.workgroups):
         raise HTTPException(400, '导入内容为空')
     conn = get_conn()
     try:
+        # ---- 看板 ----
+        if req.boards:
+            conn.execute('DELETE FROM boards')
+            for b in req.boards:
+                if not b.get('board_id'):
+                    continue
+                cols = [k for k in ('board_id', 'board_name', 'workspace_id', 'owner',
+                                    'participants', 'sort', 'created_at', 'copy_from')
+                        if k in b]
+                conn.execute(f'INSERT OR REPLACE INTO boards ({",".join(cols)}) '
+                             f'VALUES ({",".join("?"*len(cols))})',
+                             [b[k] for k in cols])
+        # ---- 板块 ----
+        if req.columns:
+            conn.execute('DELETE FROM board_columns')
+            for c in req.columns:
+                if not c.get('col_key'):
+                    continue
+                cols = [k for k in ('col_key', 'column_id', 'board_id', 'column_name',
+                                    'created_at', 'creator', 'nature', 'year', 'pinned',
+                                    'copy_from', 'owner', 'participants', 'completion')
+                        if k in c]
+                conn.execute(f'INSERT OR REPLACE INTO board_columns ({",".join(cols)}) '
+                             f'VALUES ({",".join("?"*len(cols))})',
+                             [c[k] for k in cols])
+        # ---- 板块配置 ----
+        if req.board_config:
+            conn.execute('DELETE FROM board_config')
+            for bc in req.board_config:
+                cols = [k for k in ('board_id', 'dept', 'dept_node_id', 'attr', 'status',
+                                    'remark', 'created_at') if k in bc]
+                if not cols:
+                    continue
+                conn.execute(f'INSERT OR REPLACE INTO board_config ({",".join(cols)}) '
+                             f'VALUES ({",".join("?"*len(cols))})',
+                             [bc[k] for k in cols])
+        # ---- 工作组（架构兼容视图）----
+        if req.workgroups:
+            conn.execute('DELETE FROM workgroups')
+            for w in req.workgroups:
+                if not w.get('name'):
+                    continue
+                cols = [k for k in ('id', 'name', 'parent_id', 'leader', 'function',
+                                    'boards', 'created_at') if k in w]
+                conn.execute(f'INSERT OR REPLACE INTO workgroups ({",".join(cols)}) '
+                             f'VALUES ({",".join("?"*len(cols))})',
+                             [w[k] for k in cols])
+        # ---- 组织架构节点 + 任职 ----
+        if req.org_nodes:
+            conn.execute('DELETE FROM org_appointments')
+            conn.execute('DELETE FROM org_nodes')
+            for n in req.org_nodes:
+                if not n.get('name'):
+                    continue
+                cols = [k for k in ('id', 'name', 'node_type', 'parent_id', 'wg_id',
+                                    'is_anchor', 'function', 'sort', 'created_at',
+                                    'owner', 'participants') if k in n]
+                conn.execute(f'INSERT OR REPLACE INTO org_nodes ({",".join(cols)}) '
+                             f'VALUES ({",".join("?"*len(cols))})',
+                             [n[k] for k in cols])
+            for a in req.org_appointments:
+                cols = [k for k in ('id', 'node_id', 'member_id', 'role_key',
+                                    'is_primary', 'created_at') if k in a]
+                if not cols:
+                    continue
+                conn.execute(f'INSERT OR REPLACE INTO org_appointments ({",".join(cols)}) '
+                             f'VALUES ({",".join("?"*len(cols))})',
+                             [a[k] for k in cols])
+        # ---- 事项 ----
         if req.cards:
             conn.execute('UPDATE cards SET deleted=1')
             for c in req.cards:
@@ -5324,18 +5527,27 @@ async def import_data(req: ImportReq, username: str = Depends(require_editor), r
                 if not s.get('card_id'):
                     continue
                 conn.execute(
-                    'INSERT INTO card_subtasks (id, card_id, title, done, sort, done_by, done_at, created_by, created_at) '
-                    'VALUES (?,?,?,?,?,?,?,?,?)',
+                    'INSERT INTO card_subtasks (id, card_id, title, done, sort, done_by, done_at, created_by, created_at, parent_id) '
+                    'VALUES (?,?,?,?,?,?,?,?,?,?)',
                     (s.get('id', 0), s['card_id'], s.get('title', ''),
                      1 if s.get('done') else 0, s.get('sort', 0),
                      s.get('done_by', ''), s.get('done_at', ''),
-                     s.get('created_by', ''), s.get('created_at', '') or time.strftime('%Y-%m-%d %H:%M:%S')))
+                     s.get('created_by', ''), s.get('created_at', '') or time.strftime('%Y-%m-%d %H:%M:%S'),
+                     s.get('parent_id', 0)))
+        # ---- 成员 ----
         if req.team:
             conn.execute('DELETE FROM team_members')
             for n in req.team:
                 name = n.get('name') if isinstance(n, dict) else n
                 if name and str(name).strip():
-                    conn.execute('INSERT INTO team_members (name) VALUES (?)', (str(name).strip(),))
+                    conn.execute(
+                        'INSERT INTO team_members (id, name, workgroups, account, created_at) '
+                        'VALUES (?,?,?,?,?)',
+                        (n.get('id', 0) if isinstance(n, dict) else 0, str(name).strip(),
+                         (n.get('workgroups', '') if isinstance(n, dict) else ''),
+                         (n.get('account', '') if isinstance(n, dict) else ''),
+                         (n.get('created_at', '') if isinstance(n, dict) else '')
+                         or time.strftime('%Y-%m-%d %H:%M:%S')))
         conn.commit()
     except Exception:
         # 连接是线程内复用的：出错必须回滚，否则未提交事务会留给该线程的后续请求
@@ -5344,10 +5556,15 @@ async def import_data(req: ImportReq, username: str = Depends(require_editor), r
         except Exception:
             pass
         raise
-    log_action('__import__', username, 'import', f'cards={len(req.cards)} team={len(req.team)}')
-    audit_log(username, client_ip(request), 'import', '数据导入', f'导入备份：卡片 {len(req.cards)} 张、子事项 {len(req.subtasks)} 条、团队成员 {len(req.team)} 人', 'success')
+    log_action('__import__', username, 'import',
+               f'cards={len(req.cards)} team={len(req.team)} columns={len(req.columns)}')
+    audit_log(username, client_ip(request), 'import', '数据导入',
+              f'恢复全局备份：事项 {len(req.cards)} 张、板块 {len(req.columns)} 个、'
+              f'看板 {len(req.boards)} 个、子事项 {len(req.subtasks)} 条、成员 {len(req.team)} 人',
+              'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
-    return {'ok': True, 'cards': len(req.cards), 'team': len(req.team)}
+    return {'ok': True, 'cards': len(req.cards), 'team': len(req.team),
+            'columns': len(req.columns), 'boards': len(req.boards)}
 
 # ---------------- API：从 xlsx 导入 TAPD 数据 ----------------
 # 模板列（第一行为表头，列名即 TAPD 字段名）：
