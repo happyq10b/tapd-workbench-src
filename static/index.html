@@ -1470,7 +1470,7 @@ function goLogin(){
            id 保持不变 → toggleHeaderMore(event,'headerImportExportMenu') 与
            applyPermissionUI() 的按 id 权限控制全部照旧。 -->
       <div class="header-more" id="headerImportExport">
-        <button class="btn-default" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">🔄 导入导出</button>
+        <button class="btn-default" onclick="toggleHeaderMore(event,'headerImportExportMenu')" title="导入 / 导出数据">导入导出</button>
         <div class="header-more-menu" id="headerImportExportMenu" hidden>
           <button onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复）">💾 备份</button>
           <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式，仅可编辑及以上）">📥 恢复</button>
@@ -1617,7 +1617,7 @@ function goLogin(){
       <div class="form-group" id="c_board_wrap"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
       <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
       <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，必填；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
-      <div class="form-group" style="font-size:12px;color:var(--text3);line-height:1.7">年份绑定在<b>板块</b>层：每个板块一个归属年份；该板块下的事项各自归属自己的周数（如 2026 年第 41 周），<b>周数与年份不做强制校验</b>。</div>
+      <!-- 归属年份说明段已删（2026-11-04 用户反馈），布局上移 -->
       <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
       <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
       <!-- 负责人/参与人：并排两框（2026-11-04 用户反馈：加外框、删大段说明、并成一排） -->
@@ -4273,9 +4273,9 @@ function renderBoard(cards,cols,q,colHits){
         <div class="week-bar"><i style="width:${rate}%"></i></div>
         <div class="week-actions" onclick="event.stopPropagation()">
           <span class="week-created" title="板块创建日期">创建 ${esc(created)}</span>
-          <button class="fold-btn" onclick="foldItems('wg_${i}',false)" title="折叠该板块下各事项的子事项目录">折叠事项</button>
-          <button class="fold-btn" onclick="foldItems('wg_${i}',true)" title="展开该板块下各事项的子事项目录">展开事项</button>
-          <button class="pin-btn ${pinned?'on':''}" onclick="toggleColumnPin('${esc(colKey)}',${pinned?0:1})" title="${pinned?'取消置顶':'置顶该板块（在本看板内优先显示）'}">${pinned?'📌 已置顶':'📌 板块置顶'}</button>
+          <button class="fold-btn" onclick="foldItems('wg_${i}',false)" title="折叠该板块下各事项的子事项目录">折叠</button>
+          <button class="fold-btn" onclick="foldItems('wg_${i}',true)" title="展开该板块下各事项的子事项目录">展开</button>
+          <button class="pin-btn ${pinned?'on':''}" onclick="toggleColumnPin('${esc(colKey)}',${pinned?0:1})" title="${pinned?'取消置顶':'置顶该板块（在本看板内优先显示）'}">${pinned?'📌 已置顶':'📌 置顶'}</button>
           <button class="cp-copy-btn" data-copy='${esc(JSON.stringify({col_key:colKey,column_name:k,board_id:boardId,column_id:meta?(meta.column_id||''):'',nature:meta?(meta.nature||'日常'):'日常',year:year,created_at:meta?(meta.created_at||''):''}))}' onclick="openCopyModal('column',JSON.parse(this.dataset.copy))" title="复制该板块到其它看板（归属重选）">📋 复制</button>
           <button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button>
         </div>
@@ -4504,8 +4504,8 @@ function fieldItems(o){
   return [
     {key:'owner',   label:'负责人',   value:String(o.owner||'').trim()},
     {key:'week_no', label:'周数',     value:String(o.week_no||'').trim()},
-    {key:'created', label:'创建日期', value:fmtDate(o.created)},
-    {key:'due',     label:'截止日期', value:fmtDate(o.due)},
+    {key:'created', label:'创建',     value:fmtDate(o.created)},
+    {key:'due',     label:'截止',     value:fmtDate(o.due)},
   ];
 }
 // 网格版（列表里的父/子事项行）：四列固定宽度，跨行纵向对齐。
@@ -4544,7 +4544,7 @@ function cardItem(c,seq){
   // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶。
   // 置顶是**个人设置**：读当前账号自己的置顶集合，不读服务端的共享字段
   const pinned=isPinned('card',c.card_id);
-  const pinBtnHtml=pinBtn(c.card_id,pinned,'toggleCardPin','📌 事项置顶');
+  const pinBtnHtml=pinBtn(c.card_id,pinned,'toggleCardPin','📌 置顶');
   // 复制按钮（2026-11-03）：事项行内直接复制（此前只在编辑弹窗里能复制）
   const copyBtnHtml=ME.can_edit
     ?`<button class="copy-btn" onclick="event.stopPropagation();copyCardFromRow('${c.card_id}','card')" title="复制该事项（副本需重新选择归属）">📋 复制</button>`
@@ -4917,8 +4917,8 @@ async function applySubContext(c){
   info.innerHTML=`父事项：<span style="color:var(--primary);cursor:pointer" onclick="openSubModal('${p.card_id}')">${esc(p.card_name)}</span>`
     +`<span style="color:var(--text3)"> · ${statusText(p.status)}</span>`
     +`<span style="color:var(--text3)"> · 负责人：${esc(p.owner||'—')}</span>`
-    +`<span style="color:var(--text3)"> · 创建日期：${esc(fmtDate(p.created)||'—')}</span>`
-    +`<span style="color:var(--text3)"> · 截止日期：${esc(fmtDate(p.due)||'—')}</span>`
+    +`<span style="color:var(--text3)"> · 创建：${esc(fmtDate(p.created)||'—')}</span>`
+    +`<span style="color:var(--text3)"> · 截止：${esc(fmtDate(p.due)||'—')}</span>`
     +((pBegin||pDue)?`<span style="color:var(--text3)"> · 父时间范围：${pBegin?('开始 '+esc(fmtDT(pBegin))):''}${pBegin&&pDue?' ～ ':''}${pDue?('截止 '+esc(fmtDT(pDue))):''}</span>`:'');
   if(pBegin){beg.setAttribute('min',pBegin);beg.title='开始日期（不能早于父事项 '+pBegin+'）'}
   if(pDue){due.setAttribute('max',pDue);due.title='截止日期（不能晚于父事项 '+pDue+'）'}
@@ -5263,6 +5263,8 @@ function colClearOwner(){
 function openColumnModal(){
   COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
   COL_PARTS=[];          // 新建板块：无参与人
+  // ⚠️ 必须重绘参与人控件（2026-11-04 用户反馈）：否则「✕ 清空」按钮沿用
+  //    上次编辑会话的显隐状态 → 新建板块里凭空多出一个叉叉。
   const boards=ME.boards;
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
   // 切换所属看板 → 负责人/参与人的指派权随看板能力位变化（2026-11-04）
@@ -5281,6 +5283,7 @@ function openColumnModal(){
   if(nat)nat.checked=true;
   COL_OWNER='';
   colRenderOwner();
+  colRenderParticipants();
   document.getElementById('c_modal_title').textContent='🗂️ 新建板块';
   document.getElementById('c_submit').textContent='创建板块';
   document.getElementById('c_tip').textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。';
