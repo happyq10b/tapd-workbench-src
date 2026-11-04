@@ -3256,7 +3256,19 @@ def get_workgroups(username: str = Depends(require_auth)):
                 _known = {b['board_id'] for b in all_boards}
                 all_boards = all_boards + [b for b in _all_boards()
                                            if b['board_id'] in extra and b['board_id'] not in _known]
-    return {'groups': _wg_tree(_wg_rows()), 'all_boards': all_boards}
+    # 绑定候选口径（2026-11-04）：非管理员在绑定勾选池里只能看到/选择
+    # **自己是负责人或参与人**的看板（加上各节点已绑定的，见前端保底）。
+    # 这里把「我的可绑看板」并进 all_boards（负责人不放大可见性 → 可能不在可见集里，
+    # 但绑定操作需要能选到它）；bindable_board_ids 供前端过滤勾选池。
+    bindable_ids = None
+    if not is_admin(username):
+        bindable_ids = sorted(_my_bindable_boards(username))
+        _known = {b['board_id'] for b in all_boards}
+        all_boards = all_boards + [b for b in _all_boards()
+                                   if b['board_id'] in set(bindable_ids)
+                                   and b['board_id'] not in _known]
+    return {'groups': _wg_tree(_wg_rows()), 'all_boards': all_boards,
+            'bindable_board_ids': bindable_ids}
 
 @app.get('/api/org')
 def get_org_alias(username: str = Depends(require_auth)):
@@ -3487,6 +3499,50 @@ ORG_CHILD_RULES = {
     'group':   set(),
     'special': set(),
 }
+
+def _binding_manager_nodes(username: str) -> set:
+    """绑定管理员节点集（2026-11-04 用户需求）：
+
+    看板绑定操作的执行角色 = **部门长 或 小组组长**（管理员另行放行）。
+    判定 = 担任 dept_head / group_leader 的节点**及其全部后代**
+    （部门长管理本部门架构下 —— 与 2026-11-03「本部门架构下所有看板」口径一致；
+    小组组长只管自己那一级）。中心负责人/总经理等其它岗位**不含**在内。
+    """
+    rows = dbq("""SELECT a.node_id FROM org_appointments a
+                  JOIN team_members m ON m.id=a.member_id
+                  WHERE m.account=? AND a.role_key IN ('dept_head','group_leader')""",
+               (username,))
+    if not rows:
+        return set()
+    kids = defaultdict(list)
+    for r in dbq('SELECT id, parent_id FROM org_nodes'):
+        kids[r['parent_id']].append(r['id'])
+    out, stack = set(), [r['node_id'] for r in rows]
+    while stack:
+        nid = stack.pop()
+        if nid in out:
+            continue
+        out.add(nid)
+        stack.extend(kids.get(nid, []))
+    return out
+
+
+def _my_bindable_boards(username: str) -> set:
+    """我可作为绑定候选的看板（2026-11-04 用户需求）：
+
+    = 我是**负责人**（boards.owner）或**参与人**（该看板下任一板块的
+    board_columns.participants 含我的账号）。看板级参与人机制已下线（2026-11-02），
+    此处「参与人」取板块参与人 —— 与板块编辑弹窗里的负责人/参与人配置同源。
+    ⚠️ 只约束「绑定看板」这一操作，不影响看板展示/编辑权限体系（二者独立）。
+    """
+    out = {r['board_id'] for r in
+           dbq('SELECT board_id FROM boards WHERE owner=? AND owner<>?', (username, ''))}
+    for r in dbq("SELECT board_id, participants FROM board_columns"
+                 " WHERE participants IS NOT NULL AND participants<>''"):
+        if username in [x.strip() for x in (r['participants'] or '').split(',')]:
+            out.add(r['board_id'])
+    return out
+
 
 def _org_node(node_id: int):
     rows = dbq('SELECT id, name, node_type, parent_id, wg_id, is_anchor, function'
@@ -3731,11 +3787,14 @@ def get_org_tree(username: str = Depends(require_auth)):
     if visible is not None:
         owned = {nid: {b for b in bs if b in visible} for nid, bs in owned.items()}
 
-    # 逐节点能力位（2026-11-03）：架构负责人只能配置自己管辖范围内的节点。
-    #   can_config_bind → 能否在本节点配置看板绑定（架构负责人：范围内即可）
+    # 逐节点能力位（2026-11-03，2026-11-04 修订绑定口径）：
+    #   can_config_bind → 能否在本节点**执行看板绑定**：
+    #     管理员，或 部门长/小组组长（在本节点或其祖先任职 → 管辖本节点）。
+    #     ⚠️ 架构负责人若非部门长/组长 → 不可绑定（只能查看）。
     #   can_manage_node → 能否增删改本节点（仅管理员）
     scope = set() if is_admin(username) else _arch_scope_nodes(dbq, username)
     leader_ids = set() if is_admin(username) else _arch_leader_nodes(dbq, username)
+    bind_mgr = set() if is_admin(username) else _binding_manager_nodes(username)
 
     def build(pid):
         out = []
@@ -3747,7 +3806,7 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['owned_boards'] = sorted(owned.get(n['id'], set()))
             # 能力位
             in_scope = n['id'] in scope
-            node['can_config_bind'] = bool(is_admin(username) or in_scope)
+            node['can_config_bind'] = bool(is_admin(username) or n['id'] in bind_mgr)
             node['can_manage_node'] = bool(is_admin(username))
             node['is_leader'] = (n['id'] in leader_ids)
             node['in_my_scope'] = bool(in_scope)
@@ -3828,6 +3887,56 @@ def update_org_node(nid: int, req: OrgNodeReq, username: str = Depends(require_a
     audit_log(username, client_ip(request), 'org_node_update',
               f'节点 {name} (id={nid})', '更新架构节点', 'success')
     return {'ok': True}
+
+class NodeBoardsReq(BaseModel):
+    """看板绑定专项请求（2026-11-04）：boards = 逗号分隔看板 id；空串 = 清空绑定。"""
+    boards: str = ''
+
+
+@app.put('/api/org/nodes/{nid}/boards')
+def update_node_boards(nid: int, req: NodeBoardsReq, username: str = Depends(require_writer),
+                       request: Request = None):
+    """看板绑定（专项接口，2026-11-04 用户需求）：
+
+    · 权限：管理员，或 **部门长/小组组长**（在本节点或其祖先任职 → 管辖本节点）。
+      架构负责人若非部门长/组长 → 403。
+    · 非管理员的**新增绑定**只能选自己是负责人（boards.owner）或参与人
+      （板块参与人）的看板；已有绑定保持不变（可解除，解除也是绑定操作）。
+    · 仅约束「绑定看板」这一操作，**不影响**看板展示/编辑权限体系。
+    · 结构（名称/类型/上级）仍走 PUT /api/org/nodes/{nid}（require_admin）。
+    """
+    node = _org_node(nid)
+    if not node:
+        raise HTTPException(404, '节点不存在')
+    if node['node_type'] == 'center':
+        raise HTTPException(403, '中心节点锁定全部看板，不可在此调整绑定')
+    if not node.get('wg_id'):
+        raise HTTPException(400, '该节点没有可存储绑定的载体（缺少工作组映射）')
+    if not is_admin(username):
+        if nid not in _binding_manager_nodes(username):
+            raise HTTPException(403, '仅管理员或该节点的部门长/小组组长可修改看板绑定')
+    wg_row = dbq('SELECT boards FROM workgroups WHERE id=?', (node['wg_id'],))
+    existing = set(x for x in ((wg_row[0]['boards'] if wg_row else '') or '').split(',') if x)
+    boards = _norm_boards(req.boards)
+    newset = set(x for x in boards.split(',') if x)
+    if not is_admin(username):
+        added = newset - existing
+        if added:
+            illegal = sorted(added - _my_bindable_boards(username))
+            if illegal:
+                raise HTTPException(403, '只能绑定你是负责人或参与人的看板：' + '、'.join(illegal))
+    # ⚠️ _check_child_boards 收的是 **workgroups.id**（旧表键空间）——
+    #    org_nodes.parent_id 必须先映射到父节点的 wg_id（与 update_org_node 同款）。
+    _prow = dbq('SELECT wg_id FROM org_nodes WHERE id=?', (node['parent_id'],))
+    _pwg = _prow[0]['wg_id'] if _prow and _prow[0]['wg_id'] else 0
+    _check_child_boards(_pwg, boards)
+    dbe('UPDATE workgroups SET boards=? WHERE id=?', (boards, node['wg_id']))
+    cascade = _cascade_boards(node['wg_id'], boards)
+    audit_log(username, client_ip(request), 'org_node_bind', f'节点 {node["name"]} (id={nid})',
+              '修改看板绑定 → [' + boards + ']' + (f'；级联调整 {len(cascade)} 个子级' if cascade else ''),
+              'success')
+    return {'ok': True, 'boards': boards, 'cascade': cascade}
+
 
 @app.delete('/api/org/nodes/{nid}')
 def delete_org_node(nid: int, username: str = Depends(require_admin), request: Request = None):

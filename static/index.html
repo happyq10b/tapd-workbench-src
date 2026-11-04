@@ -1848,7 +1848,8 @@ function goLogin(){
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden">
           <div style="font-size:12px;color:var(--text2);margin-bottom:6px;flex-shrink:0;display:flex;align-items:center;gap:8px">
             <span>组织架构图</span>
-            <button class="icon-btn" style="margin-left:auto" onclick="resetWgForm()">＋ 新增节点</button>
+            <!-- 新增节点 = 结构维护 → 仅管理员可见/可操作（2026-11-04 用户需求；后端 create_org_node 本就 require_admin） -->
+            <button class="icon-btn" id="g_add_node_btn" style="margin-left:auto" onclick="newWgNode()">＋ 新增节点</button>
           </div>
           <div id="wgList" style="flex:1;min-height:0;border:1px solid var(--border);border-radius:8px;padding:6px 0;overflow:auto"></div>
         </div>
@@ -7078,6 +7079,7 @@ function renderAuditPager(){
 var WG_ALL=[];    // 树形 [{id,name,parent_id,leader,function,boards,children:[]}]
 var WG_FLAT=[];   // 平铺（含 children）
 var WG_BOARDS=[]; // 全部看板 [{board_id,board_name}]
+var WG_MY_BINDABLE=null; // 我的可绑看板 id 集（负责人/参与人口径；null=管理员不限）
 var WG_EDIT_ID=0; // 0=新增模式，>0=编辑节点 id
 var WG_COLLAPSED=new Set();
 // ---------- 组织架构（新模型） ----------
@@ -7311,7 +7313,12 @@ function selectOrgNode(nid){
   document.getElementById('g_new_type').value=node?node.node_type:'';
   document.getElementById('g_new_parent').value=node?String(node.parent_id||0):'0';
   // 类型下拉要按「上级节点」过滤 —— 上级变了必须重算
+  // ⚠️ fillOrgTypeOptions 内部会无条件 sel.disabled=false → 结构字段的禁用必须在它**之后**执行
   if(node)fillOrgTypeOptions(node.node_type,node.parent_id||0);
+  // 结构字段（名称/类型/上级）= 节点结构维护 → 仅管理员可编辑（2026-11-04）；
+  // 非管理员的「保存修改」只提交看板绑定（专项接口），结构改动服务端本就 403。
+  const _structRo=!(ME&&ME.is_admin);
+  ['g_new_name','g_new_type','g_new_parent'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=_structRo;});
   const s=document.getElementById('g_boards_search'); if(s){s.value='';s.disabled=false;s.style.display=''}
   const isDeptNode=!!node&&(node.node_type==='center'||node.node_type==='dept');
   const scope=isDeptNode?nodeBoardScope(node):(node?(node.wg_boards||''):'');
@@ -7404,14 +7411,22 @@ function renderBoardChecks(boards, limit, searchTerm, readonly){
   wrap.dataset.readonly=readonly?'1':'';
   let pool=WG_BOARDS;
   if(limit) pool=WG_BOARDS.filter(b=>limit.includes(b.board_id));
+  // 绑定池口径（2026-11-04 用户需求）：非管理员只能看到/选择**自己是负责人或参与人**的看板。
+  // ⚠️ 本节点已绑定的看板**始终保留显示**（含管理员或他人此前绑的）——
+  //    否则保存时不在池里的已绑项会被当成「取消勾选」误清掉。
+  const mineIds=WG_MY_BINDABLE||null;
+  if(mineIds) pool=pool.filter(b=>mineIds.includes(b.board_id)||sel.includes(b.board_id));
   const totalPool=pool.length;
   if(search) pool=pool.filter(b=>((b.board_name||'').toLowerCase().includes(search))||((b.board_id||'').toLowerCase().includes(search)));
-  const chk=pool.map(b=>`<label class="tm-grp-opt" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}${readonly?' disabled':''}><span style="font-size:12.5px">${esc(b.board_name)}</span></label>`).join('');
+  const chk=pool.map(b=>`<label class="tm-grp-opt" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}${readonly?' disabled':''}><span style="font-size:12.5px">${esc(b.board_name)}</span>${(!mineIds||mineIds.includes(b.board_id))?'':'<span style="font-size:10px;color:var(--text3);flex-shrink:0">已绑定</span>'}</label>`).join('');
   wrap.innerHTML=(chk||'<span style="color:var(--text3);font-size:12px">'+(search?'无匹配板块':(limit?'上级部门未绑定看板，暂无可用选项':'暂无看板数据'))+'</span>');
   if(!bindAllowed){
     hint.textContent='⚠ 该节点不在你的管辖范围内，看板绑定为只读，不可修改。';
   }else if(readonly){
     hint.textContent='部门/中心节点的板块由「看板管理 · 归属部门」统一决定（当前 '+sel.length+' 个）；小组级节点仍可在此手动勾选。';
+  }else if(mineIds){
+    // 2026-11-04 绑定口径：候选 = 我是负责人/参与人的看板 ∪ 本节点已绑定
+    hint.textContent='你只能绑定自己是【负责人或参与人】的看板；标注「已绑定」的是该节点现有绑定（取消勾选即解除）。';
   }else if(limit){
     hint.textContent='上级部门已绑定 '+totalPool+' 个看板，子级仅能选择其中部分（或留空不限制）。';
   }else{
@@ -7437,6 +7452,11 @@ function onWgParentChange(){
   fillOrgTypeOptions(curType,parent);
   renderBoardChecks('', parentBoardLimit(parent));
 }
+// 「＋ 新增节点」入口（2026-11-04）：仅管理员。取消编辑走 resetWgForm，不受此限。
+function newWgNode(){
+  if(!ME||!ME.is_admin){toast('新增节点仅管理员可操作');return}
+  resetWgForm();
+}
 function resetWgForm(){
   WG_EDIT_ID=0;
   ORG_SELECTED=0;
@@ -7445,6 +7465,8 @@ function resetWgForm(){
   document.getElementById('g_cancel_edit').style.display='none';
   document.getElementById('g_new_name').value='';
   document.getElementById('g_new_type').value='';
+  // 结构字段恢复可编辑（新增节点仅管理员能走到这里 —— newWgNode 已把关）
+  ['g_new_name','g_new_type','g_new_parent'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=false;});
   const s=document.getElementById('g_boards_search'); if(s){s.value='';s.disabled=true;s.style.display='';}
   const top=ORG_FLAT.find(x=>x.node_type==='center');
   rebuildWgParentOptions(0, top?top.id:0);
@@ -7492,6 +7514,10 @@ async function openWgModal(){
   WG_ALL=gd.groups||[];
   WG_FLAT=wgFlat(WG_ALL);
   WG_BOARDS=gd.all_boards||[];
+  WG_MY_BINDABLE=gd.bindable_board_ids||null;   // 非管理员：只能绑自己是负责人/参与人的看板
+  // 「＋ 新增节点」仅管理员可见（2026-11-04 用户需求）
+  const _addBtn=document.getElementById('g_add_node_btn');
+  if(_addBtn)_addBtn.style.display=(ME&&ME.is_admin)?'':'none';
   // 新模型：节点树 + 岗位 + 任职。
   // **必须强制刷新** —— 任命/免职后树上的「负责人」「任职人数」都来自
   // node.appointments，用缓存会拿到旧数据，表现为「弹窗未及时刷新」。
@@ -7642,16 +7668,25 @@ async function submitWgForm(){
   const boards=isCenter?'*':collectBoardChecks();
   const body={name,node_type:type,parent_id:parent,function:''};
   try{
+    if(!WG_EDIT_ID&&!ME.is_admin){toast('新增节点仅管理员可操作');return}
     if(WG_EDIT_ID){
-      await api('/api/org/nodes/'+WG_EDIT_ID,{method:'PUT',body:JSON.stringify(body)});
-      // 板块绑定走旧接口（workgroups），与新模型节点一一对应
-      if(node&&!isCenter){
-        const wg=WG_FLAT.find(x=>x.name===node.name);
-        if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id,leader:wg.leader||'',function:node.function||'',boards})});
+      if(ME.is_admin){
+        await api('/api/org/nodes/'+WG_EDIT_ID,{method:'PUT',body:JSON.stringify(body)});
+        // 板块绑定走旧接口（workgroups），与新模型节点一一对应
+        if(node&&!isCenter){
+          const wg=WG_FLAT.find(x=>x.name===node.name);
+          if(wg)await api('/api/workgroups/'+wg.id,{method:'PUT',body:JSON.stringify({name,parent_id:wg.parent_id,leader:wg.leader||'',function:node.function||'',boards})});
+        }
+      }else{
+        // 非管理员（2026-11-04）：结构字段已禁用，保存只提交**看板绑定**（专项接口）。
+        // 仅小组节点在此绑定（部门/中心的板块由「看板管理·归属部门」统一决定）。
+        if(node&&node.node_type==='group'){
+          await api('/api/org/nodes/'+WG_EDIT_ID+'/boards',{method:'PUT',body:JSON.stringify({boards})});
+        }
       }
       toast('已更新');
     }else{
-      const r=await api('/api/org/nodes',{method:'POST',body:JSON.stringify(body)});
+      const r=await api('/api/org/nodes',{method:'POST',body:JSON.stringify(body)});  // 后端 require_admin
       const nid=r&&r.id;
       // 新建后同步板块绑定（需要旧 workgroups 的 id）
       if(nid&&!isCenter&&boards){
