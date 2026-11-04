@@ -1509,6 +1509,14 @@ def me(username: str = Depends(require_auth)):
         dn, dnode = dept_map.get(b['board_id'], ('', 0))
         item['dept'] = dn
         item['dept_node_id'] = dnode or 0
+        # 板块弹窗的负责人/参与人指派门槛（2026-11-04）：与后端写接口**同一判定**，
+        # 前端不再手写 is_admin（#43 同款问题的教训）。
+        #   can_edit          → 可指派板块参与人（板块负责人及以上，看板/架构负责人继承）
+        #   can_assign_owner  → 可指派板块负责人（架构负责人及以上）
+        _chain = perm_chain(board_id=b['board_id'])
+        item['can_edit'] = perm_check_pass(username, _chain, OP_UPDATE, LV_BOARD_OWNER)
+        item['can_assign_owner'] = perm_check_pass(username, _chain, OP_ASSIGN_OWNER, LV_BOARD_OWNER,
+                                                   min_level=LV_ARCH_OWNER)
         boards_out.append(item)
     # 板块级权限信息（供前端配置/展示）
     col_info = None
@@ -1816,6 +1824,8 @@ class ColumnCreate(BaseModel):
     # 板块参与人（2026-11-03）：账号列表（逗号分隔）。
     # 参与人 = 可修改该板块的**可见内容**，但无增删与指派权（见 perm.py）。
     participants: str = ''
+    # 板块负责人（2026-11-04）：指定权 = 架构负责人及以上（与编辑板块同口径）。
+    owner: str = ''
 
 
 class ColumnUpdate(BaseModel):
@@ -1889,17 +1899,25 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
         raise HTTPException(409, '该看板下已存在同名板块')
     year = _norm_year(req.year) or created[:4]   # 归属年份：单值必填，未填默认取创建年份
+    # 板块负责人（2026-11-04）：指定权 = **架构负责人及以上**；未传 = 不指定
+    new_owner = ''
+    if (req.owner or '').strip():
+        perm_check(username, perm_chain(board_id=req.board_id), OP_ASSIGN_OWNER, LV_BOARD_OWNER,
+                   'board:' + req.board_id, min_level=LV_ARCH_OWNER)
+        new_owner = _norm_acl_owner(req.owner)
+    # ⚠️ 参与人此前**模型有字段但 create 没落库**（静默丢弃）—— 一并补上
+    parts = _norm_acl_participants(req.participants) if (req.participants or '').strip() else ''
     new_cid = 'COL' + str(int(time.time() * 1000))
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
-        ' VALUES (?,?,?,?,?,?,?,?,0)',
-        (key, new_cid, req.board_id, name, created, username, req.nature, year))
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants)'
+        ' VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+        (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
               f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year}，创建日期 {created}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'created_at': created, 'creator': username, 'nature': req.nature,
-            'year': year, 'pinned': 0}
+            'year': year, 'pinned': 0, 'owner': new_owner, 'participants': parts}
 
 
 @app.put('/api/columns')
@@ -1931,12 +1949,14 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     boards, _cols = user_allowed(username)
     if boards is not None and board_id not in boards:
         raise HTTPException(403, '无权编辑该板块')
-    # 负责人字段：**仅管理员可改**（负责人是板块的管理权，指定权归管理员）
+    # 负责人字段（2026-11-04 修订）：指定权 = **架构负责人及以上**（上级权，与看板
+    # 负责人指派同口径）。原「仅管理员」与前端能力位脱节 —— #43 同款问题第四次。
     owner_val = (req.owner or '').strip()
     new_owner = None
     if owner_val:
-        if not is_admin(username):
-            raise HTTPException(403, '只有管理员可以设置板块负责人')
+        perm_check(username, perm_chain(board_id=board_id, column_id=(old['column_id'] if old else '')),
+                   OP_ASSIGN_OWNER, LV_BOARD_OWNER, 'column:' + (req.col_key or ''),
+                   min_level=LV_ARCH_OWNER)
         new_owner = _norm_acl_owner('' if owner_val == '__CLEAR__' else owner_val)
     nature = (req.nature or '').strip() or (old['nature'] if old else '日常')
     if nature not in COLUMN_NATURES:
@@ -3261,14 +3281,41 @@ def get_workgroups(username: str = Depends(require_auth)):
     # 这里把「我的可绑看板」并进 all_boards（负责人不放大可见性 → 可能不在可见集里，
     # 但绑定操作需要能选到它）；bindable_board_ids 供前端过滤勾选池。
     bindable_ids = None
+    binding_scope = 'admin'
     if not is_admin(username):
-        bindable_ids = sorted(_my_bindable_boards(username))
+        base = _my_bindable_boards(username)
+        binding_scope = 'own'
+        # 架构负责人（中心负责人/总经理）：候选池并入**管辖架构下全部看板**（宽池）
+        arows = dbq("SELECT a.node_id FROM org_appointments a"
+                    " JOIN team_members m ON m.id=a.member_id"
+                    " WHERE m.account=? AND a.role_key IN ('center_head','gm')",
+                    (username,))
+        if arows:
+            binding_scope = 'arch'
+            owned = _dept_owned_boards()
+            wg_by_id = {r['id']: dict(r) for r in dbq('SELECT id, boards FROM workgroups')}
+            nmap = _org_node_map()
+            kids = defaultdict(list)
+            for r in dbq('SELECT id, parent_id FROM org_nodes'):
+                kids[r['parent_id']].append(r['id'])
+            aroots, stack = set(), [r['node_id'] for r in arows]
+            while stack:
+                nid = stack.pop()
+                if nid in aroots:
+                    continue
+                aroots.add(nid)
+                stack.extend(kids.get(nid, []))
+            for nid in aroots:
+                node = nmap.get(nid)
+                if node:
+                    base |= _node_arch_boards(node, owned=owned, wg_by_id=wg_by_id, nmap=nmap)
+        bindable_ids = sorted(base)
         _known = {b['board_id'] for b in all_boards}
         all_boards = all_boards + [b for b in _all_boards()
                                    if b['board_id'] in set(bindable_ids)
                                    and b['board_id'] not in _known]
     return {'groups': _wg_tree(_wg_rows()), 'all_boards': all_boards,
-            'bindable_board_ids': bindable_ids}
+            'bindable_board_ids': bindable_ids, 'binding_scope': binding_scope}
 
 @app.get('/api/org')
 def get_org_alias(username: str = Depends(require_auth)):
@@ -3544,6 +3591,33 @@ def _my_bindable_boards(username: str) -> set:
     return out
 
 
+def _arch_owner_nodes(username: str) -> set:
+    """架构负责人节点集（2026-11-04 用户修订）：
+
+    担任 **中心负责人(center_head) / 总经理(gm)** 的节点及其全部后代。
+    架构负责人对**管辖架构下的全部看板**拥有绑定权（不受「负责人/参与人」
+    候选池限制）。部门长/组长的窄口径（只能绑自己是负责人/参与人的看板）
+    见 _binding_manager_nodes —— 两者互不覆盖，一人兼多岗时取并集。
+    """
+    rows = dbq("""SELECT a.node_id FROM org_appointments a
+                  JOIN team_members m ON m.id=a.member_id
+                  WHERE m.account=? AND a.role_key IN ('center_head','gm')""",
+               (username,))
+    if not rows:
+        return set()
+    kids = defaultdict(list)
+    for r in dbq('SELECT id, parent_id FROM org_nodes'):
+        kids[r['parent_id']].append(r['id'])
+    out, stack = set(), [r['node_id'] for r in rows]
+    while stack:
+        nid = stack.pop()
+        if nid in out:
+            continue
+        out.add(nid)
+        stack.extend(kids.get(nid, []))
+    return out
+
+
 def _org_node(node_id: int):
     rows = dbq('SELECT id, name, node_type, parent_id, wg_id, is_anchor, function'
                ' FROM org_nodes WHERE id=?', (node_id,))
@@ -3795,6 +3869,8 @@ def get_org_tree(username: str = Depends(require_auth)):
     scope = set() if is_admin(username) else _arch_scope_nodes(dbq, username)
     leader_ids = set() if is_admin(username) else _arch_leader_nodes(dbq, username)
     bind_mgr = set() if is_admin(username) else _binding_manager_nodes(username)
+    # 架构负责人（中心负责人/总经理）：管辖架构下全部节点可绑（2026-11-04 用户修订）
+    arch_owner = set() if is_admin(username) else _arch_owner_nodes(username)
 
     def build(pid):
         out = []
@@ -3806,7 +3882,8 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['owned_boards'] = sorted(owned.get(n['id'], set()))
             # 能力位
             in_scope = n['id'] in scope
-            node['can_config_bind'] = bool(is_admin(username) or n['id'] in bind_mgr)
+            node['can_config_bind'] = bool(is_admin(username) or n['id'] in bind_mgr
+                                           or n['id'] in arch_owner)
             node['can_manage_node'] = bool(is_admin(username))
             node['is_leader'] = (n['id'] in leader_ids)
             node['in_my_scope'] = bool(in_scope)
@@ -3912,14 +3989,17 @@ def update_node_boards(nid: int, req: NodeBoardsReq, username: str = Depends(req
         raise HTTPException(403, '中心节点锁定全部看板，不可在此调整绑定')
     if not node.get('wg_id'):
         raise HTTPException(400, '该节点没有可存储绑定的载体（缺少工作组映射）')
+    arch_owner = set() if is_admin(username) else _arch_owner_nodes(username)
     if not is_admin(username):
-        if nid not in _binding_manager_nodes(username):
-            raise HTTPException(403, '仅管理员或该节点的部门长/小组组长可修改看板绑定')
+        if nid not in _binding_manager_nodes(username) and nid not in arch_owner:
+            raise HTTPException(403, '仅管理员、架构负责人或该节点的部门长/小组组长可修改看板绑定')
     wg_row = dbq('SELECT boards FROM workgroups WHERE id=?', (node['wg_id'],))
     existing = set(x for x in ((wg_row[0]['boards'] if wg_row else '') or '').split(',') if x)
     boards = _norm_boards(req.boards)
     newset = set(x for x in boards.split(',') if x)
-    if not is_admin(username):
+    # 「负责人/参与人」候选池限制只约束**部门长/组长**（2026-11-04 用户修订）：
+    # 架构负责人可绑管辖架构下全部看板（宽池豁免）。
+    if not is_admin(username) and nid not in arch_owner:
         added = newset - existing
         if added:
             illegal = sorted(added - _my_bindable_boards(username))

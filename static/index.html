@@ -5096,11 +5096,20 @@ function colRenderOwner(){
   }
   const pb=document.getElementById('c_owner_pick_btn');
   const cb=document.getElementById('c_owner_clear_btn');
-  const isAdmin=!!(ME&&ME.is_admin);
-  if(pb)pb.style.display=isAdmin?'':'none';
-  if(cb)cb.style.display=(isAdmin&&COL_OWNER)?'':'none';
+  // 指定板块负责人 = 上级权 → **架构负责人及以上**（2026-11-04 修订：
+  // 原写死 ME.is_admin，与后端 min_level=LV_ARCH_OWNER 脱节 —— #43 同款问题第四次）。
+  const canSet=colCanAssignOwner();
+  if(pb)pb.style.display=canSet?'':'none';
+  if(cb)cb.style.display=(canSet&&COL_OWNER)?'':'none';
   const wrap=document.getElementById('c_owner_wrap');
-  if(wrap)wrap.style.display=isAdmin?'':'none';
+  if(wrap)wrap.style.display='';   // 区块始终显示（无指派权时只读展示现任负责人）
+}
+// 当前编辑上下文能否指定板块负责人（架构负责人及以上 —— 与后端 min_level 同口径）
+function colCanAssignOwner(){
+  if(ME&&ME.is_admin)return true;
+  const bid=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:((document.getElementById('c_board')||{}).value||'');
+  const b=((ME&&ME.boards)||[]).find(function(x){return x.board_id===bid});
+  return !!(b&&b.can_assign_owner);
 }
 // ---------- 板块参与人（2026-11-03）----------
 function colPartsLabel(acc){
@@ -5124,11 +5133,15 @@ function colRenderParticipants(){
   if(cb)cb.style.display=(canSet&&COL_PARTS.length)?'':'none';
   if(wrap)wrap.style.display='';
 }
-// 当前板块上，我是否有权指定参与人（管理员 或 该板块负责人）
+// 当前板块上，我是否有权指定参与人（板块负责人及以上，2026-11-04 对齐后端口径）：
+// 管理员 / 看板 can_edit（看板负责人、架构负责人继承）/ 本板块负责人
 function colCanAssignParticipants(){
   if(ME&&ME.is_admin)return true;
+  const bid=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:((document.getElementById('c_board')||{}).value||'');
+  const b=((ME&&ME.boards)||[]).find(function(x){return x.board_id===bid});
+  if(b&&b.can_edit)return true;
   const colKey=COLUMN_MODE==='edit'?COLUMN_EDIT_KEY:'';
-  if(!colKey)return !!(ME&&ME.can_edit);
+  if(!colKey)return false;
   const me=(ME&&ME.managed_columns)||[];
   return me.indexOf(colKey)>=0;
 }
@@ -5197,6 +5210,8 @@ function openColumnModal(){
   COL_PARTS=[];          // 新建板块：无参与人
   const boards=ME.boards;
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
+  // 切换所属看板 → 负责人/参与人的指派权随看板能力位变化（2026-11-04）
+  document.getElementById('c_board').onchange=function(){colRenderOwner();colRenderParticipants();};
   document.getElementById('c_board_wrap').style.display='';
   document.getElementById('c_name').value='';
   // 创建日期：必填，默认当天（不限制可选范围）
@@ -5260,8 +5275,9 @@ async function saveColumn(){
   if(!/^\d{4}$/.test(year)){toast('归属年份应为 4 位数字，如 2026');return}
   try{
     if(COLUMN_MODE==='edit'){
-      // owner 只在管理员改负责人时提交（清空用 __CLEAR__）；其他情况留空 = 不改
-      const ownerPayload=(ME&&ME.is_admin)?{owner:(COL_OWNER||'__CLEAR__')}:{};
+      // owner 仅在**有指派权**（架构负责人及以上，2026-11-04）时提交（清空用 __CLEAR__）；
+      // 其他情况留空 = 不改
+      const ownerPayload=colCanAssignOwner()?{owner:(COL_OWNER||'__CLEAR__')}:{};
       // 参与人：仅在有权指定时提交（传值 = 覆盖；不传 = 不改）
       const partsPayload=colCanAssignParticipants()?{participants:COL_PARTS.join(',')}:{};
       await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload))});
@@ -5269,7 +5285,9 @@ async function saveColumn(){
       closeModal('columnModal');
       reload(1);renderProgress();
     }else{
-      await api('/api/columns',{method:'POST',body:JSON.stringify({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(',')})});
+      // 新建板块：有指派权时带上负责人（2026-11-04 —— 此前新建根本没有负责人入口）
+      const ownerCreate=colCanAssignOwner()?{owner:COL_OWNER||''}:{};
+      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(',')},ownerCreate))});
       toast('板块已创建：'+column_name);
       closeModal('columnModal');
       if(curBoard!==board_id){curBoard=board_id;ensureDeptOpen(board_id)}
@@ -7080,6 +7098,7 @@ var WG_ALL=[];    // 树形 [{id,name,parent_id,leader,function,boards,children:
 var WG_FLAT=[];   // 平铺（含 children）
 var WG_BOARDS=[]; // 全部看板 [{board_id,board_name}]
 var WG_MY_BINDABLE=null; // 我的可绑看板 id 集（负责人/参与人口径；null=管理员不限）
+var WG_BINDING_SCOPE='own'; // 绑定池口径：admin=不限 / arch=架构负责人宽池 / own=部门长组长窄池
 var WG_EDIT_ID=0; // 0=新增模式，>0=编辑节点 id
 var WG_COLLAPSED=new Set();
 // ---------- 组织架构（新模型） ----------
@@ -7425,8 +7444,12 @@ function renderBoardChecks(boards, limit, searchTerm, readonly){
   }else if(readonly){
     hint.textContent='部门/中心节点的板块由「看板管理 · 归属部门」统一决定（当前 '+sel.length+' 个）；小组级节点仍可在此手动勾选。';
   }else if(mineIds){
-    // 2026-11-04 绑定口径：候选 = 我是负责人/参与人的看板 ∪ 本节点已绑定
-    hint.textContent='你只能绑定自己是【负责人或参与人】的看板；标注「已绑定」的是该节点现有绑定（取消勾选即解除）。';
+    // 2026-11-04 绑定口径：候选 = 我可绑的看板 ∪ 本节点已绑定；
+    // 架构负责人（arch）= 管辖架构下全部看板；部门长/组长（own）= 负责人/参与人
+    hint.textContent=(WG_BINDING_SCOPE==='arch'
+      ?'作为架构负责人，你可以绑定管辖架构下的全部看板'
+      :'你只能绑定自己是【负责人或参与人】的看板')
+      +'；标注「已绑定」的是该节点现有绑定（取消勾选即解除）。';
   }else if(limit){
     hint.textContent='上级部门已绑定 '+totalPool+' 个看板，子级仅能选择其中部分（或留空不限制）。';
   }else{
@@ -7514,7 +7537,8 @@ async function openWgModal(){
   WG_ALL=gd.groups||[];
   WG_FLAT=wgFlat(WG_ALL);
   WG_BOARDS=gd.all_boards||[];
-  WG_MY_BINDABLE=gd.bindable_board_ids||null;   // 非管理员：只能绑自己是负责人/参与人的看板
+  WG_MY_BINDABLE=gd.bindable_board_ids||null;   // 非管理员：绑定候选池（own=负责人/参与人；arch=管辖架构下全部）
+  WG_BINDING_SCOPE=gd.binding_scope||'own';
   // 「＋ 新增节点」仅管理员可见（2026-11-04 用户需求）
   const _addBtn=document.getElementById('g_add_node_btn');
   if(_addBtn)_addBtn.style.display=(ME&&ME.is_admin)?'':'none';
