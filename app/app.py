@@ -3051,9 +3051,12 @@ def get_team(username: str = Depends(require_auth)):
             m['org_conflict'] = []
             m['org_nodes'] = []
     if not is_admin(username):
-        # 非管理员仅用于首页负责人下拉，不暴露账号/角色/密码状态
+        # 非管理员：脱敏角色/密码状态（成员管理是管理员页面用不到）。
+        # ⚠️ account **不能清**（2026-11-04 用户反馈）——
+        #   「姓名 → 账号」映射是选人选人的必需依赖：树选负责人/参与人的
+        #   requireAccount 判定与 bcAccountByName 转换都靠它。
+        #   清空 → 所有人被判「未开通账号」不可选 + 负责人筛选降级成账号下拉。
         for m in out:
-            m['account'] = ''
             m['role'] = ''
             m['password_set'] = False
             m.pop('org_conflict', None)

@@ -1616,21 +1616,24 @@ function goLogin(){
       <div class="form-group" style="font-size:12px;color:var(--text3);line-height:1.7">年份绑定在<b>板块</b>层：每个板块一个归属年份；该板块下的事项各自归属自己的周数（如 2026 年第 41 周），<b>周数与年份不做强制校验</b>。</div>
       <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
       <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
-      <div class="form-group" id="c_owner_wrap"><label>板块负责人</label>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span id="c_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
-          <button type="button" class="icon-btn" id="c_owner_pick_btn" onclick="colPickOwner(this)" title="从架构树中选择负责人（单选）">🌳 选择负责人</button>
-          <button type="button" class="icon-btn" id="c_owner_clear_btn" onclick="colClearOwner()" title="清除负责人">✕</button>
+      <!-- 负责人/参与人：并排两框（2026-11-04 用户反馈：加外框、删大段说明、并成一排） -->
+      <div class="form-group" style="display:flex;gap:10px;align-items:stretch">
+        <div id="c_owner_wrap" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:6px;padding:8px 10px;box-sizing:border-box">
+          <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">板块负责人</label>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span id="c_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
+            <button type="button" class="icon-btn" id="c_owner_pick_btn" onclick="colPickOwner(this)" title="从架构树中选择负责人（单选）">🌳 选择</button>
+            <button type="button" class="icon-btn" id="c_owner_clear_btn" onclick="colClearOwner()" title="清除负责人">✕</button>
+          </div>
         </div>
-        <div style="font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6">负责人有权修改该板块的基本信息。<b>谁能看见这个板块</b>由【架构管理】的看板绑定决定，与负责人无关。</div>
-      </div>
-      <div class="form-group" id="c_parts_wrap"><label>板块参与人</label>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span id="c_parts_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
-          <button type="button" class="icon-btn" id="c_parts_pick_btn" onclick="colPickParticipants(this)" title="从架构树中选择参与人（可多选）">🌳 选择参与人</button>
-          <button type="button" class="icon-btn" id="c_parts_clear_btn" onclick="colClearParticipants()" title="清空参与人">✕</button>
+        <div id="c_parts_wrap" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:6px;padding:8px 10px;box-sizing:border-box">
+          <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">板块参与人</label>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span id="c_parts_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
+            <button type="button" class="icon-btn" id="c_parts_pick_btn" onclick="colPickParticipants(this)" title="从架构树中选择参与人（可多选）">🌳 选择</button>
+            <button type="button" class="icon-btn" id="c_parts_clear_btn" onclick="colClearParticipants()" title="清空参与人">✕</button>
+          </div>
         </div>
-        <div style="font-size:12px;color:var(--text3);margin-top:4px;line-height:1.6">参与人可修改该板块的<b>可见内容</b>，但<b>无增删与指派权限</b>。<b>谁能看见这个板块</b>仍由【架构管理】的看板绑定决定。</div>
       </div>
       <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
         <div class="radio-group">
@@ -1943,6 +1946,8 @@ function goLogin(){
 .bc-boardcard .bi-name{font-size:14px;font-weight:600;color:var(--text)}
 .bc-boardcard .bi-meta{font-size:12px;color:var(--text2);margin-top:2px}
 .bc-section{display:flex;flex-direction:column;gap:9px}
+/* 看板负责人区块：加边框突出（2026-11-04 用户反馈「没有框，不明显」） */
+.bc-owner-sec{border:1px solid var(--border);border-radius:8px;padding:9px 12px;background:var(--bg)}
 .bc-section > .lab{font-size:12.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
 .bc-section > .lab .req{color:var(--danger);font-size:12px}
 .bc-pills{display:flex;flex-wrap:wrap;gap:8px}
@@ -2094,7 +2099,7 @@ function goLogin(){
         <div class="bc-left">
           <div class="bc-left-head">
             <span class="t">真实看板</span>
-            <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-default" style="padding:4px 11px;font-size:12px" onclick="configBoard()" title="为尚未配置的看板补齐年份/归属部门/属性/状态">+ 配置</button><button class="btn-primary" id="bcNewBoardBtn" style="padding:4px 11px;font-size:12px" onclick="openBoardModal()" title="创建一个全新的看板">+ 新建看板</button></span>
+            <span style="display:flex;align-items:center;gap:8px"><span class="c"><span id="bcLeftCount">0</span> 个</span><button class="btn-primary" id="bcNewBoardBtn" style="padding:4px 11px;font-size:12px" onclick="openBoardModal()" title="创建一个全新的看板">+ 新建看板</button></span>
           </div>
           <div class="bc-filter" id="bcFilter">
             <div class="bc-filter-row"><span class="lab">归属部门</span><select id="bcf_dept" onchange="bcFilterChange('dept',this.value)"></select></div>
@@ -7291,8 +7296,10 @@ function renderOrgIdle(){
     wrap.dataset.boards=''; wrap.dataset.limit='[]'; wrap.dataset.readonly='';
     wrap.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0;text-align:center">在左侧选中一个节点后<br>可在此配置板块绑定</div>';
   }
+  // 下方 hint 已删（2026-11-04 用户反馈：与框内占位「在左侧选中一个节点后
+  // 可在此配置板块绑定」重复，留一个即可 —— 保留框内占位）。
   const hint=document.getElementById('g_boards_hint');
-  if(hint)hint.textContent='先在左侧选中一个节点，再配置它可访问的板块。';
+  if(hint)hint.textContent='';
   const s=document.getElementById('g_boards_search');
   if(s){s.value='';s.disabled=true;}
 }
@@ -8537,7 +8544,7 @@ function renderAclSection(b){
   const ownerChip=owner
     ? '<span class="cf-chip" title="'+esc(label)+'">'+esc(label)+'</span>'
     : '<span style="font-size:12px;color:var(--text3)">未指定</span>';
-  return '<div class="bc-section"><div class="lab">看板负责人</div>'
+  return '<div class="bc-section bc-owner-sec"><div class="lab">看板负责人</div>'
     +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     +'<div id="bc_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:24px">'+ownerChip+'</div>'
     +(canSetOwner?'<button type="button" class="icon-btn" onclick="bcPickOwner(this)" title="从架构树中选择负责人（单选）">🌳 选择负责人</button>':'')
