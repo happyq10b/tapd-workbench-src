@@ -641,12 +641,14 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 归属年份徽标 */
 .week-year{font-size:11.5px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;flex-shrink:0;white-space:nowrap}
 .week-meta{font-size:12px;color:var(--text2)}
-.week-bar{flex:1;max-width:180px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
+.week-bar{flex:1 1 auto;min-width:120px;max-width:320px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
+/* 2026-11-04 #55：bar 弹性填满标题与字段列之间 → bar 右端 = 字段列左端 = 事项标题右端 */
 .week-bar i{display:block;height:100%;background:var(--success)}
 .week-body{display:none;border-top:1px solid var(--border);padding:8px}
 .week-group.open .week-body{display:block}
 /* ---- 板块头部右侧操作区：创建日期 / 折叠事项 / 展开事项 / 板块置顶 / 事项+ ---- */
 .week-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* 2026-11-04 #55：板块行尾部改用与事项行同构的 item-tail 槽位（见 renderBoard），actions 保留兜底 */
 .week-created{font-size:11.5px;color:var(--text3);white-space:nowrap}
 /* 置顶按钮：板块与事项共用，带文字标签；「已置顶」是点击后切换出的状态文案 */
 /* ===== WCAG 点击目标修正（2026-11-02 UI 排查）=====
@@ -668,8 +670,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    用 grid 定宽列 → 负责人姓名长短、周数文本长短、空值占位都不影响后续列的起始位置。
    父事项行与子事项行共用同一套类名与同一套字段定义（列宽也必须完全一致，
    否则父行与子行的字段列起点会错位）。 */
-.fcols{display:grid;grid-template-columns:166px 118px 146px 178px;gap:0 10px;align-items:center;
-  width:648px;flex:0 0 648px}
+.fcols{display:grid;grid-template-columns:96px 118px 104px 104px;gap:0 8px;align-items:center;
+  width:446px;flex:0 0 446px}
+/* 2026-11-04 #55：列宽 648→446（-202px 全部让给标题）——
+   周数值压缩为「2026·W32」、列序调整为 周数/负责人/创建/截止。 */
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .fcol-owner{color:var(--text2)}
 .fcol-week_no{color:var(--text2)}
@@ -693,7 +697,15 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .slot-overdue{width:46px;flex-shrink:0;display:inline-block}
 .slot-subtask{width:52px;flex-shrink:0;display:inline-block;text-align:center}
 .slot-status{width:58px;flex-shrink:0;display:inline-block;text-align:center}
-.slot-pin{width:84px;flex-shrink:0;display:inline-block;text-align:center}
+.slot-ops{width:64px;flex-shrink:0;display:inline-block;text-align:center}
+/* 2026-11-04 #55：置顶/复制（板块行还有折叠/展开）合并为「操作 ▾」下拉菜单 */
+.ops-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:3px 9px;
+  font-size:11.5px;border-radius:12px;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
+.ops-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
+.row-ops-menu{position:fixed;z-index:3000;background:#fff;border:1px solid var(--border);border-radius:8px;
+  box-shadow:0 6px 20px rgba(0,0,0,.12);padding:4px;min-width:128px}
+.row-ops-item{padding:7px 12px;font-size:12.5px;color:var(--text);cursor:pointer;border-radius:5px;white-space:nowrap}
+.row-ops-item:hover{background:#f0f5ff;color:var(--primary)}
 .slot-sub{width:72px;flex-shrink:0;display:inline-block;text-align:center}
 /* 标题占剩余空间并可收缩；行尾各槽位宽度固定 → 字段列纵向对齐 */
 .item-title{flex:1;min-width:0}
@@ -735,7 +747,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
 /* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小） */
-.sub-node .fcols{grid-template-columns:166px 118px 146px 178px;gap:0 10px;width:648px;flex:0 0 648px}
+.sub-node .fcols{grid-template-columns:96px 118px 104px 104px;gap:0 8px;width:446px;flex:0 0 446px}
 .sub-node .fcol{font-size:11px}
 /* 子事项行的尾部槽位：同样固定宽度 → 与父事项行同样的对齐逻辑 */
 /* 子事项行的尾部槽位宽度与父事项行**完全一致**（含 gap），
@@ -745,7 +757,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .sub-node .slot-overdue{width:46px}
 .sub-node .slot-subtask{width:52px}
 .sub-node .slot-status{width:58px}
-.sub-node .slot-pin{width:84px}
+.sub-node .slot-ops{width:64px}
 .sub-node .slot-sub{width:72px}
 /* 子事项前的圆点：统一用品牌金，不再按负责人姓名哈希出不同颜色 */
 .s-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0}
@@ -4278,6 +4290,26 @@ function renderBoard(cards,cols,q,colHits){
     const titleHtml=titleEditable
       ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnEdit(this)" title="点击编辑板块">${esc(k)}</span>`
       :`<span class="week-title">${esc(k)}</span>`;
+    // ── 板块行布局（2026-11-04 #55）：与事项行同构 → 字段列纵向对齐 ──
+    // 字段：负责人 / 创建 / 截止（板块无周数与逾期 → 周数列留空、逾期槽位空占位）
+    const _ownerName=bcMemberName(meta?(meta.owner||''):'');
+    const _colFcols='<span class="fcols week-fcols">'
+      +'<span class="fcol fcol-empty"></span>'
+      +(_ownerName?`<span class="fcol fcol-owner" title="板块负责人">负责人 ${esc(_ownerName)}</span>`
+                  :'<span class="fcol fcol-owner fcol-empty" title="未设置板块负责人">负责人 —</span>')
+      +`<span class="fcol fcol-created" title="板块创建日期">创建 ${esc(created||'—')}</span>`
+      +'<span class="fcol fcol-due fcol-empty" title="板块无截止日期">截止 —</span>'
+      +'</span>';
+    // 置顶 / 复制 / 折叠 / 展开合并为「操作 ▾」（tail 槽位与事项行同构 → 纵向对齐）
+    const _copyPayload=JSON.stringify({col_key:colKey,column_name:k,board_id:boardId,column_id:meta?(meta.column_id||''):'',nature:meta?(meta.nature||'日常'):'日常',year:year,created_at:meta?(meta.created_at||''):''});
+    const _wg='wg_'+i;
+    const _colOps=[
+      {label:pinned?'📌 取消置顶':'📌 置顶',fn:function(){toggleColumnPin(colKey,pinned?0:1);}},
+      {label:'📋 复制',fn:function(){openCopyModal('column',JSON.parse(_copyPayload));}},
+      {label:'折叠子事项',fn:function(){foldItems(_wg,false);}},
+      {label:'展开子事项',fn:function(){foldItems(_wg,true);}}
+    ];
+    const _colOpsId=rowOpsRegister(_colOps);
     return `<div class="week-group open" id="wg_${i}">
       <div class="week-header">
         <span class="chev" onclick="toggleWeek(${i});event.stopPropagation()" title="展开 / 收起该板块下的事项">▶</span>
@@ -4285,14 +4317,14 @@ function renderBoard(cards,cols,q,colHits){
         ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
         <span class="week-meta">${done}/${total} 完成</span>
         <div class="week-bar"><i style="width:${rate}%"></i></div>
-        <div class="week-actions" onclick="event.stopPropagation()">
-          <span class="week-created" title="板块创建日期">创建 ${esc(created)}</span>
-          <button class="fold-btn" onclick="foldItems('wg_${i}',false)" title="折叠该板块下各事项的子事项目录">折叠</button>
-          <button class="fold-btn" onclick="foldItems('wg_${i}',true)" title="展开该板块下各事项的子事项目录">展开</button>
-          <button class="pin-btn ${pinned?'on':''}" onclick="toggleColumnPin('${esc(colKey)}',${pinned?0:1})" title="${pinned?'取消置顶':'置顶该板块（在本看板内优先显示）'}">${pinned?'📌 已置顶':'📌 置顶'}</button>
-          <button class="cp-copy-btn" data-copy='${esc(JSON.stringify({col_key:colKey,column_name:k,board_id:boardId,column_id:meta?(meta.column_id||''):'',nature:meta?(meta.nature||'日常'):'日常',year:year,created_at:meta?(meta.created_at||''):''}))}' onclick="openCopyModal('column',JSON.parse(this.dataset.copy))" title="复制该板块到其它看板（归属重选）">📋 复制</button>
-          <button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button>
-        </div>
+        ${_colFcols}
+        <span class="item-tail">
+          <span class="slot-overdue"></span>
+          <span class="slot-subtask"></span>
+          <span class="slot-status"></span>
+          <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_colOpsId}')" title="置顶 / 复制 / 折叠 / 展开">操作 ▾</button></span>
+          <span class="slot-sub"><button class="add-item-btn" onclick="openNewModal('${esc(boardId)}','${esc(colKey)}')" title="在该板块下新建事项">＋ 事项</button></span>
+        </span>
       </div>
       <div class="week-body">${list.map((c,i)=>cardItem(c,i+1)).join('')}</div>
     </div>`;
@@ -4515,12 +4547,18 @@ function fmtDate(v){
 // 负责人与父事项**各自独立取值**，不做任何父子关联或继承。
 // 「周数」放在创建信息列（创建日期）**之前** —— 它本身就是按创建日期算出来的维度。
 function fieldItems(o){
+  // 2026-11-04 #55：周数移到负责人左侧（紧随标题之后的第一个字段）
   return [
-    {key:'owner',   label:'负责人',   value:String(o.owner||'').trim()},
     {key:'week_no', label:'周数',     value:String(o.week_no||'').trim()},
+    {key:'owner',   label:'负责人',   value:String(o.owner||'').trim()},
     {key:'created', label:'创建',     value:fmtDate(o.created)},
     {key:'due',     label:'截止',     value:fmtDate(o.due)},
   ];
+}
+// 周数压缩显示（#55）：「2026年第32周」→「2026·W32」，全称放悬停提示
+function weekCompact(w){
+  const m=String(w||'').match(/^(\d{4})年第(\d{1,2})周$/);
+  return m?(m[1]+'·W'+(+m[2])):(w||'');
 }
 // 网格版（列表里的父/子事项行）：四列固定宽度，跨行纵向对齐。
 // 负责人姓名长短不影响后续列的起始位置；空值统一占位为「—」。
@@ -4533,9 +4571,11 @@ function colYearOf(columnName){
 function fieldCols(o){
   const cy=colYearOf(o.column_name);
   return fieldItems(o).map(f=>{
+    // 周数在网格里用压缩形态（#55），全称进悬停提示
+    const v=f.key==='week_no'?weekCompact(f.value):f.value;
     let tip=f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label);
     if(f.key==='week_no'&&f.value&&cy)tip+='（所属板块年份：'+esc(cy)+'年）';
-    return `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}" title="${tip}">${f.label}：${f.value?esc(f.value):'—'}</span>`;
+    return `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}" title="${tip}">${f.label} ${v?esc(v):'—'}</span>`;
   }).join('');
 }
 // 紧凑版（右侧抽屉面板，宽度有限无法并排三列）：字段集合与顺序同上，仅改为单行堆叠
@@ -4558,11 +4598,11 @@ function cardItem(c,seq){
   // 「已置顶」只是该按钮被点击后切换出的状态文案，点它即取消置顶。
   // 置顶是**个人设置**：读当前账号自己的置顶集合，不读服务端的共享字段
   const pinned=isPinned('card',c.card_id);
-  const pinBtnHtml=pinBtn(c.card_id,pinned,'toggleCardPin','📌 置顶');
-  // 复制按钮（2026-11-03）：事项行内直接复制（此前只在编辑弹窗里能复制）
-  const copyBtnHtml=ME.can_edit
-    ?`<button class="copy-btn" onclick="event.stopPropagation();copyCardFromRow('${c.card_id}','card')" title="复制该事项（副本需重新选择归属）">📋 复制</button>`
-    :'';
+  // 置顶/复制合并为「操作 ▾」下拉（2026-11-04 #55）：省出的槽位宽度让给标题
+  const _cid=c.card_id;
+  const _opsItems=[{label:pinned?'📌 取消置顶':'📌 置顶',fn:function(){toggleCardPin(_cid,pinned?0:1);}}];
+  if(ME.can_edit)_opsItems.push({label:'📋 复制',fn:function(){copyCardFromRow(_cid,'card');}});
+  const opsId=rowOpsRegister(_opsItems);
   // 有子事项时给出目录展开箭头
   const hasSubs=(c.sub_count||0)>0;
   const subArrow=hasSubs
@@ -4583,8 +4623,7 @@ function cardItem(c,seq){
       <span class="slot-overdue">${overdue?'<span class="lock-tag lock-tag-overdue">逾期</span>':''}</span>
       <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}</span>
       <span class="slot-status">${statusTag(c.card_id,c.status)}</span>
-      <span class="slot-pin">${pinBtnHtml}</span>
-      <span class="slot-copy">${copyBtnHtml}</span>
+      <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${opsId}')" title="置顶 / 复制">操作 ▾</button></span>
       <span class="slot-sub">${subBtn}</span>
     </span>
   </div>
@@ -4637,6 +4676,12 @@ function subNodeHtml(n,level){
   // 字段列复用父事项的 fieldCols() → 字段集合与顺序天然一致（含周数列）
   // 负责人与父事项**各自独立取值**，子事项不会继承父事项负责人
   const colsHtml=fieldCols({owner:n.owner,week_no:n.week_no,created:n.created,due:n.due,column_name:n.column_name});
+  // 置顶/复制合并为「操作 ▾」（#55，与主事项行同构）
+  const _sid=n.card_id;
+  const _spinned=isPinned('card',_sid);
+  const _subOps=[{label:_spinned?'📌 取消置顶':'📌 置顶',fn:function(){toggleCardPin(_sid,_spinned?0:1);}}];
+  if(ME.can_edit)_subOps.push({label:'📋 复制',fn:function(){copyCardFromRow(_sid,'sub');}});
+  const _opsId=rowOpsRegister(_subOps);
   return `<div class="sub-node ${n.status==='done'?'done':''}">
     <span class="s-chev leaf">▶</span>
     <span class="s-dot"></span>
@@ -4646,8 +4691,7 @@ function subNodeHtml(n,level){
       <span class="slot-overdue">${od?'<span class="lock-tag lock-tag-overdue">逾期</span>':''}</span>
       <span class="slot-subtask"></span>
       <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
-      <span class="slot-pin">${pinBtn(n.card_id,isPinned('card',n.card_id),'toggleCardPin','📌 子事项置顶',true)}</span>
-      <span class="slot-copy">${ME.can_edit?`<button class="copy-btn" onclick="event.stopPropagation();copyCardFromRow('${n.card_id}','sub')" title="复制该子事项（副本需重新选择归属）">📋 复制</button>`:''}</span>
+      <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_opsId}')" title="置顶 / 复制">操作 ▾</button></span>
       <span class="slot-sub"></span>
     </span>
   </div>`;
@@ -5727,6 +5771,39 @@ function pinBtn(cardId,pinned,fn,offLabel,extra){
   const args=`'${cardId}',${pinned?0:1}${extra!==undefined&&extra!==null?','+extra:''}`;
   return `<button class="pin-btn ${pinned?'on':''}" onclick="${fn}(${args})" title="${pinned?'取消置顶':'置顶（在本级目录内优先显示）'}">${pinned?'📌 已置顶':(offLabel||'📌 事项置顶')}</button>`;
 }
+// ── 行操作合并菜单（#55）：置顶/复制（板块行还有折叠/展开）收进「操作 ▾」 ──
+var ROW_OPS={},ROW_OPS_SEQ=0;
+function rowOpsRegister(items){
+  const id='ro'+(++ROW_OPS_SEQ);
+  ROW_OPS[id]=items;
+  return id;
+}
+function rowOpsShow(ev,id){
+  ev.stopPropagation();
+  closeRowOps();
+  const items=ROW_OPS[id]||[];
+  const m=document.createElement('div');
+  m.className='row-ops-menu';
+  m.id='rowOpsMenu';
+  m.innerHTML=items.map((it,i)=>`<div class="row-ops-item" onclick="ROW_OPS_EXEC('${id}',${i})">${it.label}</div>`).join('');
+  document.body.appendChild(m);
+  const r=ev.currentTarget.getBoundingClientRect();
+  const mw=148,mh=items.length*32+8;
+  let left=Math.min(r.right-mw,window.innerWidth-mw-8);
+  let top=r.bottom+4;
+  if(top+mh>window.innerHeight-8)top=r.top-mh-4;
+  m.style.left=Math.max(8,left)+'px';
+  m.style.top=Math.max(8,top)+'px';
+}
+function ROW_OPS_EXEC(id,i){
+  const it=(ROW_OPS[id]||[])[i];
+  closeRowOps();
+  if(it&&it.fn)it.fn();
+}
+function closeRowOps(){const m=document.getElementById('rowOpsMenu');if(m)m.remove();}
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.row-ops-menu')&&!e.target.closest('.ops-btn'))closeRowOps();
+});
 function todayStr(){return new Date().toISOString().slice(0,10)}
 // ---------- 人员选择器：下拉 + 输入（输入必须命中成员名单） ----------
 var PP={};
