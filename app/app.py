@@ -2351,7 +2351,7 @@ class BoardCreateReq(BaseModel):
 
 @app.post('/api/boards')
 def create_board(req: BoardCreateReq, username: str = Depends(require_writer), request: Request = None):
-    """新建看板（仅管理员）。写入 boards 表，立即可在标签页看到空看板。"""
+    """新建看板（架构负责人及以上，2026-11-02 分级）。写入 boards 表，立即可在标签页看到空看板。"""
     import time
     name = (req.board_name or '').strip()
     if not name:

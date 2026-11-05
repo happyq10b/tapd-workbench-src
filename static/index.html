@@ -8475,13 +8475,18 @@ async function openBoardConfigModal(){
   const isAdmin=!!(ME&&ME.is_admin);
   const canAny=!!(ME&&(ME.editable_boards||[]).length);
   const isOwner=!!(ME&&(ME.managed_boards||[]).length);
-  if(!ME||(!isAdmin&&!isOwner&&!canAny)){toast('你没有可配置的看板');return}
+  // 2026-11-05：架构负责人（部门长/中心负责人/总经理）可新建看板、管理其架构下
+  // 全部看板的绑定 —— 即使当前没有被任命为任何看板的负责人/参与人，也应放行进入
+  const isArchOwner=!!(ME&&(ME.is_arch_owner||(ME.arch_scope||[]).length));
+  if(!ME||(!isAdmin&&!isOwner&&!canAny&&!isArchOwner)){toast('你没有可配置的看板');return}
   await loadBoardConfig();
   await bcLoadAclMembers();          // 负责人回显用的账号 → 姓名映射
   renderOwnerFilterBtn();           // 映射到手后，控件可能从「降级下拉」切回「树弹窗按钮」
-  // 管理员专属：新建看板 / 删除所选（负责人只能改自己看板的基本信息）
+  // 新建看板：后端口径 = 架构负责人及以上（POST /api/boards 走 perm_check_arch_scope），
+  // 前端按 /api/me 下发的 arch_scope 能力位显隐（2026-11-05：原写死 is_admin，
+  // 导致架构负责人看不到「+ 新建看板」按钮）
   const nb=document.getElementById('bcNewBoardBtn');
-  if(nb)nb.style.display=ME.is_admin?'':'none';
+  if(nb)nb.style.display=(ME.is_admin||(ME.arch_scope||[]).length>0)?'':'none';
   const db=document.getElementById('bcDelBtn');
   if(db)db.style.display=ME.is_admin?'':'none';
   // 批量复制（2026-11-03 修订）：对该账号**可管理的看板集合**非空即可用
