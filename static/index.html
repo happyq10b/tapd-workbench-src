@@ -910,6 +910,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 只读字段（创建人）：锁定不可修改 */
 .form-input[readonly]{background:#f5f7fa;color:var(--text2);cursor:not-allowed}
 .member-picker{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;min-height:40px}
+/* 2026-11-05：pp 作为 member-picker 的 flex 子项原本按内容收缩宽度（内外两套框不匹配、
+   提示文字被截断）→ 撑满外框并去掉自身重复的边框/背景，外框即唯一边框 */
+.member-picker .pp{flex:1 1 auto;min-width:0;border:none;background:transparent;padding:0;min-height:32px}
+.member-picker .pp-ip{width:100%}
 .pp{position:relative;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;min-height:42px;background:var(--color-background-primary,#fff)}
 .pp:focus-within{border-color:var(--primary);box-shadow:0 0 0 2px rgba(24,144,255,.12)}
 /* 成员表格：表头首行冻结。
@@ -5916,7 +5920,7 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
   // 人员选择层级约束（2026-11-04）：pool = 上级层级的可选人员名单（姓名）；
   // 不传 pool = 全员（历史行为）。pairId/isOwner = 负责人/参与人互斥联动。
   const ALL=pool||ppMembers();
-  const _ph=(pool&&!pool.length)?'无可选人员（请先在上级层级配置负责人/参与人）':'搜索或输入成员名…';
+  const _ph=(pool&&!pool.length)?'无可选人员（先配置上级负责人/参与人）':'搜索或输入成员名…';
   el.innerHTML=`<div class="pp">
     <div class="pp-tags"></div>
     <div class="pp-ip"><input class="pp-in" placeholder="${_ph}" autocomplete="off"><div class="pp-drop"></div></div>
