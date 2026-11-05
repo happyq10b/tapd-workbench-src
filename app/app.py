@@ -749,10 +749,13 @@ def _dept_stage_boards(username):
     # 但小组既然**没有绑定任何看板**（workgroups.boards 为空），
     # 它的成员就**不该看到那些看板** —— 小组成员与部门成员的可见范围必须不同。
     #
-    # 修正后的分节点类型语义（与 _node_bound_boards 完全一致）：
-    #   · 任命到部门(dept)/中心(center) → 该节点**自己拥有**的看板；
-    #   · 任命到小组(group)              → 该小组**自己绑定**的看板
-    #     （workgroups.boards；没绑定 = 没有），**不继承父部门**。
+    # 分节点类型语义（2026-11-05 用户修订）：
+    #   · 任命到小组(group) → 该小组**自己绑定**的看板
+    #     （workgroups.boards；没绑定 = 没有），**不继承父部门**；
+    #   · 任命到部门(dept) → **不再自动继承部门拥有的看板**（用户规则：
+    #     「不是看板负责人或参与人，看板不可见」）—— 部门看板对普通部门成员
+    #     关闭，可见性走：看板负责人/参与人、架构负责人负责范围、组绑定；
+    #   · 任命到中心(center) → 管理层全范围（财务中心全员可见语义）。
     scope = _member_appointed_nodes(username)[0]
     if not scope:
         return public                   # 无架构归属 → 只能看公共看板
@@ -766,6 +769,9 @@ def _dept_stage_boards(username):
     for nid in scope:
         node = nmap.get(nid)
         if not node:
+            continue
+        if node.get('node_type') == 'dept':
+            # 2026-11-05：部门成员不再自动继承部门看板（规则见上）
             continue
         visible |= _node_bound_boards(node, owned, wg_by_id)
     return visible
@@ -833,15 +839,38 @@ def _group_boards(username: str):
     return merged if bound else None
 
 
+def _owner_participant_boards(username: str) -> set:
+    """看板负责人/参与人层（2026-11-05 用户规则）：
+
+    「不是看板负责人或参与人，看板不可见」—— 我是某看板的负责人
+    （boards.owner）或参与人（boards.participants 含我）→ 该看板可见。
+    """
+    out = set()
+    for r in dbq('SELECT board_id, owner, participants FROM boards'):
+        if (r['owner'] or '').strip() == username:
+            out.add(r['board_id'])
+            continue
+        parts = (r['participants'] or '')
+        if username in [x.strip() for x in parts.split(',') if x.strip()]:
+            out.add(r['board_id'])
+    return out
+
+
 def _arch_scope_boards(username: str, dept_boards: set) -> set:
-    """架构授权集 = 归属部门层 ∪ 负责范围层，再按工作组绑定层收窄。"""
+    """架构授权集（2026-11-05 用户规则重写）：
+
+    可见 = 公共看板（归属财务中心/未归属，第一层已含）
+         ∪ 我负责范围的看板（架构负责人：节点 + 全部后代）
+         ∪ 我是看板负责人/参与人 的看板
+    （部门归属不再自动开放部门看板；组绑定由第一层按任命的组节点并入；
+     原「组级白名单收窄」随部门继承取消而失去意义，一并移除 ——
+     「最高权限」原则由模型本身保证：各来源全部取并集。）
+    """
     boards = set(dept_boards)
     # ② 负责范围层：负责人额外拥有其负责范围（节点 + 全部后代）绑定的看板
     boards |= _leader_scope_boards(username)
-    # ③ 工作组绑定层：显式白名单 → 收窄
-    gb = _group_boards(username)
-    if gb is not None:
-        boards &= gb
+    # ③ 看板负责人/参与人层
+    boards |= _owner_participant_boards(username)
     return boards
 
 # ---------------- 负责人（owner）----------------
