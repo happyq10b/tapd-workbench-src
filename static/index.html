@@ -7596,12 +7596,15 @@ function renderOrgRoles(){
     }
     html+=`</div>
       <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
-        <select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${rCan?'':' disabled'}>
+        ${r.role_key==='member'&&rCan?'':`<select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${rCan?'':' disabled'}>
           <option value="">选择成员…</option>
           ${ORG_MEMBERS.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
-        </select>
-        ${rCan?`<button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>`
-          :`<span style="font-size:11px;color:var(--text3);white-space:nowrap">${apptTipFor(r.role_key)}</span>`}
+        </select>`}
+        ${r.role_key==='member'&&rCan
+          ?`<button class="icon-btn" style="flex-shrink:0" onclick="openOrgMemberPick(${nid},'member',this)"
+              title="勾选多个成员批量任命为组员">🌳 选择成员（可多选）</button>`
+          :(rCan?`<button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>`
+          :`<span style="font-size:11px;color:var(--text3);white-space:nowrap">${apptTipFor(r.role_key)}</span>`)}
       </div>
     </div>`;
   });
@@ -7615,6 +7618,45 @@ async function addOrgAppt(nodeId,roleKey,memberId){
     toast('已任命');
     await openWgModal();
   }catch(e){toast(e.message)}
+}
+// 组员任命：树选人**多选**（2026-11-05 用户需求：组员的添加支持多选）
+function openOrgMemberPick(nodeId,roleKey,anchor){
+  const node=ORG_FLAT.find(x=>x.id===nodeId);
+  if(!node){toast('节点不存在');return}
+  const appointed={};   // 已任命的组员：跳过重复
+  (node.appointments||[]).forEach(a=>{appointed[a.member_id]=a.member_name;});
+  const names=ORG_MEMBERS.map(function(m){return m.name;});
+  const preselect=(node.appointments||[])
+    .filter(function(a){return a.role_key===roleKey;})
+    .map(function(a){return ORG_PERSON_PREFIX+a.member_name;});
+  openTreePick(anchor, preselect, function(persons){
+    if(!persons||!persons.length)return;
+    // 姓名反查 id，剔除已任命的（树里可能带着其他节点的同名成员）
+    const ids=[];
+    const skip=[];
+    persons.forEach(function(n){
+      const m=ORG_MEMBERS.find(function(x){return x.name===n;});
+      if(!m){skip.push(n+'（无账号映射）');return;}
+      if(appointed[m.id]){skip.push(n+'（已是组员）');return;}
+      ids.push({id:m.id,name:n});
+    });
+    if(!ids.length){toast('未选择新增成员'+(skip.length?'：'+skip.join('、'):''));return;}
+    addOrgApptMulti(nodeId,roleKey,ids,skip);
+  }, {mode:'filter', pickMode:'person', width:360, height:460,
+      tree:poolTree(names,'选择组员（可多选）'), keyword:'', clearable:true});
+}
+// 批量任命：逐个提交（member 可多人，无唯一槽位冲突），失败明细汇总
+async function addOrgApptMulti(nodeId,roleKey,ids,skip){
+  const okList=[],failList=(skip||[]).slice();
+  for(const it of ids){
+    try{
+      await api('/api/org/appointments',{method:'POST',
+        body:JSON.stringify({node_id:nodeId,member_id:Number(it.id),role_key:roleKey})});
+      okList.push(it.name);
+    }catch(e){failList.push(it.name+'（'+(e.message||'失败')+'）');}
+  }
+  toast('已任命 '+okList.length+' 人'+(failList.length?('；失败 '+failList.length+'：'+failList.join('、')):''));
+  if(okList.length)await openWgModal();
 }
 // 免职：移除任职
 async function removeOrgAppt(apptId,name){
