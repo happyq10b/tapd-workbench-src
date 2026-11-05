@@ -7409,6 +7409,7 @@ var WG_BOARDS=[]; // 全部看板 [{board_id,board_name}]
 var WG_MY_BINDABLE=null; // 我的可绑看板 id 集（负责人/参与人口径；null=管理员不限）
 var WG_BINDING_SCOPE='own'; // 绑定池口径：admin=不限 / arch=架构负责人宽池 / own=部门长组长窄池
 var WG_EDIT_ID=0; // 0=新增模式，>0=编辑节点 id
+var WG_NEW_CHILD=0; // 「+子节点」流程的父节点 id（>0 = 新增子节点预览态，2026-11-05）
 var WG_COLLAPSED=new Set();
 // ---------- 组织架构（新模型） ----------
 var ORG_TREE=[];        // 新模型的节点树（含 roles / appointments）
@@ -7523,6 +7524,36 @@ function renderOrgRoles(){
   const nid=ORG_SELECTED;
   if(!nid){
     box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px 0;text-align:center">在左侧选中一个节点后<br>可在此配置岗位与任职</div>';
+    return;
+  }
+  // 「+子节点」预览态（2026-11-05）：子节点尚未创建，岗位区显示**子节点**的岗位
+  //   （而非父节点的 —— 修复「部门下新增子节点却显示部门长」的层级误导），
+  //   任命控件不可用，创建后进入编辑态即可任命。
+  if(WG_NEW_CHILD){
+    const pn=ORG_FLAT.find(x=>x.id===WG_NEW_CHILD);
+    const t=document.getElementById('g_new_type')?document.getElementById('g_new_type').value:'';
+    const proto=ORG_FLAT.find(x=>x.node_type===t&&x.roles&&x.roles.length);
+    const roles=proto?proto.roles:[];
+    const tname=ORG_TYPE_NAMES[t]||t||'子节点';
+    let html='<div style="font-size:12px;color:var(--text2);margin-bottom:8px">'
+      +'将创建 <b>'+esc(tname)+'</b>（下级于「'+esc(pn?pn.name:'')+'」），创建后可任命以下岗位：</div>';
+    if(!roles.length){
+      html+='<div style="font-size:12px;color:var(--text3)">（'+esc(tname)+'层无可配置岗位）</div>';
+    }
+    roles.forEach(r=>{
+      html+='<div style="margin-bottom:8px">'
+        +'<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)">'
+        +'<span style="font-weight:600;color:var(--text)">'+esc(r.role_name)+'</span>'
+        +'<span style="font-size:10.5px;color:'+(r.unique_slot?'#ad6800':'var(--text3)')
+        +';border:1px solid '+(r.unique_slot?'#ffd591':'var(--border)')
+        +';border-radius:3px;padding:0 5px">'+(r.unique_slot?'唯一':'可多人')+'</span>'
+        +'<span style="margin-left:auto;font-size:11px;color:var(--text3)">0 人</span></div>'
+        +'<div style="font-size:11px;color:var(--text3);margin-top:3px">待节点创建后任命</div>'
+        +'</div>';
+    });
+    html+='<div style="font-size:11px;color:var(--text3);border-top:1px dashed var(--border);padding-top:8px;margin-top:4px">'
+      +'提示：任命'+esc(tname==='常规小组'||t==='group'?'组长/组员':'岗位')+'后，成员自动成为所属部门的架构参与人。</div>';
+    box.innerHTML=html;
     return;
   }
   const node=ORG_FLAT.find(x=>x.id===nid);
@@ -7788,6 +7819,7 @@ function newWgNode(){
 }
 function resetWgForm(){
   WG_EDIT_ID=0;
+  WG_NEW_CHILD=0;   // 退出「+子节点」预览态
   ORG_SELECTED=0;
   document.getElementById('g_form_title').textContent='新增节点';
   document.getElementById('g_submit_btn').textContent='添加';
@@ -7951,12 +7983,15 @@ function addWgChild(pid){
   // 权限（2026-11-05）：「+子节点」只对管辖范围内的节点开放（后端 can_add_child 能力位）。
   if(n&&n.can_add_child===false){toast('你无权在此节点下新增子节点');return;}
   resetWgForm();
+  WG_NEW_CHILD=pid;            // 新增子节点预览态：岗位区显示子节点岗位，不是父节点的
   ORG_SELECTED=pid;
   // 上级锁定为该节点（2026-11-05 用户需求：+子节点 依托现有上级，
   //   「无上级」只能通过「＋新增节点」入口选择）。
   lockParentTo(pid);
   onWgParentChange();
-  document.getElementById('g_form_title').textContent='新增子节点';
+  // 层级关系明确显示为「下级」（2026-11-05 用户反馈：部门下新增子节点应显示下级关系）
+  document.getElementById('g_form_title').textContent=
+    '新增子节点 · 下级于「'+(n?n.name:String(pid))+'」';
   renderOrgRoles();
   paintOrgSelection();
 }
@@ -7973,6 +8008,7 @@ function editWg(gid){
   const g=ORG_FLAT.find(x=>x.id===gid); if(!g)return;
   const isRoot=g.node_type==='center';
   WG_EDIT_ID=gid;
+  WG_NEW_CHILD=0;   // 进入编辑态 = 预览态结束
   ORG_SELECTED=gid;
   document.getElementById('g_form_title').textContent='编辑：'+g.name;
   document.getElementById('g_submit_btn').textContent='保存修改';
