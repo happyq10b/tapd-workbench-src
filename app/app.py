@@ -3492,10 +3492,10 @@ def get_workgroups(username: str = Depends(require_auth)):
     if not is_admin(username):
         base = _my_bindable_boards(username)
         binding_scope = 'own'
-        # 架构负责人（中心负责人/总经理）：候选池并入**管辖架构下全部看板**（宽池）
+        # 架构负责人（中心负责人/总经理/部门长，2026-11-05 扩）：候选池并入**管辖架构下全部看板**（宽池）
         arows = dbq("SELECT a.node_id FROM org_appointments a"
                     " JOIN team_members m ON m.id=a.member_id"
-                    " WHERE m.account=? AND a.role_key IN ('center_head','gm')",
+                    " WHERE m.account=? AND a.role_key IN ('center_head','gm','dept_head')",
                     (username,))
         if arows:
             binding_scope = 'arch'
@@ -3799,16 +3799,17 @@ def _my_bindable_boards(username: str) -> set:
 
 
 def _arch_owner_nodes(username: str) -> set:
-    """架构负责人节点集（2026-11-04 用户修订）：
+    """架构负责人节点集（2026-11-05 用户修订）：
 
-    担任 **中心负责人(center_head) / 总经理(gm)** 的节点及其全部后代。
-    架构负责人对**管辖架构下的全部看板**拥有绑定权（不受「负责人/参与人」
-    候选池限制）。部门长/组长的窄口径（只能绑自己是负责人/参与人的看板）
+    担任 **中心负责人(center_head) / 总经理(gm) / 部门长(dept_head)** 的节点及其全部后代。
+    架构负责人对**管辖架构下的全部看板**拥有绑定权与查看权（不受「负责人/参与人」
+    候选池限制）—— 部门长任命即自动成为对应架构的负责人，可查看/绑定
+    其架构下绑定的所有看板。组长的窄口径（只能绑自己是负责人/参与人的看板）
     见 _binding_manager_nodes —— 两者互不覆盖，一人兼多岗时取并集。
     """
     rows = dbq("""SELECT a.node_id FROM org_appointments a
                   JOIN team_members m ON m.id=a.member_id
-                  WHERE m.account=? AND a.role_key IN ('center_head','gm')""",
+                  WHERE m.account=? AND a.role_key IN ('center_head','gm','dept_head')""",
                (username,))
     if not rows:
         return set()
@@ -3963,6 +3964,118 @@ def _check_unique_slot(node_id: int, role_key: str, member_id: int, exclude_id: 
         raise HTTPException(409, f'「{d["role_name"]}」在一个节点内只能有一人，'
                                 f'当前已由 {rows[0]["name"]} 担任')
 
+
+def _role_scope_nodes(username: str, role_keys) -> set:
+    """担任指定岗位的节点**及其全部后代**（任命管辖范围的通用闭包）。
+
+    与 _binding_manager_nodes 同款结构，但岗位集合可参数化 ——
+    任命分级校验按「任命者岗位」取范围：center_head/gm → 中心子树；
+    dept_head → 部门子树。
+    """
+    keys = [k for k in (role_keys or []) if k]
+    if not keys:
+        return set()
+    marks = ','.join('?' * len(keys))
+    rows = dbq(f"""SELECT a.node_id FROM org_appointments a
+                   JOIN team_members m ON m.id=a.member_id
+                   WHERE m.account=? AND a.role_key IN ({marks})""",
+               (username,) + tuple(keys))
+    if not rows:
+        return set()
+    kids = defaultdict(list)
+    for r in dbq('SELECT id, parent_id FROM org_nodes'):
+        kids[r['parent_id']].append(r['id'])
+    out, stack = set(), [r['node_id'] for r in rows]
+    while stack:
+        nid = stack.pop()
+        if nid in out:
+            continue
+        out.add(nid)
+        stack.extend(kids.get(nid, []))
+    return out
+
+
+# 任命分级（2026-11-05 用户需求）：
+#   · dept_head（部门长）→ 仅 **中心负责人 / 总经理** 可任命（管理员同样有权）
+#   · group_leader / member（组长 / 组员）→ 仅 **部门长** 可任命（管理员同样有权）
+#   · 其余岗位（center_head / gm / backbone 类）→ 仅管理员
+_APPOINT_RULES = {
+    'dept_head':     (('center_head', 'gm'), '部门长仅可由中心负责人/总经理（或管理员）任命'),
+    'group_leader':  (('dept_head',),        '组长仅可由部门长（或管理员）任命'),
+    'member':        (('dept_head',),        '组员仅可由部门长（或管理员）任命'),
+}
+
+
+def _check_appoint_perm(username: str, node: dict, role_key: str):
+    """任命 / 罢免的分级校验（2026-11-05）。
+
+    · 管理员 / 超管：任意节点任意岗位；
+    · 中心负责人 / 总经理：可任命（罢免）其管辖中心子树内**部门节点**的部门长；
+    · 部门长：可任命（罢免）其管辖部门子树内的**组长与组员**；
+    · 其余岗位仅管理员。目标节点不在任命者管辖范围内 → 403。
+    """
+    if is_admin(username):
+        return
+    rule = _APPOINT_RULES.get(role_key)
+    if not rule:
+        raise HTTPException(403, '该岗位仅管理员可任命')
+    need, tip = rule
+    scope = _role_scope_nodes(username, need)
+    if not scope or node['id'] not in scope:
+        raise HTTPException(403, tip + '；且目标节点须在其管辖范围内')
+
+
+def _appointable_role_keys(username: str, node: dict) -> list:
+    """该用户在指定节点**可任命的岗位 key 列表**（树接口能力位，前端只消费）。
+
+    ⚠️ 与 _check_appoint_perm 同一判定 —— 前端展示与后端校验永不漂移。
+    """
+    all_roles = [d['role_key'] for d in _org_role_defs(node['node_type'])]
+    if is_admin(username):
+        return all_roles
+    out = []
+    for rk in all_roles:
+        rule = _APPOINT_RULES.get(rk)
+        if not rule:
+            continue
+        scope = _role_scope_nodes(username, rule[0])
+        if node['id'] in scope:
+            out.append(rk)
+    return out
+
+
+def _nearest_dept_ancestor(node_id: int) -> int:
+    """向上找最近的**部门(dept)**祖先节点 id（含自身）；找不到返回 0。"""
+    nid = node_id
+    seen = set()
+    while nid and nid not in seen:
+        seen.add(nid)
+        row = dbq('SELECT id, parent_id, node_type FROM org_nodes WHERE id=?', (nid,))
+        if not row:
+            return 0
+        if row[0]['node_type'] == 'dept':
+            return nid
+        nid = row[0]['parent_id']
+    return 0
+
+
+def _auto_arch_participant(dept_node_id: int, account: str):
+    """任命组长/组员后，把该成员**默认加为所属部门的架构参与人**（2026-11-05）。
+
+    org_nodes.participants 是多来源累积字段（显式配置 + 任命自动加入），
+    已存在则跳过；罢免任命**不**自动移除（保留显式配置语义）。
+    """
+    acc = (account or '').strip()
+    if not dept_node_id or not acc:
+        return
+    row = dbq('SELECT participants FROM org_nodes WHERE id=?', (dept_node_id,))
+    if not row:
+        return
+    cur = [x.strip() for x in ((row[0]['participants'] or '').split(',')) if x.strip()]
+    if acc not in cur:
+        cur.append(acc)
+        dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur), dept_node_id))
+
 def _org_sync_legacy(node_id: int):
     """把新模型的任职关系回写到旧表 workgroups.leader 与 team_members.workgroups。
     旧权限逻辑（_leader_boards / _group_boards）读的是这两个字段，
@@ -4115,6 +4228,12 @@ def get_org_tree(username: str = Depends(require_auth)):
     arch_owner = set() if is_admin(username) else _arch_owner_nodes(username)
     # 「+子节点」可用范围（2026-11-05）：管理员全部；架构负责人 / 组长按各自管辖范围。
     add_scope = _node_add_scope(username)
+    # 任命分级范围（2026-11-05）：部门长 → 中心负责人/总经理子树；组长/组员 → 部门长子树。
+    #   管理员置 None = 不限（build 内直接放行全部岗位）。
+    appt_scope_dept_head = (None if is_admin(username)
+                            else _role_scope_nodes(username, ('center_head', 'gm')))
+    appt_scope_group = (None if is_admin(username)
+                        else _role_scope_nodes(username, ('dept_head',)))
 
     def build(pid):
         out = []
@@ -4131,6 +4250,17 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['can_manage_node'] = bool(is_admin(username))
             # 「+子节点」可用范围（2026-11-05）：管理员全部；架构负责人 / 组长按管辖范围。
             node['can_add_child'] = bool(n['id'] in add_scope)
+            # 任命能力位（2026-11-05）：本节点可任命的岗位 key 列表（与后端校验同一判定）
+            if appt_scope_dept_head is None:
+                node['can_appoint_roles'] = [d['role_key'] for d in roles_by_type.get(n['node_type'], [])]
+            else:
+                _ar = []
+                if n['id'] in appt_scope_dept_head:
+                    _ar.append('dept_head')
+                if n['id'] in appt_scope_group:
+                    _ar += ['group_leader', 'member']
+                node['can_appoint_roles'] = [k for k in _ar
+                                             if any(d['role_key'] == k for d in roles_by_type.get(n['node_type'], []))]
             node['is_leader'] = (n['id'] in leader_ids)
             node['in_my_scope'] = bool(in_scope)
             # 「架构下所有看板」（2026-11-03）：本节点归属的 + 全部后代小组已绑定的。
@@ -4345,17 +4475,20 @@ def move_org_node(nid: int, req: OrgMoveNodeReq, username: str = Depends(require
     return {'ok': True}
 
 @app.post('/api/org/appointments')
-def create_org_appointment(req: OrgAppointmentReq, username: str = Depends(require_admin), request: Request = None):
+def create_org_appointment(req: OrgAppointmentReq, username: str = Depends(require_auth), request: Request = None):
     """新增任职关系：一人多岗 / 一人多组织。
-       校验：节点存在、成员存在、岗位属于该节点类型、唯一槽位不被占。"""
+       校验：节点存在、成员存在、岗位属于该节点类型、唯一槽位不被占。
+       权限（2026-11-05 分级）：管理员任意；部门长 → 中心负责人/总经理；
+       组长/组员 → 部门长；任命组长/组员后成员**默认成为所属部门的架构参与人**。"""
     node = _org_node(req.node_id)
     if not node:
         raise HTTPException(404, '节点不存在')
-    m = dbq('SELECT id, name FROM team_members WHERE id=?', (req.member_id,))
+    m = dbq('SELECT id, name, account FROM team_members WHERE id=?', (req.member_id,))
     if not m:
         raise HTTPException(404, '成员不存在')
     role_key = (req.role_key or '').strip()
     _check_role_allowed(node['node_type'], role_key)
+    _check_appoint_perm(username, node, role_key)
     _check_unique_slot(req.node_id, role_key, req.member_id)
     try:
         dbe('INSERT INTO org_appointments (node_id, member_id, role_key, is_primary) VALUES (?,?,?,?)',
@@ -4363,18 +4496,27 @@ def create_org_appointment(req: OrgAppointmentReq, username: str = Depends(requi
     except sqlite3.IntegrityError:
         raise HTTPException(409, '该成员在此节点已有该岗位')
     _org_sync_legacy(req.node_id)
+    # 任命组长/组员/部门骨干 → 默认成为所属部门的**架构参与人**
+    # （角色配置参照表：部门层面架构参与人来源 = 部门骨干、组长、组员）
+    if role_key in ('group_leader', 'member', 'dept_backbone'):
+        _auto_arch_participant(_nearest_dept_ancestor(req.node_id), m[0]['account'])
     audit_log(username, client_ip(request), 'org_appointment_create',
               f'{m[0]["name"]} @ {node["name"]}',
-              f'新增任职，岗位 {role_key}', 'success')
+              f'新增任职，岗位 {role_key}' + ('（已同步架构参与人）' if role_key in ('group_leader', 'member') else ''),
+              'success')
     return {'ok': True}
 
 @app.delete('/api/org/appointments/{aid}')
-def delete_org_appointment(aid: int, username: str = Depends(require_admin), request: Request = None):
-    """删除任职关系"""
+def delete_org_appointment(aid: int, username: str = Depends(require_auth), request: Request = None):
+    """删除任职关系（罢免）。权限与任命同分级（2026-11-05）。"""
     row = dbq('''SELECT a.id, a.node_id, a.member_id, a.role_key, m.name AS member_name
                  FROM org_appointments a JOIN team_members m ON m.id=a.member_id WHERE a.id=?''', (aid,))
     if not row:
         raise HTTPException(404, '任职关系不存在')
+    node = _org_node(row[0]['node_id'])
+    if not node:
+        raise HTTPException(404, '节点不存在')
+    _check_appoint_perm(username, node, row[0]['role_key'])
     dbe('DELETE FROM org_appointments WHERE id=?', (aid,))
     _org_sync_legacy(row[0]['node_id'])
     _org_sync_member_legacy(row[0]['member_id'])
@@ -4647,7 +4789,8 @@ class AclReq(BaseModel):
 
     2026-11-04：participants（参与人）**恢复使用** —— 人员选择层级约束要求
        「板块的负责人与参与人从所属看板的负责人与参与人中选」，看板需要
-       维护自己的参与人名单作为板块的选人池。负责人与参与人**互斥**。
+       维护自己的参与人名单作为板块的选人池。
+       2026-11-05：**取消负责人与参与人的互斥** —— 负责人可同为参与人。
     """
     owner: str = ''
     # 参与人兼容两种入参：逗号串（前端 saveBoardAcl）或列表（旧客户端）——
@@ -4708,11 +4851,10 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     owner = _norm_acl_owner(req.owner)
     # 2026-11-04 恢复：参与人字段重新启用（人员选择层级约束 —— 板块的选人池
     # 来自所属看板的负责人与参与人），不再随负责人保存清空。
-    # 负责人/参与人**互斥**：设为负责人时自动从参与人中移除。
+    # 2026-11-05 用户修订：**取消负责人/参与人互斥** —— 负责人可同为参与人，
+    # 设负责人不再从参与人中移除（判定内核 owner 优先，取高等级，天然兼容）。
     _row = dbq('SELECT participants FROM boards WHERE board_id=?', (bid,))
     parts = ((_row[0]['participants'] if _row else '') or '')
-    if owner:
-        parts = ','.join([p for p in parts.split(',') if p and p != owner])
     dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, parts, bid))
     audit_log(username, client_ip(request), 'board_acl', f'看板 {bid}',
               f'设置看板负责人：{owner or "(无)"}', 'success')
@@ -4732,11 +4874,7 @@ async def set_board_participants(board_id: str, req: AclReq, username: str = Dep
     perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_PARTICIPANT,
                LV_BOARD_OWNER, 'board:' + bid, min_level=LV_BOARD_OWNER)
     parts = _norm_acl_participants(req.participants)
-    # 负责人/参与人互斥（2026-11-04）：参与人名单里剔除当前负责人
-    _row = dbq('SELECT owner FROM boards WHERE board_id=?', (bid,))
-    _own = ((_row[0]['owner'] if _row else '') or '')
-    if _own:
-        parts = ','.join([p for p in parts.split(',') if p and p != _own])
+    # 2026-11-05 用户修订：取消负责人/参与人互斥 —— 参与人名单不再剔除当前负责人。
     dbe('UPDATE boards SET participants=? WHERE board_id=?', (parts, bid))
     audit_log(username, client_ip(request), 'board_participants', f'看板 {bid}',
               f'设置看板参与人：{parts or "(无)"}', 'success')
@@ -4794,7 +4932,10 @@ async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(requ
     perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
                OP_ASSIGN_OWNER, LV_COLUMN_OWNER, 'column:' + key, min_level=LV_BOARD_OWNER)
     owner = _norm_acl_owner(req.owner)
-    dbe('UPDATE board_columns SET owner=?, participants=? WHERE col_key=?', (owner, '', key))
+    # 2026-11-05 用户修订：取消负责人/参与人互斥 —— 设板块负责人不再清空参与人。
+    _row = dbq('SELECT participants FROM board_columns WHERE col_key=?', (key,))
+    _parts = ((_row[0]['participants'] if _row else '') or '')
+    dbe('UPDATE board_columns SET owner=?, participants=? WHERE col_key=?', (owner, _parts, key))
     audit_log(username, client_ip(request), 'column_acl', f'板块 {key}',
               f'设置板块负责人：{owner or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})

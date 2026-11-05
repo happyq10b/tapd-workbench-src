@@ -5388,10 +5388,8 @@ async function colPickParticipants(anchor){
   const bid=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:document.getElementById('c_board').value;
   const pool=await colAclPool(bid);
   if(!pool.length){toast('所属看板尚未配置负责人与参与人，请先在【看板管理】中配置');return;}
-  // 互斥：参与人候选里排除当前负责人
-  const ownerName=COL_OWNER?colMemberName(COL_OWNER):'';
-  const cand=pool.filter(function(n){return n!==ownerName;});
-  if(!cand.length){toast('所属看板除负责人外没有其他成员，无法配置参与人');return;}
+  // 2026-11-05 用户修订：取消负责人/参与人互斥 —— 参与人候选**包含**当前负责人。
+  const cand=pool;
   const cur=COL_PARTS.map(function(a){return colMemberName(a);}).filter(Boolean);
   const preselect=cur.map(function(n){return ORG_PERSON_PREFIX+n;});
   openTreePick(anchor, preselect, function(persons){
@@ -5400,12 +5398,11 @@ async function colPickParticipants(anchor){
     persons.forEach(function(n){
       const acc=bcAccountByName(n);
       if(!acc){toast('成员「'+n+'」没有登录账号，无法设为参与人');return;}
-      if(acc===COL_OWNER)return;   // 互斥兜底
       if(accs.indexOf(acc)<0)accs.push(acc);
     });
     COL_PARTS=accs;
     colRenderParticipants();
-  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(cand,'可选人员（所属看板的负责人与参与人，不含负责人）'), keyword:'', requireAccount:true, clearable:true});
+  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(cand,'可选人员（所属看板的负责人与参与人）'), keyword:'', requireAccount:true, clearable:true});
 }
 function colClearParticipants(){
   COL_PARTS=[];
@@ -5422,8 +5419,7 @@ async function colPickOwner(anchor){
     const acc=bcAccountByName(persons[0]);
     if(!acc){toast('该成员没有登录账号，无法设为负责人');return;}
     COL_OWNER=acc;
-    // 互斥：负责人不能同时是参与人 → 自动从参与人中移除
-    if(COL_PARTS.indexOf(acc)>=0){COL_PARTS=COL_PARTS.filter(function(a){return a!==acc;});colRenderParticipants();}
+    // 2026-11-05：取消互斥 —— 负责人可同为参与人，不再自动移除
     colRenderOwner();
   }, {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(pool,'可选人员（所属看板的负责人与参与人）'), keyword:'', requireAccount:true, clearable:true});
 }
@@ -5929,9 +5925,7 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
   PP[containerId]={arr,tags,inp,drop,ALL,pair:pairId||'',isOwner:!!isOwner};
   const rt=()=>{tags.innerHTML=arr.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="ppRemove('${containerId}','${esc(n)}')">×</i></span>`).join('')};
   const rd=(f)=>{let list=ALL.filter(n=>!f||n.includes(f));
-    // 互斥：参与人下拉隐藏当前负责人（负责人下拉不隐藏 —— 选中即从参与人移除）
-    const _o=PP[containerId];
-    if(!_o.isOwner&&_o.pair&&PP[_o.pair]){const _ex=PP[_o.pair].arr;list=list.filter(n=>_ex.indexOf(n)<0);}
+    // 2026-11-05：取消负责人/参与人互斥 —— 参与人下拉不再隐藏当前负责人
     drop.innerHTML=list.map(n=>`<div class="pp-opt ${arr.includes(n)?'sel':''}" onmousedown="ppToggle('${containerId}','${esc(n)}')">${esc(n)}</div>`).join('')
       ||(ALL.length?'<div class="pp-empty">无匹配成员</div>':'<div class="pp-empty">无可选人员（请先在上级层级配置负责人/参与人）</div>');
     drop.style.display='block';};
@@ -6517,13 +6511,7 @@ function ppToggle(containerId,n){
   const i=o.arr.indexOf(n);
   if(i>=0)o.arr.splice(i,1);
   else{
-    // 负责人/参与人互斥（2026-11-04）：负责人优先 —— 选为负责人时自动从参与人中移除；
-    // 参与人侧不能选已当负责人的人（下拉已隐藏，这里兜底拦截）。
-    const p=(o.pair&&PP[o.pair])?PP[o.pair]:null;
-    if(p&&p.arr.indexOf(n)>=0){
-      if(o.isOwner){p.arr.splice(p.arr.indexOf(n),1);ppSyncTags(o.pair);ppRefreshDrop(o.pair);}
-      else{toast('「'+n+'」已是负责人，不能同时作为参与人');return;}
-    }
+    // 2026-11-05：取消负责人/参与人互斥 —— 两侧均可选同一人
     o.arr.push(n);
   }
   ppSyncTags(containerId);
@@ -6540,12 +6528,7 @@ function ppAddTyped(containerId){
     o.inp.value='';
     return;
   }
-  // 互斥（2026-11-04）：负责人优先 —— 负责人侧录入自动从参与人移除；参与人侧录入撞负责人则拦截
-  const _p=(o.pair&&PP[o.pair])?PP[o.pair]:null;
-  if(_p&&_p.arr.indexOf(v)>=0){
-    if(o.isOwner){_p.arr.splice(_p.arr.indexOf(v),1);ppSyncTags(o.pair);ppRefreshDrop(o.pair);}
-    else{toast(`「${v}」已是负责人，不能同时作为参与人`);o.inp.value='';return;}
-  }
+  // 2026-11-05：取消负责人/参与人互斥 —— 参与人侧录入撞负责人不再拦截
   if(!o.arr.includes(v))o.arr.push(v);
   o.inp.value='';
   ppSyncTags(containerId);
@@ -7544,8 +7527,16 @@ function renderOrgRoles(){
   }
   const node=ORG_FLAT.find(x=>x.id===nid);
   if(!node){box.innerHTML='';return}
-  // 岗位任命 = 组织架构结构维护 → 管理员专属（2026-11-03）
-  const canAppt=node.can_manage_node!==false;
+  // 岗位任命 = **后端分级能力位**（2026-11-05）：can_appoint_roles 由树接口下发，
+  //   与后端 _check_appoint_perm 同一判定 —— 管理员全部；部门长 → 中心负责人/总经理；
+  //   组长/组员 → 部门长。前端只消费能力位，不自行推断。
+  const canApptRoles=node.can_appoint_roles||[];
+  const canAppt=canApptRoles.length>0;
+  const apptTipFor=function(rk){
+    if(rk==='dept_head')return'部门长由中心负责人/总经理任命';
+    if(rk==='group_leader'||rk==='member')return'组长/组员由部门长任命';
+    return'该岗位由管理员任命';
+  };
   const roles=node.roles||[];
   const appts=node.appointments||[];
   const byRole={};
@@ -7553,6 +7544,7 @@ function renderOrgRoles(){
   let html='';
   roles.forEach(r=>{
     const list=byRole[r.role_key]||[];
+    const rCan=canApptRoles.indexOf(r.role_key)>=0;
     const slotTag=r.unique_slot
       ?'<span style="font-size:10.5px;color:#ad6800;background:#fffbe6;border:1px solid #ffd591;border-radius:3px;padding:0 5px">唯一</span>'
       :'<span style="font-size:10.5px;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:0 5px">可多人</span>';
@@ -7566,19 +7558,19 @@ function renderOrgRoles(){
       const multi=a.other_org_count>0
         ?`<span title="该成员另有 ${a.other_org_count} 个组织任职" style="font-size:10px;color:var(--primary);margin-left:3px">+${a.other_org_count}</span>`:'';
       html+=`<span class="org-chip" title="点击移除任职">${esc(a.member_name)}${multi}
-        ${canAppt?`<button class="org-chip-x" onclick="removeOrgAppt(${a.id},${esc(JSON.stringify(a.member_name))})" title="移除">✕</button>`:''}</span>`;
+        ${rCan?`<button class="org-chip-x" onclick="removeOrgAppt(${a.id},${esc(JSON.stringify(a.member_name))})" title="移除">✕</button>`:''}</span>`;
     });
     if(!list.length){
       html+='<span style="font-size:11.5px;color:var(--text3)">未配置</span>';
     }
     html+=`</div>
       <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
-        <select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${canAppt?'':' disabled'}>
+        <select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${rCan?'':' disabled'}>
           <option value="">选择成员…</option>
           ${ORG_MEMBERS.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
         </select>
-        ${canAppt?`<button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>`
-          :'<span style="font-size:11px;color:var(--text3);white-space:nowrap">任命由管理员操作</span>'}
+        ${rCan?`<button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>`
+          :`<span style="font-size:11px;color:var(--text3);white-space:nowrap">${apptTipFor(r.role_key)}</span>`}
       </div>
     </div>`;
   });
@@ -8890,15 +8882,7 @@ function orgTreeForNode(nodeId){
   (function walk(ns){(ns||[]).forEach(function(n){if(found)return;if(n.id===nodeId)found=n;walk(n.children||[]);});})(ORG_TREE);
   return found?[found]:ORG_TREE;
 }
-// 从树中剔除指定人员（参与人候选排除负责人 —— 互斥）
-function orgTreeWithoutNames(tree,names){
-  const ex=new Set(names||[]);
-  // ⚠️ members 是**对象**（{name,node_id}）—— 按 m.name 比对，ex.has(m) 永远 false
-  const prune=function(ns){return (ns||[]).map(function(n){
-    return Object.assign({},n,{members:(n.members||[]).filter(function(m){return !ex.has(m.name);}),
-      children:prune(n.children||[])});});};
-  return prune(tree);
-}
+// 从树中剔除指定人员（2026-11-05：取消负责人/参与人互斥后已无调用方，函数移除）
 function renderAclSection(b){
   const owner=BC_FORM.owner||'';
   const parts=BC_FORM.participants||[];
@@ -8958,10 +8942,7 @@ function bcOpenOwnerTree(anchor){
     const acc=bcAccountByName(persons[0]);
     if(!acc){toast('该成员没有登录账号，无法设为负责人');return;}
     BC_FORM.owner=acc;
-    // 互斥：负责人不能同时是参与人 → 自动从参与人中移除
-    if((BC_FORM.participants||[]).indexOf(acc)>=0){
-      BC_FORM.participants=BC_FORM.participants.filter(function(a){return a!==acc;});
-    }
+    // 2026-11-05：取消互斥 —— 负责人可同为参与人，不再自动移除
     renderEditArea();
   }, {mode:'filter', pickMode:'person', width:360, height:460,
       tree:orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept||'')), keyword:'', requireAccount:true});
@@ -8995,11 +8976,8 @@ function bcPickParticipants(anchor){
   }).catch(function(){toast('架构数据加载失败');});
 }
 function bcOpenParticipantsTree(anchor){
-  // 选人范围 = 归属架构子树（与负责人同池），并排除当前负责人（互斥）
-  const ownerName=BC_FORM.owner?bcMemberName(BC_FORM.owner):'';
-  const tree=orgTreeWithoutNames(
-    orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept||'')),
-    ownerName?[ownerName]:[]);
+  // 选人范围 = 归属架构子树（与负责人同池）。2026-11-05：取消互斥 —— 不再排除当前负责人。
+  const tree=orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept||''));
   const cur=(BC_FORM.participants||[]).map(function(a){return bcMemberName(a);}).filter(Boolean);
   openTreePick(anchor, cur.map(function(n){return ORG_PERSON_PREFIX+n;}), function(persons){
     if(!persons||!persons.length){BC_FORM.participants=[];renderEditArea();return;}
@@ -9007,7 +8985,6 @@ function bcOpenParticipantsTree(anchor){
     persons.forEach(function(n){
       const acc=bcAccountByName(n);
       if(!acc){toast('成员「'+n+'」没有登录账号，无法设为参与人');return;}
-      if(acc===BC_FORM.owner)return;   // 互斥兜底
       if(accs.indexOf(acc)<0)accs.push(acc);
     });
     BC_FORM.participants=accs;
