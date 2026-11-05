@@ -3825,6 +3825,41 @@ def _arch_owner_nodes(username: str) -> set:
     return out
 
 
+def _node_add_scope(username: str) -> set:
+    """可在其下新增子节点的节点集合（'+子节点' 按钮的可用范围，2026-11-05）。
+
+    口径（与用户需求一致，三档角色）：
+      · **超级管理员** → 全部节点（is_admin 走 require_admin 分支，此处不参与）。
+      · **架构负责人**（中心负责人 / 总经理）→ 管辖架构下的所有节点
+        （_arch_owner_nodes = 其负责节点 + 全部后代）。
+      · **组长**（小组组长 / 部门长）→ 自己担任负责人的节点及其后代
+        （_binding_manager_nodes = 其任命节点 + 全部后代）。
+    ⚠️ 组长只能在自己**所在组**下新增；常规小组按层级规则不可再挂子节点，
+       该能力由前端类型下拉（ORG_CHILD_RULES）与后端 _check_parent_ok 共同兜底。
+    """
+    if is_admin(username):
+        return {r['id'] for r in dbq('SELECT id FROM org_nodes')}
+    scope = set(_arch_owner_nodes(username)) | set(_binding_manager_nodes(username))
+    return scope
+
+
+def _check_add_parent(username: str, parent_id: int):
+    """新增节点的上级合法性 + 权限判定（2026-11-05 用户需求）。
+
+    · **无上级（parent_id=0）→ 仅超级管理员**：
+      与「财务中心」同级别的顶层节点，只能通过「＋新增节点」入口新增
+      （前端该按钮仅超管可见；此处服务端兜底）。
+    · **有上级 → 该上级节点必须落在本人可新增范围内**：
+      管理员=全部；架构负责人=管辖架构下；组长/部门长=自己管辖范围。
+    """
+    if is_admin(username):
+        return
+    if not parent_id:
+        raise HTTPException(403, '新增与「财务中心」同级别的顶层节点，仅超级管理员可操作')
+    if parent_id not in _node_add_scope(username):
+        raise HTTPException(403, '你只能在自己管辖的节点下新增子节点')
+
+
 def _org_node(node_id: int):
     rows = dbq('SELECT id, name, node_type, parent_id, wg_id, is_anchor, function'
                ' FROM org_nodes WHERE id=?', (node_id,))
@@ -4078,6 +4113,8 @@ def get_org_tree(username: str = Depends(require_auth)):
     bind_mgr = set() if is_admin(username) else _binding_manager_nodes(username)
     # 架构负责人（中心负责人/总经理）：管辖架构下全部节点可绑（2026-11-04 用户修订）
     arch_owner = set() if is_admin(username) else _arch_owner_nodes(username)
+    # 「+子节点」可用范围（2026-11-05）：管理员全部；架构负责人 / 组长按各自管辖范围。
+    add_scope = _node_add_scope(username)
 
     def build(pid):
         out = []
@@ -4092,6 +4129,8 @@ def get_org_tree(username: str = Depends(require_auth)):
             node['can_config_bind'] = bool(is_admin(username) or n['id'] in bind_mgr
                                            or n['id'] in arch_owner)
             node['can_manage_node'] = bool(is_admin(username))
+            # 「+子节点」可用范围（2026-11-05）：管理员全部；架构负责人 / 组长按管辖范围。
+            node['can_add_child'] = bool(n['id'] in add_scope)
             node['is_leader'] = (n['id'] in leader_ids)
             node['in_my_scope'] = bool(in_scope)
             # 「架构下所有看板」（2026-11-03）：本节点归属的 + 全部后代小组已绑定的。
@@ -4112,12 +4151,22 @@ def get_org_tree(username: str = Depends(require_auth)):
             'type_names': ORG_TYPE_NAMES}
 
 @app.post('/api/org/nodes')
-def create_org_node(req: OrgNodeReq, username: str = Depends(require_admin), request: Request = None):
-    """新增架构节点（中心/部门/常规小组/专项小组）"""
+def create_org_node(req: OrgNodeReq, username: str = Depends(require_auth), request: Request = None):
+    """新增架构节点（中心/部门/常规小组/专项小组）
+
+    权限分级（2026-11-05 用户需求）：
+      · **超级管理员** → 任意层级；且**只有「＋新增节点」入口**可以选「无上级」
+        （即与「财务中心」同级别的顶层节点）。
+      · **架构负责人**（中心负责人/总经理）→ 只能在自己管辖架构下的节点下新增子节点。
+      · **组长/部门长** → 只能在自己管辖范围内的节点下新增子节点。
+    ⚠️ 上级必须**已存在**（parent_id 必须指向真实节点）；
+       「无上级」= parent_id=0，仅超级管理员可达 —— 见 _check_add_parent。
+    """
     name = (req.name or '').strip()
     if not name:
         raise HTTPException(400, '节点名称不能为空')
     node_type = (req.node_type or '').strip()
+    _check_add_parent(username, req.parent_id)
     _check_parent_ok(node_type, req.parent_id)
     if dbq('SELECT 1 FROM org_nodes WHERE parent_id=? AND name=?', (req.parent_id, name)):
         raise HTTPException(409, f'同级下已存在同名节点「{name}」')
