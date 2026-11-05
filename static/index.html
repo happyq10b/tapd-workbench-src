@@ -8502,9 +8502,13 @@ async function openBoardConfigModal(){
             owner:'',participants:[]};
   // 默认不选中：进入看板管理时所有**看板**均未勾选（需用户主动勾选）
   BC_SEL=new Set();
+  // ⚠️ 先显示弹窗再渲染（2026-11-05 修首开尺寸异常）：
+  //    renderBoardList → setBcListScroll 用 offsetHeight 量行高算 maxHeight，
+  //    弹窗 display:none 时量到 0 → maxHeight 被设成 20px → 首开整个弹窗被压扁
+  //    （二次打开时值已被上次可见渲染纠正，所以「首开异常、二开正常」）。
+  document.getElementById('boardConfigModal').style.display='flex';
   renderBoardList();
   renderEditArea();
-  document.getElementById('boardConfigModal').style.display='flex';
 }
 async function loadBoardConfig(){
   const res=await api('/api/boards');
@@ -8708,6 +8712,9 @@ function renderBoardList(){
 function setBcListScroll(n){
   const box=document.getElementById('bcList');
   if(!box)return;
+  // ⚠️ 弹窗隐藏时 offsetHeight=0，量出来的行高是假的 → 算出的 maxHeight 会把列表压扁
+  //    （首开尺寸异常的根因之一）。隐藏态直接跳过，等可见时的下一次渲染再适配。
+  if(!box.offsetParent)return;
   if(n<=7){
     box.style.maxHeight='none';
     // ⚠️ 原为 'hidden' → 看板 ≤7 个时列表超高会被裁掉且**无法滚动**
