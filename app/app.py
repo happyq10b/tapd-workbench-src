@@ -547,9 +547,6 @@ def _dept_order():
     return ordered
 
 
-def _center_node_ids():
-    return {r['id'] for r in _dept_nodes() if r['node_type'] == 'center'}
-
 
 def _dept_owned_boards():
     """{部门节点 id: set(board_id)} —— 看板按「归属部门」的归属关系。"""
@@ -735,11 +732,14 @@ def _dept_stage_boards(username):
     owner = {}                          # board_id → 归属部门节点 id
     for r in dbq('SELECT board_id, dept_node_id FROM board_config'):
         owner[r['board_id']] = r['dept_node_id']
-    centers = _center_node_ids()
-    public = set()                      # 公共看板：未归属部门 / 归属中心
+    public = set()                      # 公共看板：**未归属部门**的看板
+    # ⚠️ 2026-11-05 用户规则修订：归属中心（财务中心）的看板**不再全员可见** ——
+    #    「当用户既不是看板负责人也不是参与人时，该看板对用户不可见」。
+    #    中心归属看板与其他看板一样走任命链（负责人/参与人/架构负责人负责范围）。
+    #    组织架构不受影响：中心节点在目录树恒显示（见 /api/me 的 dept_list），
+    #    只是点进去的看板列表按可见性过滤（可能为空）。
     for bid in all_ids:
-        nid = owner.get(bid, 0)
-        if not nid or nid in centers:
+        if not owner.get(bid, 0):
             public.add(bid)
     # ⚠️ **用「原始任命节点」而不是「向上提升后的部门」**（2026-11-02 修复）
     #
@@ -1578,7 +1578,11 @@ def me(username: str = Depends(require_auth)):
         dept_list = _dept_order()
     else:
         seen = {item.get('dept') for item in boards_out if item.get('dept')}
-        dept_list = [d for d in _dept_order() if d in seen]
+        # 2026-11-05 用户规则：中心（财务中心）在目录树**恒显示** ——
+        # 组织架构可见性不受看板任命影响；用户看不到中心归属的看板时，
+        # 点进去的看板列表为空。其余部门仍按「有可见看板」过滤。
+        center_names = {r['name'] for r in _dept_nodes() if r['node_type'] == 'center'}
+        dept_list = [d for d in _dept_order() if d in seen or d in center_names]
     # 我管理的看板 / 板块（2026-11-02 负责人语义）：
     #   负责人 = 管理权（可改该看板 / 板块的基本信息），不代表可见性。
     #   前端据此决定「看板管理」入口是否显示给非管理员。
