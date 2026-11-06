@@ -1854,7 +1854,7 @@ function goLogin(){
       <div id="imp_drop" style="border:2px dashed var(--border);border-radius:var(--radius);padding:28px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s">
         <div style="font-size:30px;line-height:1">📥</div>
         <div style="font-size:13px;margin-top:8px;color:var(--text)">点击选择文件，或拖拽 .xlsx 文件到此处</div>
-        <div style="font-size:11.5px;color:var(--text3);margin-top:4px">追加式导入：已有数据不会被删除；「事项ID」相同视为同一条并更新</div>
+        <div style="font-size:11.5px;color:var(--text3);margin-top:4px">仅新增导入：不会覆盖已有数据；编号由系统自动分配，模板无需填写 ID</div>
       </div>
       <div id="imp_file" style="display:none;align-items:center;gap:8px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;font-size:12.5px">
         <span>📄</span><span id="imp_file_name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
@@ -8820,7 +8820,7 @@ async function importData(ev){
   }catch(e){toast('导入失败：'+e.message);ev.target.value=''}
 }
 // ---------- 从 xlsx 导入 TAPD 数据（2026-11-06 #82：弹窗化） ----------
-// 追加式导入：库中已有数据不删除；card_id 相同视为同一条则更新。
+// 仅新增导入（2026-11-06 #86）：文件内 ID 类列一律忽略，编号系统生成；// 每行生成一条新事项，不覆盖不更新已有数据。
 // 交互：导入弹窗内「点击选择 / 拖拽上传」两种方式 + 模板下载入口；
 //       反馈用弹窗内嵌提示卡（与整体设计规范统一），toast 仅作轻提醒。
 let IMP_FILE=null;

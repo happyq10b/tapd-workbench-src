@@ -6018,6 +6018,12 @@ XLSX_IMPORT_COLS = [
 ]
 XLSX_REQUIRED = ['card_name', 'board_name']
 
+# 导入模板列（2026-11-06 #86）：移除全部 ID/编码类列（事项ID/看板ID/板块ID/工作空间ID）——
+# 上传后编号由系统自动生成；xlsx 导入为**仅新增**，不再支持按 ID 覆盖/更新已有记录。
+# 旧文件即使带 ID 列，导入时也会被忽略（向后兼容，不报错）。
+XLSX_TEMPLATE_COLS = [c for c in XLSX_IMPORT_COLS
+                      if c not in ('card_id', 'board_id', 'column_id', 'workspace_id')]
+
 # 中文表头（模板展示用）+ 反向别名表（导入时兼容中英文两种表头）
 XLSX_COL_LABELS = {
     'card_id': '事项ID',
@@ -6129,7 +6135,7 @@ def download_import_template(username: str = Depends(require_auth)):
     ws = wb.active
     ws.title = '导入数据'
     headers = [(XLSX_COL_LABELS.get(c, c) + (' *' if c in XLSX_REQUIRED else ''))
-               for c in XLSX_IMPORT_COLS]
+               for c in XLSX_TEMPLATE_COLS]
     ws.append(headers)
     # 提示样式校准（2026-11-06 #82-3）：与最新导出规范（#79 xlsx）统一 ——
     # 浅灰表头 F2F2F2 + 深色粗体字 + D0D0D0 细边框；必填列不再用红底重涂抹，
@@ -6139,7 +6145,7 @@ def download_import_template(username: str = Depends(require_auth)):
     hdr_font = Font(bold=True, color='1F1F1F', size=11)
     thin = Side(style='thin', color='D0D0D0')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for i, c in enumerate(XLSX_IMPORT_COLS, 1):
+    for i, c in enumerate(XLSX_TEMPLATE_COLS, 1):
         cell = ws.cell(1, i)
         required = c in XLSX_REQUIRED
         cell.fill = hdr_fill
@@ -6164,7 +6170,7 @@ def download_import_template(username: str = Depends(require_auth)):
         'modified': '2026-01-02 09:00:00', 'b_sort': '2',
     }
     for smp in (sample_a, sample_b):
-        ws.append([smp.get(c, '') for c in XLSX_IMPORT_COLS])
+        ws.append([smp.get(c, '') for c in XLSX_TEMPLATE_COLS])
     ws.freeze_panes = 'A2'
     ws.auto_filter.ref = ws.dimensions
 
@@ -6180,7 +6186,7 @@ def download_import_template(username: str = Depends(require_auth)):
     ws2.column_dimensions['A'].width = 20
     ws2.column_dimensions['B'].width = 12
     ws2.column_dimensions['C'].width = 56
-    for col in XLSX_IMPORT_COLS:
+    for col in XLSX_TEMPLATE_COLS:
         req = '必填' if col in XLSX_REQUIRED else '选填'
         label = XLSX_COL_LABELS.get(col, col)
         ws2.append([label + (' *' if col in XLSX_REQUIRED else ''), req, notes.get(col, '')])
@@ -6201,12 +6207,14 @@ def download_import_template(username: str = Depends(require_auth)):
         ['2. 表头为中文；带 * 号（红字）的列是必填列，只有两列：'],
         ['   「事项名称 *」和「所属看板名称 *」，其余均可留空。'],
         ['3. 负责人 / 知会人 / 关注人 多人时用英文分号 ; 分隔。'],
-        ['4. 导入为「追加式」：库中已有的数据不会被删除；'],
-        ['   「事项ID」相同视为同一条事项，会更新该条；留空则自动生成。'],
-        ['5. 导入的看板会自动登记到「看板管理」中，可在那边指定归属部门。'],
+        ['4. 导入为「仅新增」：每行都会生成一条新事项，编号由系统自动分配；'],
+        ['   不会覆盖或修改库中已有的任何数据（含同名的看板与板块）。'],
+        ['5. 看板按名称匹配：同名看板直接向其追加事项；不存在则自动登记到'],
+        ['   「看板管理」，归属部门稍后可在那边指定。'],
         ['6. 日期建议统一用 YYYY-MM-DD；Excel 单元格格式设为文本以免被自动转换。'],
         ['7. 以「示例」开头的事项名 / 看板名会被自动跳过，不会导入真实数据。'],
-        ['8. 表头也兼容英文写法（如 card_name / board_name），两种写法都能识别。'],
+        ['8. 表头兼容英文写法（如 card_name / board_name）；旧文件中的 ID 类'],
+        ['   列（事项ID/看板ID等）会被忽略，不影响导入。'],
         [''],
         ['示例数据为占位内容，正式导入前可自行删除（留着也不会被导入）。'],
     ]:
@@ -6298,26 +6306,32 @@ async def import_xlsx(request: Request, username: str = Depends(require_editor))
             if card_name.startswith('示例') or board_name.startswith('示例'):
                 skipped += 1
                 continue
-            board_id = norm_id(cell('board_id')) or ('B' + str(int(time.time() * 1000)) + str(len(new_boards)))
-            # 同一 xlsx 内同名的看板共用一个 board_id
+            # ── 看板匹配改为**按名称**（2026-11-06 #86：文件内 ID 类列一律忽略）──
+            # ① 同一 xlsx 内同名的看板共用一个 board_id；
+            # ② 库中已有同名看板 → 直接向其追加事项（不新建、不覆盖配置）；
+            # ③ 都没有 → 生成新 board_id 并登记（不写 board_config，归属部门稍后在「看板管理」指定）
             if board_name in new_boards:
                 board_id = new_boards[board_name]
             else:
-                new_boards[board_name] = board_id
-                # 看板不存在则登记（不写 board_config，归属部门稍后由管理员在「看板管理」指定）
-                if not dbq('SELECT 1 FROM boards WHERE board_id=?', (board_id,)):
+                existing = dbq('SELECT board_id FROM boards WHERE board_name=? LIMIT 1', (board_name,))
+                if existing:
+                    board_id = existing[0]['board_id']
+                else:
+                    board_id = 'B' + str(int(time.time() * 1000000)) + str(len(new_boards))
                     dbe('INSERT OR IGNORE INTO boards (board_id, board_name, workspace_id, owner, sort, created_at) '
                         'VALUES (?,?,?,?,?,?)',
-                        (board_id, board_name, cell('workspace_id'), cell('board_creator') or username, 0,
+                        (board_id, board_name, '', cell('board_creator') or username, 0,
                          time.strftime('%Y-%m-%d %H:%M:%S')))
-            card_id = norm_id(cell('card_id')) or ('C' + str(int(time.time() * 1000000)) + str(created + updated))
+                new_boards[board_name] = board_id
+            # ── 事项编号一律系统生成（#86：仅新增，文件内的 card_id 列被忽略）──
+            card_id = 'C' + str(int(time.time() * 1000000)) + str(created)
             status = cell('status').lower()
             status = XLSX_STATUS_MAP.get(status, status) or 'open'
             status_name = cell('status_name') or {'done': '已完成', 'progressing': '进行中', 'open': '未完成'}.get(status, '未完成')
             vals = {
                 'card_id': card_id, 'board_id': board_id, 'board_name': board_name,
-                'column_id': norm_id(cell('column_id')), 'column_name': cell('column_name'),
-                'workspace_id': norm_id(cell('workspace_id')), 'card_name': card_name,
+                'column_id': '', 'column_name': cell('column_name'),
+                'workspace_id': '', 'card_name': card_name,
                 'status': status, 'status_name': status_name,
                 'priority': cell('priority'), 'creator': cell('creator') or username,
                 'owner': cell('owner'), 'cc': cell('cc'), 'follower': cell('follower'),
@@ -6335,14 +6349,15 @@ async def import_xlsx(request: Request, username: str = Depends(require_editor))
                 'board_status': cell('board_status') or 'open',
                 'board_creator': cell('board_creator'), 'parent_id': '', 'version': '1', 'deleted': '0',
             }
-            exists = dbq('SELECT 1 FROM cards WHERE card_id=?', (card_id,))
+            # 仅新增（#86）：card_id 一律新生成，永不可能命中已有记录 → 纯 INSERT，
+            # 不再存在覆盖/更新路径；updated 恒为 0（保留返回字段兼容前端提示）
             cols = [k for k in CARD_FIELDS if k in vals]
-            conn.execute(f'INSERT OR REPLACE INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
+            conn.execute(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
                          [vals[k] for k in cols])
-            if exists:
-                updated += 1
-            else:
-                created += 1
+            # 板块不存在则按 board_id::板块名 自动登记（已存在的不动，不覆盖板块配置）
+            if cell('column_name'):
+                ensure_column(board_id, cell('column_name'), '', username)
+            created += 1
         conn.commit()
     except HTTPException:
         conn.rollback()
@@ -6353,7 +6368,7 @@ async def import_xlsx(request: Request, username: str = Depends(require_editor))
 
     log_action('__import_xlsx__', username, 'import', f'created={created} updated={updated} skipped={skipped}')
     audit_log(username, client_ip(request), 'import_xlsx', 'xlsx 数据导入',
-              f'新增 {created} 条、更新 {updated} 条、跳过 {skipped} 条', 'success')
+              f'仅新增导入：新增 {created} 条、跳过 {skipped} 条（不覆盖已有数据）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'created': created, 'updated': updated, 'skipped': skipped,
             'boards': len(new_boards)}
