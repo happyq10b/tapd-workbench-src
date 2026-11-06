@@ -977,7 +977,7 @@ def cleanup_empty_columns_and_boards() -> dict:
     return {'deleted_columns': deleted_cols, 'deleted_boards': deleted_boards}
 
 
-def user_allowed(username: str):
+def user_allowed(username: str, arch_only: bool = False):
     """返回 (boards, columns)：
     boards=None=全部看板，否则 set(board_id)（普通用户**永远**是显式集合）
     columns=None=全部板块，否则 dict {board_id: set(column_id)}（缺省=该看板全部板块）
@@ -985,6 +985,10 @@ def user_allowed(username: str):
     判定流程：
       ⓪ 超级管理员（role=admin，含内置 admin 账号）→ 直接返回 (None, None)，
          拥有当前及未来新增的全部权限，**不受架构权限过滤限制**；
+         ⚠️ arch_only=True 时**跳过本捷径**（2026-11-06 #77 用户确认：管理员的
+         权限独立于架构外，「不能因为是管理员就谁都能 @ 到」——评论 @ 候选池
+         等场景只算架构内可见路径，管理员只有同时具备架构内身份
+         （看板负责人/参与人/架构负责人/组员等）才进入候选；
       ① 架构授权集（fail-closed）—— 由 _arch_scope_boards() 汇总三层：
          · 归属部门层：挂靠部门拥有的看板（board_config.dept_node_id 派生）
          · 负责范围层：负责人额外拥有其负责范围（节点+后代）绑定的看板
@@ -1003,7 +1007,7 @@ def user_allowed(username: str):
     u = get_user(username)
     if not u:
         return set(), {}
-    if is_admin(username):
+    if is_admin(username) and not arch_only:
         return None, None
     # ① 架构授权集
     dept_boards = _dept_stage_boards(username)
@@ -2956,6 +2960,34 @@ def heartbeat(card_id: str, username: str = Depends(require_writer)):
     return {'ok': True}
 
 # ---------------- API：评论 / 日志 ----------------
+@app.get('/api/cards/{card_id}/mention_pool')
+def mention_pool(card_id: str, username: str = Depends(require_auth)):
+    """评论 @ 候选池（2026-11-06 #77）：对该卡片所属看板**有架构内可见路径**的成员姓名。
+
+    口径 = 可见性模型（user_allowed(arch_only=True)，唯一权威实现加显式开关，
+    不在外复制模型）：可见该看板的登录账号 → 映射回 team_members.name。
+
+    ⚠️ 管理员的**超管可见性不计入**（用户 2026-11-06 确认：管理员权限独立于
+    架构外，不能因为是管理员就谁都能 @ 到）——管理员只有同时具备架构内身份
+    （看板负责人/参与人/架构负责人/组员）才出现在候选池。
+    没有登录账号的成员无法登录也收不到提及消息（_mention_receiver 投递语义）→ 天然排除。
+    """
+    check_card_access(card_id, username)
+    row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if not row:
+        raise HTTPException(404, '事项不存在')
+    bid = row[0]['board_id']
+    names = set()
+    for u in dbq('SELECT username FROM users'):
+        acct = u['username']
+        boards, _cols = user_allowed(acct, arch_only=True)
+        if boards is not None and bid not in boards:
+            continue
+        for m in dbq('SELECT name FROM team_members WHERE account=?', (acct,)):
+            if (m['name'] or '').strip():
+                names.add(m['name'].strip())
+    return {'names': sorted(names)}
+
 @app.get('/api/cards/{card_id}/comments')
 def get_comments(card_id: str, username: str = Depends(require_auth)):
     # 可见性校验：该卡片所属看板对当前账号不可见 → 403（此前只做登录校验，

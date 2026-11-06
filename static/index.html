@@ -6545,6 +6545,9 @@ function ppRemove(containerId,n){
 // ---------- 详情 + 评论 ----------
 async function openDetail(id){
   DETAIL_ID=id;
+  // 评论 @ 候选池随卡片切换重置（2026-11-06 #77）：不同看板可见成员不同
+  MENTION_POOL=null;
+  api('/api/cards/'+id+'/mention_pool').then(p=>{MENTION_POOL=(p&&p.names)||[];}).catch(()=>{});
   // 用 card_id 精确取（默认列表只含顶层事项，取不到子事项）
   const d=await api('/api/cards?card_id='+id);
   const c=d.cards&&d.cards[0];
@@ -6612,6 +6615,9 @@ async function addComment(){
 let COMMENT_MENTIONS=[];      // 已插入的提及成员名
 let MENTION_QUERY='';         // 当前 @ 后的搜索词
 let MENTION_INDEX=0;          // 候选列表的键盘高亮位
+let MENTION_POOL=null;        // 评论 @ 候选池（2026-11-06 #77）：对当前卡片所属看板
+                              // 有可见权限的成员姓名（openDetail 时拉取）；
+                              // null = 尚未加载 → 兜底全员（与历史行为一致，避免拉取失败堵死评论）
 // 渲染已插入的提及 chip（与输入态视觉上明确区分）
 function renderMentionBar(){
   const bar=document.getElementById('d_mention_bar');
@@ -6625,10 +6631,11 @@ function removeMention(i){
   COMMENT_MENTIONS.splice(i,1);
   renderMentionBar();
 }
-// 候选成员（排除已提及的）
+// 候选成员（排除已提及的；2026-11-06 #77 起优先用服务端下发的
+// 「对该看板有可见权限」的成员池，未加载/拉取失败时兜底全员）
 function mentionCandidates(){
   const q=(MENTION_QUERY||'').trim();
-  const all=ppMembers();
+  const all=Array.isArray(MENTION_POOL)?MENTION_POOL:ppMembers();
   return all.filter(n=>!COMMENT_MENTIONS.includes(n)&&(!q||n.includes(q)));
 }
 // 渲染 @ 候选下拉
