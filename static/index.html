@@ -364,35 +364,39 @@ button{font-family:inherit}
    容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 167px 会让右侧按钮组被挤/换行。
    → 锁 min-width:1319px，由 html 的横向滚动承载（需求5 的既定方案）。
    ⚠️ 改任一子控件宽度都要同步此值，否则控件会被压回折行/截断状态。 */
-/* 工具栏整体最小宽度（2026-11-06 #81 重算）：板块筛选栏四框等宽（label 76 + field
-   104 + padding 14 = 194px ×4 = 776）+ 搜索框 167 + 日期区间 ~290 + gap 40
-   = 左 ~1293；右 158 + gap 20 + padding 32 → **1503px**。
-   1200px 视口下横向滚动承载（与 #56 既定方案一致）；
+/* 工具栏整体最小宽度（2026-11-06 #83 重算）：四框收窄后（label 50 + field 84 +
+   padding 14 = 148px ×4 = 592）主行 = 搜索 167 + 四框 592 + 日期 ~290 + gap 40
+   ≈ 1089；明细行 = 明细(可收缩) + 清空筛选 86 + 操作 64 ≈ 170。
+   → min-width 1089 + gap 10 + padding 32 = **1131px**，1200 视口（内容 1152）
+   内完整放下，不再横向溢出。
    ⚠️ 改任一子控件宽度都要同步此值，否则控件会被压回折行/截断状态。 */
-.toolbar{min-width:1503px}
+.toolbar{min-width:1131px}
 /* 筛选明细（当前生效条件汇总）：**独占一行**，宽度不限。
    需求（2026-11-02）：原先它夹在 .toolbar-left 里、与日期区间同行，
    受 max-width:260px + ellipsis 限制 → 明细被截断（「人员：王伟娜 | 周数：2026·第1...」），
    看不全当前到底筛了什么。→ 移出 .toolbar-left，用 flex-basis:100% 强制换行。
    空内容时不占位（:empty → display:none），避免多出一条空白行。 */
 .filter-hint{
-  order:10;flex:1 0 100%;min-width:0;
+  flex:1 1 auto;min-width:0;
   font-size:12px;color:var(--text2);line-height:1.6;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  padding-top:2px;
 }
 .filter-hint:empty{display:none}
 .search-input,.filter-select{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text)}
 .search-input:focus,.filter-select:focus{border-color:var(--primary)}
-/* 搜索框宽度（2026-11-06 #81）：板块筛选栏新增 🚦板块状态 + 🗓️归属年份 两个
-   combo 框后，搜索框从 min 260 压缩到 **167px**（placeholder「搜索事项 / 看板 /
+/* 搜索框宽度（2026-11-06 #83 修订）：板块筛选栏新增 🚦状态 + 🗓️年份 两个
+   combo 框后，搜索框 min 压缩到 **167px**（placeholder「搜索事项 / 看板 /
    板块…」的完整显示宽度，canvas 实测文本 139px + padding 24 + border 2 = 165，
-   留 2px 余量）→ 提示词完整可见。宽视口下仍由 flex 吸收剩余空间（max 760）。 */
-.search-input{min-width:167px;flex:1 1 167px;max-width:760px}
-/* 四个下拉筛选框等宽对称（2026-11-06 #81）：🚦板块状态 / 🗓️归属年份 为四字标签，
-   👤人员 / 📅周数为两字 —— 统一 label 定宽 76px 后四框总宽一致（emoji 已在文案内）。
-   仅影响本筛选栏（combo-filter 只在此使用）。 */
-.toolbar-left .cf-label{width:76px;box-sizing:border-box}
+   留 2px 余量）→ 提示词完整可见。
+   ⚠️ max-width 必须放开（1200）——否则宽视口下搜索框触顶、主行尾部出现空档，
+   日期框右缘缩进，而下方「清空筛选/操作」行仍贴满行宽 → 按钮比日期框凸出
+   （用户实测反馈的「没对齐」根因）。搜索吸收全部剩余空间 → 两行右缘恒对齐。 */
+.search-input{min-width:167px;flex:1 1 167px;max-width:1200px}
+/* 四个下拉筛选框等宽对称（2026-11-06 #83 重算）：标签统一两字（🚦状态/🗓️年份/
+   👤人员/📅周数）→ label 定宽收窄 76→50px；field 104→84px；四框 = 153px 等宽。
+   主行 = 搜索 167 + 四框 612 + 日期 ~290 + gap 40 ≈ 1109，1200 视口（内容 1152）内
+   完整放下，不再横向溢出；「清空筛选/操作」移到明细行右端后 toolbar-right 不再占主行。 */
+.toolbar-left .cf-label{width:50px;box-sizing:border-box}
 /* ↑ 2026-11-04 #56：max-width 520→760 —— 工具栏右侧合并出一个按钮位后，
    多出的 ~300px 空白全部由搜索框吸收（需求：拉宽搜索栏、无浪费空间）。 */
 /* ↑ max-width 230→360：搜索框要能吃掉 .toolbar-left 的 grow 空间，
@@ -1478,10 +1482,10 @@ function goLogin(){
       <!-- 板块状态筛选（2026-11-06 #81）：按板块完成情况（未完成/进行中/已完成）多选，
            客户端过滤板块行（cols 载荷自带 completion）。与人员/周数/归属年份四框等宽对称。 -->
       <span class="combo-filter" id="colStatusWrap" title="按板块状态筛选（可多选）">
-        <span class="cf-label">🚦 板块状态</span>
+        <span class="cf-label">🚦 状态</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="colStatusInput" autocomplete="off" readonly
-                 placeholder="全部" onclick="toggleColStatusDrop(event)" onfocus="toggleColStatusDrop(event)"
+                 placeholder="" onclick="toggleColStatusDrop(event)" onfocus="toggleColStatusDrop(event)"
                  aria-label="板块状态筛选，可多选">
           <span class="cf-count" id="colStatusCount"></span>
           <span class="cf-chips" id="colStatusChips"></span>
@@ -1494,10 +1498,10 @@ function goLogin(){
            服务端交互完全兼容；仅渲染层从「chips 带」换成「combo 框」。
            id 保持 yearFilter / yearDrop → 全局点击委托零改动。 -->
       <span class="combo-filter" id="yearFilter" title="按归属年份筛选板块（可多选）">
-        <span class="cf-label">🗓️ 归属年份</span>
+        <span class="cf-label">🗓️ 年份</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="yearFilterInput" autocomplete="off" readonly
-                 placeholder="全部年份" onclick="toggleYearDrop(event)" onfocus="toggleYearDrop(event)"
+                 placeholder="" onclick="toggleYearDrop(event)" onfocus="toggleYearDrop(event)"
                  aria-label="归属年份筛选，可多选">
           <span class="cf-count" id="yearFilterCount"></span>
           <span class="cf-chips" id="yearFilterChips"></span>
@@ -1547,17 +1551,12 @@ function goLogin(){
          （截图实测：「人员：王伟娜 | 周数：2026·第1...」后半截看不到）。
          → 移出 .toolbar-left，作为 .toolbar 的独立子项，用 flex-basis:100% 强制换行。
          → 宽度放宽到 100%，明细完整可读。 -->
-    <span id="filterHint" class="filter-hint"></span>
-    <div class="toolbar-right" style="display:flex;gap:8px">
-      <!-- 2026-11-04 用户需求：①【清空筛选】放在新建板块原位置；②新建板块移到最后；
-           ③【展开板块/折叠板块】精简为【展开/折叠】（title 保留完整语义） -->
-      <!-- 需求1（2026-11-04）：【清空筛选】配蓝色底色（主操作色） -->
-      <button class="btn-clear" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/板块状态/归属年份/人员/周数/日期区间）">清空筛选</button>
-      <!-- 2026-11-04 #56：展开/折叠/导入导出/新建板块 全部并入「操作 ▾」菜单
-           （refreshToolbarOps 按 ME 权限注册，行尾唯一按钮）。
-           applyPermissionUI 对 newBtn/xlsxImportBtn/jsonImportBtn 的 getElementById
-           均为 null 安全 → 原 id 移除后无需改权限代码。 -->
-      <span class="slot-ops"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
+    <!-- 筛选明细行（2026-11-06 #83）：明细文本居左，「清空筛选 / 操作」恒定贴行右端
+         （margin-left:auto，不依赖明细有无 —— :empty 隐藏明细时按钮也不塌向左端）。 -->
+    <div style="order:10;flex:1 0 100%;display:flex;align-items:center;gap:8px;min-width:0">
+      <span id="filterHint" class="filter-hint" style="flex:1 1 auto"></span>
+      <button class="btn-clear" style="flex-shrink:0;margin-left:auto" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/年份/人员/周数/日期区间）">清空筛选</button>
+      <span class="slot-ops" style="flex-shrink:0;width:auto"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
     </div>
   </div>
   <main class="board-content" id="boardContent"></main>
@@ -2169,7 +2168,7 @@ function goLogin(){
    否则 chips（104px 宽）与输入框（52px）在 104px 的 field 里会换行 →
    field 高度翻倍 → 工具栏被顶高。chips 与输入框必须同行并排。 */
 .cf-field{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;min-width:0;
-  width:104px;max-width:220px;flex:0 1 auto}
+  width:84px;max-width:220px;flex:0 1 auto}
 .cf-input{border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;
   min-width:52px;flex:0 1 52px;color:var(--text);font-family:inherit}
 .cf-input::placeholder{color:var(--text3)}
