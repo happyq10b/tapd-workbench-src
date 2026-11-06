@@ -364,7 +364,12 @@ button{font-family:inherit}
    容器 .wrap 在 1200px 视口下内宽只有 1152px → 差 167px 会让右侧按钮组被挤/换行。
    → 锁 min-width:1319px，由 html 的横向滚动承载（需求5 的既定方案）。
    ⚠️ 改任一子控件宽度都要同步此值，否则控件会被压回折行/截断状态。 */
-.toolbar{min-width:1319px}
+/* 工具栏整体最小宽度（2026-11-06 #81 重算）：板块筛选栏四框等宽（label 76 + field
+   104 + padding 14 = 194px ×4 = 776）+ 搜索框 167 + 日期区间 ~290 + gap 40
+   = 左 ~1293；右 158 + gap 20 + padding 32 → **1503px**。
+   1200px 视口下横向滚动承载（与 #56 既定方案一致）；
+   ⚠️ 改任一子控件宽度都要同步此值，否则控件会被压回折行/截断状态。 */
+.toolbar{min-width:1503px}
 /* 筛选明细（当前生效条件汇总）：**独占一行**，宽度不限。
    需求（2026-11-02）：原先它夹在 .toolbar-left 里、与日期区间同行，
    受 max-width:260px + ellipsis 限制 → 明细被截断（「人员：王伟娜 | 周数：2026·第1...」），
@@ -379,13 +384,15 @@ button{font-family:inherit}
 .filter-hint:empty{display:none}
 .search-input,.filter-select{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;background:#fff;color:var(--text)}
 .search-input:focus,.filter-select:focus{border-color:var(--primary)}
-/* 搜索框限宽并可压缩：给右侧的创建日期区间腾出空间，保持整行不换行 */
-/* 搜索框：宽度按「placeholder 完整显示」定，不按拍脑袋。
-   实测（canvas 量字）：「搜索事项 / 看板 / 板块…」文本宽 139px，
-   加 padding(12×2)+border(1×2) → 需框宽 **167px**。
-   原 max-width:230px 但 flex-basis:150px → 实际只拿到 135px，placeholder 被截断。
-   → 改 flex-basis:170px / min-width:167px，保证提示词完整可见。 */
-.search-input{min-width:260px;flex:1 1 260px;max-width:760px}
+/* 搜索框宽度（2026-11-06 #81）：板块筛选栏新增 🚦板块状态 + 🗓️归属年份 两个
+   combo 框后，搜索框从 min 260 压缩到 **167px**（placeholder「搜索事项 / 看板 /
+   板块…」的完整显示宽度，canvas 实测文本 139px + padding 24 + border 2 = 165，
+   留 2px 余量）→ 提示词完整可见。宽视口下仍由 flex 吸收剩余空间（max 760）。 */
+.search-input{min-width:167px;flex:1 1 167px;max-width:760px}
+/* 四个下拉筛选框等宽对称（2026-11-06 #81）：🚦板块状态 / 🗓️归属年份 为四字标签，
+   👤人员 / 📅周数为两字 —— 统一 label 定宽 76px 后四框总宽一致（emoji 已在文案内）。
+   仅影响本筛选栏（combo-filter 只在此使用）。 */
+.toolbar-left .cf-label{width:76px;box-sizing:border-box}
 /* ↑ 2026-11-04 #56：max-width 520→760 —— 工具栏右侧合并出一个按钮位后，
    多出的 ~300px 空白全部由搜索框吸收（需求：拉宽搜索栏、无浪费空间）。 */
 /* ↑ max-width 230→360：搜索框要能吃掉 .toolbar-left 的 grow 空间，
@@ -1407,14 +1414,8 @@ function goLogin(){
       <div class="tb-band tb-board-band">
         <div class="tb-band-head">
           <div class="tb-band-title">可选看板</div>
-          <!-- 归属年份筛选（2026-11-03 用户需求）：原在顶栏标题右侧，
-               与「可选看板」的内容割裂（年份筛的是看板下的板块，却放在平台标题旁）。
-               → 移到【可选看板】带标题行内，紧跟标题、位于【看板管理】入口左侧。
-               id 不变 → renderYearFilter() / renderYearDrop() 零改动。 -->
-          <div class="year-picker">
-            <div class="year-filter" id="yearFilter" title="按归属年份筛选板块（可多选；点「＋ 年份」选择，点 ✕ 移除）"></div>
-            <div class="year-drop" id="yearDrop" hidden></div>
-          </div>
+          <!-- 归属年份筛选已移入下方筛选工具栏（2026-11-06 #81 用户需求）：
+               改为与周数同款的 combo 多选下拉，与本栏解耦。 -->
           <!-- 【看板管理】入口：并入【可选看板】带的标题行右侧（同上，id 不变） -->
           <div class="tb-band-head-entry" id="boardEntryBand">
             <div class="tb-entry-row" id="boardEntryRow"></div>
@@ -1474,6 +1475,35 @@ function goLogin(){
   <div class="toolbar">
     <div class="toolbar-left">
       <input type="text" class="search-input" id="searchInput" placeholder="搜索事项 / 看板 / 板块…" oninput="debounceReload()">
+      <!-- 板块状态筛选（2026-11-06 #81）：按板块完成情况（未完成/进行中/已完成）多选，
+           客户端过滤板块行（cols 载荷自带 completion）。与人员/周数/归属年份四框等宽对称。 -->
+      <span class="combo-filter" id="colStatusWrap" title="按板块状态筛选（可多选）">
+        <span class="cf-label">🚦 板块状态</span>
+        <span class="cf-field">
+          <input type="text" class="cf-input" id="colStatusInput" autocomplete="off" readonly
+                 placeholder="全部" onclick="toggleColStatusDrop(event)" onfocus="toggleColStatusDrop(event)"
+                 aria-label="板块状态筛选，可多选">
+          <span class="cf-count" id="colStatusCount"></span>
+          <span class="cf-chips" id="colStatusChips"></span>
+        </span>
+        <div class="cf-drop" id="colStatusDrop" hidden></div>
+      </span>
+      <!-- 归属年份筛选（2026-11-06 #81）：从【可选看板】带标题行移入本栏，改为
+           与周数同款的 combo 下拉（多选 + 全选/清空）。状态机不变：curYears /
+           renderYearFilter / buildFilterParams 的 years 参数零改动 → 过滤语义与
+           服务端交互完全兼容；仅渲染层从「chips 带」换成「combo 框」。
+           id 保持 yearFilter / yearDrop → 全局点击委托零改动。 -->
+      <span class="combo-filter" id="yearFilter" title="按归属年份筛选板块（可多选）">
+        <span class="cf-label">🗓️ 归属年份</span>
+        <span class="cf-field">
+          <input type="text" class="cf-input" id="yearFilterInput" autocomplete="off" readonly
+                 placeholder="全部年份" onclick="toggleYearDrop(event)" onfocus="toggleYearDrop(event)"
+                 aria-label="归属年份筛选，可多选">
+          <span class="cf-count" id="yearFilterCount"></span>
+          <span class="cf-chips" id="yearFilterChips"></span>
+        </span>
+        <div class="cf-drop" id="yearDrop" hidden></div>
+      </span>
       <!-- 状态下拉已移除（2026-11-04）：状态筛选改由顶部统计卡片点击承担（支持多选组合） -->
       <!-- 人员筛选：入口**直接是【架构树】**（含全部末级人员 + 「无负责人」选项）。
            原先的候选下拉面板只列「事项负责人」名单，多数场景为空（显示"暂无可选人员"），
@@ -1522,7 +1552,7 @@ function goLogin(){
       <!-- 2026-11-04 用户需求：①【清空筛选】放在新建板块原位置；②新建板块移到最后；
            ③【展开板块/折叠板块】精简为【展开/折叠】（title 保留完整语义） -->
       <!-- 需求1（2026-11-04）：【清空筛选】配蓝色底色（主操作色） -->
-      <button class="btn-clear" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/人员/周数/日期区间）">清空筛选</button>
+      <button class="btn-clear" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/板块状态/归属年份/人员/周数/日期区间）">清空筛选</button>
       <!-- 2026-11-04 #56：展开/折叠/导入导出/新建板块 全部并入「操作 ▾」菜单
            （refreshToolbarOps 按 ME 权限注册，行尾唯一按钮）。
            applyPermissionUI 对 newBtn/xlsxImportBtn/jsonImportBtn 的 getElementById
@@ -4173,17 +4203,22 @@ function removeFilterChip(kind,val){
   reload(1);
 }
 // 【清空筛选】（2026-11-04）：一键清空筛选行的全部条件 ——
-//   搜索词 / 人员 / 周数 / 创建日期区间（统计卡的状态筛选与年份 chip 不在本行，不受影响）
+//   搜索词 / 人员 / 周数 / 创建日期区间（统计卡的状态筛选不在本行，不受影响）
+//   2026-11-06 #81：归属年份（移入本栏）与板块状态（新增）也纳入本行清空范围
 function clearAllRowFilters(){
   const q=document.getElementById('searchInput');
   if(q)q.value='';
   PERSON_SEL=new Set();
   WEEK_SEL=new Set();
+  curYears=new Set();
+  COL_STATUS_SEL=new Set();
   const s=document.getElementById('createdStart'),e=document.getElementById('createdEnd');
   if(s)s.value='';
   if(e)e.value='';
   syncDateFilterUI();
   paintFilterCombos();
+  paintYearChips();
+  paintColStatus();
   reload(1);
 }
 function clearFilterSel(kind){
@@ -4324,12 +4359,14 @@ function filtersActive(q){
   if(WEEK_SEL&&WEEK_SEL.size)return true;
   if(PERSON_SEL&&PERSON_SEL.size)return true;
   if(typeof curYears!=='undefined'&&curYears&&curYears.size)return true;   // 归属年份筛选
+  if(typeof COL_STATUS_SEL!=='undefined'&&COL_STATUS_SEL&&COL_STATUS_SEL.size)return true;   // 板块状态筛选（#81）
   return false;
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
   renderYearFilter(cols);
+  paintColStatus();   // 板块状态 combo 首绘/重绘（2026-11-06 #81）
   // 有搜索词时切换到「统一搜索结果」视图
   if(q){renderSearchResults(c,cards,cols,q,colHits||[]);return}
   const cmeta={};
@@ -4364,6 +4401,14 @@ function renderBoard(cards,cols,q,colHits){
     names=names.filter(k=>{const m=cmeta[k];return !!m&&curYears.has(m.year||'')});
     if(!names.length){
       c.innerHTML=`<div class="empty">${esc([...curYears].join(' / '))} 年下暂无板块</div>`;
+      return;
+    }
+  }
+  // 板块状态过滤（2026-11-06 #81）：按 completion（空值视同 open/未完成）客户端过滤
+  if(COL_STATUS_SEL&&COL_STATUS_SEL.size){
+    names=names.filter(k=>{const m=cmeta[k];return !!m&&COL_STATUS_SEL.has(m.completion||'open')});
+    if(!names.length){
+      c.innerHTML='<div class="empty">没有符合状态条件的板块</div>';
       return;
     }
   }
@@ -4470,10 +4515,8 @@ function renderBoard(cards,cols,q,colHits){
 // 现在：移除/清空只调 paintYearChips()（纯重绘，不做校验）；
 // 只有看板切换等场景才走 renderYearFilter(cols)（带校验）。
 let _yearOptions=[];        // 当前看板可用的年份列表（选项来源）
-let _yearDropOpen=false;    // 「+ 年份」下拉是否展开
+let _yearDropOpen=false;    // 归属年份下拉是否展开
 function renderYearFilter(cols){
-  const box=document.getElementById('yearFilter');
-  if(!box)return;
   const years=[...new Set((cols||[]).map(x=>x.year||'').filter(Boolean))].sort().reverse();
   _yearOptions=years;
   // 已选年份在当前看板不存在时（换看板 / 改年份）：先回落到当前年份，
@@ -4488,43 +4531,49 @@ function renderYearFilter(cols){
   }
   paintYearChips();
 }
-// 纯重绘：按当前 curYears 渲染 chips，**不做任何校验**（移除/清空后走这里）
+// 纯重绘：按当前 curYears 渲染 combo 框内容（chips + 计数 + 面板），**不做任何校验**
+// （2026-11-06 #81：UI 从【可选看板】带头的 chips 带改为筛选工具栏的 combo 框，
+//  状态机与全部调用点不变；「全部年份」从 chip 降为输入框 placeholder = 空集合语义）
 function paintYearChips(){
-  const box=document.getElementById('yearFilter');
-  if(!box)return;
-  if(!_yearOptions.length){box.hidden=true;box.innerHTML='';return}
-  box.hidden=false;
-  const chips=[];
-  [...curYears].sort().reverse().forEach(y=>{
-    chips.push(`<span class="year-chip" title="已选年份 ${y}，点 × 移除">${esc(y)} 年<span class="yc-x" data-year="${esc(y)}" title="移除该年份">✕</span></span>`);
-  });
-  // 「+ 年份」：展开可选年份列表（这是**新增**选择的入口）
-  chips.push(`<span class="year-chip add${_yearDropOpen?' on':''}" data-add="1" title="选择年份（可多选）">＋ 年份</span>`);
-  // 「全部年份」：清空全部已选（空集合 = 不过滤）
-  chips.push(`<span class="year-chip all${curYears.size?'':' on'}" data-all="1" title="清空全部已选年份">全部年份</span>`);
-  box.innerHTML=chips.join('');
+  const wrap=document.getElementById('yearFilter');
+  const chips=document.getElementById('yearFilterChips');
+  const count=document.getElementById('yearFilterCount');
+  const inp=document.getElementById('yearFilterInput');
+  if(!wrap)return;
+  if(!_yearOptions.length){wrap.hidden=true;return}
+  wrap.hidden=false;
+  if(chips)chips.innerHTML=[...curYears].sort().reverse().map(y=>
+    `<span class="cf-chip" title="已选年份 ${esc(y)} 年"><span>${esc(y)} 年</span><i onclick="removeYearChip('${esc(y)}')">×</i></span>`).join('');
+  if(count)count.textContent=curYears.size?('已选 '+curYears.size):'';
+  if(wrap)wrap.classList.toggle('active',curYears.size>0);
   paintYearDrop();
 }
-// 「+ 年份」下拉：列出当前看板可用年份，已选的打勾
+// 归属年份下拉面板：全选/清空 + 勾选式年份列表（替代旧「＋ 年份」chips 入口）
 function paintYearDrop(){
   const drop=document.getElementById('yearDrop');
   if(!drop)return;
   if(!_yearDropOpen||!_yearOptions.length){drop.hidden=true;drop.innerHTML='';return}
   drop.hidden=false;
-  drop.innerHTML=_yearOptions.map(y=>{
-    const on=curYears.has(y);
-    return `<label class="year-opt${on?' on':''}"><input type="checkbox"${on?' checked':''} data-pick-year="${esc(y)}">`
-      +`<span class="yo-tick">${on?'✓':''}</span><span>${esc(y)} 年</span></label>`;
-  }).join('');
+  drop.innerHTML='<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'
+    +'<span>点击勾选（可多选）</span>'
+    +'<span style="display:flex;gap:4px;flex-shrink:0">'
+    +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-year-all="1" title="勾选全部年份">全选</button>'
+    +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-year-clear="1" title="清空已选年份（= 全部年份）">清空</button>'
+    +'</span></div>'
+    +_yearOptions.map(y=>{
+      const on=curYears.has(y);
+      return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-year="${esc(y)}"><span>${esc(y)} 年</span></label>`;
+    }).join('');
 }
-// 展开/收起「+ 年份」下拉
+// 展开/收起归属年份下拉（输入框 focus/click 触发；幂等的「确保打开」）
 function toggleYearDrop(ev){
   if(ev)ev.stopPropagation();
   if(!_yearOptions.length)return;
+  if(!_yearDropOpen){closeFilterCombo();closeColStatusDrop();}
   _yearDropOpen=!_yearDropOpen;
   paintYearChips();
 }
-// 在下拉里勾选/取消某个年份
+// 在面板里勾选/取消某个年份
 function toggleYearPick(y){
   if(!y)return;
   if(curYears.has(y))curYears.delete(y);
@@ -4532,35 +4581,103 @@ function toggleYearPick(y){
   paintYearChips();
   reload(1);
 }
+function removeYearChip(y){
+  if(!y)return;
+  curYears.delete(y);
+  paintYearChips();     // 只重绘，不校验（否则会连其它年份一起清掉）
+  reload(1);
+}
 function closeYearDrop(){
   if(!_yearDropOpen)return;
   _yearDropOpen=false;
   paintYearChips();
 }
-// 点击 ✕ 移除单个年份；点击「全部年份」清空全部；点「＋ 年份」展开可选列表
+// 面板勾选 / 全选 / 清空 / chip ✕ —— 事件委托到 document（面板是 innerHTML 重建的）
 function onYearFilterClick(ev){
   const t=ev.target;
-  if(!t)return;
-  // 下拉里的复选框 → 切换该年份的选中状态
-  if(t.dataset&&t.dataset.pickYear){
-    toggleYearPick(t.dataset.pickYear);
+  if(!t||!t.closest)return;
+  if(t.closest('#yearDrop [data-pick-year]')){
+    toggleYearPick(t.closest('[data-pick-year]').getAttribute('data-pick-year'));
     return;
   }
-  if(t.dataset&&t.dataset.year){
-    curYears.delete(t.dataset.year);
-    paintYearChips();     // 只重绘，不校验（否则会连其它年份一起清掉）
+  if(t.closest('#yearDrop [data-year-all]')){
+    curYears=new Set(_yearOptions);
+    paintYearChips();
     reload(1);
     return;
   }
-  if(t.dataset&&t.dataset.add){
-    toggleYearDrop(ev);
-    return;
-  }
-  if(t.dataset&&t.dataset.all){
+  if(t.closest('#yearDrop [data-year-clear]')){
     curYears=new Set();
     paintYearChips();
     reload(1);
+    return;
   }
+  if(t.dataset&&t.dataset.year){
+    removeYearChip(t.dataset.year);
+    return;
+  }
+}
+// ---------- 板块状态筛选（2026-11-06 #81） ----------
+// completion ∈ ('open','progressing','done')（与后端 COLUMN_COMPLETIONS 同一套）；
+// 空集合 = 全部。客户端过滤板块行（/api/cards 的 cols 载荷自带 completion）。
+const COL_STATUS_OPTS=[['open','未完成'],['progressing','进行中'],['done','已完成']];
+let COL_STATUS_SEL=new Set();     // 已选状态（空 = 全部）
+let _colStatusDropOpen=false;
+function colStatusLabel(v){
+  const o=COL_STATUS_OPTS.find(x=>x[0]===v);
+  return o?o[1]:v;
+}
+// 纯重绘：chips + 计数 + 面板（模式与周数/归属年份 combo 一致）
+function paintColStatus(){
+  const wrap=document.getElementById('colStatusWrap');
+  const chips=document.getElementById('colStatusChips');
+  const count=document.getElementById('colStatusCount');
+  if(!wrap)return;
+  if(chips)chips.innerHTML=[...COL_STATUS_SEL].map(v=>
+    `<span class="cf-chip" title="${esc(colStatusLabel(v))}"><span>${esc(colStatusLabel(v))}</span><i onclick="removeColStatusChip('${esc(v)}')">×</i></span>`).join('');
+  if(count)count.textContent=COL_STATUS_SEL.size?('已选 '+COL_STATUS_SEL.size):'';
+  wrap.classList.toggle('active',COL_STATUS_SEL.size>0);
+  paintColStatusDrop();
+}
+function paintColStatusDrop(){
+  const drop=document.getElementById('colStatusDrop');
+  if(!drop)return;
+  if(!_colStatusDropOpen){drop.hidden=true;drop.innerHTML='';return}
+  drop.hidden=false;
+  drop.innerHTML='<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'
+    +'<span>按板块完成情况筛选（可多选）</span>'
+    +'<span style="display:flex;gap:4px;flex-shrink:0">'
+    +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-cs-all="1" title="勾选全部状态">全选</button>'
+    +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-cs-clear="1" title="清空已选状态（= 全部）">清空</button>'
+    +'</span></div>'
+    +COL_STATUS_OPTS.map(o=>{
+      const on=COL_STATUS_SEL.has(o[0]);
+      return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-cs="${o[0]}"><span>${o[1]}</span></label>`;
+    }).join('');
+}
+// 展开/收起（幂等的「确保打开」；与周数/年份 combo 的互斥由 closeFilterCombo/closeYearDrop 承担）
+function toggleColStatusDrop(ev){
+  if(ev)ev.stopPropagation();
+  if(!_colStatusDropOpen){closeFilterCombo();closeYearDrop();}
+  _colStatusDropOpen=!_colStatusDropOpen;
+  paintColStatus();
+}
+function toggleColStatusPick(v){
+  if(!v)return;
+  if(COL_STATUS_SEL.has(v))COL_STATUS_SEL.delete(v);
+  else COL_STATUS_SEL.add(v);
+  paintColStatus();
+  reload(1);
+}
+function removeColStatusChip(v){
+  COL_STATUS_SEL.delete(v);
+  paintColStatus();
+  reload(1);
+}
+function closeColStatusDrop(){
+  if(!_colStatusDropOpen)return;
+  _colStatusDropOpen=false;
+  paintColStatus();
 }
 // ---------- 搜索结果：事项与板块统一展示 ----------
 // 板块名命中 → 该板块成组展示（标注「板块名匹配」）
@@ -6885,8 +7002,21 @@ document.addEventListener('click',e=>{
   const t=e.target;
   if(!t||!t.closest)return;
   if(t.closest('#yearFilter')||t.closest('#yearDrop')){onYearFilterClick(e);return}
-  // 点其它地方 → 收起「＋ 年份」下拉
+  // 点其它地方 → 收起归属年份下拉
   closeYearDrop();
+  // 板块状态面板（2026-11-06 #81）：勾选 / 全选 / 清空；点别处 → 收起
+  const csOpt=t.closest('#colStatusDrop [data-pick-cs]');
+  if(csOpt){toggleColStatusPick(csOpt.getAttribute('data-pick-cs'));return}
+  if(t.closest('#colStatusDrop [data-cs-all]')){
+    COL_STATUS_SEL=new Set(COL_STATUS_OPTS.map(o=>o[0]));
+    paintColStatus(); reload(1); return;
+  }
+  if(t.closest('#colStatusDrop [data-cs-clear]')){
+    COL_STATUS_SEL=new Set();
+    paintColStatus(); reload(1); return;
+  }
+  if(t.closest('#colStatusWrap'))return;
+  closeColStatusDrop();
   // 可输入筛选（周数）：面板内点击 → 勾选 / 清空；点别处 → 收起
   // ⚠️ 人员筛选的入口已改为【架构树】弹窗，没有下拉面板了
   const wOpt=t.closest('#weekFilterDrop [data-pick-week]');
