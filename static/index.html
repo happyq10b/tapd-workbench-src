@@ -4614,7 +4614,7 @@ function paintYearDrop(){
   const kw=(YEAR_KW||'').trim();
   const cand=_yearOptions.filter(y=>!kw||y.includes(kw));
   drop.innerHTML='<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'
-    +'<span>点击勾选（可多选）；也可直接输入年份回车</span>'
+    +'<span>可直接输入年份回车</span>'
     +'<span style="display:flex;gap:4px;flex-shrink:0">'
     +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-year-all="1" title="勾选全部年份">全选</button>'
     +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-year-clear="1" title="清空已选年份（= 全部年份）">清空</button>'
@@ -4626,12 +4626,12 @@ function paintYearDrop(){
       }).join('')
       :'<div class="cf-empty">无匹配年份（可直接输入如 2026 回车）</div>');
 }
-// 展开/收起归属年份下拉（输入框 focus/click 触发；幂等的「确保打开」）
+// 展开（2026-11-06 #85 修复「单击闪退」，同状态框——幂等「确保打开」，不做翻转）
 function toggleYearDrop(ev){
   if(ev)ev.stopPropagation();
   if(!_yearOptions.length)return;
   if(!_yearDropOpen){closeFilterCombo();closeColStatusDrop();}
-  _yearDropOpen=!_yearDropOpen;
+  _yearDropOpen=true;
   paintYearChips();
 }
 // 在面板里勾选/取消某个年份
@@ -4716,11 +4716,15 @@ function paintColStatusDrop(){
       return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-cs="${o[0]}"><span>${o[1]}</span></label>`;
     }).join('');
 }
-// 展开/收起（幂等的「确保打开」；与周数/年份 combo 的互斥由 closeFilterCombo/closeYearDrop 承担）
+// 展开（2026-11-06 #85 修复「单击闪退」）：输入框同时绑定 focus 与 click——
+// 一次点击的事件顺序是 focus → click，旧实现是 toggle 翻转：focus 先打开、
+// click 再翻转关闭 → 面板闪一下就消失，第二次点击才展开。
+// 现改为**幂等的「确保打开」**（与周数 openFilterCombo 同语义）；
+// 收起只由「点击面板外」的 document 委托承担。
 function toggleColStatusDrop(ev){
   if(ev)ev.stopPropagation();
   if(!_colStatusDropOpen){closeFilterCombo();closeYearDrop();}
-  _colStatusDropOpen=!_colStatusDropOpen;
+  _colStatusDropOpen=true;
   paintColStatus();
 }
 function toggleColStatusPick(v){
