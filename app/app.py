@@ -5577,6 +5577,90 @@ def export_fields(username: str = Depends(require_auth)):
     return {'fields': [{'title': t, 'key': k} for t, k, _w in XLSX_COLUMNS]}
 
 
+# ---------------- 导出模板（2026-11-06 #80） ----------------
+# 每用户独立；模板 = 名称 + 按序字段 key 列表 + 版式（当前仅 xlsx）。
+# 「应用模板」= 前端把 fields 按序填进勾选 → 走 /api/export/xlsx?fields=...，
+# 导出主链路零改动（与 #79 的字段选择完全兼容）。
+
+def _validate_template_fields(fields):
+    """校验并规范化模板字段：非空、全部合法、保序去重（相邻重复合并）。"""
+    if not isinstance(fields, list):
+        raise HTTPException(400, 'fields 必须是字段 key 列表')
+    keys, seen = [], set()
+    valid = {k for _t, k, _w in XLSX_COLUMNS}
+    for f in fields:
+        k = (str(f) or '').strip()
+        if not k:
+            continue
+        if k not in valid:
+            raise HTTPException(400, '未知的导出字段：' + k)
+        if k not in seen:
+            seen.add(k)
+            keys.append(k)
+    if not keys:
+        raise HTTPException(400, '请至少选择一个导出字段')
+    return keys
+
+@app.get('/api/export/templates')
+def list_export_templates(username: str = Depends(require_auth)):
+    rows = dbq('SELECT id, name, fields, fmt, created_at, updated_at '
+               'FROM export_templates WHERE username=? ORDER BY updated_at DESC, id DESC', (username,))
+    tmap = {k: t for t, k, _w in XLSX_COLUMNS}
+    out = []
+    for r in rows:
+        keys = [x for x in (r['fields'] or '').split(',') if x]
+        out.append({'id': r['id'], 'name': r['name'], 'fields': keys, 'fmt': r['fmt'],
+                    'titles': [tmap.get(k, k) for k in keys],
+                    'created_at': r['created_at'], 'updated_at': r['updated_at']})
+    return {'templates': out}
+
+@app.post('/api/export/templates')
+def create_export_template(req: dict, username: str = Depends(require_auth), request: Request = None):
+    name = (req.get('name') or '').strip()
+    if not name:
+        raise HTTPException(400, '模板名称不能为空')
+    if len(name) > 50:
+        raise HTTPException(400, '模板名称不能超过 50 字')
+    keys = _validate_template_fields(req.get('fields'))
+    if dbq('SELECT id FROM export_templates WHERE username=? AND name=?', (username, name)):
+        raise HTTPException(409, '已存在同名模板「%s」' % name)
+    cur = dbe('INSERT INTO export_templates (username, name, fields, fmt) VALUES (?,?,?,?)',
+              (username, name, ','.join(keys), 'xlsx'))
+    audit_log(username, client_ip(request), 'export_template_create',
+              name, '新增导出模板（%d 个字段）' % len(keys), 'success')
+    return {'ok': True, 'id': cur.lastrowid}
+
+@app.put('/api/export/templates/{tid}')
+def update_export_template(tid: int, req: dict, username: str = Depends(require_auth), request: Request = None):
+    row = dbq('SELECT id, name FROM export_templates WHERE id=? AND username=?', (tid, username))
+    if not row:
+        raise HTTPException(404, '模板不存在')
+    name = (req.get('name') or '').strip()
+    if not name:
+        raise HTTPException(400, '模板名称不能为空')
+    if len(name) > 50:
+        raise HTTPException(400, '模板名称不能超过 50 字')
+    keys = _validate_template_fields(req.get('fields'))
+    dup = dbq('SELECT id FROM export_templates WHERE username=? AND name=? AND id<>?', (username, name, tid))
+    if dup:
+        raise HTTPException(409, '已存在同名模板「%s」' % name)
+    dbe('UPDATE export_templates SET name=?, fields=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?',
+        (name, ','.join(keys), tid))
+    audit_log(username, client_ip(request), 'export_template_update',
+              name, '修改导出模板（%d 个字段）' % len(keys), 'success')
+    return {'ok': True}
+
+@app.delete('/api/export/templates/{tid}')
+def delete_export_template(tid: int, username: str = Depends(require_auth), request: Request = None):
+    row = dbq('SELECT name FROM export_templates WHERE id=? AND username=?', (tid, username))
+    if not row:
+        raise HTTPException(404, '模板不存在')
+    dbe('DELETE FROM export_templates WHERE id=?', (tid,))
+    audit_log(username, client_ip(request), 'export_template_delete',
+              row[0]['name'], '删除导出模板', 'success')
+    return {'ok': True}
+
+
 @app.get('/api/export/xlsx')
 def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
                 owner: str = '', column: str = '', q: str = '',

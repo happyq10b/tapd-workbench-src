@@ -1781,15 +1781,39 @@ function goLogin(){
     <div class="modal-body">
       <div style="font-size:12px;color:var(--text3)">勾选需要导出的字段；列顺序 = 勾选的先后顺序（序号实时更新）</div>
       <div style="display:flex;gap:8px;align-items:center">
+        <select id="exp_tpl_sel" class="form-select" style="flex:1;padding:4px 8px;font-size:12px">
+          <option value="">—— 应用已存模板（一键填充勾选）——</option>
+        </select>
+        <button class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="applyExpTpl()">应用</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
         <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expAll()">全选</button>
         <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expNone()">清空</button>
         <span id="exp_count" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
       </div>
       <div id="exp_fields" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;max-height:46vh;overflow:auto"></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="exp_tpl_name" class="form-input" placeholder="把当前勾选保存为模板…" style="flex:1;padding:4px 10px;font-size:12px">
+        <button id="exp_tpl_save" class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="saveExpTpl()">保存为模板</button>
+        <button class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="openExportTplManager()">管理模板</button>
+      </div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
       <button class="btn-default" onclick="closeModal('exportModal')">取消</button>
       <button class="btn-primary" onclick="submitExport()">导出</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导出模板管理（2026-11-06 #80）：列表展示 名称 / 版式 / 字段，应用·编辑·删除 -->
+<div class="modal-overlay" id="exportTplModal" style="display:none">
+  <div class="modal" style="width:640px;max-width:94vw">
+    <div class="modal-header"><h2>导出模板</h2>
+      <button class="modal-close" onclick="closeModal('exportTplModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text3)">模板 = 字段勾选 + 列顺序的整体存档；应用到导出弹窗后可一键按模板导出</div>
+      <div id="exp_tpl_list" style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow:auto"></div>
     </div>
   </div>
 </div>
@@ -2634,7 +2658,8 @@ function refreshToolbarOps(canEdit){
     {label:'折叠板块',fn:function(){collapseAll();}},
     {label:'— 数据导入导出 —',disabled:true},
     {label:'下载导入模板',fn:function(){downloadImportTemplate();}},
-    {label:'导出（xlsx）',fn:function(){openExportModal();}});
+    {label:'导出（xlsx）',fn:function(){openExportModal();}},
+    {label:'导出模板',fn:function(){openExportTplManager();}});
   if(canEdit)items.push({label:'导入（xlsx）',fn:function(){document.getElementById('xlsxFile').click();}});
   ROW_OPS['toolbarOps']=items;
 }
@@ -8363,22 +8388,134 @@ async function adminDeleteUser(name){
   catch(e){toast(e.message)}
 }
 // ---------- 导出 / 导入 ----------
-// ---------- 导出字段选择弹窗（2026-11-06 #79） ----------
+// ---------- 导出字段选择弹窗（2026-11-06 #79）+ 导出模板（#80） ----------
 // 字段清单来自后端 /api/export/fields（单一数据源 = XLSX_COLUMNS，前端不存副本）。
 // EXP_PICKS 保存**按勾选先后顺序**的 key 列表 —— 列顺序 = 勾选顺序，序号徽标实时更新。
+// EXP_TPLS = 用户已存的导出模板（#80）；EXP_EDITING_ID > 0 = 正在编辑某模板。
 let EXP_FIELDS=[];   // [{title,key}]，弹窗打开时拉取
 let EXP_PICKS=[];    // 已勾选的 key（按勾选先后排序）
+let EXP_TPLS=[];     // 已保存的导出模板
+let EXP_EDITING_ID=0;
+async function ensureExpFields(){
+  if(!EXP_FIELDS.length){
+    const d=await api('/api/export/fields');
+    EXP_FIELDS=(d&&d.fields)||[];
+  }
+}
+async function loadExpTpls(){
+  const d=await api('/api/export/templates');
+  EXP_TPLS=(d&&d.templates)||[];
+  const sel=document.getElementById('exp_tpl_sel');
+  if(sel)sel.innerHTML='<option value="">—— 应用已存模板（一键填充勾选）——</option>'
+    +EXP_TPLS.map(t=>`<option value="${t.id}">${esc(t.name)}（${t.fields.length} 字段）</option>`).join('');
+}
 async function openExportModal(){
   try{
-    if(!EXP_FIELDS.length){
-      const d=await api('/api/export/fields');
-      EXP_FIELDS=(d&&d.fields)||[];
-    }
+    await ensureExpFields();
+    try{await loadExpTpls()}catch(e){}          // 模板加载失败不挡导出
     // 每次打开默认全选（按默认顺序），用户可在其基础上增删
+    EXP_EDITING_ID=0;
+    document.getElementById('exp_tpl_save').textContent='保存为模板';
+    document.getElementById('exp_tpl_name').value='';
     EXP_PICKS=EXP_FIELDS.map(f=>f.key);
     renderExpFields();
     document.getElementById('exportModal').style.display='flex';
   }catch(e){toast(e.message)}
+}
+function applyExpTpl(){
+  const id=Number(document.getElementById('exp_tpl_sel').value||0);
+  if(!id){toast('请先在下拉中选择一个模板');return}
+  const t=EXP_TPLS.find(x=>x.id===id);
+  if(!t){toast('模板不存在，请重新打开');return}
+  // 模板字段里可能含已下线的 key → 过滤掉再填充（保守降级，不挡导出）
+  const valid=new Set(EXP_FIELDS.map(f=>f.key));
+  EXP_PICKS=t.fields.filter(k=>valid.has(k));
+  renderExpFields();
+  toast('已应用模板「'+t.name+'」：'+EXP_PICKS.length+' 个字段');
+}
+function saveExpTpl(){
+  const name=(document.getElementById('exp_tpl_name').value||'').trim();
+  if(!name){toast('请输入模板名称');return}
+  if(!EXP_PICKS.length){toast('请先勾选导出字段');return}
+  if(EXP_EDITING_ID){
+    api('/api/export/templates/'+EXP_EDITING_ID,{method:'PUT',body:JSON.stringify({name,fields:EXP_PICKS})})
+      .then(async()=>{toast('模板「'+name+'」已更新');EXP_EDITING_ID=0;
+        document.getElementById('exp_tpl_save').textContent='保存为模板';
+        document.getElementById('exp_tpl_name').value='';
+        await loadExpTpls();})
+      .catch(e=>toast(e.message));
+  }else{
+    api('/api/export/templates',{method:'POST',body:JSON.stringify({name,fields:EXP_PICKS})})
+      .then(async()=>{toast('模板「'+name+'」已保存');document.getElementById('exp_tpl_name').value='';
+        await loadExpTpls();})
+      .catch(e=>toast(e.message));
+  }
+}
+async function openExportTplManager(){
+  try{
+    await ensureExpFields();
+    try{await loadExpTpls()}catch(e){}
+    renderExpTplList();
+    document.getElementById('exportTplModal').style.display='flex';
+  }catch(e){toast(e.message)}
+}
+function renderExpTplList(){
+  const box=document.getElementById('exp_tpl_list');
+  if(!box)return;
+  if(!EXP_TPLS.length){
+    box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:16px 0;text-align:center">'
+      +'暂无模板 —— 在导出弹窗里勾选字段后「保存为模板」</div>';
+    return;
+  }
+  box.innerHTML=EXP_TPLS.map(t=>`
+    <div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <b style="font-size:13px">${esc(t.name)}</b>
+        <span style="font-size:11px;color:var(--text3)">${esc(t.fmt||'xlsx')} · ${t.fields.length} 个字段 · 更新于 ${esc(t.updated_at||'')}</span>
+        <span style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn-default" style="padding:3px 10px;font-size:12px" onclick="tplApply(${t.id})">应用到导出</button>
+          <button class="btn-default" style="padding:3px 10px;font-size:12px" onclick="tplEdit(${t.id})">编辑</button>
+          <button class="btn-default" style="padding:3px 10px;font-size:12px;color:var(--danger)" onclick="tplDelete(${t.id})">删除</button>
+        </span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
+        ${t.titles.map((x,i)=>`<span style="font-size:11px;color:var(--primary);background:#eef5ff;border-radius:8px;padding:1px 8px">${(i+1)}. ${esc(x)}</span>`).join('')}
+      </div>
+    </div>`).join('');
+}
+function tplApply(id){
+  const t=EXP_TPLS.find(x=>x.id===id);
+  if(!t)return;
+  const valid=new Set(EXP_FIELDS.map(f=>f.key));
+  EXP_PICKS=t.fields.filter(k=>valid.has(k));
+  EXP_EDITING_ID=0;
+  document.getElementById('exp_tpl_save').textContent='保存为模板';
+  document.getElementById('exp_tpl_name').value='';
+  renderExpFields();
+  closeModal('exportTplModal');
+  document.getElementById('exportModal').style.display='flex';
+  toast('已应用模板「'+t.name+'」：'+EXP_PICKS.length+' 个字段');
+}
+function tplEdit(id){
+  const t=EXP_TPLS.find(x=>x.id===id);
+  if(!t)return;
+  const valid=new Set(EXP_FIELDS.map(f=>f.key));
+  EXP_PICKS=t.fields.filter(k=>valid.has(k));
+  EXP_EDITING_ID=id;
+  document.getElementById('exp_tpl_name').value=t.name;
+  document.getElementById('exp_tpl_save').textContent='更新模板';
+  renderExpFields();
+  closeModal('exportTplModal');
+  document.getElementById('exportModal').style.display='flex';
+  toast('正在编辑模板「'+t.name+'」——调整勾选后点「更新模板」');
+}
+function tplDelete(id){
+  const t=EXP_TPLS.find(x=>x.id===id);
+  if(!t)return;
+  if(!confirm('删除模板「'+t.name+'」？不可恢复'))return;
+  api('/api/export/templates/'+id,{method:'DELETE'})
+    .then(async()=>{toast('模板已删除');await loadExpTpls();renderExpTplList();})
+    .catch(e=>toast(e.message));
 }
 function renderExpFields(){
   const box=document.getElementById('exp_fields');

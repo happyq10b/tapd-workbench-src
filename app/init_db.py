@@ -359,6 +359,17 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     last_ip       TEXT NOT NULL DEFAULT '',        -- 最后一次失败的来源 IP
     updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+-- 导出模板（2026-11-06 #80）：每用户独立；fields = 逗号分隔列 key，顺序 = 导出列序
+CREATE TABLE IF NOT EXISTS export_templates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    fields      TEXT NOT NULL,
+    fmt         TEXT NOT NULL DEFAULT 'xlsx',      -- 导出版式（当前仅 xlsx）
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_exp_tpl_user ON export_templates(username);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(username);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
