@@ -983,12 +983,13 @@ def user_allowed(username: str, arch_only: bool = False):
     columns=None=全部板块，否则 dict {board_id: set(column_id)}（缺省=该看板全部板块）
 
     判定流程：
-      ⓪ 超级管理员（role=admin，含内置 admin 账号）→ 直接返回 (None, None)，
-         拥有当前及未来新增的全部权限，**不受架构权限过滤限制**；
-         ⚠️ arch_only=True 时**跳过本捷径**（2026-11-06 #77 用户确认：管理员的
-         权限独立于架构外，「不能因为是管理员就谁都能 @ 到」——评论 @ 候选池
-         等场景只算架构内可见路径，管理员只有同时具备架构内身份
-         （看板负责人/参与人/架构负责人/组员等）才进入候选；
+      ⓪ 超级管理员 / 管理员（is_admin：内置 admin 账号 + role='admin'，如 dsy）
+         → 直接返回 (None, None)，拥有当前及未来新增的全部权限，
+         **不受架构权限过滤限制**（2026-11-06 用户确认：管理员权限独立于架构外）；
+         ⚠️ arch_only=True 时**跳过本捷径**（2026-11-06 #77 用户确认：「不能因为是
+         管理员就谁都能 @ 到」——评论 @ 候选池等场景只算架构内可见路径，
+         管理员只有同时具备架构内身份（看板负责人/参与人/架构负责人/组员等）
+         才进入候选；
       ① 架构授权集（fail-closed）—— 由 _arch_scope_boards() 汇总三层：
          · 归属部门层：挂靠部门拥有的看板（board_config.dept_node_id 派生）
          · 负责范围层：负责人额外拥有其负责范围（节点+后代）绑定的看板
@@ -1007,6 +1008,12 @@ def user_allowed(username: str, arch_only: bool = False):
     u = get_user(username)
     if not u:
         return set(), {}
+    # ⓪ 超管/管理员豁免（2026-11-06 用户确认口径）：管理员权限**独立于架构外**
+    #    ——role=admin（如 dsy）与内置 admin 一样全量可见；唯一例外是
+    #    arch_only=True（评论 @ 候选池等「把可见者当关系人」的场景，
+    #    「不能因为是管理员就谁都能 @ 到」）。
+    #    超级管理员 vs 管理员的区分见 is_admin docstring（仅 admin 账号受
+    #    不可删/改密/改角色保护），可见性行为两者一致。
     if is_admin(username) and not arch_only:
         return None, None
     # ① 架构授权集
@@ -1039,8 +1046,13 @@ def can_edit(username: str) -> bool:
 def is_admin(username: str) -> bool:
     """管理员判定：角色为 admin 即管理员（内置 admin 账号恒为管理员）。
 
-    ★ 超级管理员语义：拥有当前及未来新增的**全部**权限，
-      不受架构权限过滤限制（user_allowed 直接返回 None/None）。
+    ★ 两级称谓（2026-11-06 用户确认「超级管理员有且仅有 admin」）：
+      - 超级管理员 = 仅 SUPER_ADMIN（内置 admin 账号）——唯一受「不可删 /
+        改密码 / 改角色 / 换绑」保护的账号；
+      - 管理员（role='admin'，如 dsy）= 普通管理账号。
+      两者**权限行为一致**：全量可见 + 豁免架构过滤（用户确认：管理员权限
+      独立于架构外）；唯一例外是 user_allowed(arch_only=True) 的场景
+      （评论 @ 候选池——「不能因为是管理员就谁都能 @ 到」）。
       判定口径必须全局唯一 —— 此前 user_allowed 用「账号名 == 'admin'」、
       require_admin 用「角色 == 'admin'」，两套口径不一致，导致 role=admin 的
       账号（如 dsy）被架构层过滤，却又能调全部管理接口。
