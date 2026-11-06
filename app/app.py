@@ -5568,11 +5568,21 @@ XLSX_COLUMNS = [
     ('父事项名称', '_parent_name', 24),
 ]
 
+@app.get('/api/export/fields')
+def export_fields(username: str = Depends(require_auth)):
+    """导出字段清单（2026-11-06 #79）：字段选择弹窗的数据源。
+
+    单一数据源 = XLSX_COLUMNS（与实际导出列同一份），前端不硬编码副本。
+    """
+    return {'fields': [{'title': t, 'key': k} for t, k, _w in XLSX_COLUMNS]}
+
+
 @app.get('/api/export/xlsx')
 def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
                 owner: str = '', column: str = '', q: str = '',
                 created_start: str = '', created_end: str = '',
                 cc: str = '', week: str = '', person: str = '', years: str = '',
+                fields: str = '',
                 username: str = Depends(require_auth), request: Request = None):
     """导出**当前筛选结果**的事项为 xlsx（.xlsx，一维表，每行一个事项）
 
@@ -5647,8 +5657,22 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
     cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
     body_align = Alignment(vertical='top', wrap_text=True)
 
+    # 字段选择（2026-11-06 #79）：fields = 逗号分隔的列 key，**顺序 = 用户勾选顺序**；
+    # 未提供（旧入口兼容）→ 全部字段按默认顺序。未知 key 直接拒绝（fail-fast，
+    # 避免拼错字段名静默少列）；解析后为空 = 前端未勾选兜底 → 400。
+    cols = XLSX_COLUMNS
+    if fields:
+        keys = [x.strip() for x in fields.split(',') if x.strip()]
+        kmap = {k: (t, k, w) for t, k, w in XLSX_COLUMNS}
+        unknown = [k for k in keys if k not in kmap]
+        if unknown:
+            raise HTTPException(400, '未知的导出字段：' + ', '.join(unknown))
+        if not keys:
+            raise HTTPException(400, '请至少勾选一个导出字段')
+        cols = [kmap[k] for k in keys]
+
     # 表头
-    for idx, (title, _key, _w) in enumerate(XLSX_COLUMNS, start=1):
+    for idx, (title, _key, _w) in enumerate(cols, start=1):
         c = ws.cell(row=1, column=idx, value=title)
         c.font = header_font
         c.alignment = header_align
@@ -5657,7 +5681,7 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
 
     # 数据行（逐格写入，不做任何单元格合并）
     for r, card in enumerate(cards, start=2):
-        for idx, (_title, key, _w) in enumerate(XLSX_COLUMNS, start=1):
+        for idx, (_title, key, _w) in enumerate(cols, start=1):
             val = card.get(key)
             if val is None:
                 val = ''
@@ -5666,13 +5690,13 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
             c.border = cell_border
 
     # 列宽
-    for idx, (_title, _key, width) in enumerate(XLSX_COLUMNS, start=1):
+    for idx, (_title, _key, width) in enumerate(cols, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = width
 
     # 冻结首行 + 自动筛选（增强可读性，不涉及合并）
     ws.freeze_panes = 'A2'
     if cards:
-        ws.auto_filter.ref = f'A1:{get_column_letter(len(XLSX_COLUMNS))}{len(cards) + 1}'
+        ws.auto_filter.ref = f'A1:{get_column_letter(len(cols))}{len(cards) + 1}'
 
     # 落盘到内存
     buf = io.BytesIO()

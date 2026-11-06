@@ -898,6 +898,12 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .modal-footer{cursor:move}
 .modal-dragging{cursor:grabbing;user-select:none}
 .modal-body{display:flex;flex-direction:column;gap:12px}
+/* 导出字段选择（2026-11-06 #79）：字段行 + 勾选顺序序号徽标 */
+.exp-field{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px}
+.exp-field:hover{background:rgba(47,128,237,.08)}
+.exp-field input{cursor:pointer}
+.exp-idx{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:var(--primary);color:#fff;font-size:11px;font-weight:600;margin-left:auto}
+.exp-field:not(.on) .exp-idx{display:none}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .form-group label{display:block;font-size:12px;color:var(--text2);margin-bottom:4px}
 .form-input,.form-select,.form-textarea{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;outline:none;font-family:inherit;background:#fff;color:var(--text)}
@@ -1766,6 +1772,28 @@ function goLogin(){
 </div>
 
 <!-- 详情弹窗 -->
+<!-- 导出字段选择弹窗（2026-11-06 #79）：勾选字段 + 实时序号，列顺序 = 勾选先后 -->
+<div class="modal-overlay" id="exportModal" style="display:none">
+  <div class="modal" style="width:480px;max-width:94vw">
+    <div class="modal-header"><h2>选择导出字段</h2>
+      <button class="modal-close" onclick="closeModal('exportModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text3)">勾选需要导出的字段；列顺序 = 勾选的先后顺序（序号实时更新）</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expAll()">全选</button>
+        <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expNone()">清空</button>
+        <span id="exp_count" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
+      </div>
+      <div id="exp_fields" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;max-height:46vh;overflow:auto"></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn-default" onclick="closeModal('exportModal')">取消</button>
+      <button class="btn-primary" onclick="submitExport()">导出</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="detailModal" style="display:none">
   <div class="modal modal-wide">
     <div class="modal-header"><h2 id="d_title"></h2>
@@ -2606,7 +2634,7 @@ function refreshToolbarOps(canEdit){
     {label:'折叠板块',fn:function(){collapseAll();}},
     {label:'— 数据导入导出 —',disabled:true},
     {label:'下载导入模板',fn:function(){downloadImportTemplate();}},
-    {label:'导出（xlsx）',fn:function(){exportXlsx();}});
+    {label:'导出（xlsx）',fn:function(){openExportModal();}});
   if(canEdit)items.push({label:'导入（xlsx）',fn:function(){document.getElementById('xlsxFile').click();}});
   ROW_OPS['toolbarOps']=items;
 }
@@ -8335,13 +8363,65 @@ async function adminDeleteUser(name){
   catch(e){toast(e.message)}
 }
 // ---------- 导出 / 导入 ----------
+// ---------- 导出字段选择弹窗（2026-11-06 #79） ----------
+// 字段清单来自后端 /api/export/fields（单一数据源 = XLSX_COLUMNS，前端不存副本）。
+// EXP_PICKS 保存**按勾选先后顺序**的 key 列表 —— 列顺序 = 勾选顺序，序号徽标实时更新。
+let EXP_FIELDS=[];   // [{title,key}]，弹窗打开时拉取
+let EXP_PICKS=[];    // 已勾选的 key（按勾选先后排序）
+async function openExportModal(){
+  try{
+    if(!EXP_FIELDS.length){
+      const d=await api('/api/export/fields');
+      EXP_FIELDS=(d&&d.fields)||[];
+    }
+    // 每次打开默认全选（按默认顺序），用户可在其基础上增删
+    EXP_PICKS=EXP_FIELDS.map(f=>f.key);
+    renderExpFields();
+    document.getElementById('exportModal').style.display='flex';
+  }catch(e){toast(e.message)}
+}
+function renderExpFields(){
+  const box=document.getElementById('exp_fields');
+  if(!box)return;
+  box.innerHTML=EXP_FIELDS.map(f=>{
+    const i=EXP_PICKS.indexOf(f.key);
+    return `<label class="exp-field ${i>=0?'on':''}">`
+      +`<input type="checkbox" ${i>=0?'checked':''} onchange="expToggle('${f.key}')">`
+      +`<span>${esc(f.title)}</span>`
+      +`<span class="exp-idx">${i>=0?(i+1):''}</span></label>`;
+  }).join('');
+  const cnt=document.getElementById('exp_count');
+  if(cnt)cnt.textContent='已选 '+EXP_PICKS.length+' / '+EXP_FIELDS.length+' 项';
+}
+function expToggle(key){
+  const i=EXP_PICKS.indexOf(key);
+  if(i>=0)EXP_PICKS.splice(i,1);
+  else EXP_PICKS.push(key);          // push 到尾部 = 勾选顺序
+  renderExpFields();
+}
+function expAll(){
+  EXP_PICKS=EXP_FIELDS.map(f=>f.key);
+  renderExpFields();
+}
+function expNone(){
+  EXP_PICKS=[];
+  renderExpFields();
+}
+function submitExport(){
+  if(!EXP_PICKS.length){toast('请至少勾选一个导出字段');return}
+  closeModal('exportModal');
+  exportXlsx(EXP_PICKS.slice());
+}
+
 // 导出 Excel（xlsx）：走后端生成，格式与 TAPD 导出一致，全平铺无合并单元格
-async function exportXlsx(){
+// fields（2026-11-06 #79）：逗号分隔的列 key，顺序 = 用户在字段弹窗里的勾选顺序
+async function exportXlsx(fields){
   try{
     toast('正在生成 Excel...');
     // 2026-11-04 需求5：导出对象=**事项**，且**当前页面的筛选条件对导出结果生效**
     //   → 参数与列表请求完全一致（buildFilterParams 单一来源）
     const ps=buildFilterParams();
+    if(fields&&fields.length)ps.set('fields',fields.join(','));
     const q=ps.toString()?('?'+ps.toString()):'';
     const r=await fetch(apiUrl('/api/export/xlsx'+q),{headers:{'Authorization':'Bearer '+TOKEN}});
     if(r.status===401){goLogin();return}
