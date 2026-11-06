@@ -6131,16 +6131,19 @@ def download_import_template(username: str = Depends(require_auth)):
     headers = [(XLSX_COL_LABELS.get(c, c) + (' *' if c in XLSX_REQUIRED else ''))
                for c in XLSX_IMPORT_COLS]
     ws.append(headers)
-    hdr_fill = PatternFill('solid', fgColor='002D74')
-    req_fill = PatternFill('solid', fgColor='B42318')     # 必填列：红底
-    hdr_font = Font(bold=True, color='FFFFFF', size=11)
-    thin = Side(style='thin', color='D9D9D9')
+    # 提示样式校准（2026-11-06 #82-3）：与最新导出规范（#79 xlsx）统一 ——
+    # 浅灰表头 F2F2F2 + 深色粗体字 + D0D0D0 细边框；必填列不再用红底重涂抹，
+    # 改为「红字 + * 号」标注（与字段说明页的必填口径一致）
+    hdr_fill = PatternFill('solid', fgColor='F2F2F2')
+    req_color = 'B42318'                                 # 必填列：红字标注
+    hdr_font = Font(bold=True, color='1F1F1F', size=11)
+    thin = Side(style='thin', color='D0D0D0')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     for i, c in enumerate(XLSX_IMPORT_COLS, 1):
         cell = ws.cell(1, i)
         required = c in XLSX_REQUIRED
-        cell.fill = req_fill if required else hdr_fill
-        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.font = Font(bold=True, color=(req_color if required else '1F1F1F'), size=11)
         cell.alignment = Alignment(horizontal='center', vertical='center')
         cell.border = border
         ws.column_dimensions[get_column_letter(i)].width = 20 if required else 14
@@ -6195,7 +6198,7 @@ def download_import_template(username: str = Depends(require_auth)):
         ['TAPD 数据导入模板 · 使用说明'],
         [''],
         ['1. 填写「导入数据」工作表，第一行表头请勿修改、勿增删列。'],
-        ['2. 表头为中文；带红色底色和 * 号的列是必填列，只有两列：'],
+        ['2. 表头为中文；带 * 号（红字）的列是必填列，只有两列：'],
         ['   「事项名称 *」和「所属看板名称 *」，其余均可留空。'],
         ['3. 负责人 / 知会人 / 关注人 多人时用英文分号 ; 分隔。'],
         ['4. 导入为「追加式」：库中已有的数据不会被删除；'],
@@ -6209,7 +6212,8 @@ def download_import_template(username: str = Depends(require_auth)):
     ]:
         ws3.append(line)
     ws3.column_dimensions['A'].width = 92
-    ws3['A1'].font = Font(bold=True, size=13, color='002D74')
+    ws3['A1'].font = Font(bold=True, size=12, color='002D74')
+    ws3.row_dimensions[1].height = 24
 
     buf = io.BytesIO()
     wb.save(buf)

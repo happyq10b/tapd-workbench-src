@@ -1363,7 +1363,7 @@ function goLogin(){
       </div>
     </div>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
-    <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="importXlsx(event)">
+    <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="impFilePicked(event)">
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
 </header>
@@ -1802,48 +1802,75 @@ function goLogin(){
 </div>
 
 <!-- 详情弹窗 -->
-<!-- 导出字段选择弹窗（2026-11-06 #79）：勾选字段 + 实时序号，列顺序 = 勾选先后 -->
+<!-- 导出字段选择弹窗（2026-11-06 #79/#82）：弹窗内步骤切换 ——
+     「选择字段」页（勾选 + 实时序号）与「导出模板」页（模板管理），
+     模板操作不再单设按钮/弹窗，全部在本弹窗内完成 -->
 <div class="modal-overlay" id="exportModal" style="display:none">
-  <div class="modal" style="width:480px;max-width:94vw">
-    <div class="modal-header"><h2>选择导出字段</h2>
+  <div class="modal" style="width:520px;max-width:94vw">
+    <div class="modal-header"><h2>导出数据（xlsx）</h2>
       <button class="modal-close" onclick="closeModal('exportModal')">✕</button>
     </div>
     <div class="modal-body">
-      <div style="font-size:12px;color:var(--text3)">勾选需要导出的字段；列顺序 = 勾选的先后顺序（序号实时更新）</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <select id="exp_tpl_sel" class="form-select" style="flex:1;padding:4px 8px;font-size:12px">
-          <option value="">—— 应用已存模板（一键填充勾选）——</option>
-        </select>
-        <button class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="applyExpTpl()">应用</button>
+      <!-- 步骤切换（#82）：字段页 / 模板页 -->
+      <div style="display:flex;gap:4px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;background:var(--bg,#f0f2f5)">
+        <button id="exp_tab_fields" class="btn-default" style="flex:1;padding:5px 0;font-size:12.5px;border:none;background:#fff;font-weight:600" onclick="expShowView('fields')">选择字段</button>
+        <button id="exp_tab_tpls" class="btn-default" style="flex:1;padding:5px 0;font-size:12.5px;border:none;background:transparent;color:var(--text2)" onclick="expShowView('tpls')">导出模板</button>
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expAll()">全选</button>
-        <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expNone()">清空</button>
-        <span id="exp_count" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
+      <!-- 页 1：选择字段 -->
+      <div id="exp_view_fields" style="display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:12px;color:var(--text3)">勾选需要导出的字段；列顺序 = 勾选的先后顺序（序号实时更新）</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="exp_tpl_sel" class="form-select" style="flex:1;padding:4px 8px;font-size:12px">
+            <option value="">—— 应用已存模板（一键填充勾选）——</option>
+          </select>
+          <button class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="applyExpTpl()">应用</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expAll()">全选</button>
+          <button class="btn-default" style="padding:4px 12px;font-size:12px" onclick="expNone()">清空</button>
+          <span id="exp_count" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
+        </div>
+        <div id="exp_fields" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;max-height:46vh;overflow:auto"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="exp_tpl_name" class="form-input" placeholder="把当前勾选保存为模板…" style="flex:1;padding:4px 10px;font-size:12px">
+          <button id="exp_tpl_save" class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="saveExpTpl()">保存为模板</button>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-default" onclick="closeModal('exportModal')">取消</button>
+          <button class="btn-primary" onclick="submitExport()">导出</button>
+        </div>
       </div>
-      <div id="exp_fields" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;max-height:46vh;overflow:auto"></div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="exp_tpl_name" class="form-input" placeholder="把当前勾选保存为模板…" style="flex:1;padding:4px 10px;font-size:12px">
-        <button id="exp_tpl_save" class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="saveExpTpl()">保存为模板</button>
-        <button class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0" onclick="openExportTplManager()">管理模板</button>
+      <!-- 页 2：导出模板管理（#82 从独立弹窗并入） -->
+      <div id="exp_view_tpls" style="display:none;flex-direction:column;gap:12px">
+        <div style="font-size:12px;color:var(--text3)">模板 = 字段勾选 + 列顺序的整体存档；应用到字段页后可一键按模板导出</div>
+        <div id="exp_tpl_list" style="display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto"></div>
       </div>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn-default" onclick="closeModal('exportModal')">取消</button>
-      <button class="btn-primary" onclick="submitExport()">导出</button>
     </div>
   </div>
 </div>
 
-<!-- 导出模板管理（2026-11-06 #80）：列表展示 名称 / 版式 / 字段，应用·编辑·删除 -->
-<div class="modal-overlay" id="exportTplModal" style="display:none">
-  <div class="modal" style="width:640px;max-width:94vw">
-    <div class="modal-header"><h2>导出模板</h2>
-      <button class="modal-close" onclick="closeModal('exportTplModal')">✕</button>
+<!-- 导入数据弹窗（2026-11-06 #82）：点击选择 + 拖拽上传 + 模板下载整合；
+     导入反馈用内嵌提示卡（与整体设计规范统一），不再只靠 toast -->
+<div class="modal-overlay" id="importModal" style="display:none">
+  <div class="modal" style="width:480px;max-width:94vw">
+    <div class="modal-header"><h2>导入数据（xlsx）</h2>
+      <button class="modal-close" onclick="closeModal('importModal')">✕</button>
     </div>
     <div class="modal-body">
-      <div style="font-size:12px;color:var(--text3)">模板 = 字段勾选 + 列顺序的整体存档；应用到导出弹窗后可一键按模板导出</div>
-      <div id="exp_tpl_list" style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow:auto"></div>
+      <div id="imp_drop" style="border:2px dashed var(--border);border-radius:var(--radius);padding:28px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s">
+        <div style="font-size:30px;line-height:1">📥</div>
+        <div style="font-size:13px;margin-top:8px;color:var(--text)">点击选择文件，或拖拽 .xlsx 文件到此处</div>
+        <div style="font-size:11.5px;color:var(--text3);margin-top:4px">追加式导入：已有数据不会被删除；「事项ID」相同视为同一条并更新</div>
+      </div>
+      <div id="imp_file" style="display:none;align-items:center;gap:8px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;font-size:12.5px">
+        <span>📄</span><span id="imp_file_name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+        <i class="imp-x" onclick="impClearFile()" title="移除文件" style="cursor:pointer;color:var(--text2);font-style:normal">✕</i>
+      </div>
+      <div id="imp_result" style="display:none"></div>
+      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+        <button class="btn-default" style="padding:6px 12px;font-size:12.5px" onclick="downloadImportTemplate()" title="下载 TAPD 数据导入模板（含字段说明与示例）">📥 下载导入模板</button>
+        <button class="btn-primary" id="imp_go" onclick="submitImport()" disabled style="opacity:.5">开始导入</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2687,10 +2714,10 @@ function refreshToolbarOps(canEdit){
     {label:'展开板块',fn:function(){expandAll();}},
     {label:'折叠板块',fn:function(){collapseAll();}},
     {label:'— 数据导入导出 —',disabled:true},
-    {label:'下载导入模板',fn:function(){downloadImportTemplate();}},
+    // 2026-11-06 #82：导入/导出全部弹窗化 —— 模板下载并入导入弹窗、
+    // 模板管理并入导出弹窗（页签），外部不再单设按钮
     {label:'导出（xlsx）',fn:function(){openExportModal();}},
-    {label:'导出模板',fn:function(){openExportTplManager();}});
-  if(canEdit)items.push({label:'导入（xlsx）',fn:function(){document.getElementById('xlsxFile').click();}});
+    {label:'导入（xlsx）',fn:function(){openImportModal();}});
   ROW_OPS['toolbarOps']=items;
 }
 
@@ -8550,7 +8577,23 @@ async function openExportModal(){
     EXP_PICKS=EXP_FIELDS.map(f=>f.key);
     renderExpFields();
     document.getElementById('exportModal').style.display='flex';
+    expShowView('fields');                      // 每次打开回到字段页（#82）
   }catch(e){toast(e.message)}
+}
+// 弹窗内步骤切换（2026-11-06 #82）：'fields'=选择字段 / 'tpls'=导出模板
+function expShowView(v){
+  const vf=document.getElementById('exp_view_fields'),vt=document.getElementById('exp_view_tpls');
+  const tf=document.getElementById('exp_tab_fields'),tt=document.getElementById('exp_tab_tpls');
+  if(!vf||!vt)return;
+  vf.style.display=(v==='fields')?'flex':'none';
+  vt.style.display=(v==='tpls')?'flex':'none';
+  if(tf){tf.style.background=(v==='fields')?'#fff':'transparent';
+         tf.style.color=(v==='fields')?'var(--text)':'var(--text2)';
+         tf.style.fontWeight=(v==='fields')?'600':'400';}
+  if(tt){tt.style.background=(v==='tpls')?'#fff':'transparent';
+         tt.style.color=(v==='tpls')?'var(--text)':'var(--text2)';
+         tt.style.fontWeight=(v==='tpls')?'600':'400';}
+  if(v==='tpls')renderExpTplList();
 }
 function applyExpTpl(){
   const id=Number(document.getElementById('exp_tpl_sel').value||0);
@@ -8582,11 +8625,12 @@ function saveExpTpl(){
   }
 }
 async function openExportTplManager(){
+  // #82：模板管理并入导出弹窗的「导出模板」页 —— 保留函数名兼容旧调用
   try{
     await ensureExpFields();
     try{await loadExpTpls()}catch(e){}
-    renderExpTplList();
-    document.getElementById('exportTplModal').style.display='flex';
+    document.getElementById('exportModal').style.display='flex';
+    expShowView('tpls');
   }catch(e){toast(e.message)}
 }
 function renderExpTplList(){
@@ -8594,7 +8638,7 @@ function renderExpTplList(){
   if(!box)return;
   if(!EXP_TPLS.length){
     box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:16px 0;text-align:center">'
-      +'暂无模板 —— 在导出弹窗里勾选字段后「保存为模板」</div>';
+      +'暂无模板 —— 在「选择字段」页勾选后「保存为模板」</div>';
     return;
   }
   box.innerHTML=EXP_TPLS.map(t=>`
@@ -8622,8 +8666,7 @@ function tplApply(id){
   document.getElementById('exp_tpl_save').textContent='保存为模板';
   document.getElementById('exp_tpl_name').value='';
   renderExpFields();
-  closeModal('exportTplModal');
-  document.getElementById('exportModal').style.display='flex';
+  expShowView('fields');   // #82：应用后切回字段页（同弹窗内切换）
   toast('已应用模板「'+t.name+'」：'+EXP_PICKS.length+' 个字段');
 }
 function tplEdit(id){
@@ -8635,8 +8678,7 @@ function tplEdit(id){
   document.getElementById('exp_tpl_name').value=t.name;
   document.getElementById('exp_tpl_save').textContent='更新模板';
   renderExpFields();
-  closeModal('exportTplModal');
-  document.getElementById('exportModal').style.display='flex';
+  expShowView('fields');   // #82：编辑 = 字段页的更新模式
   toast('正在编辑模板「'+t.name+'」——调整勾选后点「更新模板」');
 }
 function tplDelete(id){
@@ -8739,40 +8781,85 @@ async function importData(ev){
     reload(1);renderProgress();
   }catch(e){toast('导入失败：'+e.message);ev.target.value=''}
 }
-// ---------- 从 xlsx 导入原 TAPD 数据 ----------
+// ---------- 从 xlsx 导入 TAPD 数据（2026-11-06 #82：弹窗化） ----------
 // 追加式导入：库中已有数据不删除；card_id 相同视为同一条则更新。
-async function importXlsx(ev){
-  const f=ev.target.files[0];
-  if(!f)return;
-  const btn=document.getElementById('xlsxImportBtn');
-  try{
-    if(!/\.xlsx$/i.test(f.name)){toast('请选择 .xlsx 文件（.xls 旧格式请先用 Excel 另存为 .xlsx）');ev.target.value='';return}
-    if(btn)btn.disabled=true;
-    toast('正在导入，请稍候...');
-    const fd=new FormData();
-    fd.append('file',f);
-    const r=await fetch(apiUrl('/api/import/xlsx'),{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+TOKEN},
-      body:fd
-    });
-    if(r.status===401){goLogin();return}
-    let d={};
-    try{d=await r.json()}catch(e){}
-    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
-    toast(`导入完成：新增 ${d.created} 条，更新 ${d.updated} 条`
-      +(d.skipped?`，跳过 ${d.skipped} 条`:'')
-      +(d.boards?`，涉及 ${d.boards} 个看板`:''));
-    ev.target.value='';
-    // 导入可能带来新看板，刷新 ME 并重渲染目录树
-    ME=await api('/api/me');
-    renderTabs();reload(1);renderProgress();
-  }catch(e){
-    toast('导入失败：'+e.message);
-    ev.target.value='';
-  }finally{
-    if(btn)btn.disabled=false;
+// 交互：导入弹窗内「点击选择 / 拖拽上传」两种方式 + 模板下载入口；
+//       反馈用弹窗内嵌提示卡（与整体设计规范统一），toast 仅作轻提醒。
+let IMP_FILE=null;
+function openImportModal(){
+  IMP_FILE=null;impPaintFile();
+  impShowResult('','');   // 清空上次结果
+  document.getElementById('importModal').style.display='flex';
+  // 拖拽事件绑定（幂等：直接赋值 on* 属性，不会重复叠加）
+  const dz=document.getElementById('imp_drop');
+  if(dz){
+    dz.ondragover=e=>{e.preventDefault();dz.style.borderColor='var(--primary)';dz.style.background='#f2f7fc';};
+    dz.ondragleave=e=>{e.preventDefault();dz.style.borderColor='var(--border)';dz.style.background='';};
+    dz.ondrop=e=>{e.preventDefault();dz.style.borderColor='var(--border)';dz.style.background='';
+      const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+      if(f)impSetFile(f);};
   }
+}
+function impPickFile(){document.getElementById('xlsxFile').click();}
+function impFilePicked(ev){
+  const f=ev.target.files&&ev.target.files[0];
+  if(f)impSetFile(f);
+  ev.target.value='';   // 允许重复选择同一文件
+}
+function impSetFile(f){
+  if(!/\.xlsx$/i.test(f.name)){toast('请选择 .xlsx 文件（.xls 旧格式请先用 Excel 另存为 .xlsx）');return}
+  IMP_FILE=f;
+  impPaintFile();
+  impShowResult('','');
+}
+function impClearFile(){IMP_FILE=null;impPaintFile();}
+function impPaintFile(){
+  const box=document.getElementById('imp_file'),name=document.getElementById('imp_file_name');
+  const go=document.getElementById('imp_go'),dz=document.getElementById('imp_drop');
+  if(!box)return;
+  box.style.display=IMP_FILE?'flex':'none';
+  if(name)name.textContent=IMP_FILE?IMP_FILE.name:'';
+  if(go){go.disabled=!IMP_FILE;go.style.opacity=IMP_FILE?'1':'.5';}
+  if(dz)dz.style.display=IMP_FILE?'none':'block';
+}
+// 内嵌提示卡（#82-3 提示样式统一）：kind='ok'|'err'|'info'
+function impShowResult(html,kind){
+  const box=document.getElementById('imp_result');
+  if(!box)return;
+  if(!html){box.style.display='none';box.innerHTML='';return}
+  const color=kind==='ok'?'var(--success)':(kind==='err'?'var(--danger)':'var(--primary)');
+  const bg=kind==='ok'?'#f6fbf6':(kind==='err'?'#fef6f6':'#f2f7fc');
+  box.style.display='block';
+  box.style.borderLeft='3px solid '+color;
+  box.style.background=bg;
+  box.style.borderRadius='var(--radius-sm)';
+  box.style.padding='9px 12px';
+  box.style.fontSize='12.5px';
+  box.style.lineHeight='1.7';
+  box.innerHTML=html;
+}
+function submitImport(){
+  if(!IMP_FILE){toast('请先选择 .xlsx 文件');return}
+  const go=document.getElementById('imp_go');
+  if(go){go.disabled=true;}
+  impShowResult('正在导入，请稍候…','info');
+  const fd=new FormData();
+  fd.append('file',IMP_FILE);
+  fetch(apiUrl('/api/import/xlsx'),{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd})
+    .then(async r=>{
+      if(r.status===401){goLogin();return}
+      let d={};try{d=await r.json()}catch(e){}
+      if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+      impShowResult('✅ 导入完成：新增 <b>'+d.created+'</b> 条，更新 <b>'+d.updated+'</b> 条'
+        +(d.skipped?('，跳过 '+d.skipped+' 条'):'')
+        +(d.boards?('，涉及 '+d.boards+' 个看板'):''),'ok');
+      IMP_FILE=null;impPaintFile();
+      // 导入可能带来新看板，刷新 ME 并重渲染目录树
+      ME=await api('/api/me');
+      renderTabs();reload(1);renderProgress();
+    })
+    .catch(e=>impShowResult('❌ 导入失败：'+esc(e.message),'err'))
+    .finally(()=>{if(go)go.disabled=!IMP_FILE;});
 }
 // 下载 xlsx 导入模板
 async function downloadImportTemplate(){
