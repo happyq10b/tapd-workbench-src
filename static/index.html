@@ -1040,7 +1040,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .mention-chip .mc-x{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;font-size:10px;color:var(--primary);cursor:pointer}
 .mention-chip .mc-x:hover{background:var(--primary);color:#fff}
 /* @ 触发时的成员候选下拉 */
-.mention-drop{position:absolute;z-index:20;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);max-height:200px;overflow-y:auto;min-width:150px;padding:4px 0}
+.mention-drop{position:absolute;z-index:20;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-md);max-height:200px;overflow-y:auto;min-width:150px;padding:4px 0;left:0;right:0}
 .mention-drop[hidden]{display:none}
 .mention-opt{padding:6px 12px;font-size:13px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px}
 .mention-opt:hover,.mention-opt.on{background:#eef5ff;color:var(--primary)}
@@ -6640,12 +6640,41 @@ function renderMentionDrop(){
     drop.innerHTML='<div class="mention-empty">无匹配成员</div>';
     drop.hidden=false;
     MENTION_INDEX=0;
+    placeMentionDrop();
     return;
   }
   if(MENTION_INDEX>=list.length)MENTION_INDEX=0;
   drop.innerHTML=list.map((n,i)=>
     `<div class="mention-opt${i===MENTION_INDEX?' on':''}" data-name="${esc(n)}">@${esc(n)}</div>`).join('');
   drop.hidden=false;
+  placeMentionDrop();
+}
+// 候选下拉定位（2026-11-06 #75）：评论区贴着弹窗底部，下拉默认向下展开会被
+// modal-body 滚动容器截断（用户截图反馈「无法完全展示」）。
+// 策略：输入框下方空间足够 → 向下；不足 → 向上翻，并把 max-height 钳制到
+// 弹窗可视区内（至少 120px），保证候选始终完整可见。
+function placeMentionDrop(){
+  const drop=document.getElementById('d_mention_drop');
+  const inp=document.getElementById('d_new_comment');
+  if(!drop||!inp||drop.hidden)return;
+  const body=inp.closest('.modal-body');
+  const cb=drop.parentElement;              // .comment-box = position:relative 锚点
+  if(!body||!cb)return;
+  const br=body.getBoundingClientRect();
+  const ir=inp.getBoundingClientRect();
+  const cr=cb.getBoundingClientRect();
+  const h=Math.min(drop.scrollHeight||200,200);
+  const spaceBelow=br.bottom-ir.bottom-8;
+  if(spaceBelow>=Math.min(h,140)){          // 下方放得下 → 向下展开
+    drop.style.top=(ir.bottom-cr.top+6)+'px';
+    drop.style.bottom='auto';
+    drop.style.maxHeight='';
+  }else{                                    // 向上翻
+    const spaceAbove=ir.top-cr.top-6;
+    drop.style.bottom=(cr.bottom-ir.top+6)+'px';
+    drop.style.top='auto';
+    drop.style.maxHeight=(spaceAbove>=h?'':Math.max(Math.round(spaceAbove),120))+'px';
+  }
 }
 // 输入框内容变化：检测光标前的 "@词" 决定是否显示候选
 function onCommentInput(el){
@@ -6851,6 +6880,12 @@ document.addEventListener('keydown',e=>{
   }
   if(e.key==='Escape'){hideMentionDrop();return}
 });
+// 弹窗内容滚动时收起 @ 候选：下拉随评论流式内容绝对定位，滚动后
+// 展开方向可能失效（2026-11-06 #75 随向上翻转逻辑一并加入）
+document.addEventListener('scroll',e=>{
+  const t=e.target;
+  if(t&&t.classList&&t.classList.contains('modal-body'))hideMentionDrop();
+},true);
 // 状态选择的统一入口：新建弹窗只记录选择（事项还没创建），详情/编辑弹窗则立即写回
 function pickStatus(ctx,st){
   if(ctx==='n'){setNewCardStatus(st);return}
