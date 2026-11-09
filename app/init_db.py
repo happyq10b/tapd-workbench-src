@@ -100,6 +100,19 @@ CREATE TABLE IF NOT EXISTS boards (
 );
 CREATE INDEX IF NOT EXISTS idx_boards_sort ON boards(sort, board_id);
 
+-- 用户个人看板排序（2026-11-09 #101）：
+--   默认布局 = boards.sort（超级管理员定义的全局默认）；
+--   用户在【看板管理】拖拽后，把**该用户自己的**完整顺序固化在这里，
+--   后续该用户的一切看板列表（看板管理 / 顶部目录带 / 外部目录）以个人布局为准。
+--   未出现在个人布局里的看板（新建等）按默认布局顺序追加在尾部。
+CREATE TABLE IF NOT EXISTS user_board_sorts (
+    username   TEXT NOT NULL,
+    board_id   TEXT NOT NULL,
+    pos        INTEGER NOT NULL DEFAULT 0,   -- 顺序权重（小在前）
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (username, board_id)
+);
+
 -- 看板管理（配置板块）：年份 / 归属部门 / 属性 / 状态 四维配置
 -- 归属部门不再用固定枚举，改由【架构管理】的部门层级决定：
 --   dept         归属部门名称（冗余存储，便于按名称分组展示）
@@ -507,6 +520,15 @@ def _migrate_schema(conn):
         conn.execute('''INSERT INTO team_members (id, name, workgroups, account, created_at)
                         SELECT id, name, workgroups, account, created_at FROM team_members_bak''')
         conn.execute('DROP TABLE team_members_bak')
+
+    # ---- 用户个人看板排序表（2026-11-09 #101）：旧库幂等建表 ----
+    conn.execute('''CREATE TABLE IF NOT EXISTS user_board_sorts (
+        username   TEXT NOT NULL,
+        board_id   TEXT NOT NULL,
+        pos        INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        PRIMARY KEY (username, board_id)
+    )''')
 
 def _migrate_org(conn):
     """组织架构迁移：workgroups（层级 + 单个 leader + 成员分号串）

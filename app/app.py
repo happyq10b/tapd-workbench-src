@@ -1549,6 +1549,9 @@ def me(username: str = Depends(require_auth)):
     allb = _all_boards()
     if boards is not None:
         allb = [b for b in allb if b['board_id'] in boards]
+    # 个人看板排序（#101）：顶部目录带 / 外部目录（groupBoardsByDept 保持
+    # ME.boards 原序渲染）随之生效 —— 看板管理与目录显示顺序保持一致
+    allb = _apply_board_order(allb, username)
     # 归属部门（board_config）：目录树按部门分组折叠用。
     # 未在「看板管理」里配置归属的看板 dept=''，前端归入「未配置」节点，不会丢失。
     dept_map = {r['board_id']: (r['dept'], r['dept_node_id'])
@@ -3555,6 +3558,36 @@ def _all_boards():
     derived.sort(key=lambda x: x['board_id'])
     return [pairs[b] for b in seen] + derived
 
+# ---------------- 用户个人看板排序（2026-11-09 #101） ----------------
+# 需求：排序为**个人层面**的设置，不影响其他用户；
+#   默认按超级管理员的布局（boards.sort）展示；用户自行拖拽后，把该用户的
+#   布局固化到 user_board_sorts，后续以个人布局为准。
+#   超级管理员的拖拽 = 更新全局默认布局（boards.sort）。
+
+def _personal_board_order(username):
+    """该用户固化的个人看板顺序（board_id 列表，按 pos 升序）。"""
+    return [r['board_id'] for r in
+            dbq('SELECT board_id FROM user_board_sorts WHERE username=? ORDER BY pos, board_id',
+                (username,))]
+
+
+def _apply_board_order(boards, username):
+    """按用户的个人布局重排 boards 列表（原地语义，返回新列表）。
+
+    · 个人布局里的看板按 pos 在前；个人布局没有的看板（新建等）
+      按默认布局（boards.sort）顺序追加在尾部 —— 新看板永远可见，不会丢。
+    · 无个人布局时返回默认顺序（= 超管布局）。
+    """
+    personal = _personal_board_order(username)
+    if not personal:
+        return boards
+    pos = {bid: i for i, bid in enumerate(personal)}
+    head = [b for b in boards if b['board_id'] in pos]
+    tail = [b for b in boards if b['board_id'] not in pos]
+    head.sort(key=lambda b: pos[b['board_id']])
+    return head + tail
+
+
 @app.get('/api/workgroups')
 def get_workgroups(username: str = Depends(require_auth)):
     """工作组管理：返回树形工作组架构 + 全部看板列表（供板块绑定配置）
@@ -4733,36 +4766,50 @@ def _validate_board_config(dept, attr, status):
 
 
 class BoardReorderReq(BaseModel):
-    board_id: str
-    direction: str            # 'up' | 'down'
+    order: list = []             # 完整的看板顺序（board_id 列表，拖拽后前端全量上报）
 
 
 @app.post('/api/boards/reorder')
-def reorder_board(req: BoardReorderReq, username: str = Depends(require_admin), request: Request = None):
-    """看板手工排序（2026-11-09 #95）：上移/下移交换相邻看板的 sort 值。
+def reorder_board(req: BoardReorderReq, username: str = Depends(require_auth), request: Request = None):
+    """看板拖拽排序（2026-11-09 #101）：个人级布局固化。
 
-    · 排序结果持久化在 boards.sort；所有列表（看板管理 / 顶部目录带 / ME.boards）
-      统一按 sort, board_id 排 → 两处顺序天然一致。
-    · sort 值历史上从未使用（全 0）→ 每次交换前先按当前顺序归一化重编 0..n-1。
+    · 需求口径：排序是**个人层面**的设置，不影响其他用户；
+      默认按**超级管理员的布局**（boards.sort）展示；用户拖拽后把
+      该用户的完整顺序固化到 user_board_sorts，后续以个人布局为准。
+    · 超级管理员的拖拽 = 更新全局默认布局 boards.sort（「默认按超管布局」
+      的落点——超管调整的即默认布局，未个人化的用户随之看到新默认；
+      已固化个人布局的用户不受影响）。
+    · order 里未包含的看板（新登记等）：按默认布局顺序追加在尾部，
+      永远可见不丢失。筛选状态下前端仍上报**全量顺序**（拖拽项按目标
+      项在完整列表中的位置落位），筛选只影响看到哪些行，不影响排序结果。
     """
-    if req.direction not in ('up', 'down'):
-        raise HTTPException(400, 'direction 只能是 up 或 down')
-    ids = [r['board_id'] for r in dbq('SELECT board_id FROM boards ORDER BY sort, board_id')]
-    if req.board_id not in ids:
-        raise HTTPException(404, '看板不存在（或未登记元数据，无法参与排序）')
-    i = ids.index(req.board_id)
-    j = i - 1 if req.direction == 'up' else i + 1
-    if j < 0 or j >= len(ids):
-        return {'ok': True, 'moved': False, 'reason': 'already_at_edge'}
-    # 归一化：按当前顺序重编 sort 0..n-1，再交换相邻两项
-    for idx, bid in enumerate(ids):
-        dbe('UPDATE boards SET sort=? WHERE board_id=?', (idx, bid))
-    dbe('UPDATE boards SET sort=? WHERE board_id=?', (j, req.board_id))
-    dbe('UPDATE boards SET sort=? WHERE board_id=?', (i, ids[j]))
-    log_action('__board__', username, 'update', f'看板排序：{req.board_id} {req.direction}')
+    order = [str(x) for x in (req.order or [])]
+    if not order:
+        raise HTTPException(400, 'order 不能为空')
+    if len(set(order)) != len(order):
+        raise HTTPException(400, 'order 中存在重复看板')
+    all_ids = [r['board_id'] for r in dbq('SELECT board_id FROM boards')]
+    unknown = [x for x in order if x not in all_ids]
+    if unknown:
+        raise HTTPException(404, '看板不存在或未登记元数据: %s' % ','.join(unknown[:3]))
+    rest = [b for b in all_ids if b not in order]      # 未上报的看板 → 尾部追加
+    full = order + rest
+
+    if username == SUPER_ADMIN:
+        # 超管：更新全局默认布局 boards.sort
+        for idx, bid in enumerate(full):
+            dbe('UPDATE boards SET sort=? WHERE board_id=?', (idx, bid))
+        audit_log(username, client_ip(request), 'update', '看板排序',
+                  f'超级管理员更新默认看板布局（{len(order)} 个看板）', 'success')
+        return {'ok': True, 'scope': 'default'}
+    # 普通用户：固化个人布局（整表重写，保证与上报顺序完全一致）
+    dbe('DELETE FROM user_board_sorts WHERE username=?', (username,))
+    for idx, bid in enumerate(order):
+        dbe('INSERT INTO user_board_sorts (username, board_id, pos) VALUES (?,?,?)',
+            (username, bid, idx))
     audit_log(username, client_ip(request), 'update', '看板排序',
-              f'看板 {req.board_id} 手动排序（{req.direction}）', 'success')
-    return {'ok': True, 'moved': True}
+              f'固化个人看板布局（{len(order)} 个看板）', 'success')
+    return {'ok': True, 'scope': 'personal'}
 
 
 @app.get('/api/boards')
@@ -4801,6 +4848,8 @@ def list_boards(username: str = Depends(require_auth)):
             _known = {b['board_id'] for b in boards}
             boards = boards + [b for b in _all_boards() if b['board_id'] in _managed_extra
                                and b['board_id'] not in _known]
+    # 个人看板排序（#101）：看板管理列表按当前用户布局展示
+    boards = _apply_board_order(boards, username)
     # 卡片数：**必须按当前账号的可见范围统计**（看板级 + 板块级两级权限）。
     # ⚠️ 此前直接对 cards 表 GROUP BY 统计 → 只做了看板级过滤，
     #    板块级白名单（allowed_columns）收窄后的板块，其事项仍被计入

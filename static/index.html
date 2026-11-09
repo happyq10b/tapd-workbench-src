@@ -2100,6 +2100,11 @@ function goLogin(){
 .bc-item{display:flex;flex-direction:column;gap:5px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:all .15s;background:var(--card)}
 .bc-item:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
 .bc-item.active{border-color:var(--primary);background:#faf7ef;box-shadow:0 0 0 2px rgba(0,45,116,.14)}
+/* 拖拽排序（2026-11-09 #101）：个人级布局，拖起半透明、落位侧画指示线 */
+.bc-item[draggable="true"]{cursor:grab}
+.bc-item.dragging{opacity:.45}
+.bc-item.drag-over-top{box-shadow:inset 0 3px 0 var(--primary)}
+.bc-item.drag-over-bottom{box-shadow:inset 0 -3px 0 var(--primary)}
 .bc-item .nm{font-size:13.5px;font-weight:500;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:8px}
 .bc-item .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2);flex-wrap:wrap}
 /* 状态徽标与复制按钮：不被压缩、不换行（此前「启用」被挤成竖排两行） */
@@ -9389,8 +9394,6 @@ function renderBoardList(){
     }
     return true;
   });
-  // 手工排序（#95）：首/末行标记 → 边界按钮禁用
-  if(list.length){list[0]._first=true;list[list.length-1]._last=true;}
   const cnt=document.getElementById('bcLeftCount'); if(cnt)cnt.textContent=list.length;
   const box=document.getElementById('bcList');
   if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';bcPaintPick();return}
@@ -9412,17 +9415,6 @@ function renderBoardList(){
     const copyBtn=(ME&&ME.is_admin)||b.can_edit
       ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||'',can_edit:!!b.can_edit}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（默认整套复制：含板块与事项）">📋 复制</button>'
       :'';
-    // 手工排序（2026-11-09 #95）：↑↓ 交换相邻看板 sort 值，持久化；
-    // 看板管理顺序 = 顶部目录带 / 外部目录的看板显示顺序（同为 boards.sort）。
-    // 排序影响所有人 → 仅管理员可见按钮；边界行（首/末）对应按钮禁用。
-    const sortBtns=(ME&&ME.is_admin)
-      ?'<span class="bc-sort-btns">'
-        +'<button class="cp-copy-btn" style="padding:1px 7px" onclick="event.stopPropagation();moveBoard(\''+esc(b.board_id)+'\',\'up\')" title="上移（排序对所有人生效）"'
-        +(b._first?' disabled style="padding:1px 7px;opacity:.4"':'')+'>↑</button>'
-        +'<button class="cp-copy-btn" style="padding:1px 7px" onclick="event.stopPropagation();moveBoard(\''+esc(b.board_id)+'\',\'down\')" title="下移（排序对所有人生效）"'
-        +(b._last?' disabled style="padding:1px 7px;opacity:.4"':'')+'>↓</button>'
-        +'</span>'
-      :'';
     // 数量：显示**看板下的板块数**（用户 2026-11-03 要求）。
     //   b.col_count 由后端 /api/boards 提供（按可见板块口径，与 card_count 同源）；
     //   后端未提供时由前端 bcLoadColCounts() 并发拉取后回填（同样用可见板块口径）。
@@ -9431,27 +9423,76 @@ function renderBoardList(){
     //   点击看板卡片本身即进入右侧配置面板（bcSelect），跳转文字是冗余的。
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+sortBtns+copyBtn+'</div>'
+      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+colTxt+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
       +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span></div>'
       +'</div>';
   }).join('');
+  bcWireDrag();
   setBcListScroll(list.length);
   bcPaintPick();
 }
-// 手工排序（2026-11-09 #95）：上移/下移看板，持久化到 boards.sort。
-// 成功后三处同步：①看板管理列表（loadBoardConfig）；②ME.boards（重拉 /api/me）
-// → ③顶部目录带 / 外部目录的看板顺序（renderTabs 按 ME.boards 渲染）。
-async function moveBoard(board_id, direction){
+// 拖拽排序（2026-11-09 #101）：个人级看板布局。
+//   · 需求：排序为个人层面设置，不影响其他用户；默认按超级管理员的布局展示；
+//     用户拖拽后把该用户布局固化保存，后续以此为准。
+//   · 前端拖拽完成后全量上报新顺序（筛选生效时也上报完整列表 —— 拖拽项按
+//     目标项在完整列表中的位置落位，筛选只影响可见行，不影响排序结果）。
+//   · 成功后三处同步：看板管理列表（loadBoardConfig）、ME.boards（重拉
+//     /api/me）→ 顶部目录带 / 外部目录顺序（renderTabs 按 ME.boards 渲染）。
+let BC_DRAG=null;   // 拖拽中的 board_id
+function bcWireDrag(){
+  const box=document.getElementById('bcList'); if(!box)return;
+  Array.prototype.forEach.call(box.querySelectorAll('.bc-item'),function(el){
+    el.draggable=true;
+    el.addEventListener('dragstart',function(e){
+      BC_DRAG=el.getAttribute('data-bid');
+      el.classList.add('dragging');
+      try{e.dataTransfer.setData('text/plain',BC_DRAG);}catch(_err){}
+      e.dataTransfer.effectAllowed='move';
+    });
+    el.addEventListener('dragend',function(){
+      el.classList.remove('dragging');BC_DRAG=null;
+      Array.prototype.forEach.call(box.querySelectorAll('.bc-item'),function(x){
+        x.classList.remove('drag-over-top','drag-over-bottom');});
+    });
+    el.addEventListener('dragover',function(e){
+      if(!BC_DRAG)return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect='move';
+      const bid=el.getAttribute('data-bid');
+      if(!bid||bid===BC_DRAG)return;
+      const ids=BC_BOARDS.map(function(b){return b.board_id;});
+      const before=ids.indexOf(BC_DRAG)>ids.indexOf(bid);   // 上移 → 落到目标之前
+      el.classList.toggle('drag-over-top',before);
+      el.classList.toggle('drag-over-bottom',!before);
+    });
+    el.addEventListener('dragleave',function(){
+      el.classList.remove('drag-over-top','drag-over-bottom');});
+    el.addEventListener('drop',function(e){
+      e.preventDefault();
+      el.classList.remove('drag-over-top','drag-over-bottom');
+      const bid=el.getAttribute('data-bid');
+      if(BC_DRAG&&bid&&bid!==BC_DRAG)bcApplyDrag(BC_DRAG,bid);
+    });
+  });
+}
+async function bcApplyDrag(bid,targetBid){
+  const orig=BC_BOARDS.map(function(b){return b.board_id;});
+  const from=orig.indexOf(bid),to=orig.indexOf(targetBid);
+  if(from<0||to<0||from===to)return;
+  const ids=orig.slice();
+  ids.splice(from,1);
+  const t=ids.indexOf(targetBid);
+  if(t<0)return;
+  ids.splice(from>to?t:t+1,0,bid);   // 上移落目标前，下移落目标后
   try{
-    const r=await api('/api/boards/reorder',{method:'POST',body:JSON.stringify({board_id,direction})});
-    if(!r.ok) throw new Error(r.detail||'排序失败');
-    // 重拉 ME（看板顺序）+ 管理列表数据
+    const r=await api('/api/boards/reorder',{method:'POST',body:JSON.stringify({order:ids})});
+    if(!r.ok) throw new Error(r.detail||'排序保存失败');
     ME=await api('/api/me');
     renderTabs();
     await loadBoardConfig();
-    if(r.moved===false){toast('已处于边缘，无法继续'+(direction==='up'?'上移':'下移'));}
+    toast(r.scope==='default'?'已更新默认看板布局（所有未自定义排序的用户可见）':'已保存个人看板布局');
   }catch(e){toast(e.message)}
 }
 function setBcListScroll(n){  const box=document.getElementById('bcList');
