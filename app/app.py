@@ -1589,8 +1589,12 @@ def admin_online(username: str = Depends(require_super)):
     ws_count = 该账号当前存活的 WebSocket 连接数（>0 即在线）。
     """
     out = []
-    for r in dbq('SELECT username, role, last_login_at AS login_at, last_login_ip AS ip FROM users '
-                 "WHERE last_login_at != '' ORDER BY last_login_at DESC"):
+    # 姓名（#115）：账号绑定的成员姓名（team_members.account 关联），
+    # 未绑定或同名返回空串 → 前端显示「—」
+    for r in dbq('SELECT u.username, u.role, u.last_login_at AS login_at, u.last_login_ip AS ip,'
+                 "(SELECT name FROM team_members WHERE account=u.username LIMIT 1) AS name "
+                 'FROM users u '
+                 "WHERE u.last_login_at != '' ORDER BY u.last_login_at DESC"):
         d = dict(r)
         d['ws_count'] = len(ws_mgr.conns.get(d['username'], set()))
         d['online'] = d['ws_count'] > 0

@@ -874,7 +874,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .icon-btn:hover{color:var(--primary);background:#f0f5ff}
 .icon-btn.delete:hover{color:var(--danger);background:#fff1f0}
 .empty{padding:48px;text-align:center;color:var(--text2);font-size:13px}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;animation:overlayIn .18s ease;transition:opacity .16s ease}
+.modal-overlay.closing{opacity:0}
+@keyframes overlayIn{from{opacity:0}to{opacity:1}}
+.modal-overlay.closing .modal{opacity:0;translate:0 8px;transition:opacity .16s ease,translate .16s ease}
 .modal{background:#fff;border-radius:12px;width:640px;max-width:94vw;max-height:94vh;overflow:auto;padding:20px 24px;box-shadow:0 8px 24px rgba(0,0,0,.15)}
 /* 宽版弹窗：详情弹窗（描述 + 评论 + 操作记录 + 代办任务）内容多，
    默认 640px 显得拥挤（用户反馈「目录进入后的弹窗太小」）。
@@ -2314,11 +2317,11 @@ function goLogin(){
       <div style="overflow:auto;border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="background:var(--bg);text-align:left">
-            <th style="padding:8px 10px">用户名</th><th style="padding:8px 10px">角色</th>
+            <th style="padding:8px 10px">姓名</th><th style="padding:8px 10px">用户名</th><th style="padding:8px 10px">角色</th>
             <th style="padding:8px 10px">登录时间</th><th style="padding:8px 10px">IP 地址</th>
             <th style="padding:8px 10px">状态</th><th style="padding:8px 10px">操作</th>
           </tr></thead>
-          <tbody id="onlineList"><tr><td colspan="6" style="padding:14px;color:var(--text2)">加载中…</td></tr></tbody>
+          <tbody id="onlineList"><tr><td colspan="7" style="padding:14px;color:var(--text2)">加载中…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -2573,7 +2576,20 @@ function genPwd(mid){
   if(inp){inp.type='text';inp.value=p;inp.focus();inp.select()}
 }
 function debounceReload(){clearTimeout(debounceT);debounceT=setTimeout(()=>reload(1),400)}
-function closeModal(id){document.getElementById(id).style.display='none'}
+function openModal(id){
+  // #115：统一入口——清掉可能残留的 closing 类（170ms 淡出窗口内重开防隐形）
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.classList.remove('closing');
+  el.style.display='flex';
+}
+function closeModal(id){
+  // #115：淡出后再隐藏——直接 display:none 会让遮罩「一闪而过」很生硬
+  const el=document.getElementById(id);
+  if(!el||el.classList.contains('closing'))return;
+  el.classList.add('closing');
+  setTimeout(function(){el.classList.remove('closing');el.style.display='none';},170);
+}
 // 是否有任意弹窗处于打开状态（display 不为 none）
 function anyModalOpen(){
   return [...document.querySelectorAll('.modal-overlay')].some(o=>o.style.display==='flex'||getComputedStyle(o).display!=='none');
@@ -3282,7 +3298,7 @@ function openProfileModal(){
     const dn=(ME.display_name||'').trim();
     t.textContent= dn ? ('👤 个人界面 · '+dn+'('+ME.username+')') : ('👤 个人界面 · '+ME.username);
   }
-  document.getElementById('profileModal').style.display='flex';
+  openModal('profileModal');
 }
 function renderProfileAvatarBox(){
   const box=document.getElementById('profileAvatarBox');
@@ -3370,7 +3386,7 @@ function openCropper(target, dataUrl){
   document.getElementById('cropTitle').textContent='✂️ 裁切'+spec.label;
   document.getElementById('cropRatioTip').textContent=(spec.ratio===1?'1:1':'3:4');
   document.getElementById('cropSizeTip').textContent=spec.outW+'×'+spec.outH;
-  document.getElementById('cropModal').style.display='flex';
+  openModal('cropModal');
   loadCropImage(dataUrl,(img)=>{
     CROP.img=img;
     CROP.base=Math.max(cv.width/img.naturalWidth, cv.height/img.naturalHeight);  // cover 铺满
@@ -3616,11 +3632,11 @@ function openDeptEditModal(){
   renderDeptPhotoBox();
   renderDeptHonorBox();
   setDeptStatus('de_save_status','');
-  document.getElementById('deptEditModal').style.display='flex';
+  openModal('deptEditModal');
   updateScrollLock();
 }
 function closeDeptEditModal(){
-  document.getElementById('deptEditModal').style.display='none';
+  closeModal('deptEditModal');
   updateScrollLock();
 }
 // 上传状态提示（saving / ok / fail）
@@ -3753,7 +3769,7 @@ async function openDeptIntroModal(){
   document.getElementById('deptIntroTitle').textContent=CUR_DEPT+' · 部门介绍';
   const body=document.getElementById('deptIntroBody');
   body.innerHTML='<div class="dept-loading"><span class="spin"></span>加载中…</div>';
-  document.getElementById('deptIntroModal').style.display='flex';
+  openModal('deptIntroModal');
   updateScrollLock();
   try{
     const [pg,posts]=await Promise.all([
@@ -3816,7 +3832,7 @@ async function openDeptIntroModal(){
   }
 }
 function closeDeptIntroModal(){
-  document.getElementById('deptIntroModal').style.display='none';
+  closeModal('deptIntroModal');
   updateScrollLock();
 }
 // 发文弹窗（复用编辑弹窗的模态样式）
@@ -3853,7 +3869,7 @@ async function openDeptPostEditor(){
   window._DEPT_POST_IMAGES=images;
   setDeptStatus('dp_save_status','');
   setDeptStatus('dp_img_status','');
-  document.getElementById('deptPostModal').style.display='flex';
+  openModal('deptPostModal');
   updateScrollLock();
 }
 function closeDeptPostEditor(){
@@ -4026,7 +4042,7 @@ async function renderNoticeBar(){
 async function openNoticeModal(){
   const body=document.getElementById('noticeBody');
   if(!body)return;
-  document.getElementById('noticeModal').style.display='flex';
+  openModal('noticeModal');
   updateScrollLock();
   body.innerHTML='<div class="dept-loading"><span class="spin"></span>加载中…</div>';
   try{
@@ -4068,7 +4084,7 @@ async function openNoticeModal(){
   }
 }
 function closeNoticeModal(){
-  document.getElementById('noticeModal').style.display='none';
+  closeModal('noticeModal');
   updateScrollLock();
 }
 function setNoticeStatus(msg,kind){
@@ -5312,7 +5328,7 @@ async function openEdit(id,preloaded){
   // 先把弹窗亮出来（2026-11-09 #98）：点击即刻弹出，数据异步填充——
   // 此前 lockCard/applySubContext/cardPickPool 三个串行 API 让弹窗延迟数秒，
   // 用户以为没点上而反复点击（「点两次才出来」）。失败路径统一关回。
-  document.getElementById('editModal').style.display='flex';
+  openModal('editModal');
   let c=preloaded;
   if(!c){
     const d=await api('/api/cards?size=2000');
@@ -5349,7 +5365,7 @@ async function openEdit(id,preloaded){
   })]);
   renderPickers();
   window.__oe=(window.__oe||[]).concat(['before-flex']);
-  document.getElementById('editModal').style.display='flex';
+  openModal('editModal');
   window.__oe=(window.__oe||[]).concat(['after-flex']);
   loadEditSubtasks(id);
 }
@@ -5369,7 +5385,7 @@ function applyOwnerSlot(isSub){
 async function openSubModal(id){
   // 同步帧内先亮弹窗壳（2026-11-09 #98）：async 函数的同步段只有 API 发起，
   // 若等数据回来再亮，用户会以为没点上而反复点击（「点两次才出来」）
-  document.getElementById('detailModal').style.display='flex';
+  openModal('detailModal');
   document.getElementById('d_title').textContent='加载中…';
   try{
     const d=await api('/api/cards?card_id='+id);
@@ -5450,7 +5466,7 @@ async function deleteCard(){
   catch(e){toast(e.message)}
 }
 function closeEdit(){
-  document.getElementById('editModal').style.display='none';
+  closeModal('editModal');
   if(editing)unlockCard(editing);
   editing=null;
   EDIT_IS_SUB=false;
@@ -5522,7 +5538,7 @@ async function openNewModal(boardId,colKey){
   const beg=document.getElementById('n_begin'),due=document.getElementById('n_due');
   beg.removeAttribute('min');due.removeAttribute('max');
   beg.title='开始日期';due.title='截止日期';
-  document.getElementById('newModal').style.display='flex';
+  openModal('newModal');
 }
 // openNewSubModal(parentId)：新建子事项 —— 与主事项共用同一个新建弹窗，
 // 差别只在「所属看板 / 所属板块」的取值来源（继承父事项）与日期受父事项时间范围约束。
@@ -5578,7 +5594,7 @@ async function openNewSubModal(parentId){
   beg.title='开始日期';due.title='截止日期';
   if(p.begin){beg.setAttribute('min',p.begin);beg.title='开始日期（不能早于父事项 '+p.begin+'）'}
   if(p.due){due.setAttribute('max',p.due);due.title='截止日期（不能晚于父事项 '+p.due+'）'}
-  document.getElementById('newModal').style.display='flex';
+  openModal('newModal');
 }
 async function createCard(){
   const card_name=document.getElementById('n_name').value.trim();
@@ -5848,7 +5864,7 @@ function openColumnModal(){
   colRenderCompletion();
   document.getElementById('c_submit').textContent='创建板块';
   document.getElementById('c_tip').textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。';
-  document.getElementById('columnModal').style.display='flex';
+  openModal('columnModal');
 }
 // 编辑板块：从板块标题点击进入。数据取自标题元素上的 data-*，
 // 避免在 onclick 里拼字符串（名称里的引号/括号会把属性截断）
@@ -5883,7 +5899,7 @@ function openColumnEdit(el){
   document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
   document.getElementById('c_submit').textContent='保存';
   document.getElementById('c_tip').innerHTML='保存后板块名称、归属年份等立即生效。<b>修改板块名称会同步更新该板块下所有事项的所属板块</b>。';
-  document.getElementById('columnModal').style.display='flex';
+  openModal('columnModal');
 }
 async function saveColumn(){
   const board_id=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:document.getElementById('c_board').value;
@@ -6032,7 +6048,7 @@ async function openCopyModal(kind,payload){
     fillCopyBoards(P.board_id);
     tipEl.innerHTML='副本是<b>全新事项</b>（新的事项 ID），与原事项<b>不共享任何数据</b>；状态重置为「未完成」，创建人 / 创建时间重置为当前账号与当前时间，评论、子事项目录、附件均不复制。';
   }
-  document.getElementById('copyModal').style.display='flex';
+  openModal('copyModal');
   if(kind==='column'||kind==='card'||kind==='sub'){
     await loadCopyColumns();
     if(kind==='sub')await loadCopyParents();
@@ -6142,8 +6158,8 @@ function openBoardModal(){
   document.getElementById('b_name').value='';
   document.getElementById('b_ws').value='';
   document.getElementById('b_owner').value=ME.username||'';
+  openModal('boardModal');
   const m=document.getElementById('boardModal');
-  m.style.display='flex';
   // 「新建看板」现在从「看板管理」弹窗里唤起，必须盖在其之上
   // （所有 .modal-overlay 默认 z-index 相同，靠 DOM 顺序不可靠）
   m.style.zIndex=120;
@@ -6988,7 +7004,7 @@ async function openDetail(id){
     box.style.display='';
     renderSubtasks(st.subtasks,document.getElementById('d_subtask_list'),document.getElementById('d_subtask_count'),ME.can_edit,id);
   }else{box.style.display='none'}
-  document.getElementById('detailModal').style.display='flex';
+  openModal('detailModal');
 }
 async function addComment(){
   const inp=document.getElementById('d_new_comment');
@@ -7372,7 +7388,7 @@ async function openTeamModal(){
   const _nb=_np.parentElement.querySelector('.pwd-eye');
   if(_nb){_nb.innerHTML=EYE_ON;_nb.title='显示/隐藏密码'}
   document.getElementById('t_new_role').value='';
-  document.getElementById('teamModal').style.display='flex';
+  openModal('teamModal');
 }
 // ---------- 「已选工作组」只读层级树 ----------
 // 归属以【架构管理】为准：org_source==='org' 时用架构任命的节点；
@@ -7808,7 +7824,7 @@ function openAuditModal(){
   if(sel.options.length<=1){
     sel.innerHTML='<option value="">全部</option>'+Object.keys(AUDIT_ACTIONS).map(k=>`<option value="${k}">${AUDIT_ACTIONS[k]}</option>`).join('');
   }
-  document.getElementById('auditModal').style.display='flex';
+  openModal('auditModal');
   loadAuditLogs(1);
 }
 function resetAuditFilter(){
@@ -7823,17 +7839,19 @@ function resetAuditFilter(){
 // ---------- 在线用户管理（#111，仅超级管理员） ----------
 async function openOnlineModal(){
   if(!ME||!ME.is_super){toast('仅超级管理员可访问');return}
-  document.getElementById('onlineModal').style.display='flex';
+  openModal('onlineModal');
   await loadOnlineList();
 }
 async function loadOnlineList(){
   const box=document.getElementById('onlineList');
   try{
     const d=await api('/api/admin/online');
-    if(!d.users.length){box.innerHTML='<tr><td colspan="6" style="padding:14px;color:var(--text2)">暂无登录记录</td></tr>';return}
+    const ROLE_CN={admin:'管理员',editor:'可编辑',viewer:'只读'};
+    if(!d.users.length){box.innerHTML='<tr><td colspan="7" style="padding:14px;color:var(--text2)">暂无登录记录</td></tr>';return}
     box.innerHTML=d.users.map(u=>`<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 10px">${esc(u.name||'—')}</td>
       <td style="padding:8px 10px;font-weight:600">${esc(u.username)}${u.username==='admin'?' <span style="font-size:11px;color:var(--primary)">（超级管理员）</span>':''}</td>
-      <td style="padding:8px 10px;color:var(--text2)">${esc(u.role)}</td>
+      <td style="padding:8px 10px;color:var(--text2)">${esc(ROLE_CN[u.role]||u.role)}</td>
       <td style="padding:8px 10px">${esc(u.login_at)}</td>
       <td style="padding:8px 10px;color:var(--text2)">${esc(u.ip||'—')}</td>
       <td style="padding:8px 10px">${u.online?'<span style="color:#16a34a">● 在线</span>':'<span style="color:var(--text3)">○ 离线</span>'}${u.ws_count>1?` <span style="font-size:11px;color:var(--text3)">（${u.ws_count} 条连接）</span>`:''}</td>
@@ -8452,7 +8470,7 @@ async function openWgModal(){
   }else{
     renderWgList();
   }
-  document.getElementById('wgModal').style.display='flex';
+  openModal('wgModal');
 }
 function renderWgList(){
   const canEdit=ME.is_admin;
@@ -8688,7 +8706,7 @@ async function openAdminModal(){
   document.getElementById('au_name').value='';document.getElementById('au_pwd').value='';
   document.getElementById('au_boards').value='*';
   await adminLoadUsers();
-  document.getElementById('adminModal').style.display='flex';
+  openModal('adminModal');
 }
 async function adminLoadUsers(){
   const d=await api('/api/admin/users');
@@ -8731,7 +8749,7 @@ async function openColModal(name, curCols){
     });
     renderCmBoards();
   }
-  document.getElementById('colModal').style.display='flex';
+  openModal('colModal');
 }
 function cmModeChange(){
   const mode=document.getElementById('cm_mode').value;
@@ -8841,7 +8859,7 @@ async function openExportModal(){
     document.getElementById('exp_tpl_name').value='';
     EXP_PICKS=EXP_FIELDS.map(f=>f.key);
     renderExpFields();
-    document.getElementById('exportModal').style.display='flex';
+    openModal('exportModal');
     expShowView('fields');                      // 每次打开回到字段页（#82）
   }catch(e){toast(e.message)}
 }
@@ -8894,7 +8912,7 @@ async function openExportTplManager(){
   try{
     await ensureExpFields();
     try{await loadExpTpls()}catch(e){}
-    document.getElementById('exportModal').style.display='flex';
+    openModal('exportModal');
     expShowView('tpls');
   }catch(e){toast(e.message)}
 }
@@ -9054,7 +9072,7 @@ let IMP_FILE=null;
 function openImportModal(){
   IMP_FILE=null;impPaintFile();
   impShowResult('','');   // 清空上次结果
-  document.getElementById('importModal').style.display='flex';
+  openModal('importModal');
   // 拖拽事件绑定（幂等：直接赋值 on* 属性，不会重复叠加）
   const dz=document.getElementById('imp_drop');
   if(dz){
@@ -9327,7 +9345,7 @@ async function openBoardConfigModal(){
   //    renderBoardList → setBcListScroll 用 offsetHeight 量行高算 maxHeight，
   //    弹窗 display:none 时量到 0 → maxHeight 被设成 20px → 首开整个弹窗被压扁
   //    （二次打开时值已被上次可见渲染纠正，所以「首开异常、二开正常」）。
-  document.getElementById('boardConfigModal').style.display='flex';
+  openModal('boardConfigModal');
   renderBoardList();
   renderEditArea();
 }
