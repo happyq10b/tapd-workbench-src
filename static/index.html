@@ -4593,6 +4593,15 @@ function renderBoard(cards,cols,q,colHits){
       <div class="week-body">${list.map((c,i)=>cardItem(c,i+1)).join('')}</div>
     </div>`;
   }).join('');
+  // 恢复子树展开状态（2026-11-09 #99）：#96b 起 reload 重绘会把子树收回，
+  // 用户每次都得「先点 ▶ 展开再点子事项」两次才能打开弹窗。这里按 SUBTREE_OPEN
+  // 记忆自动重新展开（SUBTREE_CACHE 已在 reload 时清空 → 必拉最新数据），
+  // 让「点子事项一次即弹窗」在任何刷新/保存之后都成立。
+  if(typeof SUBTREE_OPEN!=='undefined'){
+    Object.keys(SUBTREE_OPEN).forEach(function(k){
+      if(SUBTREE_OPEN[k] && document.getElementById('subtree_'+k)) toggleSubTree(k, true);
+    });
+  }
 }
 // ---------- 年份筛选（多选） ----------
 // 形态：chips 标签组。完整的多选体验包含三个动作：
@@ -5013,6 +5022,9 @@ async function toggleSubTree(cardId,force){
   const isOpen=box.style.display!=='none';
   const want=(force===undefined)?!isOpen:!!force;
   if(want===isOpen)return;
+  // 记忆父卡子树展开状态（2026-11-09 #99）：reload 重绘后按此恢复展开，
+  // 让「点子事项一次即弹窗」在保存/刷新之后仍成立
+  SUBTREE_OPEN[cardId]=want;
   if(!want){
     box.style.display='none';
     if(arrow)arrow.classList.remove('open');
@@ -5252,14 +5264,18 @@ async function cardPickPool(boardId,columnName){
 // 补上父事项信息与父时间范围约束，字段布局与主事项完全一致。
 async function openEdit(id,preloaded){
   if(!ME.can_edit){toast('无编辑权限');return}
+  // 先把弹窗亮出来（2026-11-09 #98）：点击即刻弹出，数据异步填充——
+  // 此前 lockCard/applySubContext/cardPickPool 三个串行 API 让弹窗延迟数秒，
+  // 用户以为没点上而反复点击（「点两次才出来」）。失败路径统一关回。
+  document.getElementById('editModal').style.display='flex';
   let c=preloaded;
   if(!c){
     const d=await api('/api/cards?size=2000');
     c=d.cards.find(x=>x.card_id===id);
   }
-  if(!c){toast('卡片不存在');return}
-  if(c.locked_by&&c.locked_by!==ME.username){toast(`已被 ${c.locked_by} 锁定`);return}
-  if(!await lockCard(id))return;
+  if(!c){toast('卡片不存在');closeModal('editModal');return}
+  if(c.locked_by&&c.locked_by!==ME.username){toast(`已被 ${c.locked_by} 锁定`);closeModal('editModal');return}
+  if(!await lockCard(id)){closeModal('editModal');return}
   editing=id;
   EDIT_IS_SUB=!!c.parent_id;
   window._editCard=c;          // 复制入口要用的当前事项快照
@@ -5282,11 +5298,14 @@ async function openEdit(id,preloaded){
   document.getElementById('e_week_group').style.flex=EDIT_IS_SUB?'1 1 100%':'';
   document.getElementById('editTitle').textContent=EDIT_IS_SUB?'编辑子事项':'编辑事项';
   applyOwnerSlot(EDIT_IS_SUB);
-  await applySubContext(c);
-  // 选人池 = 所属板块的负责人与参与人（层级约束，板块缺失时回退看板池）
-  window._cardPickPool={owner:await cardPickPool(c.board_id,c.column_name||'')};
+  // 父事项上下文与选人池互不依赖 → 并行（2026-11-09 #98：编辑弹窗填充提速）
+  await Promise.all([applySubContext(c), cardPickPool(c.board_id,c.column_name||'').then(function(p){
+    window._cardPickPool={owner:p};
+  })]);
   renderPickers();
+  window.__oe=(window.__oe||[]).concat(['before-flex']);
   document.getElementById('editModal').style.display='flex';
+  window.__oe=(window.__oe||[]).concat(['after-flex']);
   loadEditSubtasks(id);
 }
 // 「负责人」字段位置（2026-11-09 #96b）：子事项与父事项**布局完全一致**——
@@ -5303,10 +5322,14 @@ function applyOwnerSlot(isSub){
 // 打开子事项弹窗：目录点击、抽屉「编辑」按钮共用这一个入口。
 // 无编辑权限时回落到只读详情弹窗（与主事项的权限表现一致）。
 async function openSubModal(id){
+  // 同步帧内先亮弹窗壳（2026-11-09 #98）：async 函数的同步段只有 API 发起，
+  // 若等数据回来再亮，用户会以为没点上而反复点击（「点两次才出来」）
+  document.getElementById('detailModal').style.display='flex';
+  document.getElementById('d_title').textContent='加载中…';
   try{
     const d=await api('/api/cards?card_id='+id);
     const c=d.cards&&d.cards[0];
-    if(!c){toast('子事项不存在或已删除');return}
+    if(!c){toast('子事项不存在或已删除');closeModal('detailModal');return}
     // 子事项与主事项统一：点开先进**详情弹窗**（评论 / 操作记录 / 状态 / 代办任务全部可用），
     // 需要修改时再由详情弹窗里的「✏️ 编辑」进入独立的编辑弹窗 —— 编辑流程不与详情功能混杂。
     await openDetail(id);
@@ -6874,8 +6897,11 @@ async function openDetail(id){
   const d=await api('/api/cards?card_id='+id);
   const c=d.cards&&d.cards[0];
   if(!c){toast('卡片不存在');return}
-  const cs=await api('/api/cards/'+id+'/comments');
-  const acts=await api('/api/cards/'+id+'/actions');
+  // 评论 / 操作记录与卡片互不依赖 → 并行拉取（2026-11-09 #98：详情打开提速）
+  const cs_p=api('/api/cards/'+id+'/comments');
+  const acts_p=api('/api/cards/'+id+'/actions');
+  const cs=await cs_p;
+  const acts=await acts_p;
   document.getElementById('d_title').textContent=c.card_name||'';
   // 缓存当前卡片：从详情进编辑时直接复用，省掉 openEdit 再拉一次 size=2000 全量列表
   DETAIL_CARD=c;
