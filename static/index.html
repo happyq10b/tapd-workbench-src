@@ -1621,7 +1621,12 @@ function goLogin(){
       <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
       <div class="form-row" id="e_meta_row">
         <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
-        <div class="form-group" id="e_week_group"><label>周数</label><input type="text" class="form-input" id="e_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可手动调整"></div>
+        <div class="form-group" id="e_week_group"><label>周数</label>
+          <div style="position:relative">
+            <input type="text" class="form-input" id="e_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('e')" onclick="openWeekCombo('e')" oninput="paintWeekCombo('e')">
+            <div class="cf-drop" id="e_week_drop" hidden></div>
+          </div>
+        </div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin"></div>
@@ -1671,7 +1676,12 @@ function goLogin(){
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="n_begin"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="n_due"></div>
       </div>
-      <div class="form-group"><label>周数</label><input type="text" class="form-input" id="n_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可手动调整"></div>
+      <div class="form-group"><label>周数</label>
+        <div style="position:relative">
+          <input type="text" class="form-input" id="n_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="paintWeekCombo('n')">
+          <div class="cf-drop" id="n_week_drop" hidden></div>
+        </div>
+      </div>
       <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
       <div class="form-group" id="n_cc_group"><label>参与人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_cc"></div></div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
@@ -4153,6 +4163,52 @@ function weekSortKey(v){
   return 999999;   // 非标准标签统一排最后
 }
 
+// ---------- 事项弹窗的周数 combo（2026-11-09 #94）：下拉候选 + 手动输入 ----------
+// 与板块筛选栏的周数筛选同款交互，但这里是**单选填充**：点候选项把值填进输入框。
+// openWeekCombo 是**幂等的「确保打开」**（focus 与 click 双绑定，见 #85 教训）。
+let WEEK_COMBO_OPEN='';   // '' | 'e'(编辑弹窗) | 'n'(新增弹窗)
+function weekComboCandidates(kw){
+  return Array.from(new Set(FILTER_WEEK_CAND.concat(WEEK_OPTIONS)))
+    .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw))
+    .sort((a,b)=>weekSortKey(a)-weekSortKey(b));
+}
+function weekComboInpId(which){return which==='e'?'e_week':'n_week'}
+function weekComboDropId(which){return which==='e'?'e_week_drop':'n_week_drop'}
+function paintWeekCombo(which){
+  const inp=document.getElementById(weekComboInpId(which));
+  const drop=document.getElementById(weekComboDropId(which));
+  if(!inp||!drop)return;
+  if(WEEK_COMBO_OPEN!==which){drop.hidden=true;drop.innerHTML='';return}
+  const kw=(inp.value||'').trim().toLowerCase();
+  const cand=weekComboCandidates(kw);
+  drop.hidden=false;
+  drop.innerHTML=cand.length
+    ? '<div class="cf-tip">点击选择；也可直接输入「2026年第41周」</div>'
+      +cand.map(w=>`<label class="cf-opt" data-wk-pick="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
+    : `<div class="cf-empty">${kw?'无匹配周数，可直接输入':'暂无可选周数，可直接输入'}</div>`;
+}
+function openWeekCombo(which){
+  WEEK_COMBO_OPEN=which;
+  paintWeekCombo(which);
+  // 互斥：另一个弹窗的下拉收起
+  const other=weekComboDropId(which==='e'?'n':'e');
+  const od=document.getElementById(other);
+  if(od){od.hidden=true;od.innerHTML='';}
+}
+function closeWeekCombo(){
+  if(!WEEK_COMBO_OPEN)return;
+  WEEK_COMBO_OPEN='';
+  ['e_week_drop','n_week_drop'].forEach(id=>{
+    const d=document.getElementById(id);
+    if(d){d.hidden=true;d.innerHTML='';}
+  });
+}
+function onWeekComboPick(w){
+  const inp=document.getElementById(weekComboInpId(WEEK_COMBO_OPEN));
+  if(inp)inp.value=w;
+  closeWeekCombo();
+}
+
 // ---------- 候选面板的开关 ----------
 // openFilterCombo 是**幂等的「确保打开」**（不是 toggle）：
 // 聚焦（focus）与点击（click）都会调它，若做成 toggle，
@@ -4996,7 +5052,7 @@ function subNodeHtml(n,level){
     <span class="fcols">${colsHtml}</span>
     <span class="sub-tail">
       <span class="slot-overdue">${od?'<span class="lock-tag lock-tag-overdue">逾期</span>':''}</span>
-      <span class="slot-subtask"></span>
+      <span class="slot-subtask">${n.subtask_total>0?`<span class="st-mini ${n.subtask_total===n.subtask_done?'all':''}">【代办：${n.subtask_done}/${n.subtask_total}】</span>`:''}</span>
       <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
       <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_opsId}')" title="置顶 / 复制">操作 ▾</button></span>
     </span>
@@ -7095,6 +7151,15 @@ document.addEventListener('click',e=>{
   }
   if(t.closest('#colStatusWrap'))return;
   closeColStatusDrop();
+  // 事项弹窗的周数 combo（2026-11-09 #94）：点候选 → 填入输入框；点别处 → 收起
+  const wkPick=t.closest('[data-wk-pick]');
+  if(wkPick){
+    onWeekComboPick(wkPick.getAttribute('data-wk-pick'));
+    return;
+  }
+  if(t.closest('#e_week_drop')||t.closest('#n_week_drop')||
+     t.closest('#e_week')||t.closest('#n_week'))return;
+  closeWeekCombo();
   // 可输入筛选（周数）：面板内点击 → 勾选 / 清空；点别处 → 收起
   // ⚠️ 人员筛选的入口已改为【架构树】弹窗，没有下拉面板了
   const wOpt=t.closest('#weekFilterDrop [data-pick-week]');

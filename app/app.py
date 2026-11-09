@@ -3197,9 +3197,19 @@ def get_card_children(card_id: str, username: str = Depends(require_auth)):
     tree = build(card_id)
     stack = list(tree)
     total = 0
+    ids = []
     while stack:
         n = stack.pop()
         total += 1
+        ids.append(n['card_id'])
+        stack.extend(n.get('children') or [])
+    # 子事项代办统计（2026-11-09 #94）：与主事项列表同款口径 → 目录子行显示【代办：n/N】
+    st = subtask_stats(ids) if ids else {}
+    stack = list(tree)
+    while stack:
+        n = stack.pop()
+        n['subtask_done'] = st.get(n['card_id'], {}).get('done', 0)
+        n['subtask_total'] = st.get(n['card_id'], {}).get('total', 0)
         stack.extend(n.get('children') or [])
     return {'children': tree, 'total': total}
 
