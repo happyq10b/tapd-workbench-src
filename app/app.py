@@ -309,8 +309,15 @@ def b64e(b: bytes) -> str:
 def b64d(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
 
-def make_token(username: str) -> str:
-    payload = {'u': username, 'exp': int(time.time()) + TOKEN_TTL}
+def make_token(username: str, seq: int = None) -> str:
+    # seq = 会话代数（#110 单点登录）：与 users.active_seq 绑定，
+    # 每次登录 seq+1 → 该用户此前签发的所有 token（含 7 天 TTL 内的）立即失效。
+    # 不传 seq 时自动取当前活跃代数（供运维/测试脚本造有效 token）；
+    # 生产签发只有 login 一处，永远显式传 seq。
+    if seq is None:
+        row = dbq('SELECT active_seq FROM users WHERE username=?', (username,))
+        seq = int(row[0]['active_seq'] or 0) if row else 0
+    payload = {'u': username, 's': int(seq), 'exp': int(time.time()) + TOKEN_TTL}
     body = b64e(json.dumps(payload).encode())
     sig = b64e(hmac.new(SECRET.encode(), body.encode(), hashlib.sha256).digest())
     return body + '.' + sig
@@ -324,7 +331,15 @@ def verify_token(token: str) -> Optional[str]:
         payload = json.loads(b64d(body))
         if payload.get('exp', 0) < time.time():
             return None
-        return payload.get('u')
+        u = payload.get('u')
+        # 单点登录（#110）：token 携带的会话代数必须与 users.active_seq 一致。
+        # 旧格式 token（无 s 字段）视为无效——升级后全员重新登录一次，一次性成本。
+        row = dbq('SELECT active_seq FROM users WHERE username=?', (u,))
+        if not row:
+            return None
+        if int(payload.get('s', -1)) != int(row[0]['active_seq'] or 0):
+            return None
+        return u
     except Exception:
         return None
 
@@ -1460,7 +1475,7 @@ class LoginReq(BaseModel):
     password: str
 
 @app.post('/api/login')
-def login(req: LoginReq, request: Request):
+async def login(req: LoginReq, request: Request):
     ip = client_ip(request)
     st = _login_attempt(req.username)
     cnt = int(st.get('fail_count') or 0)
@@ -1476,8 +1491,20 @@ def login(req: LoginReq, request: Request):
     if pwd_ok:
         # 密码正确：即使处于冷却期也放行（受限的是「密码错误」，不是「登录」），并清零计数
         _login_record_success(req.username)
-        audit_log(req.username, ip, 'login', '账号登录', f'登录成功（角色：{u["role"]}）', 'success')
-        return {'token': make_token(req.username), 'username': req.username,
+        # 单点登录（#110）：会话代数 +1 → 该用户所有旧 token 立即失效；
+        # 并向其现有 WebSocket 连接推 force_logout，旧设备即时回到登录页
+        #（不再依赖旧设备下一次 API 调用吃 401）。
+        seq = int(u.get('active_seq') or 0) + 1
+        dbe('UPDATE users SET active_seq=? WHERE username=?', (seq, req.username))
+        for old_ws in list(ws_mgr.conns.get(req.username, set())):
+            try:
+                await old_ws.send_text(json.dumps({'type': 'force_logout', 'by': req.username},
+                                                  ensure_ascii=False))
+            except Exception:
+                ws_mgr.disconnect(old_ws, req.username)
+        audit_log(req.username, ip, 'login', '账号登录',
+                  f'登录成功（角色：{u["role"]}，会话代数 {seq}，已单点下线其他设备）', 'success')
+        return {'token': make_token(req.username, seq), 'username': req.username,
                 'role': u['role']}
 
     # 密码错误：累加失败次数

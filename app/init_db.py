@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
     avatar        TEXT NOT NULL DEFAULT '',          -- 头像（data URL）
     photo         TEXT NOT NULL DEFAULT '',          -- 个人照片（data URL，形象照）
     status_text   TEXT NOT NULL DEFAULT '',          -- 个人状态（顶部状态栏展示）
+    active_seq    INTEGER NOT NULL DEFAULT 0,        -- 会话代数（#110 单点登录）：每次登录+1，旧 token 立即失效
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -502,6 +503,11 @@ def _migrate_schema(conn):
     if bcols and 'description' not in bcols:
         conn.execute('ALTER TABLE board_columns ADD COLUMN description TEXT NOT NULL DEFAULT \'\'')
         conn.execute("UPDATE board_columns SET description='' WHERE description IS NULL")
+
+    # ---- users.active_seq（#110 单点登录）----
+    ucols = [r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()]
+    if 'active_seq' not in ucols:
+        conn.execute('ALTER TABLE users ADD COLUMN active_seq INTEGER NOT NULL DEFAULT 0')
 
     # ---- team_members.groups -> team_members.workgroups ----
     tcols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]

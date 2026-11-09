@@ -9082,6 +9082,7 @@ function connectWS(){
   const wsBase=window.__IS_FILE__?'ws://127.0.0.1:8000':((location.protocol==='https:'?'wss://':'ws://')+location.host);
   const ws=new WebSocket(wsBase+'/ws?token='+encodeURIComponent(TOKEN));
   ws.onmessage=e=>{const m=JSON.parse(e.data);
+    if(m.type==='force_logout'){toast('账号已在其他设备登录，本机已下线');goLogin();return}
     if(m.type==='lock'||m.type==='unlock'||m.type==='card_update'||m.type==='card_create'||m.type==='card_delete'){
       reload(curPage);renderProgress();
       // 编辑/详情弹窗开着且是同一张卡 → 刷新代办任务
