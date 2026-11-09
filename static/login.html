@@ -185,7 +185,9 @@ async function doLogin(){
       return;
     }
     renderLock({blocked:false});
-    localStorage.setItem('tk',d.token);
+    // #114：写会话级 cookie（不带过期时间）——浏览器关闭即失效，重开必重登
+    document.cookie='tk='+encodeURIComponent(d.token)+'; path=/; SameSite=Lax';
+    localStorage.removeItem('tk');
     location.href='/';
   }catch(e){show('网络错误，请重试')}
   finally{btn.disabled=false;btn.textContent='登 录'}

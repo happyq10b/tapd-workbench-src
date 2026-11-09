@@ -2403,7 +2403,21 @@ function goLogin(){
 <div class="toast" id="toast"></div>
 
 <script>
-let TOKEN=localStorage.getItem('tk')||'';
+// ---------- 登录态存储（#114）：会话级 cookie ----------
+// 需求：浏览器未关闭时新开页面保持登录（cookie 跨标签共享）；浏览器关闭重开
+// 必须重新登录（session cookie 不带过期时间，浏览器进程结束即被清除）。
+// 历史方案 localStorage 跨浏览器重启持久 → 不满足"重开必须重登"，已废弃。
+function setTkCookie(t){document.cookie='tk='+encodeURIComponent(t)+'; path=/; SameSite=Lax';}
+function getTkCookie(){const m=document.cookie.match(/(?:^|;\s*)tk=([^;]*)/);return m?decodeURIComponent(m[1]):'';}
+function clearTkCookie(){document.cookie='tk=; path=/; Max-Age=0; SameSite=Lax';}
+let TOKEN=getTkCookie();
+if(!TOKEN){
+  // 一次性迁移：老用户的 localStorage token → 会话 cookie（迁移后即删，
+  // 之后浏览器关闭重开必然重新登录）
+  const legacy=localStorage.getItem('tk')||'';
+  if(legacy){TOKEN=legacy;setTkCookie(legacy);}
+  localStorage.removeItem('tk');
+}
 // 板块级写权限：**不再对特定板块开特例**。
 // 卡片是否可编辑统一看账号角色（ME.can_edit），
 // 能否看到/进入该板块由【架构管理】的归属 + 可见性判定。
@@ -2442,7 +2456,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 function logout(){
   // 登出前上报审计日志（fire-and-forget）
   try{fetch('/api/logout',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})}catch(e){}
-  localStorage.removeItem('tk');goLogin()
+  clearTkCookie();localStorage.removeItem('tk');goLogin()
 }
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 // ---------- 消息中心 ----------
