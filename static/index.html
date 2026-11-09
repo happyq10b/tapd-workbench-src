@@ -2262,6 +2262,10 @@ function goLogin(){
 .cf-opt{display:flex;align-items:center;gap:7px;padding:6px 12px;font-size:12.5px;color:var(--text);cursor:pointer;white-space:nowrap}
 .cf-opt:hover{background:#f0f5ff;color:var(--primary)}
 .cf-opt.on{background:#eef5ff;color:var(--primary);font-weight:600}
+/* 周数候选里的「当前周」高亮（2026-11-09 需求4）：#CCB484 + 加粗。
+   颜色直接落在 span 上 → 优先级高于 .cf-opt.on / .cf-opt:hover 的继承色，
+   勾选态（on）与当前周（cur-week）叠加时高亮依然生效 */
+.cf-opt.cur-week span{color:#CCB484;font-weight:700}
 .cf-opt input{width:14px;height:14px;accent-color:var(--primary);cursor:pointer;margin:0}
 .cf-empty{padding:8px 12px;font-size:12px;color:var(--text3)}
 .cf-tip{padding:6px 12px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border);margin-bottom:3px;white-space:normal}
@@ -4023,7 +4027,11 @@ async function renderNoticeBar(){
   const canEdit=ME&&ME.is_admin;
   // 标题行（2026-11-03）：左侧「公告」标签，右侧【管理公告】按钮（右上角）。
   // 原先标题是 ::before 伪元素、按钮在卡片底部 → 改为真实 DOM 标题行。
-  const head='<div class="notice-head"><span class="t">📢 公告</span>'
+  // 2026-11-09 需求1：标题后追加本日所属的年周数【2026年第46周】。
+  //   口径与后端 week_label / 事项周数完全一致：自然周（周一~周日）+ ISO 归属年
+  //   （cpWeekOf 同款算法），跨年周归属周四所在年份。cpWeekOf 是函数声明（已提升），
+  //   本函数在其定义之后执行，直接调用安全。
+  const head='<div class="notice-head"><span class="t">📢 公告【'+cpWeekOf()+'】</span>'
     +(canEdit?'<button class="btn-default notice-mgr" onclick="openNoticeModal()">管理公告</button>':'')
     +'</div>';
   if(!n){
@@ -4185,7 +4193,7 @@ async function reload(page){
   //    直接渲染会把已取消的内容又灌回内容区。
   //    判据：请求发出时记下的 board_id 与当前 curBoard 不一致 → 丢弃本次响应。
   if(reqBoard!==[...curBoards].join(',')){return;}
-  renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（已按权限过滤），不随勾选收缩
+  renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（联动口径：其他筛选结果下存在事项的周数）
   renderBoard(d.cards,d.columns,q,d.column_hits);
   syncFilterHint();
 }
@@ -4196,8 +4204,7 @@ async function reload(page){
 //  ② 人员筛选**锚定在负责人（owner）字段上**（原独立的「全部负责人」下拉
 //     已下线，与人员筛选重复），「无负责人」作为面板里的特殊候选项保留；
 //  ③ 候选来源都是接口返回的**权限可见范围**内的数据，越权数据不出现在候选里。
-let WEEK_OPTIONS=[];      // 当前看板可选的周数（renderWeekFilter 维护）
-let FILTER_WEEK_CAND=[];  // 接口返回的全量可选周数（候选面板用，与上面互不覆盖）
+let WEEK_OPTIONS=[];      // 当前筛选结果下存在事项的周数（接口返回，联动口径，renderWeekFilter 维护）
 let WEEK_SEL=new Set();   // 已选周数（多选，任一命中）
 let PERSON_SEL=new Set();  // 已选人员（多选；锚定 owner 字段）
 let FILTER_COMBO=null;    // 当前展开的候选面板：'person' | 'week' | null
@@ -4237,11 +4244,51 @@ function weekSortKey(v){
 // ---------- 事项弹窗的周数 combo（2026-11-09 #94）：下拉候选 + 手动输入 ----------
 // 与板块筛选栏的周数筛选同款交互，但这里是**单选填充**：点候选项把值填进输入框。
 // openWeekCombo 是**幂等的「确保打开」**（focus 与 click 双绑定，见 #85 教训）。
+// 2026-11-09 需求2：候选从「数据中已出现的周数」改为**当前归属年份下的全部周数**
+//   （如 2026 年 → 2026年第1周 ~ 2026年第53周），归属年份以外的周数仍按
+//   「2026-41」格式手动输入（三条提交路径已做归一化，后端 _norm_week 同样接受）。
 let WEEK_COMBO_OPEN='';   // '' | 'e'(编辑弹窗) | 'n'(新增弹窗)
-function weekComboCandidates(kw){
-  return Array.from(new Set(FILTER_WEEK_CAND.concat(WEEK_OPTIONS)))
-    .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw))
-    .sort((a,b)=>weekSortKey(a)-weekSortKey(b));
+// ISO 年份的总周数：12月28日恒定属于该 ISO 年的最后一周（ISO 8601 规则）
+function isoWeeksInYear(y){
+  const m=/^(\d{4})年第(\d{1,2})周$/.exec(cpWeekOf(new Date(y,11,28)));
+  return m?parseInt(m[2],10):52;
+}
+// 「当前归属年份」的取定（2026-11-09 需求2）：
+//   ① 事项所属板块的归属年份（年份绑定在板块层；按 board_id 精确匹配，同名板块不串）
+//   ② 编辑时现有周值的年份（板块未登记年份时的兜底）
+//   ③ 当前自然周的 ISO 归属年（最后兜底）
+function weekComboBaseYear(which){
+  let col='',bid='';
+  if(which==='e'){
+    const c=window._editCard||{};
+    col=c.column_name||'';bid=c.board_id||'';
+  }else{
+    if(NEW_CARD_MODE==='sub'&&NEW_SUB_PARENT){
+      col=NEW_SUB_PARENT.column_name||'';bid=NEW_SUB_PARENT.board_id||'';
+    }else if(NEW_CARD_COL){
+      col=NEW_CARD_COL.column_name||'';bid=NEW_CARD_COL.board_id||'';
+    }
+  }
+  if(col){
+    const meta=(window.COLS_META||[]).find(x=>x.column_name===col&&(!bid||x.board_id===bid))
+      ||(window.COLS_META||[]).find(x=>x.column_name===col);
+    const y=meta?(meta.year||''):'';
+    if(y)return y;
+  }
+  if(which==='e'){
+    const m=/^(\d{4})年第\d{1,2}周$/.exec((document.getElementById('e_week')||{value:''}).value.trim());
+    if(m)return m[1];
+  }
+  const cm=/^(\d{4})年/.exec(cpWeekOf());
+  return cm?cm[1]:String(new Date().getFullYear());
+}
+function weekComboCandidates(kw,which){
+  const y=weekComboBaseYear(which||WEEK_COMBO_OPEN);
+  const total=isoWeeksInYear(parseInt(y,10));
+  const list=[];
+  for(let i=total;i>=1;i--)list.push(y+'年第'+i+'周');   // 倒序：最新周在前（与筛选栏一致）
+  return list
+    .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw));
 }
 function weekComboInpId(which){return which==='e'?'e_week':'n_week'}
 function weekComboDropId(which){return which==='e'?'e_week_drop':'n_week_drop'}
@@ -4251,11 +4298,11 @@ function paintWeekCombo(which){
   if(!inp||!drop)return;
   if(WEEK_COMBO_OPEN!==which){drop.hidden=true;drop.innerHTML='';return}
   const kw=(inp.value||'').trim().toLowerCase();
-  const cand=weekComboCandidates(kw);
+  const cand=weekComboCandidates(kw,which);
   drop.hidden=false;
   drop.innerHTML=cand.length
-    ? '<div class="cf-tip">点击选择；也可直接输入「2026-41」回车</div>'
-      +cand.map(w=>`<label class="cf-opt" data-wk-pick="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
+    ? '<div class="cf-tip">点击选择；归属年份以外的周数可输入「2026-41」</div>'
+      +cand.map(w=>`<label class="cf-opt${w===cpWeekOf()?' cur-week':''}" data-wk-pick="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
     : `<div class="cf-empty">${kw?'无匹配周数，可直接输入':'暂无可选周数，可直接输入'}</div>`;
 }
 function openWeekCombo(which){
@@ -4288,25 +4335,10 @@ function openFilterCombo(kind){
   if(FILTER_COMBO===kind){paintFilterCombos();return}
   FILTER_COMBO=kind;
   paintFilterCombos();
-  loadFilterOptions(kind);
 }
 function closeFilterCombo(){
   if(!FILTER_COMBO)return;
   FILTER_COMBO=null;
-  paintFilterCombos();
-}
-async function loadFilterOptions(kind){
-  try{
-    const d=await api('/api/filter-options');
-    // ⚠️ 候选来源与「当前看板已出现的周数」是**两套语义**，不能互相覆盖：
-    //   FILTER_WEEK_CAND  = 接口给的**全量**可选周数（用于输入框的候选面板）
-    //   WEEK_OPTIONS       = 当前看板下实际出现过的周数（renderWeekFilter 维护）
-    // 早期实现把两者混用同一个变量 → 一打开候选面板，当前看板的周数就被全量替换，
-    // 勾选后又会被 renderWeekFilter 收回去，表现为「选项忽多忽少」。
-    // ⚠️ 周数按**组合整数序**（202601~202644）排序，不能用字符串序
-    //    （字符串序会把「第3周」排到「第31周」后面）。
-    FILTER_WEEK_CAND=(d.weeks||[]).slice().sort((a,b)=>weekSortKey(a)-weekSortKey(b));
-  }catch(e){/* 候选拉取失败不阻断筛选 */}
   paintFilterCombos();
 }
 // 输入时：先在候选里找匹配项，找不到就允许「手工输入值」（周数归一）
@@ -4332,6 +4364,7 @@ function onFilterComboKey(kind,ev){
   const n=normWeekInput(raw);
   if(!n){toast('周数格式应为 2026-41（年份-周数）');return}
   WEEK_SEL.add(n);
+  _manualWeek.add(n);   // 手工输入的周数不在接口候选里 → 标记保护，不被「选项收缩」误清
   inp.value='';
   paintFilterCombos();
   reload(1);
@@ -4400,17 +4433,19 @@ function paintFilterCombos(){
   if(wCount)wCount.textContent=WEEK_SEL.size?('已选 '+WEEK_SEL.size):'';
   if(wDrop){
     const kw=((wInp&&wInp.value)||'').trim().toLowerCase();
-    // 候选 = 接口全量周数 ∪ 当前看板已出现的周数（两者口径不同，都保留）
+    // 候选 = 当前筛选结果下存在事项的周数（接口 weeks，联动口径，2026-11-09 需求3）：
+    //   其他筛选项（状态/人员/年份/日期/搜索）变化后，无事项的周数自动从面板消失；
+    //   归属年份以外的周数仍可按「2026-41」手动输入（onFilterComboKey）。
     // ⚠️ 排序必须用 weekSortKey（组合整数序），不能用默认字符串序
-    const cand=Array.from(new Set(FILTER_WEEK_CAND.concat(WEEK_OPTIONS)))
+    const cand=[...WEEK_OPTIONS]
       .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw))
-      .sort((a,b)=>weekSortKey(a)-weekSortKey(b));
+      .sort((a,b)=>weekSortKey(b)-weekSortKey(a));
     wDrop.hidden=(FILTER_COMBO!=='week');
     wDrop.innerHTML=(FILTER_COMBO!=='week')?'':
       (cand.length
         ? `<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px"><span>可直接输入「2026-41」回车</span><span style="display:flex;gap:4px;flex-shrink:0"><button class="icon-btn" style="padding:2px 8px;font-size:11px" data-week-all="1" title="勾选当前列表全部周数">全选</button><button class="icon-btn" style="padding:2px 8px;font-size:11px" data-week-clear="1" title="清空已选周数">清空</button></span></div>`
-          +cand.map(w=>`<label class="cf-opt ${WEEK_SEL.has(w)?'on':''}"><input type="checkbox"${WEEK_SEL.has(w)?' checked':''} data-pick-week="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
-        : `<div class="cf-empty">${kw?'无匹配周数':'暂无可选周数（当前可见范围内没有周数）'}</div>`);
+          +cand.map(w=>`<label class="cf-opt ${WEEK_SEL.has(w)?'on':''}${w===cpWeekOf()?' cur-week':''}"><input type="checkbox"${WEEK_SEL.has(w)?' checked':''} data-pick-week="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
+        : `<div class="cf-empty">${kw?'无匹配周数':'暂无可选周数（当前筛选结果下没有事项）'}</div>`);
   }
 }
 // 顶部提示：把当前生效的筛选条件汇总成一行，避免多控件时看不清当前状态
@@ -7287,7 +7322,8 @@ document.addEventListener('click',e=>{
   if(t.closest('#weekFilterDrop [data-week-all]')){
     const inp=document.getElementById('weekFilterInput');
     const kw=((inp&&inp.value)||'').trim().toLowerCase();
-    const cand=Array.from(new Set(FILTER_WEEK_CAND.concat(WEEK_OPTIONS)))
+    // 候选口径与面板一致：仅「当前筛选结果下存在事项」的周数（联动，2026-11-09 需求3）
+    const cand=[...WEEK_OPTIONS]
       .filter(w=>!kw||w.toLowerCase().includes(kw)||weekLabelOf(w).toLowerCase().includes(kw));
     WEEK_SEL=new Set(cand);
     paintFilterCombos(); reload(1); return;

@@ -1967,14 +1967,6 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
                 mine = [r for r in mine if _person_hit(r)]
     if column:
         mine = [r for r in mine if (r.get('column_name') or '') == column]
-    # 周数维度：可选周数在**应用周数筛选之前**统计 → 勾选某周后其余周仍可选
-    week_options = sorted({(r.get('week_no') or '').strip()
-                           for r in mine if (r.get('week_no') or '').strip()},
-                          key=week_sort_key)
-    if week:
-        wset = {x.strip() for x in week.split(',') if x.strip()}
-        if wset:
-            mine = [r for r in mine if (r.get('week_no') or '').strip() in wset]
     # 搜索：同时命中「事项」（名称/描述）与「板块」（板块名）
     col_hit_keys = set()
     if q:
@@ -1995,6 +1987,16 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
             r['match_type'] = ('column'
                                if col_key(r['board_id'], r.get('column_name') or '') in col_hit_keys
                                else 'card')
+    # 周数维度：可选周数在**应用周数筛选之前**统计 → 勾选某周后其余周仍可选。
+    # 2026-11-09 需求3（联动）：统计点移到**全部其他筛选项（含搜索）之后** ——
+    # 只有「当前筛选结果下存在事项」的周数才进入候选，无事项的周数不展示。
+    week_options = sorted({(r.get('week_no') or '').strip()
+                           for r in mine if (r.get('week_no') or '').strip()},
+                          key=week_sort_key)
+    if week:
+        wset = {x.strip() for x in week.split(',') if x.strip()}
+        if wset:
+            mine = [r for r in mine if (r.get('week_no') or '').strip() in wset]
     return mine, week_options, col_hit_keys
 
 
