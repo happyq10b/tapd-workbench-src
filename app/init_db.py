@@ -281,7 +281,9 @@ CREATE TABLE IF NOT EXISTS board_columns (
     --   open=未完成 / progressing=进行中 / done=已完成
     -- ⚠️ 与进度条（done/total，自动统计）**互不冲突**：进度条是统计口径，
     --    completion 是负责人对整体完成度的**声明**，两者并存展示。
-    completion  TEXT NOT NULL DEFAULT 'open'
+    completion  TEXT NOT NULL DEFAULT 'open',
+    -- 板块描述（2026-11-09 #93）：编辑/新建板块弹窗的可选说明文字，板块标题 tooltip 展示
+    description TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
 CREATE INDEX IF NOT EXISTS idx_board_columns_name ON board_columns(column_name);
@@ -481,6 +483,12 @@ def _migrate_schema(conn):
     elif 'groups' in tables and 'workgroups' in tables:
         # 两个表同时存在：以 workgroups 为准，删除旧表
         conn.execute('DROP TABLE groups')
+
+    # ---- 板块描述列（2026-11-09 #93）：旧库幂等加列 ----
+    bcols = [r[1] for r in conn.execute('PRAGMA table_info(board_columns)').fetchall()]
+    if bcols and 'description' not in bcols:
+        conn.execute('ALTER TABLE board_columns ADD COLUMN description TEXT NOT NULL DEFAULT \'\'')
+        conn.execute("UPDATE board_columns SET description='' WHERE description IS NULL")
 
     # ---- team_members.groups -> team_members.workgroups ----
     tcols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]

@@ -1931,6 +1931,8 @@ class ColumnCreate(BaseModel):
     # ⚠️ 与进度条（done/total 自动统计）**互不冲突**：
     #    进度条是统计口径，本字段是**板块负责人对整体完成度的声明**。
     completion: str = 'open'
+    # 板块描述（2026-11-09 #93）：可选说明文字，板块标题 tooltip 展示
+    description: str = ''
 
 
 class ColumnUpdate(BaseModel):
@@ -1949,6 +1951,8 @@ class ColumnUpdate(BaseModel):
     # ⚠️ 语义与 owner 不同：**None = 不改**（不传该字段）；
     #    传空串 = 清空参与人；传列表 = 覆盖。
     participants: str = None
+    # 板块描述（2026-11-09 #93）：None = 不改；传值 = 覆盖（空串 = 清空）
+    description: Optional[str] = None
     # ⚠️ owner 语义（2026-11-02）：板块负责人 = 该板块的**管理权**，
     #    在【板块编辑】弹窗里配置；不影响板块可见性（可见性由架构绑定决定）。
     #    仅管理员可改负责人本身；板块负责人（editor）改其他字段不受此限。
@@ -2021,9 +2025,10 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     new_completion = (req.completion or '').strip() or 'open'
     if new_completion not in COLUMN_COMPLETIONS:
         raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion)'
-        ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?)',
-        (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts, new_completion))
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion, description)'
+        ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)',
+        (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts, new_completion,
+         (req.description or '').strip()))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
               f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year}，创建日期 {created}）', 'success')
@@ -2113,14 +2118,17 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
                        min_level=LV_COLUMN_OWNER)
             dbe('UPDATE board_columns SET participants=? WHERE col_key=?',
                 (_norm_acl_participants(req.participants), req.col_key))
-        dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=? WHERE col_key=?',
-            (new_key, name, year, created, nature, req.col_key))
+        dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=?, description=? WHERE col_key=?',
+            (new_key, name, year, created, nature,
+             (req.description if req.description is not None else (old['description'] if old and 'description' in old.keys() else '')) or '',
+             req.col_key))
     else:
         new_cid = 'COL' + str(int(time.time() * 1000))
         parts = _norm_acl_participants(req.participants) if req.participants else ''
-        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants)'
-            ' VALUES (?,?,?,?,?,?,?,?,0,?,?)',
-            (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or '', parts))
+        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, description)'
+            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?)',
+            (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or '', parts,
+             (req.description or '').strip()))
     log_action('__column__', username, 'update', f'编辑板块 {name}')
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
               f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')

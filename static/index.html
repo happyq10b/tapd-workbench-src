@@ -726,7 +726,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    行内结构恒定 → 字段列的起始位置在所有行上完全一致（纵向对齐）。
    display:inline-block + 定宽，空内容时也保留占位宽度。 */
 .slot-overdue{width:46px;flex-shrink:0;display:inline-block}
-.slot-subtask{width:52px;flex-shrink:0;display:inline-block;text-align:center}
+.slot-subtask{width:118px;flex-shrink:0;display:inline-block;text-align:center}
 .slot-status{width:58px;flex-shrink:0;display:inline-block;text-align:center}
 .slot-ops{width:64px;flex-shrink:0;display:inline-block;text-align:center}
 /* 2026-11-04 #55：置顶/复制（板块行还有折叠/展开）合并为「操作 ▾」下拉菜单 */
@@ -789,7 +789,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    「＋子事项」那格（.slot-sub）留空即可。 */
 .sub-node .sub-tail{gap:10px}
 .sub-node .slot-overdue{width:46px}
-.sub-node .slot-subtask{width:52px}
+.sub-node .slot-subtask{width:118px}
 .sub-node .slot-status{width:58px}
 .sub-node .slot-ops{width:64px}
 .sub-node .slot-sub{width:72px}
@@ -1621,13 +1621,11 @@ function goLogin(){
       <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
       <div class="form-row" id="e_meta_row">
         <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
+        <div class="form-group" id="e_week_group"><label>周数</label><input type="text" class="form-input" id="e_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可手动调整"></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>周数</label><input type="text" class="form-input" id="e_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可手动调整"></div>
       </div>
       <div class="form-row" id="e_owner_row">
         <div class="form-group" id="e_owner_group"><label>负责人<span id="e_owner_opt" style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="e_owner"></div></div>
@@ -1727,6 +1725,7 @@ function goLogin(){
           <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
         </div>
       </div>
+      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="c_desc" style="min-height:72px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
       <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。</div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" id="c_submit" onclick="saveColumn()">创建板块</button></div>
@@ -4475,10 +4474,13 @@ function renderBoard(cards,cols,q,colHits){
     const year=meta?(meta.year||''):'';
     // 标题点击 = 打开板块编辑界面；展开/收起只由左侧三角控制，两者互不干扰
     const titleEditable=canEditColumn(boardId);
-    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}" data-completion="${esc(meta?(meta.completion||'open'):'open')}"`;
+    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}" data-completion="${esc(meta?(meta.completion||'open'):'open')}" data-desc="${esc(meta?(meta.description||''):'')}"`;
+    // 板块描述 tooltip（2026-11-09 #93）：有描述时悬停标题展示，否则提示可编辑
+    const colDesc=(meta&&(meta.description||'').trim())||'';
+    const titleTip=colDesc?('【板块描述】'+colDesc):'点击编辑板块';
     const titleHtml=titleEditable
-      ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnEdit(this)" title="点击编辑板块">${esc(k)}</span>`
-      :`<span class="week-title">${esc(k)}</span>`;
+      ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnEdit(this)" title="${esc(titleTip)}">${esc(k)}</span>`
+      :`<span class="week-title" title="${esc(colDesc?('【板块描述】'+colDesc):'')}">${esc(k)}</span>`;
     // ── 板块行布局（2026-11-04 #55）：与事项行同构 → 字段列纵向对齐 ──
     // 字段：负责人 / 创建 / 截止（板块无周数与逾期 → 周数列留空、逾期槽位空占位）
     const _ownerName=bcMemberName(meta?(meta.owner||''):'');
@@ -4927,7 +4929,7 @@ function cardItem(c,seq){
     <span class="fcols">${colsHtml}</span>
     <span class="item-tail">
       <span class="slot-overdue">${overdue?'<span class="lock-tag lock-tag-overdue">逾期</span>':''}</span>
-      <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">☑ ${c.subtask_done}/${c.subtask_total}</span>`:''}</span>
+      <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">【代办：${c.subtask_done}/${c.subtask_total}】</span>`:''}</span>
       <span class="slot-status">${statusTag(c.card_id,c.status)}</span>
       <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${opsId}')" title="置顶 / 复制 / 子事项">操作 ▾</button></span>
     </span>
@@ -5210,6 +5212,8 @@ async function openEdit(id,preloaded){
   document.getElementById('e_board').innerHTML=ME.boards.map(b=>`<option value="${b.board_id}" ${b.board_id===c.board_id?'selected':''}>${esc(b.board_name)}</option>`).join('');
   // 子事项模式：只隐藏「所属看板」（子事项继承父看板）；「参与人」与主事项一样保留
   document.getElementById('e_board_wrap').style.display=EDIT_IS_SUB?'none':'';
+  // 周数与所属看板同行（2026-11-09 #93）：子事项隐藏看板后，周数占满整行
+  document.getElementById('e_week_group').style.flex=EDIT_IS_SUB?'1 1 100%':'';
   document.getElementById('editTitle').textContent=EDIT_IS_SUB?'编辑子事项':'编辑事项';
   applyOwnerSlot(EDIT_IS_SUB);
   await applySubContext(c);
@@ -5695,6 +5699,8 @@ function openColumnModal(){
   COL_OWNER='';
   colRenderOwner();
   colRenderParticipants();
+  // 板块描述（2026-11-09 #93）：新建时清空
+  document.getElementById('c_desc').value='';
   // 板块完成情况（2026-11-04 需求3）：新建时默认「未完成」，由创建者定初始值
   document.getElementById('c_completion').value='open';
   colRenderCompletion();
@@ -5723,6 +5729,8 @@ function openColumnEdit(el){
   // 板块完成情况回填（2026-11-04 需求3）
   document.getElementById('c_completion').value=d.completion||'open';
   colRenderCompletion();
+  // 板块描述回填（2026-11-09 #93）
+  document.getElementById('c_desc').value=d.desc||'';
   // 板块负责人回填（账号）；映射（账号 → 姓名）可能尚未加载 → 先拉再渲染
   COL_OWNER=d.owner||'';
   // 板块参与人回填（账号数组）
@@ -5756,7 +5764,8 @@ async function saveColumn(){
       const partsPayload=colCanAssignParticipants()?{participants:COL_PARTS.join(',')}:{};
       // 完成情况：仅板块负责人/管理员可提交（其他成员不传 = 不改，服务端也会 403 兜底）
       const compPayload=colCanEditCompletion()?{completion:document.getElementById('c_completion').value}:{};
-      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload))});
+      const descPayload={description:document.getElementById('c_desc').value.trim()};
+      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload))});
       toast('板块已保存：'+column_name);
       closeModal('columnModal');
       reload(1);renderProgress();
@@ -5764,7 +5773,8 @@ async function saveColumn(){
       // 新建板块：有指派权时带上负责人（2026-11-04 —— 此前新建根本没有负责人入口）
       const ownerCreate=colCanAssignOwner()?{owner:COL_OWNER||''}:{};
       const compCreate=colCanEditCompletion()?{completion:document.getElementById('c_completion').value}:{};
-      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(',')},ownerCreate,compCreate))});
+      const descCreate={description:document.getElementById('c_desc').value.trim()};
+      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(',')},ownerCreate,compCreate,descCreate))});
       toast('板块已创建：'+column_name);
       closeModal('columnModal');
       // ⚠️ curBoards 是内容区的**权威选择**（#51 多看板语义）——
@@ -6049,6 +6059,7 @@ async function addSubtask(){
     await api('/api/cards/'+editing+'/subtasks',{method:'POST',body:JSON.stringify({title})});
     document.getElementById('e_subtask_new').value='';
     await loadEditSubtasks(editing);
+    debounceReload();   // 同步外部目录（2026-11-09 #93）
   }catch(e){toast(e.message)}
 }
 async function toggleSubtask(sid,checked,cardId){
@@ -6057,6 +6068,7 @@ async function toggleSubtask(sid,checked,cardId){
   try{
     await api('/api/cards/'+cardId+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({done:checked?1:0})});
     await loadEditSubtasks(cardId);
+    debounceReload();   // 同步外部目录的代办计数/勾选态（2026-11-09 #93）
   }catch(e){toast(e.message);loadEditSubtasks(cardId)}
 }
 async function delSubtask(sid,cardId){
@@ -6066,6 +6078,7 @@ async function delSubtask(sid,cardId){
   try{
     await api('/api/cards/'+cardId+'/subtasks/'+sid,{method:'DELETE'});
     await loadEditSubtasks(cardId);
+    debounceReload();   // 同步外部目录（2026-11-09 #93）
   }catch(e){toast(e.message)}
 }
 async function editSubtaskTitle(sid){
