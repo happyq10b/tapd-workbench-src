@@ -519,9 +519,13 @@ def _org_leader_nodes(username):
 # 看板管理（board_config.dept_node_id）是唯一真相，架构管理里的
 # 「板块绑定」按此联动展示，避免两处口径不一致。
 def _dept_nodes():
-    """架构中的部门层级节点（中心 + 部门），中心在前、按 id 排序。"""
+    """架构中的部门层级节点（中心 + 部门）。
+
+    排序（2026-11-09 #103）：按 org_nodes.sort（架构管理的上移/下移手工排序），
+    同 sort 时按 id —— 目录界面的部门顺序与架构管理界面保持一致。
+    """
     rows = dbq("SELECT id, name, node_type, parent_id FROM org_nodes "
-               "WHERE node_type IN ('center','dept') ORDER BY id")
+               "WHERE node_type IN ('center','dept') ORDER BY sort, id")
     return [dict(r) for r in rows]
 
 
@@ -538,13 +542,16 @@ def _dept_names():
 
 
 def _dept_order():
-    """目录树展示用的部门顺序：历史顺序在前（仅保留架构里仍存在的），新增部门追加在后。"""
-    exist = {r['name'] for r in _dept_nodes()}
-    if not exist:
+    """目录树展示用的部门顺序（2026-11-09 #103 改版）：
+
+    跟随【架构管理】的节点排序（org_nodes.sort，上移/下移维护）——
+    架构管理界面从上到下的顺序 = 目录界面从左上到右下的顺序。
+    架构为空时回退到历史固定清单 DEPT_ORDER（兼容初始化前）。
+    """
+    names = [r['name'] for r in _dept_nodes()]
+    if not names:
         return list(DEPT_ORDER)
-    ordered = [d for d in DEPT_ORDER if d in exist]
-    ordered += [n for n in sorted(exist) if n not in ordered]
-    return ordered
+    return list(dict.fromkeys(names))     # 去重保序（同名节点只出现一次）
 
 
 
@@ -4303,6 +4310,44 @@ def _collect_node_members(node_id: int, nodes, appts):
         stack.extend(child['id'] for child in by_parent.get(cur, []))
     out.sort(key=lambda x: (x['node_name'], x['name']))
     return out
+
+
+class OrgReorderReq(BaseModel):
+    direction: str            # 'up' | 'down'
+
+
+@app.post('/api/org/nodes/{node_id}/reorder')
+def reorder_org_node(node_id: int, req: OrgReorderReq, username: str = Depends(require_admin),
+                     request: Request = None):
+    """架构节点手工排序（2026-11-09 #103）：上移/下移，**仅限管理员/超级管理员**。
+
+    · 只在**同级兄弟节点**之间交换（同 parent_id）→ 移动不可跨越不同层级；
+    · 排序持久化在 org_nodes.sort；/api/org/tree（架构管理界面）、
+      _dept_nodes/_dept_order（目录界面部门顺序）统一按 sort, id 排 →
+      架构管理从上到下 = 目录从左上到右下；
+    · sort 历史全 0 → 每次交换前先按当前顺序归一化重编 0..n-1。
+    """
+    if req.direction not in ('up', 'down'):
+        raise HTTPException(400, 'direction 只能是 up 或 down')
+    row = dbq('SELECT id, parent_id FROM org_nodes WHERE id=?', (node_id,))
+    if not row:
+        raise HTTPException(404, '节点不存在')
+    parent_id = row[0]['parent_id']
+    ids = [r['id'] for r in dbq(
+        'SELECT id FROM org_nodes WHERE parent_id=? ORDER BY sort, id', (parent_id,))]
+    if node_id not in ids:
+        raise HTTPException(404, '节点不在其父节点下（数据异常）')
+    i = ids.index(node_id)
+    j = i - 1 if req.direction == 'up' else i + 1
+    if j < 0 or j >= len(ids):
+        return {'ok': True, 'moved': False, 'reason': 'already_at_edge'}
+    for idx, nid in enumerate(ids):
+        dbe('UPDATE org_nodes SET sort=? WHERE id=?', (idx, nid))
+    dbe('UPDATE org_nodes SET sort=? WHERE id=?', (j, node_id))
+    dbe('UPDATE org_nodes SET sort=? WHERE id=?', (i, ids[j]))
+    audit_log(username, client_ip(request), 'update', '架构排序',
+              f'节点 {node_id} 手动排序（{req.direction}，同级交换）', 'success')
+    return {'ok': True, 'moved': True}
 
 
 @app.get('/api/org/tree')
