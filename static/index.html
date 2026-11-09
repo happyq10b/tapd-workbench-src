@@ -1062,6 +1062,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .detail-desc{background:#fafafa;border-left:3px solid var(--primary);padding:10px 14px;font-size:13px;color:var(--text);white-space:pre-wrap;border-radius:0 6px 6px 0;margin-top:10px}
 .detail-meta{font-size:13px;color:var(--text2);line-height:2}
 .detail-meta b{color:var(--text);font-weight:500}
+.parent-box{border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--bg);
+  font-size:12.5px;color:var(--text2);line-height:1.8;word-break:break-all}
+.parent-box .pv{color:var(--text);font-weight:600}
 .subtask-box{border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-top:12px;background:#fafcff}
 .subtask-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .subtask-title{font-size:13px;font-weight:600;color:var(--text)}
@@ -1618,7 +1621,7 @@ function goLogin(){
     </div>
     <div class="modal-body">
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
-      <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
+      <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" class="parent-box"></div></div>
       <div class="form-row" id="e_meta_row">
         <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
         <div class="form-group" id="e_week_group"><label>周数</label>
@@ -1671,7 +1674,7 @@ function goLogin(){
     </div>
     <div class="modal-body">
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="n_name" placeholder="请输入工作标题"></div>
-      <div class="form-group" id="n_parent_wrap" style="display:none"><label>父事项</label><div id="n_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
+      <div class="form-group" id="n_parent_wrap" style="display:none"><label>父事项</label><div id="n_parent_info" class="parent-box"></div></div>
       <div class="form-row" id="n_meta_row">
         <div class="form-group" id="n_board_wrap"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
         <div class="form-group" id="n_week_group"><label>周数</label>
@@ -5353,7 +5356,7 @@ async function applySubContext(c){
   }catch(e){}
   if(!p){info.innerHTML='<span style="color:var(--text3)">父事项不可见或已删除</span>';return}
   const pBegin=p.begin||'',pDue=p.due||'';
-  info.innerHTML=`父事项：<span style="color:var(--primary);cursor:pointer" onclick="openSubModal('${p.card_id}')">${esc(p.card_name)}</span>`
+  info.innerHTML=`父事项：<span class="pv" style="color:var(--primary);cursor:pointer" onclick="openSubModal('${p.card_id}')">${esc(p.card_name)}</span>`
     +`<span style="color:var(--text3)"> · ${statusText(p.status)}</span>`
     +`<span style="color:var(--text3)"> · 负责人：${esc(p.owner||'—')}</span>`
     +`<span style="color:var(--text3)"> · 创建：${esc(fmtDate(p.created)||'—')}</span>`
@@ -5505,7 +5508,7 @@ async function openNewSubModal(parentId){
   document.getElementById('n_week_group').style.flex='1 1 100%';
   document.getElementById('n_parent_wrap').style.display='';
   document.getElementById('n_parent_info').innerHTML=
-    `父事项：<span style="color:var(--primary)">${esc(p.card_name)}</span>`
+    `父事项：<span class="pv" style="color:var(--primary)">${esc(p.card_name)}</span>`
     +`<span style="color:var(--text3)"> · 所属板块：${esc(p.column_name||'—')}</span>`
     +((p.begin||p.due)?`<span style="color:var(--text3)"> · 父时间范围：${p.begin?('开始 '+esc(fmtDT(p.begin))):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(fmtDT(p.due))):''}</span>`:'');
   // 板块显示父事项所属板块（只读，隐藏由父事项行承载信息）
