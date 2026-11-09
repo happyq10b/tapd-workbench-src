@@ -8,7 +8,7 @@ TAPD 看板 Web 应用 v2 - 多人协作编辑版
 - 操作日志 + 卡片评论
 依赖：fastapi, uvicorn（JWT/密码哈希均用标准库）
 """
-import json, os, time, hmac, hashlib, base64, secrets, sqlite3, threading, re
+import json, os, time, hmac, hashlib, base64, secrets, sqlite3, threading, re, asyncio
 from collections import defaultdict
 from datetime import datetime, date as _date
 from typing import Optional, List, Union
@@ -44,6 +44,7 @@ SECRET = os.environ.get('APP_SECRET', 'tapd-webapp-dev-secret-change-me')
 TOKEN_TTL = 7 * 24 * 3600
 LOCK_TIMEOUT = 300
 LOCK_HEARTBEAT = 60
+WS_IDLE_TIMEOUT = 70   # WS 空闲判定（#113）：前端 25s 心跳，2.8 倍容差
 
 # ---------------- 登录失败锁定策略 ----------------
 # 连续失败 LOGIN_FAIL_THRESHOLD 次 → 冷却 LOGIN_COOLDOWN 秒内不允许再试
@@ -1407,18 +1408,25 @@ def _ws_message_boards(msg: dict):
 
 class WSManager:
     def __init__(self):
-        self.conns = {}    # username -> set[WebSocket]
+        self.conns = {}      # username -> set[WebSocket]
+        self.last_seen = {}  # ws -> 最近一次收到消息的时间（#113 死活判定）
 
     async def connect(self, ws: WebSocket, username: str):
         await ws.accept()
         self.conns.setdefault(username, set()).add(ws)
+        self.last_seen[ws] = time.time()
 
     def disconnect(self, ws: WebSocket, username: str):
+        self.last_seen.pop(ws, None)
         s = self.conns.get(username)
         if s:
             s.discard(ws)
             if not s:
                 self.conns.pop(username, None)
+
+    def touch(self, ws: WebSocket):
+        """收到任何消息（含心跳 ping）时刷新存活时间（#113）。"""
+        self.last_seen[ws] = time.time()
 
     async def broadcast(self, msg: dict, exclude: str = None):
         """推送给所有在线连接（可选排除某用户）。
@@ -1450,6 +1458,28 @@ class WSManager:
 
 ws_mgr = WSManager()
 
+
+@app.on_event('startup')
+async def _ws_reaper():
+    """死连接收割器（#113）：每 30s 扫描一次，last_seen 超 WS_IDLE_TIMEOUT
+    （70s，前端 25s 心跳的 2.8 倍容差）的连接直接从在线表移除——不发任何
+    消息（对死 socket 的 send 要等 TCP 超时才失败，且在请求处理器里 send
+    探活会与 receive 循环并发冲突误杀活连接，实测教训）。
+    断电/强杀等无 TCP FIN 的半开连接因此最多 100s 内从「已在线」判定中消失。
+    """
+    async def _loop():
+        while True:
+            await asyncio.sleep(30)
+            now = time.time()
+            stale = [ws for ws, ts in ws_mgr.last_seen.items() if now - ts > WS_IDLE_TIMEOUT]
+            for ws in stale:
+                for uname, sockets in list(ws_mgr.conns.items()):
+                    if ws in sockets:
+                        ws_mgr.disconnect(ws, uname)
+                        break
+    asyncio.create_task(_loop())
+
+
 @app.websocket('/ws')
 async def ws_endpoint(ws: WebSocket, token: str = None):
     """WebSocket: ?token=xxx 连接后实时收广播"""
@@ -1463,10 +1493,17 @@ async def ws_endpoint(ws: WebSocket, token: str = None):
     await ws_mgr.connect(ws, username)
     try:
         while True:
-            data = await ws.receive_text()   # 客户端心跳/保持连接
+            # 客户端每 25s 发 ping（#113 死活判定依赖此心跳刷新 last_seen）；
+            # 死连接（断电/强杀进程等无 TCP FIN 的半开场景）由后台 reaper
+            # 按 last_seen 超 WS_IDLE_TIMEOUT 清理——⚠️ 不在此处对连接做
+            # 主动 send 探活：与 receive 循环并发 send 会把活连接误杀（实测）。
+            data = await ws.receive_text()
+            ws_mgr.touch(ws)
             if data == 'ping':
                 await ws.send_text('pong')
     except WebSocketDisconnect:
+        ws_mgr.disconnect(ws, username)
+    except Exception:
         ws_mgr.disconnect(ws, username)
 
 # ---------------- API：登录 / 信息 ----------------
@@ -1491,19 +1528,23 @@ async def login(req: LoginReq, request: Request):
     if pwd_ok:
         # 密码正确：即使处于冷却期也放行（受限的是「密码错误」，不是「登录」），并清零计数
         _login_record_success(req.username)
-        # 单点登录（#110）：会话代数 +1 → 该用户所有旧 token 立即失效；
-        # 并向其现有 WebSocket 连接推 force_logout，旧设备即时回到登录页
-        #（不再依赖旧设备下一次 API 调用吃 401）。
+        # 单点登录（#113 修订，原 #110「后来者踢先者」）：**先在线者占位，后来者拒绝**。
+        # 在线判定 = 该账号当前有存活的 WebSocket 连接（前端 25s 心跳保活；
+        # 正常关浏览器/断网时服务端 receive 循环立即 disconnect；异常半开
+        # 连接（断电/强杀进程，无 TCP FIN）由后台 reaper 按 last_seen 超 70s
+        # 清理——不在 login 里 send 探活：与 receive 循环并发冲突会把活连接
+        # 误杀（实测教训）。
+        # 解封路径 = 超管【在线用户管理】强制下线（#111），与拒绝文案闭环。
+        if ws_mgr.conns.get(req.username):
+            audit_log(req.username, ip, 'login', '账号登录',
+                      '登录被拒：该账号当前已在线（单点占用）', 'denied')
+            raise HTTPException(409, '该账号当前已在线。如非本人操作，请联系超级管理员将该用户强制下线后再试')
+        # 会话代数 +1 保留：作废该账号所有旧代数 token（换设备登录后旧设备的
+        # 7 天 localStorage token 不残留）；此时该账号无存活 WS，无需 force_logout。
         seq = int(u.get('active_seq') or 0) + 1
         now_str = time.strftime('%Y-%m-%d %H:%M:%S')
         dbe('UPDATE users SET active_seq=?, last_login_at=?, last_login_ip=? WHERE username=?',
             (seq, now_str, ip or '', req.username))
-        for old_ws in list(ws_mgr.conns.get(req.username, set())):
-            try:
-                await old_ws.send_text(json.dumps({'type': 'force_logout', 'by': req.username},
-                                                  ensure_ascii=False))
-            except Exception:
-                ws_mgr.disconnect(old_ws, req.username)
         audit_log(req.username, ip, 'login', '账号登录',
                   f'登录成功（角色：{u["role"]}，会话代数 {seq}，已单点下线其他设备）', 'success')
         return {'token': make_token(req.username, seq), 'username': req.username,
@@ -1581,7 +1622,10 @@ async def admin_online_kick(req: KickReq, username: str = Depends(require_super)
                                               ensure_ascii=False))
             kicked_ws += 1
         except Exception:
-            ws_mgr.disconnect(old_ws, req.username)
+            pass
+        # 主动从在线表移除（#113）：不能等客户端自己关——那中间窗口里
+        # 该账号的重复登录仍会被「已在线」判定拒绝。
+        ws_mgr.disconnect(old_ws, req.username)
     audit_log(username, client_ip(request), 'update', '在线用户管理',
               f'强制下线账号 {req.username}（会话代数 → {seq}，断开 {kicked_ws} 条连接）', 'success')
     return {'ok': True, 'username': req.username, 'ws_kicked': kicked_ws}

@@ -175,6 +175,8 @@ async function doLogin(){
     const d=await r.json();
     if(!r.ok){
       show(d.detail||'登录失败');
+      // 单点登录（#113）：账号已在线 → 弹出提示框（用户要求文案）
+      if(r.status===409){alert(d.detail||'该账号当前已在线。如非本人操作，请联系超级管理员将该用户强制下线后再试');}
       // 失败后刷新锁定状态（可能进入冷却或被锁定）
       try{
         const s2=await fetch('/api/login/lock-status?username='+encodeURIComponent(u.value.trim()));
