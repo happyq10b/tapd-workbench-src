@@ -6992,7 +6992,11 @@ async function openDetail(id){
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
   document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
-  document.getElementById('d_actions').innerHTML=acts.actions.slice(0,10).map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(actCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
+  // 操作记录仅显示最近 12 条（#116）；更早的完整日志走【更多→操作日志】（管理员权限）
+  const _acts=acts.actions.slice(0,12);
+  const _more=acts.actions.length>12
+    ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">仅显示最近 12 条，更早的完整操作日志请通过【更多 → 操作日志】查询（管理员权限）</div>`:'';
+  document.getElementById('d_actions').innerHTML=_acts.map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(actCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')+_more||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
   document.getElementById('d_new_comment').value='';
   // 切换事项时清空上一次残留的提及（否则会把上一条评论的 @ 提到新事项上）
   COMMENT_MENTIONS=[];
