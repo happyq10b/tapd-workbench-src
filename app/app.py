@@ -3537,16 +3537,23 @@ def _wg_tree(rows):
     return build(0)
 
 def _all_boards():
-    """看板来源 = boards 表 ∪ cards 派生的看板（兼容历史仅有卡片、未登记元数据的看板）"""
-    pairs = {}
+    """看板来源 = boards 表 ∪ cards 派生的看板（兼容历史仅有卡片、未登记元数据的看板）
+
+    ⚠️ 排序（2026-11-09 #95）：boards 表按 **sort, board_id**（看板管理手工排序），
+    cards 派生的未登记看板排在其后（按 board_id）。
+    此前最终 sorted 又按 board_id 重排 → sort 完全失效，本版修正。"""
+    pairs = {}          # board_id -> dict，保插入序（boards 先按 sort 序插入）
+    seen = []
     for r in dbq('SELECT board_id, board_name, workspace_id FROM boards ORDER BY sort, board_id'):
         d = dict(r)
         pairs[d['board_id']] = {'board_id': d['board_id'], 'board_name': d['board_name'], 'workspace_id': d.get('workspace_id', '')}
+        seen.append(d['board_id'])
+    derived = []
     for r in dbq('SELECT DISTINCT board_id, board_name, workspace_id FROM cards WHERE deleted=0'):
-        d = dict(r)
-        if d['board_id'] not in pairs:
-            pairs[d['board_id']] = {'board_id': d['board_id'], 'board_name': d['board_name'], 'workspace_id': d.get('workspace_id', '')}
-    return sorted(pairs.values(), key=lambda x: (x['board_id'],))
+        if r['board_id'] not in pairs:
+            derived.append({'board_id': r['board_id'], 'board_name': r['board_name'], 'workspace_id': r.get('workspace_id', '')})
+    derived.sort(key=lambda x: x['board_id'])
+    return [pairs[b] for b in seen] + derived
 
 @app.get('/api/workgroups')
 def get_workgroups(username: str = Depends(require_auth)):
@@ -4723,6 +4730,40 @@ def _validate_board_config(dept, attr, status):
         raise HTTPException(400, '属性必须是 ' + '/'.join(ALLOWED_ATTRS) + ' 之一')
     if status not in ALLOWED_STATUSES:
         raise HTTPException(400, '状态必须是 ' + '/'.join(ALLOWED_STATUSES) + ' 之一')
+
+
+class BoardReorderReq(BaseModel):
+    board_id: str
+    direction: str            # 'up' | 'down'
+
+
+@app.post('/api/boards/reorder')
+def reorder_board(req: BoardReorderReq, username: str = Depends(require_admin), request: Request = None):
+    """看板手工排序（2026-11-09 #95）：上移/下移交换相邻看板的 sort 值。
+
+    · 排序结果持久化在 boards.sort；所有列表（看板管理 / 顶部目录带 / ME.boards）
+      统一按 sort, board_id 排 → 两处顺序天然一致。
+    · sort 值历史上从未使用（全 0）→ 每次交换前先按当前顺序归一化重编 0..n-1。
+    """
+    if req.direction not in ('up', 'down'):
+        raise HTTPException(400, 'direction 只能是 up 或 down')
+    ids = [r['board_id'] for r in dbq('SELECT board_id FROM boards ORDER BY sort, board_id')]
+    if req.board_id not in ids:
+        raise HTTPException(404, '看板不存在（或未登记元数据，无法参与排序）')
+    i = ids.index(req.board_id)
+    j = i - 1 if req.direction == 'up' else i + 1
+    if j < 0 or j >= len(ids):
+        return {'ok': True, 'moved': False, 'reason': 'already_at_edge'}
+    # 归一化：按当前顺序重编 sort 0..n-1，再交换相邻两项
+    for idx, bid in enumerate(ids):
+        dbe('UPDATE boards SET sort=? WHERE board_id=?', (idx, bid))
+    dbe('UPDATE boards SET sort=? WHERE board_id=?', (j, req.board_id))
+    dbe('UPDATE boards SET sort=? WHERE board_id=?', (i, ids[j]))
+    log_action('__board__', username, 'update', f'看板排序：{req.board_id} {req.direction}')
+    audit_log(username, client_ip(request), 'update', '看板排序',
+              f'看板 {req.board_id} 手动排序（{req.direction}）', 'success')
+    return {'ok': True, 'moved': True}
+
 
 @app.get('/api/boards')
 def list_boards(username: str = Depends(require_auth)):

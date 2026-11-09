@@ -9342,6 +9342,8 @@ function renderBoardList(){
     }
     return true;
   });
+  // 手工排序（#95）：首/末行标记 → 边界按钮禁用
+  if(list.length){list[0]._first=true;list[list.length-1]._last=true;}
   const cnt=document.getElementById('bcLeftCount'); if(cnt)cnt.textContent=list.length;
   const box=document.getElementById('bcList');
   if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';bcPaintPick();return}
@@ -9363,6 +9365,17 @@ function renderBoardList(){
     const copyBtn=(ME&&ME.is_admin)||b.can_edit
       ?'<button class="cp-copy-btn" data-copy=\''+esc(JSON.stringify({board_id:b.board_id,board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||0,attr:b.attr||'',status:b.status||'',can_edit:!!b.can_edit}))+'\' onclick="event.stopPropagation();openCopyModal(\'board\',JSON.parse(this.dataset.copy))" title="复制该看板（默认整套复制：含板块与事项）">📋 复制</button>'
       :'';
+    // 手工排序（2026-11-09 #95）：↑↓ 交换相邻看板 sort 值，持久化；
+    // 看板管理顺序 = 顶部目录带 / 外部目录的看板显示顺序（同为 boards.sort）。
+    // 排序影响所有人 → 仅管理员可见按钮；边界行（首/末）对应按钮禁用。
+    const sortBtns=(ME&&ME.is_admin)
+      ?'<span class="bc-sort-btns">'
+        +'<button class="cp-copy-btn" style="padding:1px 7px" onclick="event.stopPropagation();moveBoard(\''+esc(b.board_id)+'\',\'up\')" title="上移（排序对所有人生效）"'
+        +(b._first?' disabled style="padding:1px 7px;opacity:.4"':'')+'>↑</button>'
+        +'<button class="cp-copy-btn" style="padding:1px 7px" onclick="event.stopPropagation();moveBoard(\''+esc(b.board_id)+'\',\'down\')" title="下移（排序对所有人生效）"'
+        +(b._last?' disabled style="padding:1px 7px;opacity:.4"':'')+'>↓</button>'
+        +'</span>'
+      :'';
     // 数量：显示**看板下的板块数**（用户 2026-11-03 要求）。
     //   b.col_count 由后端 /api/boards 提供（按可见板块口径，与 card_count 同源）；
     //   后端未提供时由前端 bcLoadColCounts() 并发拉取后回填（同样用可见板块口径）。
@@ -9371,7 +9384,7 @@ function renderBoardList(){
     //   点击看板卡片本身即进入右侧配置面板（bcSelect），跳转文字是冗余的。
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
+      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+sortBtns+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+colTxt+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
       +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span></div>'
@@ -9380,8 +9393,21 @@ function renderBoardList(){
   setBcListScroll(list.length);
   bcPaintPick();
 }
-function setBcListScroll(n){
-  const box=document.getElementById('bcList');
+// 手工排序（2026-11-09 #95）：上移/下移看板，持久化到 boards.sort。
+// 成功后三处同步：①看板管理列表（loadBoardConfig）；②ME.boards（重拉 /api/me）
+// → ③顶部目录带 / 外部目录的看板顺序（renderTabs 按 ME.boards 渲染）。
+async function moveBoard(board_id, direction){
+  try{
+    const r=await api('/api/boards/reorder',{method:'POST',body:JSON.stringify({board_id,direction})});
+    if(!r.ok) throw new Error(r.detail||'排序失败');
+    // 重拉 ME（看板顺序）+ 管理列表数据
+    ME=await api('/api/me');
+    renderTabs();
+    await loadBoardConfig();
+    if(r.moved===false){toast('已处于边缘，无法继续'+(direction==='up'?'上移':'下移'));}
+  }catch(e){toast(e.message)}
+}
+function setBcListScroll(n){  const box=document.getElementById('bcList');
   if(!box)return;
   // ⚠️ 弹窗隐藏时 offsetHeight=0，量出来的行高是假的 → 算出的 maxHeight 会把列表压扁
   //    （首开尺寸异常的根因之一）。隐藏态直接跳过，等可见时的下一次渲染再适配。
