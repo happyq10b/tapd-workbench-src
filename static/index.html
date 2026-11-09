@@ -1623,7 +1623,8 @@ function goLogin(){
         <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
         <div class="form-group" id="e_week_group"><label>周数</label>
           <div style="position:relative">
-            <input type="text" class="form-input" id="e_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('e')" onclick="openWeekCombo('e')" oninput="paintWeekCombo('e')">
+            <input type="text" class="form-input" id="e_week" autocomplete="off"
+                   placeholder="" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('e')" onclick="openWeekCombo('e')" oninput="paintWeekCombo('e')">
             <div class="cf-drop" id="e_week_drop" hidden></div>
           </div>
         </div>
@@ -1678,7 +1679,8 @@ function goLogin(){
       </div>
       <div class="form-group"><label>周数</label>
         <div style="position:relative">
-          <input type="text" class="form-input" id="n_week" placeholder="例如：2026年第41周" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="paintWeekCombo('n')">
+          <input type="text" class="form-input" id="n_week" autocomplete="off"
+                   placeholder="" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="paintWeekCombo('n')">
           <div class="cf-drop" id="n_week_drop" hidden></div>
         </div>
       </div>
@@ -4183,7 +4185,7 @@ function paintWeekCombo(which){
   const cand=weekComboCandidates(kw);
   drop.hidden=false;
   drop.innerHTML=cand.length
-    ? '<div class="cf-tip">点击选择；也可直接输入「2026年第41周」</div>'
+    ? '<div class="cf-tip">点击选择；也可直接输入「2026-41」回车</div>'
       +cand.map(w=>`<label class="cf-opt" data-wk-pick="${esc(w)}"><span>${esc(weekLabelOf(w))}</span></label>`).join('')
     : `<div class="cf-empty">${kw?'无匹配周数，可直接输入':'暂无可选周数，可直接输入'}</div>`;
 }
@@ -5349,7 +5351,8 @@ async function saveEdit(){
     description:document.getElementById('e_desc').value,
   };
   // 周数维度：格式校验（清空 = 回落到按创建日期自动计算）
-  const wk=(document.getElementById('e_week').value||'').trim();
+  // 2026-11-09 #95：与板块筛选同款体验——也接受「2026-41」简写，保存前规范化
+  const wk=(document.getElementById('e_week').value||'').trim().replace(/^(\d{4})-(\d{1,2})$/,'$1年第$2周');
   if(wk&&!/^\d{4}年第(\d{1,2})周$/.test(wk)){toast('周数格式应为「2026年第41周」');return}
   fields.week_no=wk;
   // 参与人：主事项与子事项都有（对标主事项，cc 是 cards 表的标准字段）
@@ -5512,7 +5515,7 @@ async function createCard(){
       begin:nb,due:nd,
     };
     // 周数：格式校验后提交（留空 = 后端按创建日期自动算）
-    const nw=(document.getElementById('n_week').value||'').trim();
+    const nw=(document.getElementById('n_week').value||'').trim().replace(/^(\d{4})-(\d{1,2})$/,'$1年第$2周');
     if(nw&&!/^\d{4}年第(\d{1,2})周$/.test(nw)){toast('周数格式应为「2026年第41周」');return}
     const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:fields,week_no:nw};
     if(NEW_CARD_COL){
@@ -5527,7 +5530,7 @@ async function createCard(){
 async function createSubCard(card_name){
   const p=NEW_SUB_PARENT;
   if(!p){toast('父事项上下文已失效，请重新打开');return}
-  const nw=(document.getElementById('n_week').value||'').trim();
+  const nw=(document.getElementById('n_week').value||'').trim().replace(/^(\d{4})-(\d{1,2})$/,'$1年第$2周');
   if(nw&&!/^\d{4}年第(\d{1,2})周$/.test(nw)){toast('周数格式应为「2026年第41周」');return}
   try{
     await api('/api/cards',{method:'POST',body:JSON.stringify({
