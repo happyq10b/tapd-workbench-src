@@ -6896,6 +6896,12 @@ function ppRemove(containerId,n){
   ppSyncTags(containerId);
 }
 // ---------- 详情 + 评论 ----------
+// 操作记录动作 → 中文（2026-11-09：用户不是程序员，看不懂 subtask_update/update）
+const ACT_CN={create:'新建事项',update:'修改事项',copy:'复制事项',delete:'删除事项',
+  pin:'置顶 / 取消置顶',subtask_add:'新增代办',subtask_update:'更新代办',
+  comment:'发表评论',move:'移动看板',import:'导入事项',
+  user_create:'新建账号',user_update:'修改账号',user_delete:'删除账号'};
+function actCn(a){return ACT_CN[a]||a;}
 async function openDetail(id){
   DETAIL_ID=id;
   // 评论 @ 候选池随卡片切换重置（2026-11-06 #77）：不同看板可见成员不同
@@ -6933,7 +6939,7 @@ async function openDetail(id){
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
   document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
-  document.getElementById('d_actions').innerHTML=acts.actions.slice(0,10).map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(a.action)}<span class="when">${esc(a.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
+  document.getElementById('d_actions').innerHTML=acts.actions.slice(0,10).map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(actCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
   document.getElementById('d_new_comment').value='';
   // 切换事项时清空上一次残留的提及（否则会把上一条评论的 @ 提到新事项上）
   COMMENT_MENTIONS=[];
@@ -9492,7 +9498,6 @@ async function bcApplyDrag(bid,targetBid){
     ME=await api('/api/me');
     renderTabs();
     await loadBoardConfig();
-    toast(r.scope==='default'?'已更新默认看板布局（所有未自定义排序的用户可见）':'已保存个人看板布局');
   }catch(e){toast(e.message)}
 }
 function setBcListScroll(n){  const box=document.getElementById('bcList');
