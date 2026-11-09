@@ -1345,6 +1345,7 @@ function goLogin(){
            现按 2026-11-03 需求把这两个低频项收进来 → 菜单不再空置，T-007 自然闭环。 -->
       <div class="header-more-menu" id="headerMoreMenu" hidden>
         <button id="teamBtn" onclick="openTeamModal()" title="账号管理（仅管理员）">👥 账号管理</button>
+        <button id="onlineBtn" onclick="openOnlineModal()" title="在线用户管理（仅超级管理员）">🟢 在线用户</button>
         <button id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
         <!-- 2026-11-04 #56 用户反馈（最终口径）：备份/恢复 = **管理员级**，放顶部【更多】，
              非管理员不展现（backupBtn/jsonImportBtn → applyPermissionUI 按 isAdmin 显隐）；
@@ -2304,6 +2305,25 @@ function goLogin(){
   </div>
 </div>
 
+<!-- 在线用户管理弹窗（仅超级管理员，#111） -->
+<div class="modal-overlay" id="onlineModal" style="display:none">
+  <div class="modal" style="width:min(760px,94vw)">
+    <div class="modal-header"><h2>🟢 在线用户管理</h2><button class="modal-close" onclick="closeModal('onlineModal')">✕</button></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:12.5px;color:var(--text2)">当前已登录用户（每账号单点会话）。「强制下线」立即使其全部登录态失效并断开实时连接，被下线者会收到提示。</div>
+      <div style="overflow:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:var(--bg);text-align:left">
+            <th style="padding:8px 10px">用户名</th><th style="padding:8px 10px">角色</th>
+            <th style="padding:8px 10px">登录时间</th><th style="padding:8px 10px">IP 地址</th>
+            <th style="padding:8px 10px">状态</th><th style="padding:8px 10px">操作</th>
+          </tr></thead>
+          <tbody id="onlineList"><tr><td colspan="6" style="padding:14px;color:var(--text2)">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- 操作日志弹窗（仅管理员） -->
 <div class="modal-overlay" id="auditModal" style="display:none">
   <div class="modal" style="width:min(1080px,96vw);max-height:min(92vh,860px);overflow:hidden;display:flex;flex-direction:column">
@@ -2733,6 +2753,8 @@ function applyPermissionUI(){
   ['backupBtn','jsonImportBtn'].forEach(function(id){
     const el=document.getElementById(id); if(el)el.style.display=isAdmin?'':'none';
   });
+  // 在线用户管理（#111）：仅超级管理员（内置 admin 账号）可见
+  const ob=document.getElementById('onlineBtn'); if(ob)ob.style.display=(ME&&ME.is_super)?'':'none';
   ['xlsxImportBtn'].forEach(function(id){
     const el=document.getElementById(id); if(el)el.style.display=canEdit?'':'none';
   });
@@ -7783,6 +7805,37 @@ function resetAuditFilter(){
   document.getElementById('audit_ip').value='';
   document.getElementById('audit_result').value='';
   loadAuditLogs(1);
+}
+// ---------- 在线用户管理（#111，仅超级管理员） ----------
+async function openOnlineModal(){
+  if(!ME||!ME.is_super){toast('仅超级管理员可访问');return}
+  document.getElementById('onlineModal').style.display='flex';
+  await loadOnlineList();
+}
+async function loadOnlineList(){
+  const box=document.getElementById('onlineList');
+  try{
+    const d=await api('/api/admin/online');
+    if(!d.users.length){box.innerHTML='<tr><td colspan="6" style="padding:14px;color:var(--text2)">暂无登录记录</td></tr>';return}
+    box.innerHTML=d.users.map(u=>`<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 10px;font-weight:600">${esc(u.username)}${u.username==='admin'?' <span style="font-size:11px;color:var(--primary)">（超级管理员）</span>':''}</td>
+      <td style="padding:8px 10px;color:var(--text2)">${esc(u.role)}</td>
+      <td style="padding:8px 10px">${esc(u.login_at)}</td>
+      <td style="padding:8px 10px;color:var(--text2)">${esc(u.ip||'—')}</td>
+      <td style="padding:8px 10px">${u.online?'<span style="color:#16a34a">● 在线</span>':'<span style="color:var(--text3)">○ 离线</span>'}${u.ws_count>1?` <span style="font-size:11px;color:var(--text3)">（${u.ws_count} 条连接）</span>`:''}</td>
+      <td style="padding:8px 10px">${u.username===ME.username
+        ?'<span style="font-size:12px;color:var(--text3)">当前账号</span>'
+        :`<button class="btn-secondary" style="padding:3px 10px;font-size:12px" onclick="kickOnline('${esc(u.username)}')">强制下线</button>`}</td>
+    </tr>`).join('');
+  }catch(e){box.innerHTML=`<tr><td colspan="6" style="padding:14px;color:var(--danger)">${esc(e.message)}</td></tr>`}
+}
+async function kickOnline(name){
+  if(!confirm(`确定强制下线「${name}」？其未保存的编辑将丢失，需重新登录。`))return;
+  try{
+    await api('/api/admin/online/kick',{method:'POST',body:JSON.stringify({username:name})});
+    toast(`已下线 ${name}`);
+    await loadOnlineList();
+  }catch(e){toast(e.message)}
 }
 async function loadAuditLogs(page){
   AUDIT_PAGE=Math.max(1,page);

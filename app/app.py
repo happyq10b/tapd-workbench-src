@@ -1495,7 +1495,9 @@ async def login(req: LoginReq, request: Request):
         # 并向其现有 WebSocket 连接推 force_logout，旧设备即时回到登录页
         #（不再依赖旧设备下一次 API 调用吃 401）。
         seq = int(u.get('active_seq') or 0) + 1
-        dbe('UPDATE users SET active_seq=? WHERE username=?', (seq, req.username))
+        now_str = time.strftime('%Y-%m-%d %H:%M:%S')
+        dbe('UPDATE users SET active_seq=?, last_login_at=?, last_login_ip=? WHERE username=?',
+            (seq, now_str, ip or '', req.username))
         for old_ws in list(ws_mgr.conns.get(req.username, set())):
             try:
                 await old_ws.send_text(json.dumps({'type': 'force_logout', 'by': req.username},
@@ -1524,6 +1526,65 @@ async def login(req: LoginReq, request: Request):
     detail = f'登录失败：账号或密码错误（已连续失败 {cnt} 次）'
     audit_log(req.username, ip, 'login', '账号登录', detail, 'failed')
     raise HTTPException(401, '账号或密码错误')
+
+
+def require_super(username: str = Depends(require_auth)):
+    """超级管理员（仅内置 admin 账号，2026-11-06 两级称谓口径）。
+
+    在线用户管理/强制下线属于「最高权限运维动作」，普通管理账号（role=admin）
+    也不放行——误踢他人会话的影响面太大。
+    """
+    if username != SUPER_ADMIN:
+        raise HTTPException(403, '仅超级管理员可操作')
+    return username
+
+
+@app.get('/api/admin/online')
+def admin_online(username: str = Depends(require_super)):
+    """当前已登录用户列表（#111 在线用户管理）。
+
+    每行 = 最近一次登录的会话信息（#110 单点登录语义下每账号至多一个活会话）：
+    login_at/ip 来自 users.last_login_*（登录成功时记录）；
+    ws_count = 该账号当前存活的 WebSocket 连接数（>0 即在线）。
+    """
+    out = []
+    for r in dbq('SELECT username, role, last_login_at AS login_at, last_login_ip AS ip FROM users '
+                 "WHERE last_login_at != '' ORDER BY last_login_at DESC"):
+        d = dict(r)
+        d['ws_count'] = len(ws_mgr.conns.get(d['username'], set()))
+        d['online'] = d['ws_count'] > 0
+        out.append(d)
+    return {'users': out}
+
+
+class KickReq(BaseModel):
+    username: str
+
+
+@app.post('/api/admin/online/kick')
+async def admin_online_kick(req: KickReq, username: str = Depends(require_super),
+                            request: Request = None):
+    """强制下线指定账号（#111）：会话代数 +1 → 其 token 立即失效，
+    并向其全部 WebSocket 推 force_logout 即时弹出。禁止踢自己。
+    """
+    if req.username == username:
+        raise HTTPException(400, '不能强制下线你自己（会把自己踢回登录页）')
+    u = get_user(req.username)
+    if not u:
+        raise HTTPException(404, '账号不存在')
+    seq = int(u.get('active_seq') or 0) + 1
+    dbe('UPDATE users SET active_seq=? WHERE username=?', (seq, req.username))
+    kicked_ws = 0
+    for old_ws in list(ws_mgr.conns.get(req.username, set())):
+        try:
+            await old_ws.send_text(json.dumps({'type': 'force_logout', 'by': req.username},
+                                              ensure_ascii=False))
+            kicked_ws += 1
+        except Exception:
+            ws_mgr.disconnect(old_ws, req.username)
+    audit_log(username, client_ip(request), 'update', '在线用户管理',
+              f'强制下线账号 {req.username}（会话代数 → {seq}，断开 {kicked_ws} 条连接）', 'success')
+    return {'ok': True, 'username': req.username, 'ws_kicked': kicked_ws}
 
 
 @app.get('/api/login/lock-status')
@@ -1657,6 +1718,7 @@ def me(username: str = Depends(require_auth)):
                 editable_boards.append(b['board_id'])
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
+            'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'allowed_columns': col_info,
             'managed_boards': managed_boards,      # 我是负责人的看板

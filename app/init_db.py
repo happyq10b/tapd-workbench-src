@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS users (
     photo         TEXT NOT NULL DEFAULT '',          -- 个人照片（data URL，形象照）
     status_text   TEXT NOT NULL DEFAULT '',          -- 个人状态（顶部状态栏展示）
     active_seq    INTEGER NOT NULL DEFAULT 0,        -- 会话代数（#110 单点登录）：每次登录+1，旧 token 立即失效
+    last_login_at TEXT NOT NULL DEFAULT '',           -- 本次会话登录时间（#111 在线用户管理）
+    last_login_ip TEXT NOT NULL DEFAULT '',           -- 本次会话登录 IP（#111）
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -508,6 +510,10 @@ def _migrate_schema(conn):
     ucols = [r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()]
     if 'active_seq' not in ucols:
         conn.execute('ALTER TABLE users ADD COLUMN active_seq INTEGER NOT NULL DEFAULT 0')
+    if 'last_login_at' not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT NOT NULL DEFAULT ''")
+    if 'last_login_ip' not in ucols:
+        conn.execute("ALTER TABLE users ADD COLUMN last_login_ip TEXT NOT NULL DEFAULT ''")
 
     # ---- team_members.groups -> team_members.workgroups ----
     tcols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]
