@@ -2308,7 +2308,7 @@ function goLogin(){
 <!-- 在线用户管理弹窗（仅超级管理员，#111） -->
 <div class="modal-overlay" id="onlineModal" style="display:none">
   <div class="modal" style="width:min(760px,94vw)">
-    <div class="modal-header"><h2>🟢 在线用户管理</h2><button class="modal-close" onclick="closeModal('onlineModal')">✕</button></div>
+    <div class="modal-header"><h2>🟢 在线用户管理</h2><div style="display:flex;gap:6px;align-items:center"><button class="btn-secondary" style="padding:3px 12px;font-size:12px" onclick="loadOnlineList()" title="重新拉取当前登录用户列表">🔄 刷新</button><button class="modal-close" onclick="closeModal('onlineModal')">✕</button></div></div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
       <div style="font-size:12.5px;color:var(--text2)">当前已登录用户（每账号单点会话）。「强制下线」立即使其全部登录态失效并断开实时连接，被下线者会收到提示。</div>
       <div style="overflow:auto;border:1px solid var(--border);border-radius:8px">
@@ -7834,7 +7834,8 @@ async function kickOnline(name){
   try{
     await api('/api/admin/online/kick',{method:'POST',body:JSON.stringify({username:name})});
     toast(`已下线 ${name}`);
-    await loadOnlineList();
+    await loadOnlineList();          // 立即刷新
+    setTimeout(loadOnlineList,800);  // 等 WS 断开传播后再刷一次 → 状态/连接数归准
   }catch(e){toast(e.message)}
 }
 async function loadAuditLogs(page){
