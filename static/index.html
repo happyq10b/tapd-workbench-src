@@ -1670,22 +1670,27 @@ function goLogin(){
       </div>
     </div>
     <div class="modal-body">
-      <div class="form-group" id="n_board_wrap"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
-      <div class="form-group" id="n_col_wrap" style="display:none"><label>所属板块</label><input type="text" class="form-input" id="n_col" readonly></div>
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="n_name" placeholder="请输入工作标题"></div>
+      <div class="form-group" id="n_parent_wrap" style="display:none"><label>父事项</label><div id="n_parent_info" style="font-size:12.5px;color:var(--text2);line-height:1.7"></div></div>
+      <div class="form-row" id="n_meta_row">
+        <div class="form-group" id="n_board_wrap"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
+        <div class="form-group" id="n_week_group"><label>周数</label>
+          <div style="position:relative">
+            <input type="text" class="form-input" id="n_week" autocomplete="off"
+                     placeholder="" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="paintWeekCombo('n')">
+            <div class="cf-drop" id="n_week_drop" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="form-group" id="n_col_wrap" style="display:none"><label>所属板块</label><input type="text" class="form-input" id="n_col" readonly></div>
       <div class="form-row">
         <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="n_begin"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="n_due"></div>
       </div>
-      <div class="form-group"><label>周数</label>
-        <div style="position:relative">
-          <input type="text" class="form-input" id="n_week" autocomplete="off"
-                   placeholder="" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="paintWeekCombo('n')">
-          <div class="cf-drop" id="n_week_drop" hidden></div>
-        </div>
+      <div class="form-row" id="n_people_row">
+        <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
+        <div class="form-group" id="n_cc_group"><label>参与人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_cc"></div></div>
       </div>
-      <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
-      <div class="form-group" id="n_cc_group"><label>参与人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_cc"></div></div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('newModal')">取消</button><button class="btn-primary" onclick="createCard()">创建</button></div>
@@ -4102,6 +4107,9 @@ function buildFilterParams(extra){
 }
 async function reload(page){
   curPage=page;
+  // 子事项目录缓存清空（2026-11-09 #96b）：子树展开后数据可能已被编辑
+  // （周数/代办/标题），不清缓存会让目录继续显示旧值——「改了没生效」的观感根因。
+  if(typeof SUBTREE_CACHE!=='undefined')Object.keys(SUBTREE_CACHE).forEach(k=>delete SUBTREE_CACHE[k]);
   // ⚠️ 未选板块（curBoard 为空）→ **不拉数据**，直接渲染空状态。
   //    否则会把全部可见板块的事项一次性灌进来（需求3：初始内容区应为空）。
   if(!curBoards.size){renderEmptyBoardState();syncFilterHint();return}
@@ -5281,23 +5289,16 @@ async function openEdit(id,preloaded){
   document.getElementById('editModal').style.display='flex';
   loadEditSubtasks(id);
 }
-// 「负责人」字段的位置：子事项模式下搬到「所属看板」所在行（填满原本的空白格），
-// 并标注为选填；主事项模式还原成原来的「负责人 / 参与人」独立行。
-// 用 DOM 搬移而不是另建一份，保证两处永远是同一个元素、不会出现两份输入框或错位。
+// 「负责人」字段位置（2026-11-09 #96b）：子事项与父事项**布局完全一致**——
+// 负责人/参与人保持独立一行，不再把负责人搬进周数行（旧做法导致子事项的
+// 参与人整行被藏、周数行结构错乱）。本函数退化为「归位」：两种模式同布局。
 function applyOwnerSlot(isSub){
   const ownerRow=document.getElementById('e_owner_row');
   const ownerGroup=document.getElementById('e_owner_group');
-  const metaRow=document.getElementById('e_meta_row');
   const opt=document.getElementById('e_owner_opt');
-  if(isSub){
-    if(ownerGroup.parentNode!==metaRow)metaRow.appendChild(ownerGroup);
-    ownerRow.style.display='none';       // 参与人已隐藏，这一行整体不再占位
-    if(opt)opt.style.display='';
-  }else{
-    if(ownerGroup.parentNode!==ownerRow)ownerRow.insertBefore(ownerGroup,ownerRow.firstChild);
-    ownerRow.style.display='';
-    if(opt)opt.style.display='none';
-  }
+  if(ownerGroup.parentNode!==ownerRow)ownerRow.insertBefore(ownerGroup,ownerRow.firstChild);
+  ownerRow.style.display='';
+  if(opt)opt.style.display='none';
 }
 // 打开子事项弹窗：目录点击、抽屉「编辑」按钮共用这一个入口。
 // 无编辑权限时回落到只读详情弹窗（与主事项的权限表现一致）。
@@ -5401,10 +5402,15 @@ async function openNewModal(boardId,colKey){
   NEW_CARD_MODE='card';NEW_CARD_COL=null;NEW_SUB_PARENT=null;
   const boards=ME.boards;
   document.getElementById('n_title').textContent='新建事项';
+  // 还原子事项模式可能遗留的样式（看板隐藏/周数占满）
+  document.getElementById('n_board_wrap').style.display='';
+  document.getElementById('n_week_group').style.flex='';
   document.getElementById('n_board').innerHTML=boards.map(b=>`<option value="${b.board_id}">${esc(b.board_name)}</option>`).join('');
   document.getElementById('n_name').value='';document.getElementById('n_desc').value='';
   document.getElementById('n_begin').value='';document.getElementById('n_due').value='';
   document.getElementById('n_week').value=cpWeekOf();   // 周数默认 = 当前自然周
+  // 父事项上下文：主事项无（2026-11-09 #96b 与编辑弹窗布局对齐）
+  document.getElementById('n_parent_wrap').style.display='none';
   NEW_CARD_STATUS='open';
   document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
   // 选人池（层级约束）：来自指定板块，或当前选中看板（尚无板块场景）
@@ -5470,9 +5476,18 @@ async function openNewSubModal(parentId){
   const bs=document.getElementById('n_board');
   bs.innerHTML=`<option value="${esc(p.board_id)}">${esc(p.board_name||'')}</option>`;
   bs.value=p.board_id;bs.disabled=true;
-  // 板块显示父事项所属板块（只读）
+  // 与编辑子事项同布局（2026-11-09 #96b）：看板隐藏（继承自父事项），
+  // 父事项上下文行代替之；周数占满整行
+  document.getElementById('n_board_wrap').style.display='none';
+  document.getElementById('n_week_group').style.flex='1 1 100%';
+  document.getElementById('n_parent_wrap').style.display='';
+  document.getElementById('n_parent_info').innerHTML=
+    `父事项：<span style="color:var(--primary)">${esc(p.card_name)}</span>`
+    +`<span style="color:var(--text3)"> · 所属板块：${esc(p.column_name||'—')}</span>`
+    +((p.begin||p.due)?`<span style="color:var(--text3)"> · 父时间范围：${p.begin?('开始 '+esc(fmtDT(p.begin))):''}${p.begin&&p.due?' ～ ':''}${p.due?('截止 '+esc(fmtDT(p.due))):''}</span>`:'');
+  // 板块显示父事项所属板块（只读，隐藏由父事项行承载信息）
   const wrap=document.getElementById('n_col_wrap'),colInp=document.getElementById('n_col');
-  wrap.style.display='';
+  wrap.style.display='none';
   colInp.value=p.column_name||'—';
   // 其余字段一律清空
   document.getElementById('n_name').value='';
