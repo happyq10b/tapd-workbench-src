@@ -2571,8 +2571,15 @@ function modalScrollGuard(e){
 }
 document.addEventListener('wheel',modalScrollGuard,{passive:false,capture:true});
 document.addEventListener('touchmove',modalScrollGuard,{passive:false,capture:true});
-function setupDraggableModals(){
-  document.querySelectorAll('.modal-overlay').forEach(overlay=>{
+function setupDraggableModals(root){
+  // 弹窗拖拽（2026-11-09 #108）：按住标题栏/页脚（cursor:move 区域）拖动弹窗。
+  //   · 边界限制：弹窗整体始终留在可视区内（留 8px 边距）；某一维比视口还大
+  //     （如 max-height 94vh 的大弹窗在矮窗口）时该维锁回居中，不允许偏移
+  //   · 拖拽不与内部交互冲突：button/input/select/textarea/a 及整个 .modal-body
+  //     不触发拖拽（body 内的滚动/选字/点击全部原样工作）
+  //   · 可重复调用：dataset.dragInited 幂等；全局 MutationObserver 捕获后加
+  //     的动态弹窗（避免"只有登录后那次初始化"的覆盖缺口）
+  (root||document).querySelectorAll('.modal-overlay').forEach(overlay=>{
     const modal=overlay.querySelector('.modal');
     if(!modal)return;
     if(modal.dataset.dragInited)return;
@@ -2586,10 +2593,18 @@ function setupDraggableModals(){
       closeTreePick();
       const startX=e.clientX,startY=e.clientY;
       const tx=parseFloat(modal.dataset.dragX||0),ty=parseFloat(modal.dataset.dragY||0);
+      // 未平移时的布局位置（rect 含当前 translate → 反推）
+      const rect0=modal.getBoundingClientRect();
+      const layoutLeft=rect0.left-tx, layoutTop=rect0.top-ty;
+      const M=8;   // 可视区边距
+      const loX=M-layoutLeft, hiX=window.innerWidth-M-layoutLeft-rect0.width;
+      const loY=M-layoutTop, hiY=window.innerHeight-M-layoutTop-rect0.height;
       modal.classList.add('modal-dragging');
       function move(ev){
         const dx=ev.clientX-startX,dy=ev.clientY-startY;
-        const nx=tx+dx,ny=ty+dy;
+        let nx=tx+dx,ny=ty+dy;
+        nx=Math.min(Math.max(nx,loX),hiX); if(loX>hiX)nx=(loX+hiX)/2;   // 宽于视口 → 锁回
+        ny=Math.min(Math.max(ny,loY),hiY); if(loY>hiY)ny=(loY+hiY)/2;   // 高于视口 → 锁回
         modal.dataset.dragX=nx;modal.dataset.dragY=ny;
         modal.style.transform='translate('+nx+'px,'+ny+'px)';
       }
@@ -2612,6 +2627,14 @@ function setupDraggableModals(){
     });
     mo.observe(overlay,{attributes:true,attributeFilter:['style']});
   });
+}
+// 动态弹窗捕获：任何新加入的 .modal-overlay 自动接上拖拽（幂等）
+new MutationObserver(()=>setupDraggableModals())
+  .observe(document.documentElement,{childList:true,subtree:true});
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',()=>setupDraggableModals());
+}else{
+  setupDraggableModals();
 }
 
 // ---------- 按权限隐藏无权使用的入口 ----------
