@@ -3432,7 +3432,13 @@ def add_team(req: TeamReq, username: str = Depends(require_admin), request: Requ
         raise HTTPException(403, f'「{SUPER_ADMIN}」是内置超级管理员，不可被成员关联')
     try:
         # workgroups 不再由本接口写入 —— 归属统一由【架构管理】的任命同步维护
-        dbe('INSERT INTO team_members (name, workgroups) VALUES (?,?)', (name, ''))
+        # 成员编号（2026-11-09 #106）：显式取 MAX(id)+1，与存量成员格式一致（小号连续）。
+        #   ⚠️ 不用裸 AUTOINCREMENT：sqlite_sequence 是历史高水位（已删成员的旧号
+        #   不回落），新成员会拿到 3590 这类大号，与存量 1..41 断层（用户反馈）。
+        #   显式插入 rowid 会自动把 seq 顶到 max(id)，旧水位随之自愈。
+        _nid = dbq('SELECT COALESCE(MAX(id),0)+1 AS nid FROM team_members')[0]['nid']
+        dbe('INSERT INTO team_members (id, name, workgroups) VALUES (?,?,?)',
+            (_nid, name, ''))
     except sqlite3.IntegrityError:
         raise HTTPException(409, '成员已存在')
     mid = dbq('SELECT id FROM team_members WHERE name=?', (name,))[0]['id']
