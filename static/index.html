@@ -2108,6 +2108,11 @@ function goLogin(){
 .bc-item.drag-over-top{box-shadow:inset 0 3px 0 var(--primary)}
 .bc-item.drag-over-bottom{box-shadow:inset 0 -3px 0 var(--primary)}
 .bc-item .nm{font-size:13.5px;font-weight:500;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:8px}
+/* 看板名（2026-11-09 #104）：左对齐缩进（紧跟勾选框），自动换行最多 2 行，
+   超出两行以「…」截断 —— 原先 space-between 布局下长名被挤成竖排、观感居中 */
+.bc-item .nm .bc-name{flex:1;min-width:0;text-align:left;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  word-break:break-all;line-height:1.45}
 .bc-item .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text2);flex-wrap:wrap}
 /* 状态徽标与复制按钮：不被压缩、不换行（此前「启用」被挤成竖排两行） */
 .bc-item .nm>.badge-active,.bc-item .nm>.badge-locked,.bc-item .nm>.badge-muted{flex-shrink:0;white-space:nowrap}
@@ -9453,7 +9458,7 @@ function renderBoardList(){
     //   点击看板卡片本身即进入右侧配置面板（bcSelect），跳转文字是冗余的。
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span>'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
+      +'<span class="bc-name" title="'+esc(b.board_name||b.board_id)+'">'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+colTxt+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
       +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span></div>'
