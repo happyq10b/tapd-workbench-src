@@ -3141,8 +3141,9 @@ def board_columns_list(board_id: str, username: str = Depends(require_auth)):
     return {'columns': out}
 
 
-@app.delete('/api/cards/{card_id}')
-async def delete_card(card_id: str, username: str = Depends(require_writer), request: Request = None):
+def _delete_card_core(card_id: str, username: str, request=None) -> int:
+    """删除单卡核心逻辑（校验 + 级联软删）。成功返回连带子事项数，失败抛 HTTPException。
+    供单条删除（#161 批量删除复用同一套校验/级联）共用。"""
     holder = lock_mgr.who(card_id)
     if holder and holder != username:
         raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法删除')
@@ -3158,7 +3159,9 @@ async def delete_card(card_id: str, username: str = Depends(require_writer), req
     if res.rowcount == 0:
         raise HTTPException(404, '卡片不存在或已删除')
     # 级联：删除子事项（递归，含孙级）及其代办任务
-    allsubs = dbq('SELECT card_id, parent_id FROM cards WHERE deleted=0 AND parent_id!=?', (card_id,))
+    # ⚠️ 原查询带 parent_id!=card_id 条件，恰好把**直接子事项**排除在图之外，
+    #    导致级联永远传播不到子事项（历史 bug，#161 修复）：改为全量取图。
+    allsubs = dbq('SELECT card_id, parent_id FROM cards WHERE deleted=0')
     byid = {r['card_id']: (r['parent_id'] or 0) for r in allsubs}
     victims = {card_id}
     changed = True
@@ -3176,11 +3179,57 @@ async def delete_card(card_id: str, username: str = Depends(require_writer), req
     # 数据不变量：板块至少留一个事项；空板块与空看板一并清理
     cleanup_empty_columns_and_boards()
     log_action(card_id, username, 'delete', f'subitems={len(victims)}')
-    audit_log(username, client_ip(request), 'delete', f'卡片 {card_id}', f'删除卡片（含 {len(victims)} 个子事项）', 'success')
+    audit_log(username, client_ip(request), 'delete', f'卡片 {card_id}',
+              f'删除卡片（含 {len(victims)} 个子事项）', 'success')
     lock_mgr.release(card_id, username)
+    return len(victims)
+
+
+@app.delete('/api/cards/{card_id}')
+async def delete_card(card_id: str, username: str = Depends(require_writer), request: Request = None):
+    n = _delete_card_core(card_id, username, request)
     await ws_mgr.broadcast({'type': 'card_delete', 'card_id': card_id,
         'by': username}, exclude=username)
     return {'ok': True}
+
+
+class BatchDeleteReq(BaseModel):
+    card_ids: list = []
+
+
+@app.post('/api/cards/batch-delete')
+async def batch_delete_cards(req: BatchDeleteReq, username: str = Depends(require_writer),
+                             request: Request = None):
+    """批量删除勾选事项（#161）。
+
+    服务端**逐卡校验**（存在性 / 权限 / 编辑锁）后删除 —— 客户端预校验之外的第二道
+    并发防线：他人已抢先删除、权限变化的卡各自记入 failed，不影响其余。
+    级联：主事项连带子事项软删；随后一次性广播。
+    """
+    ids = []
+    for x in (req.card_ids or []):
+        s = (x or '').strip()
+        if s and s not in ids:
+            ids.append(s)
+    if not ids:
+        raise HTTPException(400, '未勾选任何事项')
+    deleted, failed = [], []
+    for cid in ids:
+        try:
+            n = _delete_card_core(cid, username, request)
+            deleted.append({'card_id': cid, 'subitems': n})
+        except HTTPException as e:
+            failed.append({'card_id': cid, 'reason': e.detail})
+        except Exception as e:
+            failed.append({'card_id': cid, 'reason': str(e)})
+    if deleted:
+        audit_log(username, client_ip(request), 'delete', '批量删除事项',
+                  f'批量删除 {len(deleted)} 个事项'
+                  + (f'（{len(failed)} 个失败：已删除/无权限/被锁定）' if failed else ''),
+                  'success')
+        await ws_mgr.broadcast({'type': 'card_delete', 'card_id': '*', 'by': username})
+    return {'ok': True, 'deleted': deleted, 'failed': failed}
+
 
 # ---------------- API：锁 ----------------
 @app.post('/api/cards/{card_id}/lock')
@@ -6153,7 +6202,7 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
                 owner: str = '', column: str = '', q: str = '',
                 created_start: str = '', created_end: str = '',
                 cc: str = '', week: str = '', person: str = '', years: str = '',
-                fields: str = '',
+                fields: str = '', card_ids: str = '',
                 username: str = Depends(require_auth), request: Request = None):
     """导出**当前筛选结果**的事项为 xlsx（.xlsx，一维表，每行一个事项）
 
@@ -6163,6 +6212,8 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
       筛选参数（status / q / cc / person / week / created_start / created_end /
       years / board_id(s) / owner / column），并**复用 /api/cards 的同一套过滤逻辑**
       （见 _filter_cards_for_user）→ 页面看到什么就导出什么；
+    - #161 导出勾选：card_ids 非空时仅导出这些事项 —— **在权限过滤之后取交集**，
+      不可见/已删除的 id 静默剔除（导出范围永远 ⊆ 用户可见范围）；
     - 字段涵盖事项关联的全部信息（看板 / 板块 / 负责人 / 参与人 / 周数 /
       日期类 / 描述类信息，**除评论外**）；
     - 仍受用户可见性约束（看板 + 板块双层过滤）；
@@ -6194,6 +6245,10 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
         board_id=board_id, board_ids=board_ids, status=status, owner=owner,
         column=column, q=q, created_start=created_start, created_end=created_end,
         cc=cc, week=week, person=person, years=years, board_set=target_boards)
+    # #161 导出勾选：与勾选清单取交集（交集在权限过滤之后 → 不可见 id 无法借道导出）
+    if (card_ids or '').strip():
+        want = {x.strip() for x in card_ids.split(',') if x.strip()}
+        cards = [c for c in cards if c.get('card_id') in want]
     # 稳定排序：按开始时间、卡片名，保证多次导出一致
     cards.sort(key=lambda c: (str(c.get('begin') or ''), str(c.get('card_name') or '')))
     # 派生列需要板块元信息与父事项名称

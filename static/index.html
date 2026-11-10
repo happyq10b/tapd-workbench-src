@@ -1618,6 +1618,7 @@ function goLogin(){
          （margin-left:auto，不依赖明细有无 —— :empty 隐藏明细时按钮也不塌向左端）。 -->
     <div style="order:10;flex:1 0 100%;display:flex;align-items:center;gap:8px;min-width:0">
       <span id="filterHint" class="filter-hint" style="flex:1 1 auto"></span>
+      <button id="chkAllBtn" class="btn-clear" style="flex-shrink:0;display:none" onclick="selectAllCurrent()" title="一键勾选当前筛选结果中的全部事项（板块随之全选/半选）">全选当前</button>
       <button id="chkModeBtn" class="btn-clear chk-mode-btn" style="flex-shrink:0" onclick="toggleChkMode()" title="点击开启勾选模式（板块/事项/子事项前显示勾选框）">启用勾选</button>
       <button class="btn-clear" style="flex-shrink:0" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/年份/人员/周数/日期区间）">清空筛选</button>
       <span class="slot-ops" style="flex-shrink:0;width:auto"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
@@ -2867,11 +2868,12 @@ function refreshToolbarOps(canEdit){
     {label:'— 数据导入导出 —',disabled:true},
     // 2026-11-06 #82：导入/导出全部弹窗化 —— 模板下载并入导入弹窗、
     // 模板管理并入导出弹窗（页签），外部不再单设按钮
-    {label:'导出（xlsx）',fn:function(){openExportModal();}},
+    // #161：导出升级为「导出勾选」—— 仅导出当前用户勾选的事项
+    {label:'导出勾选（xlsx）',fn:function(){openExportModal();}},
     {label:'导入（xlsx）',fn:function(){openImportModal();}},
-    // #158 批量删除板块：只删当前用户勾选的板块（勾选按用户隔离）；无勾选不执行
+    // #158/#161 批量删除：只删当前用户勾选的板块+事项（勾选按用户隔离）；无勾选不执行
     {label:'— 危险操作 —',disabled:true},
-    {label:'🗑 批量删除勾选板块',fn:function(){bulkDeleteColumns();}});
+    {label:'🗑 批量删除勾选',fn:function(){bulkDeleteChecked();}});
   ROW_OPS['toolbarOps']=items;
 }
 
@@ -2879,31 +2881,69 @@ function refreshToolbarOps(canEdit){
 //   不落库不广播 → 多人同时操作互不影响）；无勾选直接提示返回，不执行删除。
 // 逐列调用 DELETE /api/columns/{col_key}（后端按列做「看板负责人及以上」校验，
 //   无权限/已被他人抢先删除的板块各自报错，不影响其余勾选板块的删除）。
-async function bulkDeleteColumns(){
-  const keys=[...COL_CHECKED];
-  if(!keys.length){toast('未勾选任何板块');return}
-  const metaOf=function(k){return (window.COLS_META||[]).find(function(x){return x.col_key===k;});};
-  const names=keys.map(function(k){const m=metaOf(k);return m?(m.column_name||k):k;});
-  const msg='确认删除已勾选的 '+keys.length+' 个板块？\n'
-    +names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n'
-    +'这些板块下的事项与子事项将一并删除（软删，可由管理员通过备份恢复找回）。';
+// #161 批量删除勾选（通用版）：删除当前用户勾选的**板块与事项**。
+//   勾选按用户隔离（COL_CHECKED/ITEM_CHECKED 本地会话状态）；无勾选不执行。
+//   并发安全三道防线：
+//   ① 下发前重校验：拉取全局可见清单，他人已删/已改名的板块与事项自动剔除并提示；
+//   ② 服务端逐条校验：DELETE /api/columns 与 POST /api/cards/batch-delete 各自
+//      做存在性/权限/编辑锁校验，失败项单独报告，不影响其余；
+//   ③ 已删除板块连带其下事项 → 从事项删除清单中剪掉，避免 404 误报。
+async function bulkDeleteChecked(){
+  const colKeys=[...COL_CHECKED];
+  const cardIds=[...ITEM_CHECKED];
+  if(!colKeys.length && !cardIds.length){toast('未勾选任何板块/事项');return}
+  const colNameOf=function(k){const m=(window.COLS_META||[]).find(function(x){return x.col_key===k;});return m?(m.column_name||k):k;};
+  const cardNameOf=function(id){return (CHK_CURRENT_CARDS_META||{})[id]||id;};
+  // ① 有效性重校验：全局可见清单（不带筛选 → 权限范围内存在性判定）
+  const dropped=[];
+  let validCols=colKeys, validCards=cardIds;
+  try{
+    const d=await api('/api/cards');
+    const alive=new Set((d.cards||[]).map(function(x){return x.card_id;}));
+    validCards=cardIds.filter(function(id){return alive.has(id);});
+    const colAlive=new Set((d.columns||[]).map(function(x){return x.col_key;}));
+    validCols=colKeys.filter(function(k){return colAlive.has(k);});
+    cardIds.forEach(function(id){if(validCards.indexOf(id)<0)dropped.push('事项 '+cardNameOf(id));});
+    colKeys.forEach(function(k){if(validCols.indexOf(k)<0)dropped.push('板块 '+colNameOf(k));});
+  }catch(e){ /* 校验接口失败不阻断 —— 逐条删除时服务端仍会兜底 */ }
+  if(!validCols.length && !validCards.length){toast('勾选内容均已失效（可能已被他人删除），未执行删除');return}
+  const msg='确认删除勾选的'
+    +(validCols.length?(' 板块 '+validCols.length+' 个'):'')
+    +((validCols.length&&validCards.length)?' +':'')
+    +(validCards.length?(' 事项 '+validCards.length+' 个'):'')+'？\n'
+    +'板块下的事项与子事项将一并删除；事项与子事项走软删（可由管理员恢复）。';
   if(!bcConfirm(msg))return;
-  const okList=[],fail=[];
-  for(const k of keys){
+  const okCols=[],failCols=[],failCards=[];
+  let okCards=0;
+  // ② 板块删除（每删一个板块，剪掉其名下的事项，避免批量删事项时 404 误报）
+  const deadCardIds=new Set();
+  for(const k of validCols){
     try{
       await api('/api/columns/'+encodeURIComponent(k),{method:'DELETE'});
-      okList.push(k);
-      COL_CHECKED.delete(k);
-    }catch(e){
-      fail.push((metaOf(k)?(metaOf(k).column_name||k):k)+'（'+e.message+'）');
-    }
+      okCols.push(k);COL_CHECKED.delete(k);
+      (CHK_COL_CARDS[k]||[]).forEach(function(id){deadCardIds.add(id);});
+    }catch(e){failCols.push(colNameOf(k)+'（'+e.message+'）');}
   }
-  saveColChecked();
-  if(okList.length){
-    toast('已删除 '+okList.length+' 个板块'+(fail.length?('；'+fail.length+' 个未删除'):''));
-  }else if(fail.length){
-    toast('未删除任何板块：'+fail[0]);
+  const restCards=validCards.filter(function(id){return !deadCardIds.has(id);});
+  // ③ 事项批量删除（服务端逐卡校验 + 级联软删子事项）
+  if(restCards.length){
+    try{
+      const r=await api('/api/cards/batch-delete',{method:'POST',
+        body:JSON.stringify({card_ids:restCards})});
+      (r.deleted||[]).forEach(function(x){
+        okCards++;ITEM_CHECKED.delete(x.card_id);
+        (CHK_CARD_SUBS[x.card_id]||[]).forEach(function(s){ITEM_CHECKED.delete(s);});
+      });
+      (r.failed||[]).forEach(function(x){failCards.push(cardNameOf(x.card_id)+'（'+x.reason+'）');});
+    }catch(e){failCards.push(e.message);}
   }
+  saveColChecked();saveItemChecked();
+  const parts=[];
+  if(okCols.length)parts.push('板块 '+okCols.length+' 个');
+  if(okCards)parts.push('事项 '+okCards+' 个');
+  const fails=failCols.concat(failCards);
+  if(parts.length)toast('已删除 '+parts.join('、')+(fails.length?('；未删除：'+fails.slice(0,3).join('、')+(fails.length>3?' 等':'')):''));
+  else toast('未删除任何内容：'+fails.slice(0,2).join('、'));
   // 页面状态同步：板块列表 / 统计带 / 顶栏目录树都随删除刷新
   try{ ME=await api('/api/me'); }catch(e){}
   reload(1); renderProgress(); renderTabs();
@@ -4737,6 +4777,9 @@ function renderBoard(cards,cols,q,colHits){
   (cols||[]).forEach(x=>{cmeta[x.column_name]=x});
   window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id
   CHK_COL_CARDS={};            // #159：板块→主事项映射随每次重绘重建
+  CHK_CURRENT_CARDS=(cards||[]).map(x=>x.card_id);   // #161：全选当前的本轮卡片清单
+  CHK_CURRENT_CARDS_META={};                          // #161：card_id→名称（失败报告用）
+  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]=x.card_name;});
   // 没有事项但有板块（如刚建的空板块）时仍要展示板块列表
   if(!(cards||[]).length && !(cols||[]).length){
     // 空状态文案要区分两种情形（需求2）：
@@ -5103,6 +5146,10 @@ function closeColStatusDrop(){
 // 板块名命中 → 该板块成组展示（标注「板块名匹配」）
 // 事项名/描述命中 → 逐条展示，每条标注所属板块
 function renderSearchResults(container,cards,cols,q,colHits){
+  // #161 搜索视图同样支持「全选当前」：注册本轮命中的事项清单
+  CHK_CURRENT_CARDS=(cards||[]).map(x=>x.card_id);
+  CHK_CURRENT_CARDS_META={};
+  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]=x.card_name;});
   const hitByKey={};
   (colHits||[]).forEach(h=>{hitByKey[h.col_key]=h});
   // 年份筛选在搜索视图同样生效：只保留归属年份匹配的板块与其事项
@@ -7810,6 +7857,30 @@ function syncChkModeBtn(btn){
   btn.title=CHK_MODE?'勾选模式已启用，点击关闭并清空全部勾选'
                     :'点击开启勾选模式（板块/事项/子事项前显示勾选框）';
   btn.classList.toggle('on',CHK_MODE);
+  // #161 「全选当前」仅在勾选启用后出现
+  const ab=document.getElementById('chkAllBtn');
+  if(ab)ab.style.display=CHK_MODE?'':'none';
+}
+// #161 一键勾选当前筛选结果：renderBoard 时注册的本轮卡片清单
+var CHK_CURRENT_CARDS=null;   // #161 全选当前的本轮卡片清单（renderBoard/renderSearchResults 注册）
+var CHK_CURRENT_CARDS_META={};   // #161 card_id→名称（删除失败报告用）
+function selectAllCurrent(){
+  if(!CHK_MODE)return;
+  const ids=CHK_CURRENT_CARDS||[];
+  if(!ids.length){toast('当前没有可勾选的事项');return}
+  ids.forEach(function(id){
+    ITEM_CHECKED.add(id);
+    (CHK_CARD_SUBS[id]||[]).forEach(function(s){ITEM_CHECKED.add(s);});
+  });
+  // 板块联动：仅当该板块的**全部**主事项都在本轮筛选结果中（完整可见）才随勾选，
+  //   避免把含不可见事项的板块整列勾上（批量删除板块会连带删除不可见事项）
+  Object.keys(CHK_COL_CARDS).forEach(function(k){
+    const cards=CHK_COL_CARDS[k]||[];
+    if(cards.length&&cards.every(function(id){return ids.indexOf(id)>=0;}))COL_CHECKED.add(k);
+  });
+  saveItemChecked();saveColChecked();
+  syncCheckStates();
+  toast('已勾选当前筛选结果 '+ids.length+' 个事项');
 }
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
@@ -9500,10 +9571,14 @@ function submitExport(){
 // fields（2026-11-06 #79）：逗号分隔的列 key，顺序 = 用户在字段弹窗里的勾选顺序
 async function exportXlsx(fields){
   try{
+    // #161 导出勾选：仅导出当前用户勾选的事项
+    if(!CHK_MODE||!ITEM_CHECKED.size){toast('未勾选任何事项：请先启用勾选并勾选要导出的事项');return}
     toast('正在生成 Excel...');
     // 2026-11-04 需求5：导出对象=**事项**，且**当前页面的筛选条件对导出结果生效**
     //   → 参数与列表请求完全一致（buildFilterParams 单一来源）
     const ps=buildFilterParams();
+    // #161：勾选清单下发，服务端在权限过滤后取交集（不可见 id 借道无效）
+    ps.set('card_ids',[...ITEM_CHECKED].join(','));
     if(fields&&fields.length)ps.set('fields',fields.join(','));
     const q=ps.toString()?('?'+ps.toString()):'';
     const r=await fetch(apiUrl('/api/export/xlsx'+q),{headers:{'Authorization':'Bearer '+TOKEN}});
@@ -9520,7 +9595,7 @@ async function exportXlsx(fields){
     a.download=fname;
     a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),2000);
-    toast('已导出 Excel：'+fname);
+    toast('已导出勾选的 '+ITEM_CHECKED.size+' 个事项：'+fname);
   }catch(e){toast('导出失败：'+e.message)}
 }
 
