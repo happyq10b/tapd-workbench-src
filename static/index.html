@@ -281,6 +281,9 @@ button{font-family:inherit}
 /* 看板卡片【编辑】按钮（2026-11-10 #119）：复用架构卡「主页」的 .dept-home 形态，
    margin-left:auto 推到卡片最右端；卡片本身是 flex 容器，防挤压不换行 */
 .tab-btn .dept-home{margin-left:auto;flex-shrink:0}
+/* 看板卡片标题（2026-11-10 #121）：始终单行，超出「…」省略 ——
+   长标题此前会把 flex 卡片撑高/撑破三列栅格；完整名称看悬停提示（外层 title 已带） */
+.tab-btn .tab-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 当前打开的部门页（进入部门主页后，该节点高亮） */
 .tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
 .tree-dept.cur .dept-home{border-color:var(--primary);color:var(--primary);background:#eef5ff}
@@ -1356,14 +1359,12 @@ function goLogin(){
         <button id="teamBtn" onclick="openTeamModal()" title="账号管理（仅管理员）">👥 账号管理</button>
         <button id="onlineBtn" onclick="openOnlineModal()" title="在线用户管理（仅超级管理员）">🟢 在线用户</button>
         <button id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
-        <!-- 2026-11-04 #56 用户反馈（最终口径）：备份/恢复 = **管理员级**，放顶部【更多】，
-             非管理员不展现（backupBtn/jsonImportBtn → applyPermissionUI 按 isAdmin 显隐）；
-             模板/导入/导出 留在板块筛选的「操作 ▾」里 -->
-        <button id="backupBtn" onclick="exportData()" title="导出 JSON 数据备份（可再导入恢复；仅管理员）">💾 备份</button>
-        <button id="jsonImportBtn" onclick="document.getElementById('importFile').click()" title="从 JSON 备份恢复（覆盖式；仅管理员）">📥 恢复</button>
+        <!-- ⚠️ 备份/恢复按钮已移除（2026-11-10 #121 用户判断）：浏览器端 JSON 导出/
+             覆盖式导入与本地 bat 快照链（prod_/dev_/local_ 快照 + 数据库同步回滚.bat）
+             功能重叠，且覆盖式恢复误操作风险高。前端 exportData/importData 一并移除；
+             后端 /api/export、/api/import 端点保留（未暴露入口）。 -->
       </div>
     </div>
-    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
     <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="impFilePicked(event)">
     <button class="header-btn" onclick="logout()">退出</button>
   </div>
@@ -1475,7 +1476,10 @@ function goLogin(){
   <!-- 统计概览已上移到顶部栏左半第三行（#progressOverview），此处只留筛选工具栏 -->
   <div class="toolbar">
     <div class="toolbar-left">
-      <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索事项 / 看板 / 板块…" oninput="debounceReload()">
+      <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索事项 / 板块…" oninput="debounceReload()"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();reload(1)}" title="搜索事项（名称/描述）与板块名；未选看板时在全部可见看板范围内搜索">
+      <!-- 搜索按钮（2026-11-10 #121）：显式触发搜索（输入过程仍有 400ms 防抖自动搜，回车/按钮 = 立即搜） -->
+      <button type="button" class="btn-default" style="flex-shrink:0;height:33px;padding:0 14px;font-size:13px" onclick="reload(1)" title="执行搜索">搜索</button>
       <!-- 板块状态筛选（2026-11-06 #81）：按板块完成情况（未完成/进行中/已完成）多选，
            客户端过滤板块行（cols 载荷自带 completion）。与人员/周数/归属年份四框等宽对称。 -->
       <span class="combo-filter" id="colStatusWrap" title="按板块状态筛选（可多选）">
@@ -2757,11 +2761,7 @@ function applyPermissionUI(){
   renderPermissionEntries();
   // 可编辑专属：新建板块
   const nb=document.getElementById('newBtn'); if(nb)nb.style.display=canEdit?'':'none';
-  // 数据导入导出权限（#56 修正）：备份/恢复 = **仅管理员**（用户明确）；
-  // 导入（xlsx）= editor 及以上；模板/导出 = 登录即可见
-  ['backupBtn','jsonImportBtn'].forEach(function(id){
-    const el=document.getElementById(id); if(el)el.style.display=isAdmin?'':'none';
-  });
+  // 2026-11-10 #121：备份/恢复按钮已移除（与本地 bat 快照链重叠）→ 显隐逻辑一并下线
   // 在线用户管理（#111）：仅超级管理员（内置 admin 账号）可见
   const ob=document.getElementById('onlineBtn'); if(ob)ob.style.display=(ME&&ME.is_super)?'':'none';
   ['xlsxImportBtn'].forEach(function(id){
@@ -2899,7 +2899,8 @@ function boardTabHtml(b,deptLabel){
   return `<span class="tab-btn ${curBoards.has(b.board_id)?'active':''}" role="button" tabindex="0"`
     +` onclick="pickBoard('${b.board_id}')"`
     +` onkeydown="if(event.key==='Enter'){event.preventDefault();pickBoard('${b.board_id}')}"`
-    +` title="${esc(title)}（单击选中 / 再次单击取消，可多选）">${esc(b.board_name)}${editBtn}</span>`;
+    +` title="${esc(title)}（单击选中 / 再次单击取消，可多选）">`
+    +`<span class="tab-name">${esc(b.board_name)}</span>${editBtn}</span>`;
 }
 function pickBoardToggle(bid){pickBoard(bid);}   // 兼容旧引用（2026-11-04 起单击即切换）
 function renderTabs(){
@@ -3947,7 +3948,11 @@ function pickBoard(bid){
   // 从部门页进入事项列表时，先切回列表视图（switchView 内部会 renderTabs）
   if(CUR_DEPT)backToBoardList();
   if(!curBoards.size){
-    renderTabs();renderEmptyBoardState();renderProgress();syncFilterHint();updateNewBtn();return;
+    renderTabs();renderProgress();syncFilterHint();updateNewBtn();
+    // 搜索词非空 → 全局搜索（2026-11-10 #121：未选看板也能搜，权限由后端 user_allowed 兜底）
+    if(document.getElementById('searchInput').value.trim()){reload(1);}
+    else{renderEmptyBoardState();}
+    return;
   }
   ensureDeptOpen(bid);renderTabs();reload(1);renderProgress();updateNewBtn()
 }
@@ -4175,7 +4180,11 @@ async function reload(page){
   if(typeof SUBTREE_CACHE!=='undefined')Object.keys(SUBTREE_CACHE).forEach(k=>delete SUBTREE_CACHE[k]);
   // ⚠️ 未选板块（curBoard 为空）→ **不拉数据**，直接渲染空状态。
   //    否则会把全部可见板块的事项一次性灌进来（需求3：初始内容区应为空）。
-  if(!curBoards.size){renderEmptyBoardState();syncFilterHint();return}
+  //    例外（2026-11-10 #121）：搜索词非空 → 放行全局搜索 —— 不带 board_ids
+  //    （buildFilterParams 对空集合本就不设置），后端按 user_allowed 的
+  //    权限可见范围返回，越权看板/事项不会出现；其他筛选条件照常生效。
+  const q0=document.getElementById('searchInput').value.trim();
+  if(!curBoards.size&&!q0){renderEmptyBoardState();syncFilterHint();return}
   const reqBoard=[...curBoards].join(',');   // 记下本次请求对应的多选看板（判别响应是否过期）
   const ps=buildFilterParams({page:curPage,size:pageSize});
   // 归属年份已并入 buildFilterParams（与导出共用同一口径）
@@ -9074,37 +9083,9 @@ async function exportXlsx(fields){
   }catch(e){toast('导出失败：'+e.message)}
 }
 
-// 备份（JSON）：完整业务数据，可用于恢复
-async function exportData(){
-  try{
-    const d=await api('/api/export');
-    const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='工作台数据备份_'+new Date().toISOString().slice(0,10)+'.json';
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href),2000);
-    toast('备份完成：事项 '+(d.cards||[]).length+' 条、板块 '+((d.columns||[]).length)+' 个');
-  }catch(e){toast(e.message)}
-}
-async function importData(ev){
-  const f=ev.target.files[0];
-  if(!f)return;
-  try{
-    const text=await f.text();
-    const data=JSON.parse(text);
-    // 2026-11-04 需求4：恢复面向**全局** → 全量字段一起送（看板/板块/配置/组织架构）
-    await api('/api/import',{method:'POST',body:JSON.stringify({
-      cards:data.cards||[],subtasks:data.subtasks||[],team:data.team||[],
-      boards:data.boards||[],columns:data.columns||[],board_config:data.board_config||[],
-      org_nodes:data.org_nodes||[],org_appointments:data.org_appointments||[],
-      workgroups:data.workgroups||[]})});
-    toast('恢复成功：事项 '+((data.cards||[]).length)+' 条、板块 '+((data.columns||[]).length)+' 个');
-    ev.target.value='';
-    ME=await api('/api/me');
-    reload(1);renderProgress();
-  }catch(e){toast('导入失败：'+e.message);ev.target.value=''}
-}
+// 备份（JSON）/ 恢复（JSON 导入）已移除（2026-11-10 #121）：
+//   浏览器端导出/覆盖式导入与本地 bat 快照链功能重叠，恢复按钮误操作风险高。
+//   后端 /api/export、/api/import 端点保留未暴露入口。
 // ---------- 从 xlsx 导入 TAPD 数据（2026-11-06 #82：弹窗化） ----------
 // 仅新增导入（2026-11-06 #86）：文件内 ID 类列一律忽略，编号系统生成；// 每行生成一条新事项，不覆盖不更新已有数据。
 // 交互：导入弹窗内「点击选择 / 拖拽上传」两种方式 + 模板下载入口；
