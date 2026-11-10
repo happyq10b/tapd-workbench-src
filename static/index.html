@@ -3979,7 +3979,9 @@ function updateNewBtn(){
   if(!ME.can_edit){btn.style.display='none';return}
   btn.style.display='';
 }
+let _ovSeq=0;   // 统计请求序号：并发/乱序回落时只让**最新**一次响应落笔（防旧数据盖新数据）
 async function renderProgress(){
+  const seq=++_ovSeq;
   // ⚠️ 统计带必须**跟随当前板块**：不带 board_id 时接口返回的是全局汇总，
   //    会出现「切到别的板块、数字却还是上一个板块的」（需求：板块切换彻底联动）。
   //    curBoard 为空（初始未选板块）→ 不传 board_id → 显示全局概览。
@@ -3988,6 +3990,9 @@ async function renderProgress(){
     ? ('?board_id='+encodeURIComponent([...curBoards][0]))
     : (curBoards.size>1?('?board_ids='+encodeURIComponent([...curBoards].join(','))):'');
   const ov=await api('/api/overview'+ovq);
+  // 快速连续变更（勾两张卡/弹窗改状态+WS 广播并发触发）时，
+  // 后发的请求若先返回，先发的旧响应不能覆盖它 —— 序号不一致直接丢弃。
+  if(seq!==_ovSeq)return;
   // 顶部统计带：4 张核心指标卡（总事项 / 已完成 / 进行中 / 未完成）。
   // 除「总事项」外的三张可点击筛选：单击选中 / 再击取消，支持多选组合（默认全不选）。
   const box=document.getElementById('progressOverview');
@@ -5252,9 +5257,13 @@ async function toggleCardDone(cardId,done,isSub){
     await api('/api/cards/'+cardId,{method:'PUT',body:JSON.stringify({fields:{status:st,status_name:statusText(st)}})});
     toast(done?'已标记完成':'已取消完成');
     if(isSub){
+      // 子事项不参与顶部统计卡口径（/api/overview 只统计主事项），无需刷统计
       patchSubTreeNode(cardId,{status:st});
     }else{
       reload(curPage);
+      // WS 广播 exclude=操作者本人 → 本机收不到自己的 card_update 广播，
+      // 统计卡必须本地主动刷新（2026-11-10 #118：勾选完成后四张卡立即更新）
+      renderProgress();
     }
   }catch(e){toast(e.message)}
 }
@@ -7399,6 +7408,9 @@ async function setCardStatus(ctx,st){
       await reload(curPage);
       await openDetail(id);
     }
+    // WS 广播 exclude=操作者本人 → 本机收不到自己的 card_update 广播，
+    // 统计卡（已完成/进行中/未完成）必须本地主动刷新（2026-11-10 #118）
+    renderProgress();
   }catch(e){toast(e.message)}
 }
 // ---------- 团队 ----------
