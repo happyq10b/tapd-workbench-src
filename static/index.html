@@ -8650,10 +8650,9 @@ function renderWgList(){
     return c>1;
   }).length;
   box.innerHTML=ORG_TREE.map(n=>row(n,0,ORG_TREE)).join('')+
+    // 底部说明仅保留统计行（2026-11-10 #127 用户要求：「层级/唯一岗位」两行说明删除）
     `<div style="margin-top:10px;font-size:12px;color:var(--text2);padding:0 10px;line-height:1.7">
-      共 ${total} 个节点 · ${apptTotal} 条任职 · ${multi} 人跨组织任职<br>
-      层级：中心 → 部门 → 常规小组；中心与部门均可设专项小组<br>
-      唯一岗位（组长/部门长/中心负责人/总经理）每节点仅一人，骨干/组员可多人
+      共 ${total} 个节点 · ${apptTotal} 条任职 · ${multi} 人跨组织任职
     </div>`;
   paintOrgSelection();   // 选中态唯一来源：渲染后统一回写，杜绝残留高亮
 }
