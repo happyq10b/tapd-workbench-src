@@ -2057,7 +2057,7 @@ function goLogin(){
           <div class="form-group" style="flex:1;min-width:130px"><label>姓名 *</label><input type="text" class="form-input" id="t_new_name" placeholder="成员姓名"></div>
           <div class="form-group" style="flex:1;min-width:130px" id="t_new_account_wrap"><label>登录账号（可选）</label><input type="text" class="form-input" id="t_new_account" placeholder="留空则不开通"></div>
           <div class="form-group" style="flex:1;min-width:150px" id="t_new_pwd_wrap"><label>密码（开通时必填）</label><span class="pwd-wrap" style="width:100%"><input type="password" class="form-input" id="t_new_pwd" placeholder="设置密码" style="flex:1;min-width:0"><button type="button" class="pwd-eye" onclick="togglePwd('t_new_pwd',this)" title="显示/隐藏密码"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></span></div>
-          <div class="form-group" style="min-width:100px"><label>角色</label><select class="form-select" id="t_new_role"><option value="" selected>无权限</option><option value="editor">可编辑</option><option value="viewer">只读</option><option value="admin">管理员</option></select></div>
+          <div class="form-group" style="min-width:100px"><label>角色</label><select class="form-select" id="t_new_role"><option value="">无权限</option><option value="editor" selected>可编辑</option><option value="viewer">只读</option><option value="admin">管理员</option></select></div>
           <button class="btn-primary" onclick="addTeamMember()" style="flex-shrink:0;height:36px">添加成员</button>
         </div>
       </div>
@@ -7543,7 +7543,7 @@ async function openTeamModal(){
   _np.value='';_np.type='password';
   const _nb=_np.parentElement.querySelector('.pwd-eye');
   if(_nb){_nb.innerHTML=EYE_ON;_nb.title='显示/隐藏密码'}
-  document.getElementById('t_new_role').value='';
+  document.getElementById('t_new_role').value='editor';   // #147 角色默认「可编辑」
   openModal('teamModal');
 }
 // ---------- 「已选工作组」只读层级树 ----------
