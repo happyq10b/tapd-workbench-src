@@ -7914,6 +7914,11 @@ async function addTeamMember(){
     if(account){
       const pwd=document.getElementById('t_new_pwd').value;
       if(!pwd){toast('开通账号需填写密码');return}
+      // #142 账号唯一性预检（2026-11-10）：与已有成员撞号 → 阻止提交
+      //（后端同样校验，这里提前拦截给出明确提示，不发请求）
+      if(TM_ALL.some(m=>(m.account||'')===account)){
+        toast('账号已存在，不允许重复添加');return;
+      }
       body.account=account;body.password=pwd;
     }
   }
@@ -7951,6 +7956,24 @@ async function saveAllTeamMembers(){
       }
     }
     updates.push(u);
+  }
+  // #142 账号唯一性预检（2026-11-10）：批量保存是 Promise.all 并发，
+  //   若后端 409 时其他请求已发出 → 部分成员已写入（部分成功的副作用）。
+  //   提交前整批预检：可见行内部重复、或与任何成员（含被筛选隐藏的）撞号都阻止。
+  {
+    const seen=new Map();
+    for(const u of updates){
+      const acc=(u.account||'').trim();
+      if(!acc)continue;
+      if(seen.has(acc)){toast(`账号「${acc}」在保存列表中重复，请修正后再保存`);return}
+      seen.set(acc,u.id);
+    }
+    for(const u of updates){
+      const acc=(u.account||'').trim();
+      if(!acc)continue;
+      const other=TM_ALL.find(m=>m.id!==u.id&&(m.account||'')===acc);
+      if(other){toast(`账号「${acc}」已被成员「${other.name}」使用，不允许重复添加`);return}
+    }
   }
   try{
     await Promise.all(updates.map(u=>api('/api/team/'+u.id,{method:'PUT',body:JSON.stringify(u)})));

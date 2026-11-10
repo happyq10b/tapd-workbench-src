@@ -3587,6 +3587,16 @@ def add_team(req: TeamReq, username: str = Depends(require_admin), request: Requ
         raise HTTPException(400, '成员名不能为空')
     if req.account and req.account.strip() == SUPER_ADMIN:
         raise HTTPException(403, f'「{SUPER_ADMIN}」是内置超级管理员，不可被成员关联')
+    acc = req.account.strip() if req.account and req.account.strip() else ''
+    # #142 账号唯一性校验（2026-11-10）必须在**成员插入之前**：
+    #   原实现先插行再校验 → 409 返回时新成员行已落库（重复提交产生脏数据）；
+    #   原实现对撞号「自动解除原绑定」更是静默抢号，把原成员账号清空。
+    #   现在两者都在写库前拒绝，保证重复提交零副作用。
+    #   （账号存在于 users 表但未绑定任何成员 → 仍允许绑定，属正常重绑流程）
+    if acc:
+        other = dbq('SELECT id, name FROM team_members WHERE account=?', (acc,))
+        if other:
+            raise HTTPException(409, '账号已存在，不允许重复添加')
     try:
         # workgroups 不再由本接口写入 —— 归属统一由【架构管理】的任命同步维护
         # 成员编号（2026-11-09 #106）：显式取 MAX(id)+1，与存量成员格式一致（小号连续）。
@@ -3599,12 +3609,7 @@ def add_team(req: TeamReq, username: str = Depends(require_admin), request: Requ
     except sqlite3.IntegrityError:
         raise HTTPException(409, '成员已存在')
     mid = dbq('SELECT id FROM team_members WHERE name=?', (name,))[0]['id']
-    if req.account and req.account.strip():
-        acc = req.account.strip()
-        # 若 acc 已被其他成员绑定，自动解除原绑定（避免一号多人）
-        other = dbq('SELECT id FROM team_members WHERE account=? AND id!=?', (acc, mid))
-        if other:
-            dbe('UPDATE team_members SET account="" WHERE id=?', (other[0]['id'],))
+    if acc:
         _open_account(mid, acc, req.password, req.role)
     audit_log(username, client_ip(request), 'member_create', f'成员 {name}', f'新增成员（id={mid}' + (f'，开通账号 {req.account.strip()}' if req.account and req.account.strip() else '，未开通账号') + '）', 'success')
     return {'ok': True}
@@ -3647,11 +3652,12 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
                 dbe('DELETE FROM users WHERE username=?', (old_acc,))
             dbe('UPDATE team_members SET account="" WHERE id=?', (mid,))
         else:
-            # 换绑：若 acc 已被其他成员绑定，自动解除原绑定
+            # #142 账号唯一性校验（2026-11-10）：换绑目标已被其他成员绑定 → 拒绝，
+            #   原为静默抢号（解除原成员绑定），现明确报错且不触碰任何已有数据
             if acc != old_acc:
-                other = dbq('SELECT id FROM team_members WHERE account=? AND id!=?', (acc, mid))
+                other = dbq('SELECT id, name FROM team_members WHERE account=? AND id!=?', (acc, mid))
                 if other:
-                    dbe('UPDATE team_members SET account="" WHERE id=?', (other[0]['id'],))
+                    raise HTTPException(409, '账号已存在，不允许重复添加')
             _open_account(mid, acc, req.password, req.role)
     changes = []
     if name != req.name.strip() or True:
