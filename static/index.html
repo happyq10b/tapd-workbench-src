@@ -179,10 +179,13 @@ button{font-family:inherit}
    架构管理界面从上到下 = 目录界面从左上到右下；架构排序保存后
    orgMoveNode 重拉 ME + renderTabs → 目录实时更新。 */
 /* ===== 需求2：可选看板默认两行，超出滚动 =====
-   实测（1600px 视口）：看板行高 38px、行间距 6px（行距 44px），
-   故两行净高 = 38 + 44 = 82px。超出部分由容器内滚动承载。 */
+   ⚠️ 2026-11-10 #122 教训：行高曾写死 38px → max-height:82px；
+      #121 卡片加了【编辑】按钮后行高实测 45px → 第二行被裁 14px。
+      → 高度不再写死：CSS 只留 96px 兜底值（45px 行高下的两行完整高度），
+        实际值由 JS syncBoardBandHeight() 按当前行高**动态测量**（两行完整 = 
+        首行高 + rowGap + 次行高），卡片样式再变也不会裁切。 */
 .tb-board-band .tb-grid{
-  max-height:82px;overflow-y:auto;overflow-x:hidden;
+  max-height:96px;overflow-y:auto;overflow-x:hidden;
   /* 滚动条留出内边距，避免末行文字被滚动条压住 */
   padding-right:2px;
   /* 滚动条样式：细窄低调，不抢视觉 */
@@ -380,6 +383,22 @@ button{font-family:inherit}
    max-width 保持放开（1200）：宽视口下搜索触顶会让日期框右缘缩进、
    下方「清空筛选/操作」行仍贴满行宽 → 两行右缘错位（#83 用户反馈根因）。 */
 .search-input{min-width:187px;flex:1 1 187px;max-width:1200px}
+/* 搜索区一体化组件（2026-11-10 #122）：输入框 + 搜索按钮共用一层边框，
+   圆角连续、按钮贴右 —— 视觉上是一个整体而非两个并排控件。
+   ⚠️ 输入框在组件内去自身边框/阴影（focus 态由容器的 :focus-within 承担），
+   覆盖 .search-input 的独立边框规则。 */
+.search-group{display:inline-flex;align-items:stretch;height:33px;min-width:0;
+  border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff;
+  overflow:hidden;transition:border-color .2s,box-shadow .2s;max-width:1200px}
+.search-group:focus-within{border-color:var(--primary);box-shadow:var(--ring)}
+.search-group .search-input{flex:1 1 auto;min-width:150px;max-width:none;height:100%;
+  border:none;border-radius:0;box-shadow:none;transition:none}
+.search-group .search-input:focus{border:none;box-shadow:none}
+.search-group .search-btn{flex-shrink:0;border:none;border-left:1px solid var(--border);
+  background:#f7f8fa;color:var(--text2);padding:0 16px;font-size:13px;font-weight:500;
+  cursor:pointer;transition:all .15s;white-space:nowrap}
+.search-group .search-btn:hover{background:#eef5ff;color:var(--primary)}
+.search-group .search-btn:active{background:#e3eefc}
 /* 四个下拉筛选框等宽对称（2026-11-06 #83 重算）：标签统一两字（🚦状态/🗓️年份/
    👤人员/📅周数）→ label 定宽收窄 76→50px；field 104→84px；四框 = 153px 等宽。
    主行 = 搜索 167 + 四框 612 + 日期 ~290 + gap 40 ≈ 1109，1200 视口（内容 1152）内
@@ -1476,10 +1495,15 @@ function goLogin(){
   <!-- 统计概览已上移到顶部栏左半第三行（#progressOverview），此处只留筛选工具栏 -->
   <div class="toolbar">
     <div class="toolbar-left">
-      <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索事项 / 板块…" oninput="debounceReload()"
-             onkeydown="if(event.key==='Enter'){event.preventDefault();reload(1)}" title="搜索事项（名称/描述）与板块名；未选看板时在全部可见看板范围内搜索">
-      <!-- 搜索按钮（2026-11-10 #121）：显式触发搜索（输入过程仍有 400ms 防抖自动搜，回车/按钮 = 立即搜） -->
-      <button type="button" class="btn-default" style="flex-shrink:0;height:33px;padding:0 14px;font-size:13px" onclick="reload(1)" title="执行搜索">搜索</button>
+      <!-- 搜索区（2026-11-10 #122）：输入框 + 搜索按钮拼为**一体化组件**
+           （共用边框/圆角连续，按钮贴右侧成整体）。搜索行为 = 仅点击按钮或回车触发，
+           输入过程不再自动搜索（原 oninput 防抖已移除）。 -->
+      <span class="search-group">
+        <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索事项 / 板块…"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();reload(1)}"
+               title="搜索事项（名称/描述）与板块名；未选看板时在全部可见看板范围内搜索。输入后点击「搜索」或按回车">
+        <button type="button" class="search-btn" onclick="reload(1)" title="执行搜索">搜索</button>
+      </span>
       <!-- 板块状态筛选（2026-11-06 #81）：按板块完成情况（未完成/进行中/已完成）多选，
            客户端过滤板块行（cols 载荷自带 completion）。与人员/周数/归属年份四框等宽对称。 -->
       <span class="combo-filter" id="colStatusWrap" title="按板块状态筛选（可多选）">
@@ -2951,6 +2975,24 @@ function renderTabs(){
   }
   if(!bhtml)bhtml=`<span class="tree-empty-tip" style="grid-column:1/-1">点击上方部门可展开其下的板块</span>`;
   boardBox.innerHTML=bhtml;
+  syncBoardBandHeight();
+}
+// 可选看板带高度（2026-11-10 #122）：恒定**完整两行**（首行高 + rowGap + 次行高），
+//   第三行起容器内滚动。行高由 JS 实测 —— 此前写死 82px（按旧行高 38px 测量），
+//   卡片加【编辑】按钮后行高变 45px → 第二行被裁 14px。
+function syncBoardBandHeight(){
+  const grid=document.getElementById('tbBoards');
+  if(!grid)return;
+  // ⚠️ 弹层/视图隐藏时 offsetHeight=0，量出来是假的 → 跳过（CSS 兜底值 96px 生效），
+  //    等下一次可见状态的 renderTabs 再纠正。
+  if(!grid.offsetParent)return;
+  const items=grid.children;
+  if(!items.length){grid.style.maxHeight='none';return;}
+  const gap=parseFloat(getComputedStyle(grid).rowGap)||6;
+  const h1=items[0].getBoundingClientRect().height;
+  const h2=items.length>1?items[1].getBoundingClientRect().height:h1;
+  if(h1<=0||h2<=0)return;   // 度量异常（隐藏中）→ 不动现有值
+  grid.style.maxHeight=Math.ceil(h1+gap+h2)+'px';
 }
 // 单选切换：点已展开的部门 → 收起；点其他部门 → 展开它并收起其他
 function toggleDept(name){
