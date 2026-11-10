@@ -908,6 +908,8 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .icon-btn:hover{color:var(--primary);background:#f0f5ff}
 .icon-btn.delete:hover{color:var(--danger);background:#fff1f0}
 .empty{padding:48px;text-align:center;color:var(--text2);font-size:13px}
+/* 「请选择看板」空态强调（2026-11-10 #128）：加大加粗，主文字色更醒目 */
+.empty.empty-strong{font-size:17px;font-weight:700;color:var(--text);letter-spacing:.5px}
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;animation:overlayIn .18s ease;transition:opacity .16s ease}
 .modal-overlay.closing{opacity:0}
 @keyframes overlayIn{from{opacity:0}to{opacity:1}}
@@ -3088,14 +3090,12 @@ let LAST_EMPTY_REASON='';
 function renderEmptyBoardState(){
   const c=document.getElementById('boardContent');
   if(!c)return;
-  const msg=LAST_EMPTY_REASON==='部门已收起'
-    ? '部门已收起，请从上方选择看板'
-    : (LAST_EMPTY_REASON==='该看板暂无数据'
-      ? '该看板暂无数据'
-      : (LAST_EMPTY_REASON==='已取消选择'
-        ? '已取消选择，请从上方选择看板'
-        : '请选择看板'));
-  c.innerHTML=`<div class="empty">${esc(msg)}</div>`;
+  // 「无选择」类空态（取消选择 / 初始未选）统一为「请选择看板」并加大加粗
+  //   （2026-11-10 #128 用户要求）；「部门已收起 / 该看板暂无数据」保留原因说明。
+  const noSel=LAST_EMPTY_REASON!=='部门已收起'&&LAST_EMPTY_REASON!=='该看板暂无数据';
+  const msg=noSel?'请选择看板'
+    :(LAST_EMPTY_REASON==='部门已收起'?'部门已收起，请从上方选择看板':'该看板暂无数据');
+  c.innerHTML=`<div class="empty${noSel?' empty-strong':''}">${esc(msg)}</div>`;
 }
 // ---------------- 部门主页面 ----------------
 // 视图切换：部门页与事项列表页互斥显示（同一时刻只显示一个）
