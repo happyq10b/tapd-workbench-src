@@ -1618,7 +1618,7 @@ function goLogin(){
          （margin-left:auto，不依赖明细有无 —— :empty 隐藏明细时按钮也不塌向左端）。 -->
     <div style="order:10;flex:1 0 100%;display:flex;align-items:center;gap:8px;min-width:0">
       <span id="filterHint" class="filter-hint" style="flex:1 1 auto"></span>
-      <button id="chkModeBtn" class="btn-clear chk-mode-btn" style="flex-shrink:0" onclick="toggleChkMode()" title="勾选模式开关：开启后板块/事项/子事项前显示勾选框用于多选">☐ 关闭勾选</button>
+      <button id="chkModeBtn" class="btn-clear chk-mode-btn" style="flex-shrink:0" onclick="toggleChkMode()" title="点击开启勾选模式（板块/事项/子事项前显示勾选框）">启用勾选</button>
       <button class="btn-clear" style="flex-shrink:0" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/年份/人员/周数/日期区间）">清空筛选</button>
       <span class="slot-ops" style="flex-shrink:0;width:auto"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
     </div>
@@ -7805,9 +7805,10 @@ function toggleChkMode(){
   reload(1);   // 重绘内容区（勾选框显隐随 CHK_MODE）
 }
 function syncChkModeBtn(btn){
-  btn.textContent=CHK_MODE?'☑ 启用勾选':'☐ 关闭勾选';
-  btn.title=CHK_MODE?'勾选模式已启用：板块/事项/子事项前显示勾选框，点击关闭并清空全部勾选'
-                    :'勾选模式已关闭：点击开启多选勾选';
+  // 按钮文字 = 点击后将执行的动作（关闭态显示「启用勾选」，开启态显示「关闭勾选」）
+  btn.textContent=CHK_MODE?'关闭勾选':'启用勾选';
+  btn.title=CHK_MODE?'勾选模式已启用，点击关闭并清空全部勾选'
+                    :'点击开启勾选模式（板块/事项/子事项前显示勾选框）';
   btn.classList.toggle('on',CHK_MODE);
 }
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
