@@ -386,12 +386,15 @@ button{font-family:inherit}
 /* 搜索区一体化组件（2026-11-10 #122）：输入框 + 搜索按钮共用一层边框，
    圆角连续、按钮贴右 —— 视觉上是一个整体而非两个并排控件。
    ⚠️ 输入框在组件内去自身边框/阴影（focus 态由容器的 :focus-within 承担），
-   覆盖 .search-input 的独立边框规则。 */
-.search-group{display:inline-flex;align-items:stretch;height:33px;min-width:0;
+   覆盖 .search-input 的独立边框规则。
+   2026-11-10 #123：组件本身接管 flex-grow —— 此前「剩余空间由搜索框吸收」
+   靠 .search-input 的 flex:1 实现，包组后组不自增 → 行尾留白。
+   现在 .search-group{flex:1} 吸收行内全部剩余空间，最右端不再有空白。 */
+.search-group{display:inline-flex;align-items:stretch;height:33px;min-width:187px;flex:1 1 auto;
   border:1px solid var(--border);border-radius:var(--radius-sm);background:#fff;
-  overflow:hidden;transition:border-color .2s,box-shadow .2s;max-width:1200px}
+  overflow:hidden;transition:border-color .2s,box-shadow .2s}
 .search-group:focus-within{border-color:var(--primary);box-shadow:var(--ring)}
-.search-group .search-input{flex:1 1 auto;min-width:150px;max-width:none;height:100%;
+.search-group .search-input{flex:1 1 auto;min-width:120px;max-width:none;height:100%;
   border:none;border-radius:0;box-shadow:none;transition:none}
 .search-group .search-input:focus{border:none;box-shadow:none}
 .search-group .search-btn{flex-shrink:0;border:none;border-left:1px solid var(--border);
