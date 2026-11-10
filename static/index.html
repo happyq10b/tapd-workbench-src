@@ -7551,6 +7551,15 @@ async function openTeamModal(){
 // 架构管理无任命时才回退旧 workgroups 字段（兼容历史成员）。
 // 纯展示：默认收起、点击逐级展开，**不提供任何编辑 / 勾选 / 修改入口**。
 var WG_TREE_EXPANDED=new Set();   // 展开的节点 key（成员id + 节点名）
+// #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
+var TM_SORT_DIR=1;
+function tmToggleSort(){
+  TM_SORT_DIR=-TM_SORT_DIR;
+  // 表头在 initTeamFilterBar 的 innerHTML 里，renderTeamList 不重绘它 → 箭头单独更新
+  const th=document.querySelector('#teamModal .tm-table-scroll thead th');
+  if(th)th.innerHTML='ID '+(TM_SORT_DIR===-1?'↓':'↑');
+  renderTeamList();
+}
 function memberWgNodeNames(m){
   if(m.org_source==='org' && (m.org_nodes||[]).length) return m.org_nodes.slice();
   return (m.workgroups||[]).slice();
@@ -7703,6 +7712,8 @@ function renderTeamList(){
     }
     return true;
   });
+  // #146 ID 排序（双击表头切换升/降序）
+  filtered.sort((a,b)=>(a.id-b.id)*TM_SORT_DIR);
   // 当前可见的成员 id（保存时只提交这些行，见 saveAllTeamMembers）
   TM_VISIBLE_IDS=new Set(filtered.map(m=>m.id));
   tbody.innerHTML=filtered.length?filtered.map(m=>{
@@ -7884,7 +7895,7 @@ function initTeamFilterBar(){
     <div class="tm-table-scroll">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--bg)">
-          <th style="padding:6px 10px;text-align:left;width:48px">ID</th>
+          <th style="padding:6px 10px;text-align:left;width:48px;cursor:pointer;user-select:none" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
           <th style="padding:6px 10px;text-align:left;width:110px">姓名</th>
           <th style="padding:6px 10px;text-align:left;width:230px">已选工作组</th>
           <th style="padding:6px 10px;text-align:left;width:150px">账号</th>
