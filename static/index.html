@@ -278,6 +278,9 @@ button{font-family:inherit}
    stopPropagation 阻止冒泡到外层 .tree-dept（否则会同时触发展开/收起）。 */
 .dept-home{display:inline-flex;align-items:center;gap:3px;margin-left:auto;padding:3px 7px;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text2);font-size:11.5px;font-weight:400;cursor:pointer;white-space:nowrap;transition:all .15s}
 .dept-home:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
+/* 看板卡片【编辑】按钮（2026-11-10 #119）：复用架构卡「主页」的 .dept-home 形态，
+   margin-left:auto 推到卡片最右端；卡片本身是 flex 容器，防挤压不换行 */
+.tab-btn .dept-home{margin-left:auto;flex-shrink:0}
 /* 当前打开的部门页（进入部门主页后，该节点高亮） */
 .tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
 .tree-dept.cur .dept-home{border-color:var(--primary);color:var(--primary);background:#eef5ff}
@@ -2910,7 +2913,21 @@ function boardTabHtml(b,deptLabel){
   const title=base;
   // 单击 = 切换选中/取消（2026-11-04 用户需求：由「双击取消」改为「单击取消」，支持多选）。
   // 选中态看 curBoards 集合（多选高亮），curBoard 仅是主看板。
-  return `<button class="tab-btn ${curBoards.has(b.board_id)?'active':''}" onclick="pickBoard('${b.board_id}')" title="${esc(title)}（单击选中 / 再次单击取消，可多选）">${esc(b.board_name)}</button>`;
+  // 【编辑】按钮（2026-11-10 #119）：轻量卡片操作 —— 看板管理能力拆到卡片上，
+  //   点击直接打开看板管理弹窗并定位到该看板。样式复用架构卡「主页」的 .dept-home 形态。
+  //   显隐口径与看板管理一致：管理员=全部可见；非管理员按 /api/me 的 editable_boards
+  //   （后端 perm_check_pass OP_UPDATE LV_BOARD_OWNER，即 can_edit 集合，前端不二次推断）。
+  //   ⚠️ 外层必须用 <span> 而非 <button>：HTML 不允许 button 嵌套 button；
+  //      .tab-btn 全部样式走类选择器（background/border/font 显式声明），span 视觉零变化。
+  const canCfg=!!(ME&&(ME.is_admin||(ME.editable_boards||[]).indexOf(b.board_id)>=0));
+  const editBtn=canCfg
+    ? `<span class="dept-home" onclick="event.stopPropagation();openBoardConfigModalFor('${b.board_id}')"`
+      +` title="编辑该看板（归属部门 / 属性 / 状态 / 备注 / 负责人）">编辑</span>`
+    : '';
+  return `<span class="tab-btn ${curBoards.has(b.board_id)?'active':''}" role="button" tabindex="0"`
+    +` onclick="pickBoard('${b.board_id}')"`
+    +` onkeydown="if(event.key==='Enter'){event.preventDefault();pickBoard('${b.board_id}')}"`
+    +` title="${esc(title)}（单击选中 / 再次单击取消，可多选）">${esc(b.board_name)}${editBtn}</span>`;
 }
 function pickBoardToggle(bid){pickBoard(bid);}   // 兼容旧引用（2026-11-04 起单击即切换）
 function renderTabs(){
@@ -9362,7 +9379,10 @@ function bcPaintPick(){
   const cb=document.getElementById('bcCopyBtn');
   if(cb)cb.disabled=BC_SEL.size===0;
 }
-async function openBoardConfigModal(){
+// 打开看板管理弹窗的**公共准备**（2026-11-10 #119 抽出，两个入口共用）：
+//   准入校验 → 加载看板/部门/成员映射 → 工具按钮显隐 → 列表事件绑定。
+//   返回 false = 准入未通过（已 toast），调用方直接返回。
+async function bcPrepModal(){
   // 准入（2026-11-03）：管理员，或**任一看板可配置**。
   // ⚠️ 口径来自后端 /api/me 的 editable_boards（权威）——
   //    不用前端缓存的列表，避免与后端漂移。
@@ -9372,7 +9392,7 @@ async function openBoardConfigModal(){
   // 2026-11-05：架构负责人（部门长/中心负责人/总经理）可新建看板、管理其架构下
   // 全部看板的绑定 —— 即使当前没有被任命为任何看板的负责人/参与人，也应放行进入
   const isArchOwner=!!(ME&&(ME.is_arch_owner||(ME.arch_scope||[]).length));
-  if(!ME||(!isAdmin&&!isOwner&&!canAny&&!isArchOwner)){toast('你没有可配置的看板');return}
+  if(!ME||(!isAdmin&&!isOwner&&!canAny&&!isArchOwner)){toast('你没有可配置的看板');return false;}
   await loadBoardConfig();
   await bcLoadAclMembers();          // 负责人回显用的账号 → 姓名映射
   renderOwnerFilterBtn();           // 映射到手后，控件可能从「降级下拉」切回「树弹窗按钮」
@@ -9388,6 +9408,33 @@ async function openBoardConfigModal(){
   const cb=document.getElementById('bcCopyBtn');
   if(cb)cb.style.display=(ME.is_admin||(ME.editable_boards||[]).length>0)?'':'none';
   initBcListEvents();
+  return true;
+}
+// 轻量卡片编辑入口（2026-11-10 #119）：看板卡片【编辑】→ 弹窗定位到该看板。
+//   BC_FROM_CARD=true → 保存成功后自动关闭弹窗（轻量操作的语义：改完即走）；
+//   标准入口 openBoardConfigModal 保持原行为（保存后留在弹窗内继续配置）。
+var BC_FROM_CARD=false;
+async function openBoardConfigModalFor(bid){
+  if(!(await bcPrepModal()))return;
+  BC_FROM_CARD=true;
+  BC_SEL=new Set();
+  const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
+  // ⚠️ 先显示弹窗再渲染（同 openBoardConfigModal 的首开尺寸教训）：
+  //    setBcListScroll 依赖 offsetHeight 度量，display:none 时会量到 0。
+  openModal('boardConfigModal');
+  if(b){
+    bcSelect(bid);                 // 回填该看板现有信息并渲染右侧编辑区
+  }else{
+    BC_SELECTED=null; BC_EDIT_ID=0;
+    BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
+    renderBoardList();
+    renderEditArea();
+    toast('看板不存在或不在你的可见范围内');
+  }
+}
+async function openBoardConfigModal(){
+  if(!(await bcPrepModal()))return;
+  BC_FROM_CARD=false;
   BC_SELECTED=null; BC_EDIT_ID=0;
   BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
             owner:'',participants:[]};
@@ -9989,8 +10036,17 @@ async function saveBoardAll(){
     }
     await loadBoardConfig();
     // 归属部门可能已变更，刷新 ME 并重渲染目录树，保证「板块↔部门」归属关系一致
+    // （看板卡片【编辑】入口同样依赖这两步完成页面状态同步：顶栏卡片按新归属重新分组）
     ME=await api('/api/me');
     renderTabs();
+    if(BC_FROM_CARD){
+      // 轻量卡片编辑入口（2026-11-10 #119）：保存即关闭弹窗 —— 「改完即走」。
+      // 页面状态同步已由上面的 loadBoardConfig + ME 重拉 + renderTabs 完成。
+      BC_FROM_CARD=false;
+      toast('已保存'+(saved.length?('（'+saved.join('、')+'）'):''));
+      closeModal('boardConfigModal');
+      return;
+    }
     const nb=BC_BOARDS.find(function(x){return x.board_id===bid;});
     if(nb){BC_SELECTED=nb;BC_EDIT_ID=nb.config_id||0;
       BC_FORM={dept:nb.dept||'',dept_node_id:nb.dept_node_id||bcDeptNodeId(nb.dept||''),
@@ -10003,6 +10059,12 @@ async function saveBoardAll(){
 }
 
 function resetBoardConfigForm(){
+  // 轻量卡片编辑入口（2026-11-10 #119）：「取消」= 直接关闭弹窗，不残留空表单
+  if(BC_FROM_CARD){
+    BC_FROM_CARD=false;
+    closeModal('boardConfigModal');
+    return;
+  }
   BC_EDIT_ID=0; BC_SELECTED=null;
   BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[]};
   renderBoardList();
