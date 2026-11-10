@@ -7933,8 +7933,10 @@ async function addTeamMember(){
       if(!pwd){toast('开通账号需填写密码');return}
       // #142 账号唯一性预检（2026-11-10）：与已有成员撞号 → 阻止提交
       //（后端同样校验，这里提前拦截给出明确提示，不发请求）
-      if(TM_ALL.some(m=>(m.account||'')===account)){
-        toast('账号已存在，不允许重复添加');return;
+      // #151 提示带上占用者姓名
+      const dup=TM_ALL.find(m=>(m.account||'')===account);
+      if(dup){
+        toast('账号已存在，不允许重复添加（已被成员「'+dup.name+'」使用）');return;
       }
       body.account=account;body.password=pwd;
     }
@@ -7982,7 +7984,12 @@ async function saveAllTeamMembers(){
     for(const u of updates){
       const acc=(u.account||'').trim();
       if(!acc)continue;
-      if(seen.has(acc)){toast(`账号「${acc}」在保存列表中重复，请修正后再保存`);return}
+      if(seen.has(acc)){
+        // #151 提示带上两名重复使用者的姓名
+        const a=TM_ALL.find(m=>m.id===seen.get(acc));
+        const b=TM_ALL.find(m=>m.id===u.id);
+        toast(`账号「${acc}」在保存列表中重复（${a?a.name:seen.get(acc)} 与 ${b?b.name:u.id}），请修正后再保存`);return
+      }
       seen.set(acc,u.id);
     }
     for(const u of updates){

@@ -3596,7 +3596,8 @@ def add_team(req: TeamReq, username: str = Depends(require_admin), request: Requ
     if acc:
         other = dbq('SELECT id, name FROM team_members WHERE account=?', (acc,))
         if other:
-            raise HTTPException(409, '账号已存在，不允许重复添加')
+            # #151 提示带上占用者姓名（用户需求：弹提示要能看出被谁占用）
+            raise HTTPException(409, '账号已存在，不允许重复添加（已被成员「%s」使用）' % other[0]['name'])
     try:
         # workgroups 不再由本接口写入 —— 归属统一由【架构管理】的任命同步维护
         # 成员编号（2026-11-09 #106）：显式取 MAX(id)+1，与存量成员格式一致（小号连续）。
@@ -3657,7 +3658,7 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
             if acc != old_acc:
                 other = dbq('SELECT id, name FROM team_members WHERE account=? AND id!=?', (acc, mid))
                 if other:
-                    raise HTTPException(409, '账号已存在，不允许重复添加')
+                    raise HTTPException(409, '账号已存在，不允许重复添加（已被成员「%s」使用）' % other[0]['name'])
             _open_account(mid, acc, req.password, req.role)
     changes = []
     if name != req.name.strip() or True:
