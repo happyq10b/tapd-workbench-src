@@ -1350,6 +1350,9 @@ function goLogin(){
            原先此菜单因 5 项数据操作被挪走而空置（曾登记 T-007 问去留），
            现按 2026-11-03 需求把这两个低频项收进来 → 菜单不再空置，T-007 自然闭环。 -->
       <div class="header-more-menu" id="headerMoreMenu" hidden>
+        <!-- 架构管理（2026-11-10 #120）：从【架构部门】带标题行移入本菜单。
+             id 保持 wgBtn → renderPermissionEntries() 的权限显隐逻辑零改动。 -->
+        <button id="wgBtn" onclick="openWgModal()" title="架构管理（按权限显示）">🏗️ 架构管理</button>
         <button id="teamBtn" onclick="openTeamModal()" title="账号管理（仅管理员）">👥 账号管理</button>
         <button id="onlineBtn" onclick="openOnlineModal()" title="在线用户管理（仅超级管理员）">🟢 在线用户</button>
         <button id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
@@ -1403,9 +1406,11 @@ function goLogin(){
           <!-- 【架构管理】入口：并入【架构部门】带的标题行右侧（2026-11-03 用户需求）。
                id 保持不变 → renderPermissionEntries() 的权限显隐逻辑零改动：
                无权限时整个入口槽 display:none（按钮随之消失），语义与原「整带隐藏」一致。 -->
+          <!-- 【架构管理】入口（2026-11-10 #120）：已从本带标题行移入顶部【更多】菜单
+               （headerMoreMenu 里的 #wgBtn，权限显隐口径不变）。
           <div class="tb-band-head-entry" id="archEntryBand">
             <div class="tb-entry-row" id="archEntryRow"></div>
-          </div>
+          </div> -->
         </div>
         <div class="tb-grid" id="tbDepts"></div>
       </div>
@@ -1414,10 +1419,8 @@ function goLogin(){
           <div class="tb-band-title">可选看板</div>
           <!-- 归属年份筛选已移入下方筛选工具栏（2026-11-06 #81 用户需求）：
                改为与周数同款的 combo 多选下拉，与本栏解耦。 -->
-          <!-- 【看板管理】入口：并入【可选看板】带的标题行右侧（同上，id 不变） -->
-          <div class="tb-band-head-entry" id="boardEntryBand">
-            <div class="tb-entry-row" id="boardEntryRow"></div>
-          </div>
+          <!-- 【看板管理】入口已按 2026-11-10 需求移除：单看板配置由看板卡片上的
+               【编辑】按钮承接（2026-11-10 #119 轻量卡片操作）。 -->
         </div>
         <div class="tb-grid" id="tbBoards"></div>
       </div>
@@ -2079,21 +2082,15 @@ function goLogin(){
 /* 筛选区对齐（2026-11-03 用户反馈）：四个筛选项（归属部门/属性/状态/负责人）两列排布，
    select 与负责人按钮都必须**撑满所在列**，否则各自按内容自适应 → 左右两列宽窄不齐。 */
 .bc-filter-row #bcf_owner_box{width:100%;min-width:0}
-.bc-filter-row #bcf_owner_box .bc-owner-filter{width:100%;box-sizing:border-box;justify-content:space-between}
 .bc-filter-row select:hover{border-color:var(--primary)}
 .bc-filter-row select:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(0,45,116,.12)}
 /* ⚠️ 2026-11-03 用户反馈「看板管理滚轮没了」：
    原 overflow:hidden + JS 里「看板 ≤7 个时设 overflow:hidden」→ 内容超出被裁且无法滚动。
    → 改为 overflow-y:auto，超出即可滚动（setBcListScroll 仍负责限高）。 */
 .bc-list{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:10px}
-/* 负责人筛选按钮：外观与同区 select 保持一致（高度/边框/圆角/悬停反馈） */
-.bc-owner-filter{padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;
-  background:var(--card);color:var(--text);outline:none;cursor:pointer;transition:all .15s;
-  display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;text-align:left}
-.bc-owner-filter:hover{border-color:var(--primary)}
-.bc-owner-filter.on{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
-.bc-owner-filter .caret{flex-shrink:0;color:var(--text3);font-size:10px}
-.bc-owner-filter.on .caret{color:var(--primary)}
+/* 负责人筛选（2026-11-10 #120）：已统一为与同区其他筛选**同款原生 select**
+   （样式由 .bc-filter-row select 规则承载），交互仍为组织架构树弹窗。
+   原自绘 .bc-owner-filter 按钮样式已随统一移除。 */
 .bc-item{display:flex;flex-direction:column;gap:5px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:all .15s;background:var(--card)}
 .bc-item:hover{border-color:var(--primary);box-shadow:var(--shadow-sm)}
 .bc-item.active{border-color:var(--primary);background:#faf7ef;box-shadow:0 0 0 2px rgba(0,45,116,.14)}
@@ -2737,43 +2734,18 @@ function myPermProfile(){
     canManageArch:isAdmin||leaderNodes.size>0,
   };
 }
-// 渲染【架构管理】/【看板管理】两个入口（2026-11-03）
-// ⚠️ 2026-11-03 用户需求：入口不再独占一带，改为**并入所属内容带的标题行右侧**
-//    （架构管理 → 架构部门带标题行；看板管理 → 可选看板带标题行）。
-//    id 保持 archEntryBand / boardEntryBand 不变 → 本函数**逻辑零改动**，
-//    display:none 现在作用在标题行内的入口槽上，效果仍是「按钮消失」。
+// 渲染权限类入口（2026-11-10 #120 更新）
+// ⚠️ 2026-11-10 用户需求：
+//    ① 【架构管理】从【架构部门】带标题行移入顶部【更多】下拉菜单
+//       （菜单项 id 保持 wgBtn → 显隐口径 canManageArch 不变）；
+//    ② 【看板管理】顶栏入口移除 —— 单看板配置由看板卡片【编辑】按钮承接
+//       （2026-11-10 #119 轻量卡片操作，openBoardConfigModalFor）。
 // 无权限 → **入口隐藏**（不是置灰）：一个永远打不开的入口不如不出现。
 function renderPermissionEntries(){
   const p=myPermProfile();
-  // ── 架构管理入口 ──
-  const archBand=document.getElementById('archEntryBand');
-  const archRow=document.getElementById('archEntryRow');
-  if(archBand&&archRow){
-    if(p.canManageArch){
-      archBand.style.display='';
-      archRow.innerHTML='<button class="tb-entry-btn" id="wgBtn" onclick="openWgModal()" title="架构管理">🏗️ 架构管理</button>';
-      // ⚠️ 不再渲染权限范围说明（2026-11-03 用户要求：「这个注释没有必要，各用户界面都删掉」）。
-      //    此前只对管理员隐藏、对受限用户显示「可配置 N 个节点范围…」；
-      //    现改为**所有角色都不显示** —— 按钮标题已含用途，范围信息属于冗余说明。
-    }else{
-      archBand.style.display='none';
-      archRow.innerHTML='';
-    }
-  }
-  // ── 看板管理入口 ──
-  const boardBand=document.getElementById('boardEntryBand');
-  const boardRow=document.getElementById('boardEntryRow');
-  if(boardBand&&boardRow){
-    const n=p.editableBoards.length;
-    if(p.isAdmin||n>0){
-      boardBand.style.display='';
-      boardRow.innerHTML='<button class="tb-entry-btn" id="boardConfigBtn" onclick="openBoardConfigModal()" title="看板管理">📊 看板管理</button>';
-      // ⚠️ 同上：不再渲染权限范围说明，所有角色一律只留按钮。
-    }else{
-      boardBand.style.display='none';
-      boardRow.innerHTML='';
-    }
-  }
+  // ── 架构管理入口（顶部【更多】菜单内）──
+  const wgBtn=document.getElementById('wgBtn');
+  if(wgBtn)wgBtn.style.display=p.canManageArch?'':'none';
 }
 function applyPermissionUI(){
   if(!ME)return;
@@ -9514,17 +9486,25 @@ function renderOwnerFilterBtn(){
   if(!box)return;
   const hasMap=BC_ACL_MEMBERS.length>0;
   if(hasMap){
-    box.innerHTML='<button type="button" class="bc-owner-filter" id="bcf_owner" onclick="bcPickOwnerFilter(this)" title="按看板负责人筛选（点击从组织架构树选择）"><span class="txt"></span><span class="caret">▾</span></button>';
-    const btn=document.getElementById('bcf_owner');
-    const t=btn.querySelector('.txt');
-    if(!t)return;
-    if(!BC_FILTER.owner){ t.textContent='全部'; btn.classList.remove('on'); return; }
-    if(BC_FILTER.owner===OWNER_NONE){ t.textContent='无负责人'; }
-    else{
+    // 统一筛选样式（2026-11-10 #120）：与其他筛选同款**原生 select**——
+    //   外观（边框/内距/系统倒三角/悬停反馈）由 .bc-filter-row select 规则天然一致。
+    //   交互不变：仍是组织架构树弹窗 —— mousedown preventDefault 阻止原生下拉展开，
+    //   随后打开树弹窗（bcPickOwnerFilter）；Enter/空格同样触发（键盘可达）。
+    let label='全部';
+    if(BC_FILTER.owner===OWNER_NONE)label='无负责人';
+    else if(BC_FILTER.owner){
       const m=BC_ACL_MEMBERS.filter(function(x){return x.account===BC_FILTER.owner;})[0];
-      t.textContent=m?m.name:BC_FILTER.owner;
+      label=m?m.name:BC_FILTER.owner;
     }
-    btn.classList.add('on');
+    box.innerHTML='<select id="bcf_owner" title="按看板负责人筛选（点击从组织架构树选择）">'
+      +'<option>'+esc(label)+'</option></select>';
+    const sel=document.getElementById('bcf_owner');
+    if(sel){
+      sel.addEventListener('mousedown',function(e){e.preventDefault();bcPickOwnerFilter(sel);});
+      sel.addEventListener('keydown',function(e){
+        if(e.key==='Enter'||e.key===' '){e.preventDefault();bcPickOwnerFilter(sel);}
+      });
+    }
   }else{
     // 降级：下拉选项 = 当前用户可见看板的 owner 账号
     const owners={};
