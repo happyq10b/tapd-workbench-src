@@ -7772,12 +7772,12 @@ function renderTeamList(){
               ? `<span class="pwd-wrap"><input type="password" id="tm_pwd_${m.id}" placeholder="${m.password_set?'已设置':'设置密码'}" style="padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">${pwdEyeHtml('tm_pwd_'+m.id)}${m.password_set?`<button class="pwd-eye" onclick="genPwd(${m.id})" title="生成随机密码重置">🔄</button>`:''}</span>`
               : (m.password_set ? '<span style="color:var(--text2);font-size:12px">已设置</span>' : '<span style="color:var(--text3);font-size:12px">未设置密码</span>');
         return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:7px 10px;color:var(--text2);font-size:12px">${
+        <td style="padding:7px 12px 7px 10px;color:var(--text2);font-size:12px">${
           isSuperUser
-            ? `<input type="text" id="tm_empno_${m.id}" value="${esc(tmIdLabel(m))}" title="ID（工号），全局唯一，仅超级管理员可修改" style="width:80px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:12px">`
+            ? `<input type="text" id="tm_empno_${m.id}" value="${esc(tmIdLabel(m))}" title="ID（工号），全局唯一，仅超级管理员可修改" style="width:86px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:12px;margin-right:10px">`
             : `<span title="${tmIdLabel(m)}">${tmIdLabel(m)}</span>`
         }</td>
-        <td style="padding:7px 10px" id="tm_name_${m.id}">
+        <td style="padding:7px 10px 7px 0" id="tm_name_${m.id}">
           <input type="text" id="tm_edit_name_${m.id}" value="${esc(m.name)}" style="width:100px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">
         </td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--text2)">
@@ -7945,8 +7945,8 @@ function initTeamFilterBar(){
     <div class="tm-table-scroll">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--bg)">
-          <th style="padding:6px 10px;text-align:left;width:48px;cursor:pointer;user-select:none" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
-          <th style="padding:6px 10px;text-align:left;width:110px">姓名</th>
+          <th style="padding:6px 10px;text-align:left;width:122px;cursor:pointer;user-select:none" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
+          <th style="padding:6px 10px;text-align:left;width:130px">姓名</th>
           <th style="padding:6px 10px;text-align:left;width:230px">已选工作组</th>
           <th style="padding:6px 10px;text-align:left;width:150px">账号</th>
           <th style="padding:6px 10px;text-align:left;width:170px">密码</th>
