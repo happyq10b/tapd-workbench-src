@@ -287,6 +287,12 @@ button{font-family:inherit}
 /* 看板卡片标题（2026-11-10 #121）：始终单行，超出「…」省略 ——
    长标题此前会把 flex 卡片撑高/撑破三列栅格；完整名称看悬停提示（外层 title 已带） */
 .tab-btn .tab-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 可选看板标题后的「已选明细」小字（2026-11-10 #126）：
+   字体样式与筛选明细行（.filter-hint）同款 —— 12px 灰字；
+   跟在标题右侧吃满剩余宽度，已选过多时单行省略，全量看悬停提示 */
+.band-sel-hint{flex:1;min-width:0;margin-left:10px;font-size:12px;color:var(--text2);line-height:1.5;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text}
+.band-sel-hint:empty{display:none}
 /* 当前打开的部门页（进入部门主页后，该节点高亮） */
 .tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
 .tree-dept.cur .dept-home{border-color:var(--primary);color:var(--primary);background:#eef5ff}
@@ -1440,6 +1446,9 @@ function goLogin(){
       <div class="tb-band tb-board-band">
         <div class="tb-band-head">
           <div class="tb-band-title">可选看板</div>
+          <!-- 已选看板明细（2026-11-10 #126）：标题后一行小字，列示当前选中的看板；
+               样式与筛选明细行（.filter-hint）同款。内容由 renderTabs() 按 curBoards 更新。 -->
+          <span class="band-sel-hint" id="boardSelHint"></span>
           <!-- 归属年份筛选已移入下方筛选工具栏（2026-11-06 #81 用户需求）：
                改为与周数同款的 combo 多选下拉，与本栏解耦。 -->
           <!-- 【看板管理】入口已按 2026-11-10 需求移除：单看板配置由看板卡片上的
@@ -2979,6 +2988,23 @@ function renderTabs(){
   if(!bhtml)bhtml=`<span class="tree-empty-tip" style="grid-column:1/-1">点击上方部门可展开其下的板块</span>`;
   boardBox.innerHTML=bhtml;
   syncBoardBandHeight();
+  // 标题后的「已选看板」明细（2026-11-10 #126）：按 ME.boards 顺序列出当前选中项
+  //   （选择顺序会随取消/重选漂移，按目录顺序展示更稳定）；全量进悬停提示。
+  const selHint=document.getElementById('boardSelHint');
+  if(selHint){
+    if(curBoards.size){
+      const known=(ME&&ME.boards||[]).filter(function(b){return curBoards.has(b.board_id);})
+        .map(function(b){return b.board_name||b.board_id;});
+      const names=known.concat([...curBoards].filter(function(id){
+        return !(ME&&ME.boards||[]).some(function(b){return b.board_id===id;});
+      }));
+      selHint.textContent='已选：'+names.join('、');
+      selHint.title='当前已选择的看板：'+names.join('、');
+    }else{
+      selHint.textContent='未选择看板';
+      selHint.title='';
+    }
+  }
 }
 // 可选看板带高度（2026-11-10 #122）：恒定**完整两行**（首行高 + rowGap + 次行高），
 //   第三行起容器内滚动。行高由 JS 实测 —— 此前写死 82px（按旧行高 38px 测量），
