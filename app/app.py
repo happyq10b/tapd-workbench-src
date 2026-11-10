@@ -2324,6 +2324,53 @@ async def pin_column(req: ColumnPinReq, username: str = Depends(require_writer),
     return {'ok': True, 'col_key': req.col_key, 'pinned': val}
 
 
+@app.delete('/api/columns/{col_key}')
+async def delete_column(col_key: str, username: str = Depends(require_writer), request: Request = None):
+    """删除单个板块（#158 批量删除的执行单元）。
+
+    连带清理：板块下全部事项与子事项**软删**（deleted=1，可用全局备份恢复找回）、
+    子事项清单行、板块元信息行。
+    权限：与新建/删除看板同口径 = **看板负责人及以上**（架构负责人继承；逐列校验，
+    批量场景下无权限的板块各自 403，不影响其他板块）。
+    """
+    key = (col_key or '').strip()
+    row = dbq('SELECT * FROM board_columns WHERE col_key=?', (key,))
+    if not row:
+        raise HTTPException(404, '板块不存在或已删除')
+    col = row[0]
+    bid, cname, cid = col['board_id'], col['column_name'], col['column_id']
+    # 分级权限先于可见性校验（与 create_column 同款理由）
+    perm_check(username, perm_chain(board_id=bid, column_id=cid), OP_DELETE, LV_BOARD_OWNER,
+               'column:' + key, min_level=LV_BOARD_OWNER)
+    boards, _cols = user_allowed(username)
+    if boards is not None and bid not in boards:
+        raise HTTPException(403, '无权删除该板块')
+    # 收集本板块全部主事项 id（子事项随主事项软删：parent_id 挂在主事项上）
+    ids = [r['card_id'] for r in dbq('SELECT card_id FROM cards WHERE board_id=? AND column_name=? AND deleted=0',
+                                     (bid, cname))]
+    conn = get_conn()
+    try:
+        n_cards = len(ids)
+        if ids:
+            ph = ','.join('?' * len(ids))
+            # ① 主事项 + 挂在其下的子事项一并软删（子事项可能带独立 column_name，按 parent_id 兜底）
+            conn.execute(f'UPDATE cards SET deleted=1 WHERE card_id IN ({ph}) OR parent_id IN ({ph})',
+                         ids + ids)
+            # ② 子事项清单行随主事项失效
+            conn.execute(f'DELETE FROM card_subtasks WHERE card_id IN ({ph})', ids)
+        # ③ 板块元信息
+        conn.execute('DELETE FROM board_columns WHERE col_key=?', (key,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    log_action(bid, username, 'delete', f'删除板块 {cname}')
+    audit_log(username, client_ip(request), 'delete', f'板块 {cname}',
+              f'删除板块：{cname}（看板 {bid}，连带事项 {n_cards} 条，软删可恢复）', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'col_key': key, 'deleted_cards': n_cards}
+
+
 @app.post('/api/cards/{card_id}/pin')
 async def pin_card(card_id: str, req: PinReq, username: str = Depends(require_writer), request: Request = None):
     """事项置顶/取消置顶（作用域：所在板块内部）"""

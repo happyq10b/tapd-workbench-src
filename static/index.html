@@ -670,6 +670,8 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .board-content{display:flex;flex-direction:column;gap:8px}
 .week-group{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
 .week-header{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:default;user-select:none;transition:background .15s}
+/* 板块勾选框（#158）：位于 ▶ 三角与标题之间 —— 各自独立不重叠；勾选状态按用户隔离 */
+.week-header .col-chk{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--primary);margin:0}
 .week-header:hover{background:#fafafa}
 .week-header .chev{transition:transform .2s;color:var(--text2);font-size:12px;cursor:pointer;flex-shrink:0}
 .week-group.open .chev{transform:rotate(90deg)}
@@ -2861,8 +2863,45 @@ function refreshToolbarOps(canEdit){
     // 2026-11-06 #82：导入/导出全部弹窗化 —— 模板下载并入导入弹窗、
     // 模板管理并入导出弹窗（页签），外部不再单设按钮
     {label:'导出（xlsx）',fn:function(){openExportModal();}},
-    {label:'导入（xlsx）',fn:function(){openImportModal();}});
+    {label:'导入（xlsx）',fn:function(){openImportModal();}},
+    // #158 批量删除板块：只删当前用户勾选的板块（勾选按用户隔离）；无勾选不执行
+    {label:'— 危险操作 —',disabled:true},
+    {label:'🗑 批量删除勾选板块',fn:function(){bulkDeleteColumns();}});
   ROW_OPS['toolbarOps']=items;
+}
+
+// #158 批量删除板块：严格以**当前用户本人勾选**为准（COL_CHECKED 本地会话状态，
+//   不落库不广播 → 多人同时操作互不影响）；无勾选直接提示返回，不执行删除。
+// 逐列调用 DELETE /api/columns/{col_key}（后端按列做「看板负责人及以上」校验，
+//   无权限/已被他人抢先删除的板块各自报错，不影响其余勾选板块的删除）。
+async function bulkDeleteColumns(){
+  const keys=[...COL_CHECKED];
+  if(!keys.length){toast('未勾选任何板块');return}
+  const metaOf=function(k){return (window.COLS_META||[]).find(function(x){return x.col_key===k;});};
+  const names=keys.map(function(k){const m=metaOf(k);return m?(m.column_name||k):k;});
+  const msg='确认删除已勾选的 '+keys.length+' 个板块？\n'
+    +names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n'
+    +'这些板块下的事项与子事项将一并删除（软删，可由管理员通过备份恢复找回）。';
+  if(!bcConfirm(msg))return;
+  const okList=[],fail=[];
+  for(const k of keys){
+    try{
+      await api('/api/columns/'+encodeURIComponent(k),{method:'DELETE'});
+      okList.push(k);
+      COL_CHECKED.delete(k);
+    }catch(e){
+      fail.push((metaOf(k)?(metaOf(k).column_name||k):k)+'（'+e.message+'）');
+    }
+  }
+  saveColChecked();
+  if(okList.length){
+    toast('已删除 '+okList.length+' 个板块'+(fail.length?('；'+fail.length+' 个未删除'):''));
+  }else if(fail.length){
+    toast('未删除任何板块：'+fail[0]);
+  }
+  // 页面状态同步：板块列表 / 统计带 / 顶栏目录树都随删除刷新
+  try{ ME=await api('/api/me'); }catch(e){}
+  reload(1); renderProgress(); renderTabs();
 }
 
 async function init(){
@@ -2870,6 +2909,7 @@ async function init(){
   try{
     loadDeptOpen();
     ME=await api('/api/me');
+    loadColChecked();   // #158：按当前账号载入板块勾选状态（sessionStorage 按用户分桶）
     loadPins();   // 载入当前账号的个人置顶设置（按账号分桶，互不影响）
     document.getElementById('userName').textContent=meDisplayLabel();
     renderMyProfile();   // 顶栏头像 + 个人状态栏
@@ -4804,6 +4844,10 @@ function renderBoard(cards,cols,q,colHits){
     return `<div class="week-group open" id="wg_${i}">
       <div class="week-header">
         <span class="chev" onclick="toggleWeek(${i});event.stopPropagation()" title="展开 / 收起该板块下的事项">▶</span>
+        <input type="checkbox" class="col-chk" data-ck="${esc(colKey)}" ${COL_CHECKED.has(colKey)?'checked':''}
+          onclick="colCheckToggle(this.dataset.ck,this.checked);event.stopPropagation()"
+          ondblclick="event.stopPropagation()"
+          title="勾选板块（配合筛选栏「操作 ▾ → 批量删除」使用；勾选仅本人可见，不影响他人）">
         ${titleHtml}
         ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
         <span class="week-meta">${done}/${total} 完成</span>
@@ -7593,6 +7637,22 @@ async function openTeamModal(){
 // 架构管理无任命时才回退旧 workgroups 字段（兼容历史成员）。
 // 纯展示：默认收起、点击逐级展开，**不提供任何编辑 / 勾选 / 修改入口**。
 var WG_TREE_EXPANDED=new Set();   // 展开的节点 key（成员id + 节点名）
+// ── 板块批量勾选（#158）：**按用户隔离** ──
+// 勾选状态只存当前浏览器会话（sessionStorage 按账号分桶），不落库、不广播 ——
+//   多人同时操作时各人只看到/删除自己的勾选；KEY 带用户名，换账号登录互不串扰。
+var COL_CHECKED=new Set();
+function colChkStoreKey(){ return 'colChk_'+((ME&&ME.username)||''); }
+function loadColChecked(){
+  try{ COL_CHECKED=new Set(JSON.parse(sessionStorage.getItem(colChkStoreKey())||'[]')); }
+  catch(e){ COL_CHECKED=new Set(); }
+}
+function saveColChecked(){
+  try{ sessionStorage.setItem(colChkStoreKey(), JSON.stringify([...COL_CHECKED])); }catch(e){}
+}
+function colCheckToggle(key,on){
+  if(on)COL_CHECKED.add(key); else COL_CHECKED.delete(key);
+  saveColChecked();
+}
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
 // #153 ID 列展示值 = 工号（emp_no，来自人员资料）；#154 未导入工号的成员沿用原成员编号原样显示（不补零）
