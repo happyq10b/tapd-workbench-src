@@ -963,6 +963,12 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    top 取常驻筛选栏的高度（--tm-sticky-top，由 JS 测量写入），
    避免表头与 sticky 的筛选栏重叠。 */
 .tm-table-scroll{border:1px solid var(--border);border-radius:8px;overflow:visible;flex-shrink:0}
+/* #144 账号管理弹窗：外层（modal-body）不滚动，唯一滚动容器 = 表格区。
+   teamList 弹性填充剩余高度，.tm-table-scroll 内部滚动（thead sticky 顶到容器顶） */
+#teamModal .modal-body{display:flex;flex-direction:column;overflow:hidden}
+#teamModal #teamList{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+#teamModal .tm-table-scroll{flex:1 1 auto;min-height:0;overflow:auto}
+#teamModal .tm-table-scroll thead th{top:0}
 /* 成员弹窗主体的直接子项一律不参与 flex 压缩 ——
    否则表格（1400px+）会被压扁到容器高度内、内容溢出却无法滚动。 */
 #teamModal .modal-body>*{flex-shrink:0}
@@ -2042,7 +2048,7 @@ function goLogin(){
 <div class="modal-overlay" id="teamModal" style="display:none">
   <div class="modal" style="width:fit-content;min-width:920px;max-width:min(1200px,98vw);max-height:min(92vh,880px);overflow:hidden;display:flex;flex-direction:column">
     <div class="modal-header"><h2>👥 成员与账号管理</h2><button class="modal-close" onclick="closeModal('teamModal')">✕</button></div>
-    <div class="modal-body" style="flex:1;overflow:auto;min-height:0">
+    <div class="modal-body" style="flex:1;overflow:hidden;min-height:0;display:flex;flex-direction:column">
       <div style="background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;padding:8px 12px;font-size:12.5px;color:#0050b3;margin-bottom:12px">
         在此管理团队成员与配套登录账号。成员可单独存在，也可「开通账号」获得登录权限并分配角色（管理员/可编辑/只读）。
       </div>
@@ -7894,13 +7900,13 @@ function initTeamFilterBar(){
 }
 // 表头 sticky 的 top = 常驻筛选栏的高度（避免表头与筛选栏重叠）
 function syncTmStickyTop(){
+  // #144（2026-11-10）：表格区改为唯一滚动容器（外层 modal-body 禁滚），
+  // thead sticky 顶到容器自身顶部 → 偏移量恒为 0。
+  // 筛选栏在滚动容器外，天然常驻可见，不再需要让位。
   try{
-    const bar=document.getElementById('tm_filter_bar');
     const box=document.querySelector('.tm-table-scroll');
-    if(!bar||!box||!box.style||typeof box.style.setProperty!=='function')return;
-    // 筛选栏自带 8px 上下 padding + margin-bottom 8px → 实际让出 = 高度 + 8
-    const raw=Number(bar.offsetHeight)||0;
-    box.style.setProperty('--tm-sticky-top', (raw+8)+'px');
+    if(!box||!box.style||typeof box.style.setProperty!=='function')return;
+    box.style.setProperty('--tm-sticky-top', '0px');
   }catch(e){ /* 测量失败不影响主流程 */ }
 }
 async function addTeamMember(){
