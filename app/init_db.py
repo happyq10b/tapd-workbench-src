@@ -712,6 +712,10 @@ def init_db(force_import=False):
                 'phone', 'political_status'):
         if col not in ucols:
             conn.execute("ALTER TABLE users ADD COLUMN %s TEXT NOT NULL DEFAULT ''" % col)
+    # 工号（2026-11-10 #153）：人员资料导入的真实工号，作为「ID」列的展示值（幂等）
+    tcols = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]
+    if 'emp_no' not in tcols:
+        conn.execute("ALTER TABLE team_members ADD COLUMN emp_no TEXT NOT NULL DEFAULT ''")
     # 兼容旧库：cards 缺 parent_id 列时补上
     cols = [r[1] for r in conn.execute('PRAGMA table_info(cards)').fetchall()]
     if 'parent_id' not in cols:

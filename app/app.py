@@ -1739,8 +1739,10 @@ def me(username: str = Depends(require_auth)):
     # 显示名：顶栏展示「姓名(账号)」；账号未绑定成员时只显示账号
     display_name = _member_display_name(username)
     # 成员 ID（#152 个人界面展示用）：账号绑定的成员编号；未绑定 = None
-    mrow = dbq('SELECT id, name FROM team_members WHERE account=? LIMIT 1', (username,))
+    mrow = dbq('SELECT id, name, emp_no FROM team_members WHERE account=? LIMIT 1', (username,))
     member_id = mrow[0]['id'] if mrow else None
+    # 工号（#153）：作为「ID」的展示值；未绑定/未导入时前端回退成员编号
+    emp_no = (mrow[0]['emp_no'] or '') if mrow else ''
     # 部门清单：**按权限过滤** —— 只保留该账号**有可见看板**的部门。
     # ⚠️ 此前用 _dept_order()（架构里的全部部门）→ 普通用户的目录树会列出
     #    自己无权访问的部门（如「管理部 0」），既暴露无权部门的组织信息，
@@ -1780,6 +1782,7 @@ def me(username: str = Depends(require_auth)):
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'member_id': member_id,                # #152 个人界面展示：绑定的成员编号（未绑定=None）
+            'emp_no': emp_no,                      # #153 工号：ID 列的展示值（未导入时回退成员编号）
             **_basic,                              # #152 基本信息：性别/入司时间/出生日期/籍贯/手机/政治面貌
             'allowed_columns': col_info,
             'managed_boards': managed_boards,      # 我是负责人的看板
@@ -3501,7 +3504,7 @@ async def delete_subtask(card_id: str, sid: int, username: str = Depends(require
 # ---------------- API：团队管理 ----------------
 @app.get('/api/team')
 def get_team(username: str = Depends(require_auth)):
-    rows = dbq('''SELECT m.id, m.name, m.workgroups, m.account,
+    rows = dbq('''SELECT m.id, m.name, m.workgroups, m.account, m.emp_no,
                         u.role AS role, u.allowed_boards AS allowed_boards,
                         (u.password_hash IS NOT NULL AND u.password_hash != '') AS password_set
                  FROM team_members m

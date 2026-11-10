@@ -1995,7 +1995,6 @@ function goLogin(){
           </div>
           <div class="pg-item"><label>入司时间</label><input type="date" class="form-input" id="pf_hire_date"></div>
           <div class="pg-item"><label>出生日期</label><input type="date" class="form-input" id="pf_birth_date"></div>
-          <div class="pg-item"><label>手机号码</label><input type="tel" class="form-input" id="pf_phone" maxlength="11" placeholder="11 位手机号"></div>
           <div class="pg-item"><label>籍贯省</label><input type="text" class="form-input" id="pf_native_province" maxlength="20" placeholder="如：浙江"></div>
           <div class="pg-item"><label>籍贯市</label><input type="text" class="form-input" id="pf_native_city" maxlength="20" placeholder="如：杭州"></div>
           <div class="pg-item"><label>政治面貌</label>
@@ -3392,14 +3391,15 @@ function openProfileModal(){
   const st=document.getElementById('profileStatus');
   if(st)st.value=PROFILE_STATUS;
   // #152 基本信息：ID/姓名只读回显，其余回填当前值
+  // #153 ID 展示值 = 工号（emp_no）；未导入工号时回退成员编号，未绑定成员显示 —
   const mid=document.getElementById('pf_member_id');
-  if(mid)mid.textContent=(ME.member_id!=null)?String(ME.member_id):'—';
+  if(mid)mid.textContent=ME.emp_no || ((ME.member_id!=null)?String(ME.member_id):'—');
   const nm=document.getElementById('pf_name');
   if(nm)nm.textContent=(ME.display_name||ME.username||'')||'—';
   const setV=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v||'';};
   setV('pf_gender',ME.gender); setV('pf_hire_date',ME.hire_date); setV('pf_birth_date',ME.birth_date);
   setV('pf_native_province',ME.native_province); setV('pf_native_city',ME.native_city);
-  setV('pf_phone',ME.phone); setV('pf_political',ME.political_status);
+  setV('pf_political',ME.political_status);
   // 复用既有的 pwdEyeHtml()（SVG 眼睛图标）+ togglePwd()（点击切换可见）
   ['profileOldPwd','profileNewPwd','profileNewPwd2'].forEach(id=>{
     const el=document.getElementById(id);
@@ -3707,9 +3707,7 @@ async function saveProfile(){
   const g=(id)=>{const el=document.getElementById(id);return el?(el.value||'').trim():'';};
   const basic={gender:g('pf_gender'),hire_date:g('pf_hire_date'),birth_date:g('pf_birth_date'),
     native_province:g('pf_native_province'),native_city:g('pf_native_city'),
-    phone:g('pf_phone'),political_status:g('pf_political')};
-  const phoneRe=/^1[3-9]\d{9}$/;
-  if(basic.phone && !phoneRe.test(basic.phone)){toast('手机号码格式不正确（应为 11 位手机号）');return}
+    political_status:g('pf_political')};
   try{
     const d=await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,photo:PROFILE_PHOTO,status_text,...basic})});
     // 同步到 ME 并刷新顶栏
@@ -7571,7 +7569,7 @@ async function openTeamModal(){
   const [team, groupsRes]=await Promise.all([api('/api/team'), api('/api/workgroups')]);
   WG_ALL=groupsRes.groups||[];  // 树形工作组选择器使用架构树
   WG_FLAT=wgFlat(WG_ALL);
-  TM_ALL=(team.members||[]).map(m=>({id:m.id,name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set,
+  TM_ALL=(team.members||[]).map(m=>({id:m.id,emp_no:m.emp_no||'',name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set,
     org_source:m.org_source||'none',org_conflict:m.org_conflict||[],org_nodes:m.org_nodes||[]}));
   TEAM_MEMBERS=TM_ALL.map(m=>m.name);
   TM_FILTER={name:'',workgroup:[],role:[]};   // 默认全部角色（不再默认只看「无权限」）
@@ -7597,6 +7595,9 @@ async function openTeamModal(){
 var WG_TREE_EXPANDED=new Set();   // 展开的节点 key（成员id + 节点名）
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
+// #153 ID 列展示值 = 工号（emp_no，来自人员资料）；未导入工号的成员回退成员编号（5 位补零保证排序/对齐一致）
+function tmIdLabel(m){ return m.emp_no || String(m.id).padStart(5,'0'); }
+function tmSortKey(m){ return tmIdLabel(m); }
 function tmToggleSort(){
   TM_SORT_DIR=-TM_SORT_DIR;
   // 表头在 initTeamFilterBar 的 innerHTML 里，renderTeamList 不重绘它 → 箭头单独更新
@@ -7756,8 +7757,8 @@ function renderTeamList(){
     }
     return true;
   });
-  // #146 ID 排序（双击表头切换升/降序）
-  filtered.sort((a,b)=>(a.id-b.id)*TM_SORT_DIR);
+  // #146 ID 排序（双击表头切换升/降序）—— #153 起按工号（展示值）排序
+  filtered.sort((a,b)=>tmSortKey(a).localeCompare(tmSortKey(b))*TM_SORT_DIR);
   // 当前可见的成员 id（保存时只提交这些行，见 saveAllTeamMembers）
   TM_VISIBLE_IDS=new Set(filtered.map(m=>m.id));
   tbody.innerHTML=filtered.length?filtered.map(m=>{
@@ -7770,7 +7771,7 @@ function renderTeamList(){
               ? `<span class="pwd-wrap"><input type="password" id="tm_pwd_${m.id}" placeholder="${m.password_set?'已设置':'设置密码'}" style="padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">${pwdEyeHtml('tm_pwd_'+m.id)}${m.password_set?`<button class="pwd-eye" onclick="genPwd(${m.id})" title="生成随机密码重置">🔄</button>`:''}</span>`
               : (m.password_set ? '<span style="color:var(--text2);font-size:12px">已设置</span>' : '<span style="color:var(--text3);font-size:12px">未设置密码</span>');
         return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:7px 10px;color:var(--text2);font-size:12px">${m.id}</td>
+        <td style="padding:7px 10px;color:var(--text2);font-size:12px" title="${tmIdLabel(m)}">${tmIdLabel(m)}</td>
         <td style="padding:7px 10px" id="tm_name_${m.id}">
           <input type="text" id="tm_edit_name_${m.id}" value="${esc(m.name)}" style="width:100px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">
         </td>
