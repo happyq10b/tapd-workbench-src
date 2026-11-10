@@ -9284,7 +9284,7 @@ var BC_EDIT_ID=0;
 var BC_BOARDS=[];
 var BC_SELECTED=null;
 var BC_SEL=new Set();     // 批量选中的**看板**（进入看板管理时默认【不选中】，由用户自行勾选）
-var BC_FORM={dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:'',
+var BC_FORM={board_name:'',dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:'',
           owner:'',participants:[]};        // owner = 看板负责人（账号）；participants = 参与人（账号数组，2026-11-04 恢复）
 var BC_FILTER={dept:'',attr:'',status:'',owner:''};   // owner: 负责人筛选（存**账号**；'__no_owner__' = 无负责人）
 var BC_DEPTS=[];          // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
@@ -9424,7 +9424,7 @@ async function openBoardConfigModalFor(bid){
     bcSelect(bid);                 // 回填该看板现有信息并渲染右侧编辑区
   }else{
     BC_SELECTED=null; BC_EDIT_ID=0;
-    BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
+    BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
     renderBoardList();
     renderEditArea();
     toast('看板不存在或不在你的可见范围内');
@@ -9434,7 +9434,7 @@ async function openBoardConfigModal(){
   if(!(await bcPrepModal()))return;
   BC_FROM_CARD=false;
   BC_SELECTED=null; BC_EDIT_ID=0;
-  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
+  BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
             owner:'',participants:[]};
   // 默认不选中：进入看板管理时所有**看板**均未勾选（需用户主动勾选）
   BC_SEL=new Set();
@@ -9756,7 +9756,7 @@ function bcSelect(bid){
   if(!b)return;
   BC_SELECTED=b;
   BC_EDIT_ID=b.config_id||0;
-  BC_FORM={dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',
+  BC_FORM={board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',
           owner:b.owner||'',participants:(b.participants||'').split(',').filter(Boolean)};
   renderBoardList();
   renderEditArea();
@@ -9766,7 +9766,7 @@ function configBoard(){
   if(!unconf.length){toast('所有看板均已配置');return;}
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
-  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
+  BC_FORM={board_name:unconf[0].board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
   renderBoardList();
   renderEditArea();
 }
@@ -9774,7 +9774,7 @@ function bcChangeBoard(bid){
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
   if(b){
     BC_SELECTED=b;BC_EDIT_ID=0;
-    BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[]};
+    BC_FORM={board_name:b.board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[]};
     renderBoardList();
     renderEditArea();
   }
@@ -9840,6 +9840,11 @@ function renderEditArea(){
   area.innerHTML='<div class="bc-edit">'
     +'<div class="bc-edit-title">'+(isEdit?'✏️ 编辑看板配置':'➕ 新建看板配置')+'<span class="sub">'+(isEdit?'修改该看板的维度属性':'为真实看板登记维度属性')+'</span></div>'
     +boardBlock
+    // 看板名称（2026-11-10 #124）：可直接改名 —— 权限与基本信息同口径（canEdit）；
+    //   改名后 boards 表 + cards 冗余 board_name 由后端一并同步，目录/卡片实时更新
+    +'<div class="bc-section"><div class="lab"><span class="req">*</span>看板名称</div>'
+    +'<input type="text" class="form-input" id="bc_board_name" maxlength="100" style="max-width:320px"'+roAttr
+    +' value="'+esc(BC_FORM.board_name||'')+'" oninput="BC_FORM.board_name=this.value" title="看板名称（目录树、看板卡片、事项导出中显示的名字）"></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div>'
     +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="max-width:320px"'+roAttr+'>'+deptOpts+'</select>'
     +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+'</div></div>'
@@ -10021,6 +10026,8 @@ async function saveBoardAll(){
   const b=BC_SELECTED, bid=b.board_id;
   const canEdit=!!b.can_edit, canAssign=!!b.can_assign_owner;
   if(!canEdit&&!canAssign){toast('你没有修改该看板的权限');return;}
+  // 看板名称（2026-11-10 #124）：非空校验 —— 输入框就在表单顶部，清空多半是误操作
+  if(canEdit&&!(BC_FORM.board_name||'').trim()){toast('看板名称不能为空');return;}
   const saved=[];
   try{
     // ① 负责人（架构负责人及以上）
@@ -10039,6 +10046,13 @@ async function saveBoardAll(){
       await api('/api/boards/'+encodeURIComponent(bid)+'/participants',{method:'PUT',
         body:JSON.stringify({participants:(BC_FORM.participants||[]).join(',')})});
       saved.push('基本信息');
+      // ③ 看板改名（2026-11-10 #124）：与基本信息同权限口径；**名称有变才发请求**
+      const newName=(BC_FORM.board_name||'').trim();
+      if(newName && newName!==(b.board_name||'')){
+        await api('/api/boards/'+encodeURIComponent(bid)+'/rename',{method:'PUT',
+          body:JSON.stringify({board_name:newName})});
+        saved.push('名称');
+      }
     }
     await loadBoardConfig();
     // 归属部门可能已变更，刷新 ME 并重渲染目录树，保证「板块↔部门」归属关系一致
@@ -10055,7 +10069,7 @@ async function saveBoardAll(){
     }
     const nb=BC_BOARDS.find(function(x){return x.board_id===bid;});
     if(nb){BC_SELECTED=nb;BC_EDIT_ID=nb.config_id||0;
-      BC_FORM={dept:nb.dept||'',dept_node_id:nb.dept_node_id||bcDeptNodeId(nb.dept||''),
+      BC_FORM={board_name:nb.board_name||'',dept:nb.dept||'',dept_node_id:nb.dept_node_id||bcDeptNodeId(nb.dept||''),
         attr:nb.attr||'日常',status:nb.status||'启用',remark:nb.remark||'',
         owner:nb.owner||'',participants:(nb.participants||'').split(',').filter(Boolean)};}
     renderBoardList();
@@ -10072,7 +10086,7 @@ function resetBoardConfigForm(){
     return;
   }
   BC_EDIT_ID=0; BC_SELECTED=null;
-  BC_FORM={dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[]};
+  BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[]};
   renderBoardList();
   renderEditArea();
 }

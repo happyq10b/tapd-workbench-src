@@ -5256,6 +5256,41 @@ async def set_board_participants(board_id: str, req: AclReq, username: str = Dep
     return {'ok': True, 'board_id': bid, 'participants': parts}
 
 
+class BoardRenameReq(BaseModel):
+    board_name: str = ''
+
+
+@app.put('/api/boards/{board_id}/rename')
+async def rename_board(board_id: str, req: BoardRenameReq, username: str = Depends(require_auth),
+                       request: Request = None):
+    """看板改名（2026-11-10 #124：编辑看板配置界面可直接改名称）。
+
+    权限：与修改看板基本信息同口径 —— 看板负责人及以上（OP_UPDATE / LV_BOARD_OWNER）。
+    同步 cards 冗余字段 board_name（导出/展示口径），并广播刷新其他客户端目录。
+    """
+    bid = (board_id or '').strip()
+    name = (req.board_name or '').strip()
+    if not name:
+        raise HTTPException(400, '看板名称不能为空')
+    if len(name) > 100:
+        raise HTTPException(400, '看板名称过长（≤100 字）')
+    if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
+        raise HTTPException(404, '看板不存在')
+    perm_check(username, perm_chain(board_id=bid), OP_UPDATE, LV_BOARD_OWNER, 'board:' + bid)
+    old = dbq('SELECT board_name FROM boards WHERE board_id=?', (bid,))
+    old_name = old[0]['board_name'] if old else ''
+    if name == old_name:
+        return {'ok': True, 'board_id': bid, 'board_name': name, 'changed': False}
+    dbe('UPDATE boards SET board_name=? WHERE board_id=?', (name, bid))
+    # cards 冗余的 board_name 一并同步（新建事项时后端会按 boards 表回填新名，
+    # 存量数据靠这里对齐，避免「改了名、旧事项还挂旧看板名」）
+    dbe('UPDATE cards SET board_name=? WHERE board_id=?', (name, bid))
+    audit_log(username, client_ip(request), 'board_rename', f'看板 {bid}',
+              f'看板改名：「{old_name}」→「{name}」', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'board_id': bid, 'board_name': name, 'changed': True}
+
+
 @app.put('/api/columns/{col_key}/participants')
 async def set_column_participants(col_key: str, req: AclReq, username: str = Depends(require_writer),
                                   request: Request = None):
