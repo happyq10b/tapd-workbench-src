@@ -1723,13 +1723,24 @@ def me(username: str = Depends(require_auth)):
     col_info = None
     if columns is not None:
         col_info = {bid: sorted(cols) for bid, cols in columns.items()}
-    # 个人资料（头像 / 个人照片 / 个人状态）—— 顶栏状态栏与个人界面使用
-    prof = dbq('SELECT avatar, photo, status_text FROM users WHERE username=?', (username,))
-    avatar = prof[0]['avatar'] if prof else ''
-    photo = prof[0]['photo'] if prof else ''
-    status_text = prof[0]['status_text'] if prof else ''
+    # 个人资料（头像 / 个人照片 / 个人状态 / 基本信息）—— 顶栏状态栏与个人界面使用
+    prof = dbq('SELECT avatar, photo, status_text, gender, hire_date, birth_date,'
+               ' native_province, native_city, phone, political_status'
+               ' FROM users WHERE username=?', (username,))
+    if prof:
+        p = prof[0]
+        avatar, photo, status_text = p['avatar'], p['photo'], p['status_text']
+        _basic = {k: (p[k] or '') for k in ('gender', 'hire_date', 'birth_date',
+                    'native_province', 'native_city', 'phone', 'political_status')}
+    else:
+        avatar = photo = status_text = ''
+        _basic = {k: '' for k in ('gender', 'hire_date', 'birth_date',
+                    'native_province', 'native_city', 'phone', 'political_status')}
     # 显示名：顶栏展示「姓名(账号)」；账号未绑定成员时只显示账号
     display_name = _member_display_name(username)
+    # 成员 ID（#152 个人界面展示用）：账号绑定的成员编号；未绑定 = None
+    mrow = dbq('SELECT id, name FROM team_members WHERE account=? LIMIT 1', (username,))
+    member_id = mrow[0]['id'] if mrow else None
     # 部门清单：**按权限过滤** —— 只保留该账号**有可见看板**的部门。
     # ⚠️ 此前用 _dept_order()（架构里的全部部门）→ 普通用户的目录树会列出
     #    自己无权访问的部门（如「管理部 0」），既暴露无权部门的组织信息，
@@ -1768,6 +1779,8 @@ def me(username: str = Depends(require_auth)):
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
+            'member_id': member_id,                # #152 个人界面展示：绑定的成员编号（未绑定=None）
+            **_basic,                              # #152 基本信息：性别/入司时间/出生日期/籍贯/手机/政治面貌
             'allowed_columns': col_info,
             'managed_boards': managed_boards,      # 我是负责人的看板
             'managed_columns': managed_columns,    # 我是负责人的板块
@@ -5453,21 +5466,59 @@ def _check_image_data_url(data_url: str, max_bytes: int = None) -> str:
     return s
 
 class ProfileReq(BaseModel):
-    """个人资料：头像 + 个人照片 + 个人状态"""
+    """个人资料：头像 + 个人照片 + 个人状态 + 基本信息（#152）"""
     avatar: str = ''          # 头像 data URL（空串=清除头像）
     photo: str = ''           # 个人照片 data URL（空串=清除照片）
     status_text: str = ''     # 个人状态（一句话）
+    gender: str = ''          # 性别：'' / 男 / 女
+    hire_date: str = ''       # 入司时间（YYYY-MM-DD）
+    birth_date: str = ''      # 出生日期（YYYY-MM-DD）
+    native_province: str = '' # 籍贯省
+    native_city: str = ''     # 籍贯市
+    phone: str = ''           # 手机号码（11 位手机号，可空）
+    political_status: str = ''# 政治面貌
+
+
+_DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+_PHONE_RE = re.compile(r'^1[3-9]\d{9}$')
+
+
+def _profile_date(v: str, label: str) -> str:
+    """日期字段校验：空串放行；非空必须是 YYYY-MM-DD 且是真实日期。"""
+    v = (v or '').strip()[:10]
+    if not v:
+        return ''
+    if not _DATE_RE.match(v):
+        raise HTTPException(400, '%s格式应为 YYYY-MM-DD' % label)
+    try:
+        _date.fromisoformat(v)
+    except ValueError:
+        raise HTTPException(400, '%s不是有效日期' % label)
+    return v
 
 
 @app.post('/api/profile')
 def update_profile(req: ProfileReq, username: str = Depends(require_auth), request: Request = None):
-    """保存个人资料（头像 + 个人照片 + 个人状态）。仅能改自己的。"""
+    """保存个人资料（头像 + 个人照片 + 个人状态 + 基本信息）。仅能改自己的。"""
     avatar = _check_image_data_url(req.avatar) if (req.avatar or '').strip() else ''
     # 个人照片用独立上限（2MB）；照片与头像分开校验，互不影响
     photo = _check_image_data_url(req.photo, MAX_PHOTO_BYTES) if (req.photo or '').strip() else ''
     status_text = (req.status_text or '').strip()[:120]
-    dbe('UPDATE users SET avatar=?, photo=?, status_text=? WHERE username=?',
-        (avatar, photo, status_text, username))
+    # #152 基本信息字段：逐个清洗 + 轻校验
+    gender = req.gender if req.gender in ('', '男', '女') else ''
+    hire_date = _profile_date(req.hire_date, '入司时间')
+    birth_date = _profile_date(req.birth_date, '出生日期')
+    native_province = (req.native_province or '').strip()[:20]
+    native_city = (req.native_city or '').strip()[:20]
+    phone = (req.phone or '').strip()[:11]
+    if phone and not _PHONE_RE.match(phone):
+        raise HTTPException(400, '手机号码格式不正确（应为 11 位手机号）')
+    political_status = (req.political_status or '').strip()[:20]
+    dbe('UPDATE users SET avatar=?, photo=?, status_text=?, gender=?, hire_date=?,'
+        ' birth_date=?, native_province=?, native_city=?, phone=?, political_status=?'
+        ' WHERE username=?',
+        (avatar, photo, status_text, gender, hire_date, birth_date,
+         native_province, native_city, phone, political_status, username))
     parts = []
     if avatar:
         parts.append('更新头像')
@@ -5475,9 +5526,14 @@ def update_profile(req: ProfileReq, username: str = Depends(require_auth), reque
         parts.append('更新个人照片')
     if status_text:
         parts.append('更新个人状态')
+    if any((gender, hire_date, birth_date, native_province, native_city, phone, political_status)):
+        parts.append('更新基本信息')
     audit_log(username, client_ip(request), 'profile_update', '个人资料',
               '，'.join(parts) or '更新个人资料', 'success')
-    return {'ok': True, 'avatar': avatar, 'photo': photo, 'status_text': status_text}
+    return {'ok': True, 'avatar': avatar, 'photo': photo, 'status_text': status_text,
+            'gender': gender, 'hire_date': hire_date, 'birth_date': birth_date,
+            'native_province': native_province, 'native_city': native_city,
+            'phone': phone, 'political_status': political_status}
 
 
 class PasswordChangeReq(BaseModel):

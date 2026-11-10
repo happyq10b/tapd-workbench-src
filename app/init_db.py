@@ -707,6 +707,11 @@ def init_db(force_import=False):
         conn.execute("ALTER TABLE users ADD COLUMN photo TEXT NOT NULL DEFAULT ''")
     if 'status_text' not in ucols:
         conn.execute("ALTER TABLE users ADD COLUMN status_text TEXT NOT NULL DEFAULT ''")
+    # 个人界面基本信息（2026-11-10 #152）：性别/入司时间/出生日期/籍贯/手机/政治面貌（幂等）
+    for col in ('gender', 'hire_date', 'birth_date', 'native_province', 'native_city',
+                'phone', 'political_status'):
+        if col not in ucols:
+            conn.execute("ALTER TABLE users ADD COLUMN %s TEXT NOT NULL DEFAULT ''" % col)
     # 兼容旧库：cards 缺 parent_id 列时补上
     cols = [r[1] for r in conn.execute('PRAGMA table_info(cards)').fetchall()]
     if 'parent_id' not in cols:
