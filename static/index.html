@@ -9409,8 +9409,8 @@ async function bcPrepModal(){
   return true;
 }
 // 轻量卡片编辑入口（2026-11-10 #119）：看板卡片【编辑】→ 弹窗定位到该看板。
-//   BC_FROM_CARD=true → 保存成功后自动关闭弹窗（轻量操作的语义：改完即走）；
-//   标准入口 openBoardConfigModal 保持原行为（保存后留在弹窗内继续配置）。
+//   BC_FROM_CARD=true → 「取消」直接关闭弹窗（轻量语义）；保存行为与标准入口
+//   统一：留在弹窗内 + toast 悬浮提示（2026-11-10 #125 修订，不再保存即关）。
 var BC_FROM_CARD=false;
 async function openBoardConfigModalFor(bid){
   if(!(await bcPrepModal()))return;
@@ -10059,14 +10059,9 @@ async function saveBoardAll(){
     // （看板卡片【编辑】入口同样依赖这两步完成页面状态同步：顶栏卡片按新归属重新分组）
     ME=await api('/api/me');
     renderTabs();
-    if(BC_FROM_CARD){
-      // 轻量卡片编辑入口（2026-11-10 #119）：保存即关闭弹窗 —— 「改完即走」。
-      // 页面状态同步已由上面的 loadBoardConfig + ME 重拉 + renderTabs 完成。
-      BC_FROM_CARD=false;
-      toast('已保存'+(saved.length?('（'+saved.join('、')+'）'):''));
-      closeModal('boardConfigModal');
-      return;
-    }
+    // 2026-11-10 #125 用户修订：保存后**不再自动关闭弹窗**（含看板卡片【编辑】入口）——
+    //   统一「留在弹窗内 + toast 悬浮提示」，方便连续修改；表单回填为最新已存值，
+    //   「取消」按钮仍会关闭弹窗（resetBoardConfigForm 的卡片入口分支）。
     const nb=BC_BOARDS.find(function(x){return x.board_id===bid;});
     if(nb){BC_SELECTED=nb;BC_EDIT_ID=nb.config_id||0;
       BC_FORM={board_name:nb.board_name||'',dept:nb.dept||'',dept_node_id:nb.dept_node_id||bcDeptNodeId(nb.dept||''),
