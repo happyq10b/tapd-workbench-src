@@ -3558,6 +3558,7 @@ class TeamUpdateReq(BaseModel):
     account: Optional[str] = None   # 变更账号关联：空串=关闭，非空前=开通/绑定
     password: Optional[str] = None
     role: Optional[str] = None
+    emp_no: Optional[str] = None    # #154 ID（工号）：仅超级管理员可改；空串=清除（回退成员编号展示）
 
 def _norm_workgroups(workgroups):
     """（兼容保留）工作组名归一化。
@@ -3652,6 +3653,26 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
     dup = dbq('SELECT 1 FROM team_members WHERE name=? AND id!=?', (name, mid))
     if dup:
         raise HTTPException(409, f'成员「{name}」已存在')
+    # #154 ID（工号）修改：仅超级管理员；全局唯一（与其他成员的 emp_no、
+    #   或其未设工号时回退展示的成员编号撞号都拒绝 —— 保证展示层 ID 不重复）
+    emp_changed = False
+    if req.emp_no is not None:
+        if username != SUPER_ADMIN:
+            raise HTTPException(403, '仅超级管理员可修改成员 ID（工号）')
+        emp = (req.emp_no or '').strip()[:20]
+        old_emp = dbq('SELECT emp_no FROM team_members WHERE id=?', (mid,))
+        old_emp = (old_emp[0]['emp_no'] or '') if old_emp else ''
+        if emp != old_emp:
+            # 空值=未设置（回退成员编号展示），不占用、不参与查重；非空才全局唯一
+            if emp:
+                others = dbq('SELECT id, name, emp_no FROM team_members WHERE id!=?', (mid,))
+                clash = next((o for o in others
+                              if (o['emp_no'] or '') == emp
+                              or ((o['emp_no'] or '') == '' and str(o['id']) == emp)), None)
+                if clash:
+                    raise HTTPException(409, 'ID已存在，不允许重复修改（已被成员「%s」使用）' % clash['name'])
+            dbe('UPDATE team_members SET emp_no=? WHERE id=?', (emp, mid))
+            emp_changed = True
     # 只改姓名；workgroups 归【架构管理】独占维护，本接口不触碰
     dbe('UPDATE team_members SET name=? WHERE id=?', (name, mid))
     # 只改角色：成员已有账号且本次未变更账号关联
@@ -3685,6 +3706,8 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
         changes.append('重置密码')
     if req.account is not None and req.account != old_acc:
         changes.append('变更账号关联')
+    if emp_changed:
+        changes.append(f'ID→{req.emp_no.strip()}')
     audit_log(username, client_ip(request), 'member_update', f'成员 {name} (id={mid})', '，'.join(changes) or '资料更新', 'success')
     return {'ok': True}
 

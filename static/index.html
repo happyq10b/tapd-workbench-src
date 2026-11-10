@@ -7595,8 +7595,8 @@ async function openTeamModal(){
 var WG_TREE_EXPANDED=new Set();   // 展开的节点 key（成员id + 节点名）
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
-// #153 ID 列展示值 = 工号（emp_no，来自人员资料）；未导入工号的成员回退成员编号（5 位补零保证排序/对齐一致）
-function tmIdLabel(m){ return m.emp_no || String(m.id).padStart(5,'0'); }
+// #153 ID 列展示值 = 工号（emp_no，来自人员资料）；#154 未导入工号的成员沿用原成员编号原样显示（不补零）
+function tmIdLabel(m){ return m.emp_no || String(m.id); }
 function tmSortKey(m){ return tmIdLabel(m); }
 function tmToggleSort(){
   TM_SORT_DIR=-TM_SORT_DIR;
@@ -7757,8 +7757,9 @@ function renderTeamList(){
     }
     return true;
   });
-  // #146 ID 排序（双击表头切换升/降序）—— #153 起按工号（展示值）排序
-  filtered.sort((a,b)=>tmSortKey(a).localeCompare(tmSortKey(b))*TM_SORT_DIR);
+  // #146 ID 排序（双击表头切换升/降序）—— #153 起按工号（展示值）排序；
+  // #154 numeric 比较：未导入工号的成员显示原始编号（如 6），与工号 00006 按数值自然排序
+  filtered.sort((a,b)=>tmSortKey(a).localeCompare(tmSortKey(b),undefined,{numeric:true})*TM_SORT_DIR);
   // 当前可见的成员 id（保存时只提交这些行，见 saveAllTeamMembers）
   TM_VISIBLE_IDS=new Set(filtered.map(m=>m.id));
   tbody.innerHTML=filtered.length?filtered.map(m=>{
@@ -7771,7 +7772,11 @@ function renderTeamList(){
               ? `<span class="pwd-wrap"><input type="password" id="tm_pwd_${m.id}" placeholder="${m.password_set?'已设置':'设置密码'}" style="padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">${pwdEyeHtml('tm_pwd_'+m.id)}${m.password_set?`<button class="pwd-eye" onclick="genPwd(${m.id})" title="生成随机密码重置">🔄</button>`:''}</span>`
               : (m.password_set ? '<span style="color:var(--text2);font-size:12px">已设置</span>' : '<span style="color:var(--text3);font-size:12px">未设置密码</span>');
         return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:7px 10px;color:var(--text2);font-size:12px" title="${tmIdLabel(m)}">${tmIdLabel(m)}</td>
+        <td style="padding:7px 10px;color:var(--text2);font-size:12px">${
+          isSuperUser
+            ? `<input type="text" id="tm_empno_${m.id}" value="${esc(tmIdLabel(m))}" title="ID（工号），全局唯一，仅超级管理员可修改" style="width:80px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:12px">`
+            : `<span title="${tmIdLabel(m)}">${tmIdLabel(m)}</span>`
+        }</td>
         <td style="padding:7px 10px" id="tm_name_${m.id}">
           <input type="text" id="tm_edit_name_${m.id}" value="${esc(m.name)}" style="width:100px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">
         </td>
@@ -8019,6 +8024,11 @@ async function saveAllTeamMembers(){
         u.password=pwd; pwdChanged++;
       }
     }
+    // #154 ID（工号）修改：仅超级管理员（表格里只有超管有输入框）
+    if(isSuperUser){
+      const empInp=document.getElementById('tm_empno_'+m.id);
+      u.emp_no=empInp?(empInp.value||'').trim():'';
+    }
     updates.push(u);
   }
   // #142 账号唯一性预检（2026-11-10）：批量保存是 Promise.all 并发，
@@ -8042,6 +8052,28 @@ async function saveAllTeamMembers(){
       if(!acc)continue;
       const other=TM_ALL.find(m=>m.id!==u.id&&(m.account||'')===acc);
       if(other){toast(`账号「${acc}」已被成员「${other.name}」使用，不允许重复添加`);return}
+    }
+  }
+  // #154 ID（工号）唯一性预检（仅超管提交 emp_no）：保存列表内部重复、或与其他成员
+  //   （含被筛选隐藏的）撞号都阻止 —— 「其他成员占用」= 其 emp_no 相同，
+  //   或其未设 emp_no（回退展示成员编号）且编号恰好相同（展示层也不允许撞）。
+  if(isSuperUser){
+    const seen=new Map();
+    for(const u of updates){
+      const emp=(u.emp_no||'').trim();
+      if(!emp)continue;
+      if(seen.has(emp)){
+        const a=TM_ALL.find(m=>m.id===seen.get(emp));
+        const b=TM_ALL.find(m=>m.id===u.id);
+        toast(`ID「${emp}」在保存列表中重复（${a?a.name:seen.get(emp)} 与 ${b?b.name:u.id}），请修正后再保存`);return
+      }
+      seen.set(emp,u.id);
+    }
+    for(const u of updates){
+      const emp=(u.emp_no||'').trim();
+      if(!emp)continue;
+      const other=TM_ALL.find(m=>m.id!==u.id&&((m.emp_no||'')===emp||(!(m.emp_no||'')&&String(m.id)===emp)));
+      if(other){toast(`ID「${emp}」已被成员「${other.name}」使用，不允许重复修改`);return}
     }
   }
   try{
