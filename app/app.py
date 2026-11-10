@@ -2375,10 +2375,23 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
         assign_fields['owner'] = fields.pop('owner')
     if 'cc' in fields:
         assign_fields['cc'] = fields.pop('cc')
+    # 2026-11-10 #130：状态勾选（完成/进行中）= **仅事项负责人**可变更 ——
+    #   参与人可改内容（描述/日期等），但不能替负责人勾完成或改状态。
+    #   单独拆出判定（避免并入通用内容字段触发参与人级放行），错误文案明确。
+    status_fields = {}
+    if 'status' in fields:
+        status_fields['status'] = fields.pop('status')
+    if 'status_name' in fields:
+        status_fields['status_name'] = fields.pop('status_name')
     _chain = perm_chain(card_id=card_id)
     if fields:
         perm_check(username, _chain, OP_EDIT_CONTENT, LV_CARD_OWNER, 'card:' + card_id,
                    min_level=LV_PARTICIPANT)
+    if status_fields:
+        if PERM_ENABLED and not (is_admin(username) or username == SUPER_ADMIN
+                                 or has_role(dbq, username, _chain, LV_CARD_OWNER)):
+            raise HTTPException(403, '仅事项负责人可变更事项状态（完成勾选/状态更新），如需调整请联系负责人或管理员')
+        fields.update(status_fields)
     if assign_fields.get('owner'):
         perm_check(username, _chain, OP_ASSIGN_OWNER, LV_CARD_OWNER, 'card:' + card_id,
                    min_level=LV_COLUMN_OWNER)
@@ -3374,6 +3387,11 @@ async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(req
     card_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not card_row:
         raise HTTPException(404, '卡片不存在或已删除')
+    # 2026-11-10 #130：待办任务只能由**该事项的负责人**发起/创建 ——
+    #   参与人、普通可见用户均无权（负责人及以上层级 / 管理员按既有继承语义放行）。
+    if PERM_ENABLED and not (is_admin(username) or username == SUPER_ADMIN
+                             or has_role(dbq, username, perm_chain(card_id=card_id), LV_CARD_OWNER)):
+        raise HTTPException(403, '仅事项负责人可发起该事项的待办任务，如需新增请联系负责人或管理员')
     check_board_access(card_row[0]['board_id'], username)
     if not dbq('SELECT 1 FROM cards WHERE card_id=? AND deleted=0', (card_id,)):
         raise HTTPException(404, '卡片不存在或已删除')

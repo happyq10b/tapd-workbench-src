@@ -1693,8 +1693,10 @@ function goLogin(){
         </div>
         <div id="e_subtask_list" class="subtask-list"></div>
         <div class="subtask-add">
-          <input type="text" class="form-input" id="e_subtask_new" placeholder="添加代办任务，回车确认…" onkeydown="if(event.key==='Enter')addSubtask()">
-          <button class="btn-default" onclick="addSubtask()" style="flex-shrink:0">添加</button>
+          <div id="e_subtask_add_row" style="display:flex;gap:8px;flex:1;min-width:0">
+            <input type="text" class="form-input" id="e_subtask_new" placeholder="添加代办任务，回车确认…" onkeydown="if(event.key==='Enter')addSubtask()">
+            <button class="btn-default" onclick="addSubtask()" style="flex-shrink:0">添加</button>
+          </div>
         </div>
       </div>
     </div>
@@ -6324,11 +6326,29 @@ function renderSubtasks(list,listEl,countEl,editable,cardId){
 async function loadEditSubtasks(cardId){
   const d=await api('/api/cards/'+cardId+'/subtasks');
   EDIT_SUBTASKS=d.subtasks;
-  renderSubtasks(EDIT_SUBTASKS,document.getElementById('e_subtask_list'),document.getElementById('e_subtask_count'),true,cardId);
+  // 待办区可编辑性 = 是否事项负责人（2026-11-10 #130）：非负责人隐藏「新增/勾选/删除」
+  // 入口（后端同口径兜底），只读浏览
+  const canManage=isCardOwnerOf((window._editCard||{}).owner);
+  var addRow=document.getElementById('e_subtask_add_row');
+  if(addRow)addRow.style.display=canManage?'':'none';
+  renderSubtasks(EDIT_SUBTASKS,document.getElementById('e_subtask_list'),document.getElementById('e_subtask_count'),canManage,cardId);
 }
+// ---------- 事项负责人判定（2026-11-10 #130）----------
+// cards.owner 存**姓名**（分号分隔，可多人）；与后端 identity_names 的双口径对齐，
+// 前端用「显示名 + 登录账号」双字段比对。管理员/超管直通（后端同样直通，永不打架）。
+function isCardOwnerOf(ownerStr){
+  if(ME&&(ME.is_admin||ME.is_super))return true;
+  const owners=(ownerStr||'').split(';').map(function(s){return s.trim();}).filter(Boolean);
+  if(!owners.length)return false;
+  const me=[ME&&ME.display_name,ME&&ME.username].filter(Boolean);
+  return owners.some(function(o){return me.indexOf(o)>=0;});
+}
+const CARD_OWNER_TIP='仅事项负责人可操作，如需调整请联系负责人或管理员';
 async function addSubtask(){
   const title=document.getElementById('e_subtask_new').value.trim();
   if(!title){toast('请输入代办任务内容');return}
+  // 待办任务仅事项负责人可发起（2026-11-10 #130；后端同口径兜底）
+  if(!isCardOwnerOf((window._editCard||{}).owner)){toast(CARD_OWNER_TIP.replace('可操作','可发起待办任务'));return}
   try{
     await api('/api/cards/'+editing+'/subtasks',{method:'POST',body:JSON.stringify({title})});
     document.getElementById('e_subtask_new').value='';
@@ -7467,6 +7487,10 @@ function setNewCardStatus(st){
 async function setCardStatus(ctx,st){
   const id=ctx==='e'?editing:DETAIL_ID;
   if(!id)return;
+  // 状态勾选/更新仅事项负责人可操作（2026-11-10 #130；后端同口径兜底）
+  //   编辑弹窗取 _editCard，详情弹窗取 DETAIL_CARD —— 两处都持有当前卡片的 owner
+  const ownerCard=ctx==='e'?(window._editCard||{}):(DETAIL_CARD||{});
+  if(!isCardOwnerOf(ownerCard.owner)){toast('仅事项负责人可变更事项状态（完成勾选/状态更新）');return}
   closeStatusMenu();
   try{
     await api('/api/cards/'+id,{method:'PUT',body:JSON.stringify({fields:{status:st,status_name:statusText(st)}})});
