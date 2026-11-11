@@ -1164,6 +1164,15 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .se-owner{display:flex;flex-wrap:wrap;gap:6px}
 .empty-hint{color:var(--text2);font-size:12px;padding:14px;text-align:center;border:1px dashed var(--border);border-radius:8px}
 .toast{position:fixed;top:70px;right:24px;background:rgba(0,0,0,.75);color:#fff;padding:10px 18px;border-radius:var(--radius-sm);font-size:13px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none}
+/* T-0170 全局保存守卫遮罩：保存/修改请求期间全屏拦截交互 + 转圈提示（样式与 toast 同族） */
+#saveGuard{position:fixed;inset:0;z-index:5000;background:rgba(255,255,255,.45);backdrop-filter:blur(1.5px);
+  display:flex;align-items:center;justify-content:center;cursor:wait}
+#saveGuard .sg-box{display:flex;align-items:center;gap:10px;background:rgba(16,24,40,.85);color:#fff;
+  padding:12px 22px;border-radius:10px;box-shadow:var(--shadow-lg);font-size:13.5px;backdrop-filter:blur(4px)}
+#saveGuard .sg-spin{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:sgSpin .8s linear infinite;flex-shrink:0}
+@keyframes sgSpin{to{transform:rotate(360deg)}}
+button.sg-busy{opacity:.6;cursor:wait}
 .toast.show{opacity:1}
 @media(max-width:900px){.progress-overview{grid-template-columns:repeat(2,1fr)}.form-row{grid-template-columns:1fr}}
 
@@ -2544,16 +2553,61 @@ let EDIT_FROM_DETAIL=''; // 从详情弹窗进入编辑时记录来源，关闭�
 let DETAIL_ID=null, DETAIL_CARD=null, TEAM_MEMBERS=[], expandedAll=false;
 
 function api(path,opts={}){
+  // T-0170 保存守卫激活期间的变更请求纳入追踪（守卫未激活时零开销，
+  //   编辑锁心跳/消息回执等后台写请求不会弹遮罩）
+  const _mut=/^(POST|PUT|DELETE|PATCH)$/i.test(String(opts.method||'GET'));
+  const _track=_mut&&SG_DEPTH>0;
+  if(_track)sgTrack();
   const o={headers:{'Authorization':'Bearer '+TOKEN},...opts};
   if(opts.body)o.headers['Content-Type']='application/json';
-  return fetch(apiUrl(path),o).then(async r=>{
+  const p=fetch(apiUrl(path),o).then(async r=>{
     if(r.status===401){goLogin();throw new Error('unauth')}
     const d=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
     return d;
   });
+  return _track?p.finally(function(){sgRelease()}):p;
 }
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600)}
+// ---------- T-0170 全局保存守卫：防重复提交 + 中途退出提示 ----------
+// 保存/修改入口（见文末 SG_WRAPS 包装清单）进入即 sgBegin：
+//   · 全屏遮罩（拦截页面一切交互）+ 转圈提示；
+//   · 禁用触发按钮（防重复提交）；
+//   · 注册 beforeunload —— 等待期关闭/刷新页面会弹确认，避免误以为已保存。
+// 请求全部返回后（含入口函数内部 fire-and-forget 的写请求）sgFinish 释放。
+var SG_DEPTH=0, SG_N=0, SG_BTN=null, SG_BTN_TS=0, SG_EL=null;
+function sgWarn(e){e.preventDefault();e.returnValue=' ';return ' '}
+function sgShow(){
+  if(SG_EL)return;
+  SG_EL=document.createElement('div');SG_EL.id='saveGuard';
+  SG_EL.innerHTML='<div class="sg-box"><span class="sg-spin"></span><span>正在保存，请稍候…</span></div>';
+  document.body.appendChild(SG_EL);
+  document.documentElement.setAttribute('data-saving','1');
+  window.addEventListener('beforeunload',sgWarn);
+}
+function sgHide(){
+  if(SG_EL){SG_EL.remove();SG_EL=null;}
+  document.documentElement.removeAttribute('data-saving');
+  window.removeEventListener('beforeunload',sgWarn);
+  if(SG_BTN){SG_BTN.disabled=false;SG_BTN.classList.remove('sg-busy');SG_BTN=null;}
+}
+function sgTrack(){if(SG_N++===0)sgShow();return SG_N}
+function sgRelease(){if(SG_N>0&&--SG_N===0)sgHide()}
+function sgBegin(){
+  if(SG_DEPTH++===0){
+    // 触发按钮 = 100ms 内点击的 button（onclick 与 click 事件同帧触发）；
+    // 程序化调用/菜单项（非 button）不禁用，由遮罩统一拦截交互
+    if(SG_BTN&&Date.now()-SG_BTN_TS<100&&SG_BTN.tagName==='BUTTON'){
+      SG_BTN.disabled=true;SG_BTN.classList.add('sg-busy');
+    }else{SG_BTN=null;}
+  }
+  sgTrack();
+}
+function sgFinish(){if(SG_DEPTH>0)SG_DEPTH--;sgRelease()}
+document.addEventListener('click',function(e){
+  var b=e.target&&e.target.closest?e.target.closest('button'):null;
+  if(b){SG_BTN=b;SG_BTN_TS=Date.now();}
+},true);
 function logout(){
   // 登出前上报审计日志（fire-and-forget）
   try{fetch('/api/logout',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})}catch(e){}
@@ -10853,6 +10907,35 @@ async function bcAfterDelete(deletedIds){
   renderEditArea();
 }
 
+// ---------- T-0170 保存守卫接线：统一包装全部保存/修改入口 ----------
+// 覆盖 = 所有由按钮/菜单/下拉触发的写操作（个人资料/密码、账号管理、看板与
+// 板块配置、事项/子事项/清单/评论增删改、批量删除、导入、通知、部门主页、
+// 架构管理任命与节点、在线用户管理、板块权限、导出模板、强制下线）。
+// 排除 = 编辑锁心跳/解锁（后台自动）、消息已读回执、登出、看板拖拽排序
+// （连续拖拽操作，非按钮）；守卫未激活时 api() 零开销。
+(function(){
+  var WRAPS=['saveProfile','submitChangePassword','saveAllTeamMembers','addTeamMember','removeTeamMember',
+    'saveBoardAll','createBoard','createCard','createSubCard','saveEdit','deleteCard','setCardStatus','toggleCardDone',
+    'saveColumn','addSubtask','toggleSubtask','delSubtask','saveSubtaskTitle','addComment','submitCopy',
+    'bulkDeleteChecked','purgeEmptyColumns','submitImport',
+    'addNotice','deleteNotice','toggleNotice','saveDeptProfile','saveDeptPost','deleteDeptPost',
+    'addOrgAppt','addOrgApptMulti','removeOrgAppt','orgMoveNode','submitWgForm','removeWg',
+    'adminCreateUser','adminDeleteUser','adminResetPwd','adminSetRole','saveColPerm','saveExpTpl','tplDelete',
+    'kickOnline'];
+  WRAPS.forEach(function(n){
+    var f=window[n];
+    if(typeof f!=='function')return;
+    window[n]=function(){
+      var r;
+      sgBegin();
+      try{r=f.apply(this,arguments);}
+      catch(e){sgFinish();throw e;}
+      if(r&&typeof r.then==='function')return r.finally(function(){sgFinish()});
+      sgFinish();
+      return r;
+    };
+  });
+})();
 </script>
 </body>
 </html>
