@@ -5740,7 +5740,9 @@ async function cardPickPool(boardId,columnName){
     }
   }
   const names=accs.filter(Boolean).map(n2).filter(Boolean);
-  return [...new Set(names)];
+  // T-013c：离岗成员不再进入事项的负责人/参与人选人池（存量指派=历史数据，照常显示）
+  const departedNames=new Set(BC_ACL_MEMBERS.filter(x=>x.status==='departed').map(x=>x.name));
+  return [...new Set(names)].filter(function(n){return !departedNames.has(n);});
 }
 // 打开事项弹窗。子事项复用同一套弹窗（子事项模式）：隐藏「所属看板」，
 // 补上父事项信息与父时间范围约束，字段布局与主事项完全一致。
@@ -7831,7 +7833,7 @@ async function openTeamModal(){
   WG_FLAT=wgFlat(WG_ALL);
   TM_ALL=(team.members||[]).map(m=>({id:m.id,emp_no:m.emp_no||'',name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set,
     org_source:m.org_source||'none',org_conflict:m.org_conflict||[],org_nodes:m.org_nodes||[],
-    departments:m.departments||[]}));
+    departments:m.departments||[],status:m.status||''}));   // T-013c：''=在岗 'departed'=离岗
   TEAM_MEMBERS=TM_ALL.map(m=>m.name);
   TM_FILTER={name:'',dept:[],role:[]};   // 默认全部（不再默认只看「无权限」）
   TM_DEPT_DRAFT={};   // #165 部门草稿随弹窗重开清空（以服务端数据为准）
@@ -8160,7 +8162,16 @@ function renderTeamList(){
               <option value="viewer" ${m.role==='viewer'?'selected':''}>只读</option>
             </select>`
           : '<span style="color:var(--text3);font-size:12px" title="该成员未开通登录账号，无权限">无权限</span>'
-        }</td>
+        }
+          ${m.status==='departed'
+            ? `<div style="margin-top:5px;display:flex;align-items:center;gap:6px">
+                 <span class="bc-role-tag" style="color:#b3620b;background:#fff7ec;border-color:#f0c78a">离岗</span>
+                 ${isAdmin?`<button type="button" class="icon-btn" style="font-size:11px;padding:1px 6px" onclick="toggleMemberDeparted(${m.id},'')">恢复在岗</button>`:''}
+               </div>`
+            : (isAdmin?`<div style="margin-top:5px"><button type="button" class="icon-btn" style="font-size:11px;padding:1px 6px;color:#b3620b"
+                 title="设为离岗：自动从任命/负责人/参与人名单剔除，各筛选条件不再可见；历史数据保持不变"
+                 onclick="toggleMemberDeparted(${m.id},'departed')">离岗</button></div>`:'')}
+        </td>
         ${canEdit?`<td style="padding:7px 10px">
           <button class="icon-btn delete" onclick="removeTeamMember(${m.id})">删除</button>
         </td>`:''}
@@ -8477,6 +8488,19 @@ async function removeTeamMember(mid){
   try{await api('/api/team/'+mid,{method:'DELETE'});toast('已移除');openTeamModal()}
   catch(e){toast(e.message)}
 }
+// T-013c 离岗/恢复在岗：立即生效（不走「保存全部」草稿——剔除名单是即时动作需确认）
+async function toggleMemberDeparted(mid, toStatus){
+  const m=TM_ALL.find(x=>x.id===mid);
+  if(!m)return;
+  if(toStatus==='departed'){
+    if(!confirm(`将成员「${m.name}」设为离岗？\n\n· 自动从任命 / 负责人 / 参与人名单中剔除；\n· 各类人员筛选条件中不再可见；\n· 历史数据（事项记录等）保持不变；\n· 恢复在岗后名单不会自动回填，需重新任命。`))return;
+  }
+  try{
+    await api('/api/team/'+mid,{method:'PUT',body:JSON.stringify({name:m.name,status:toStatus})});
+    toast(toStatus==='departed'?'已设为离岗（名单已剔除）':'已恢复在岗');
+    openTeamModal();
+  }catch(e){toast(e.message)}
+}
 // ---------- 操作日志（仅管理员） ----------
 const AUDIT_ACTIONS={'login':'登入','logout':'登出','view':'查看','create':'新建','update':'编辑','delete':'删除','move':'移动','lock':'锁定','unlock':'解锁','comment':'评论','subtask_add':'新增子事项','subtask_update':'更新子事项','subtask_delete':'删除子事项','member_create':'新增成员','member_update':'编辑成员','member_delete':'删除成员','group_create':'新增工作组','group_update':'编辑工作组','group_delete':'删除工作组','user_create':'新建账号','user_update':'编辑账号','user_delete':'删除账号','export':'导出','import':'导入'};
 var AUDIT_PAGE=1, AUDIT_PAGE_SIZE=30, AUDIT_TOTAL=0;
@@ -8724,6 +8748,7 @@ function orgApptCandidates(node, roleKey){
   const appointed=new Set();
   (node.appointments||[]).forEach(a=>{if(a.role_key===roleKey)appointed.add(a.member_id);});
   return ORG_MEMBERS.filter(function(m){
+    if(m.status==='departed')return false;                                  // T-013c：离岗成员不可任命
     if(appointed.has(m.id))return false;                                    // 任职要求：已任同岗位
     if(deptName&&(m.departments||[]).indexOf(deptName)<0)return false;      // 部门归属
     return true;
@@ -9145,7 +9170,7 @@ async function openWgModal(){
   const keepSel=ORG_SELECTED;   // 记住当前选中节点，刷新后恢复
   await ensureOrgTree(true);
   ORG_TYPE_NAMES=ORG_TYPE_NAMES||{};
-  ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||'',departments:m.departments||[]}));
+  ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||'',departments:m.departments||[],status:m.status||''}));
   ORG_MEMBER_BY_ID={};
   ORG_MEMBERS.forEach(m=>{ORG_MEMBER_BY_ID[m.id]=m});
   // 板块绑定：新模型节点不存 boards，从旧 workgroups 视图补齐
@@ -10487,7 +10512,8 @@ async function bcLoadAclMembers(){
       BC_ACL_MEMBERS=(res.members||res||[]).map(function(m){
         const acc=m.account||'';
         if(!acc)return null;                  // 没有登录账号的成员不能作为负责人
-        return {account:acc,name:m.name||acc,label:(m.name||acc)+(m.name&&m.name!==acc?'('+acc+')':'')};
+        return {account:acc,name:m.name||acc,label:(m.name||acc)+(m.name&&m.name!==acc?'('+acc+')':''),
+                status:m.status||''};        // T-013c：离岗标记（label 映射保留完整，选人池过滤）
       }).filter(function(x){return x});
       BC_ACL_LOADED=true;
     }catch(e){ BC_ACL_MEMBERS=[]; }

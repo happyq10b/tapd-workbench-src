@@ -1838,10 +1838,13 @@ def filter_options(username: str = Depends(require_auth)):
     rows = filter_rows(dbq('SELECT owner, week_no, board_id, column_id FROM cards WHERE deleted=0'),
                        boards, columns)
     people, weeks = set(), set()
+    # T-013c：离岗成员不再出现在人员筛选候选里（历史数据展示不受影响，
+    #   只是不能再作为筛选条件选中）
+    departed_names = {r['name'] for r in dbq("SELECT name FROM team_members WHERE status='departed'")}
     for r in rows:
         for n in (r.get('owner') or '').split(';'):
             n = n.strip()
-            if n:
+            if n and n not in departed_names:
                 people.add(n)
         w = (r.get('week_no') or '').strip()
         if w:
@@ -3630,7 +3633,7 @@ async def delete_subtask(card_id: str, sid: int, username: str = Depends(require
 # ---------------- API：团队管理 ----------------
 @app.get('/api/team')
 def get_team(username: str = Depends(require_auth)):
-    rows = dbq('''SELECT m.id, m.name, m.workgroups, m.account, m.emp_no, m.departments,
+    rows = dbq('''SELECT m.id, m.name, m.workgroups, m.account, m.emp_no, m.departments, m.status,
                         u.role AS role, u.allowed_boards AS allowed_boards,
                         (u.password_hash IS NOT NULL AND u.password_hash != '') AS password_set
                  FROM team_members m
@@ -3688,6 +3691,7 @@ class TeamUpdateReq(BaseModel):
     role: Optional[str] = None
     emp_no: Optional[str] = None    # #154 ID（工号）：仅超级管理员可改；空串=清除（回退成员编号展示）
     departments: Optional[List[str]] = None   # #165 部门（多选）；None=本次不动该字段
+    status: Optional[str] = None    # T-013c 离岗：''=在岗，'departed'=离岗；None=本次不动该字段
 
 def _norm_workgroups(workgroups):
     """（兼容保留）工作组名归一化。
@@ -3845,6 +3849,21 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
         dept_changed = True
     elif req.account is not None and req.account.strip() != old_acc:
         _sync_dept_participants_for_member(mid)
+    # T-013c 离岗状态：切到离岗 → 从任命/负责人/参与人名单剔除（历史数据不动）；
+    #   恢复在岗 → 名单不自动回填（需在架构管理重新任命/配置）。账号换绑与
+    #   部门同步先行，剔除用的是成员最新账号。
+    status_changed = False
+    if req.status is not None:
+        st = (req.status or '').strip()
+        if st not in ('', 'departed'):
+            raise HTTPException(400, '状态必须是 在岗 / 离岗')
+        old_st = dbq('SELECT status FROM team_members WHERE id=?', (mid,))
+        old_st = (old_st[0]['status'] or '') if old_st else ''
+        if st != old_st:
+            dbe('UPDATE team_members SET status=? WHERE id=?', (st, mid))
+            status_changed = True
+            if st == 'departed':
+                _strip_member_rosters(mid, action='离岗')
     changes = []
     if name != req.name.strip() or True:
         changes = ['姓名/工作组']
@@ -3858,6 +3877,8 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
         changes.append(f'ID→{req.emp_no.strip()}')
     if dept_changed:
         changes.append('部门→' + '、'.join(req.departments or []))
+    if status_changed:
+        changes.append('状态→' + ('离岗' if req.status == 'departed' else '在岗'))
     audit_log(username, client_ip(request), 'member_update', f'成员 {name} (id={mid})', '，'.join(changes) or '资料更新', 'success')
     return {'ok': True}
 
@@ -3873,24 +3894,12 @@ def del_team(mid: int, username: str = Depends(require_admin), request: Request 
         raise HTTPException(400, '不能删除当前登录账号关联的成员')
     if acc:
         dbe('DELETE FROM users WHERE username=?', (acc,))
-    # 清理该成员在【架构管理】中的任职记录。
-    # org_appointments 虽声明了 ON DELETE CASCADE，但本库未开启
-    # PRAGMA foreign_keys（SQLite 默认关闭），级联不会生效 → 必须显式清理，
-    # 否则会残留孤儿任职数据。
-    dbe('DELETE FROM org_appointments WHERE member_id=?', (mid,))
+    # T-013c：删除成员 = 从现有名单（任命/负责人/参与人）中剔除 —— 与离岗共用
+    #   同一套剔除逻辑（org_appointments 未开外键级联，必须显式清理）。
+    #   历史数据（事项的 owner/参与记录等）一律不动。
+    _strip_member_rosters(mid, action='删除')
     dbe('DELETE FROM team_members WHERE id=?', (mid,))
-    # #165 部门强映射收尾：被删成员的账号从部门级参与人移除；
-    #   中心（财务中心）全员口径随之补齐/收敛。
-    if acc:
-        for n in _top2_dept_nodes():
-            row = dbq('SELECT participants FROM org_nodes WHERE id=?', (n['id'],))
-            if not row:
-                continue
-            cur = [x.strip() for x in (row[0]['participants'] or '').split(',') if x.strip()]
-            if acc in cur:
-                cur = [x for x in cur if x != acc]
-                dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur), n['id']))
-    audit_log(username, client_ip(request), 'member_delete', f'成员 {mname} (id={mid})', f'删除成员' + (f'及关联账号 {acc}' if acc else '') + '，并清理架构管理中的任职记录', 'success')
+    audit_log(username, client_ip(request), 'member_delete', f'成员 {mname} (id={mid})', f'删除成员' + (f'及关联账号 {acc}' if acc else '') + '，并从任命/负责人/参与人名单剔除', 'success')
     return {'ok': True}
 
 # ---------------- API：工作组管理（工作组树形架构） ----------------
@@ -4626,6 +4635,53 @@ def _set_member_departments(member_id: int, depts):
     _sync_dept_participants_for_member(member_id)
 
 
+def _strip_member_rosters(member_id: int, action: str = '离岗'):
+    """把成员从现有名单中剔除（T-013c 离岗/删除共用）。
+
+    剔除范围：
+    · 任命：org_appointments 全部任职记录（负责人/管理员等岗位即被卸下）；
+    · 负责人：org_nodes.owner / workgroups.leader 中按姓名或账号匹配的条目；
+    · 参与人：org_nodes.participants（存账号）全节点剔除。
+
+    ⚠️ 历史数据一律不动 —— cards 的 owner/participants/评论等记录的是
+    「当时谁干的」，离岗/删除不影响其展示，仅不再出现在新名单与筛选里。
+    """
+    m = dbq('SELECT account, name FROM team_members WHERE id=?', (member_id,))
+    if not m:
+        return 0
+    acc, mname = (m[0]['account'] or '').strip(), m[0]['name'] or ''
+    changed = 0
+    # ① 任命
+    dbe('DELETE FROM org_appointments WHERE member_id=?', (member_id,))
+    changed += 1
+    # ② 节点负责人 + 参与人（全节点；participants 存账号，owner 姓名与账号双口径）
+    for n in dbq('SELECT id, owner, participants FROM org_nodes'):
+        owner = (n['owner'] or '').strip()
+        parts = [x.strip() for x in (n['participants'] or '').split(',') if x.strip()]
+        new_owner, new_parts = owner, parts
+        if owner and owner not in ('__perm_arch', '__perm_xarch') and mname and mname in owner:
+            new_owner = ';'.join(x.strip() for x in owner.replace(';', ',').split(',')
+                                 if x.strip() and x.strip() not in (mname, acc))
+        if acc and acc in parts:
+            new_parts = [x for x in parts if x != acc]
+        elif mname and mname in parts:
+            new_parts = [x for x in parts if x != mname]
+        if new_owner != owner or new_parts != parts:
+            dbe('UPDATE org_nodes SET owner=?, participants=? WHERE id=?',
+                (new_owner, ','.join(new_parts), n['id']))
+            changed += 1
+    # ③ 工作组负责人（leader 存姓名，顿号/分号/逗号混存的旧数据按分隔符拆）
+    for w in dbq('SELECT id, leader FROM workgroups'):
+        leader = (w['leader'] or '').strip()
+        if not leader or not mname or mname not in leader:
+            continue
+        new_leader = ';'.join(x.strip() for x in leader.replace('；', ';').replace('、', ';').replace(',', ';').split(';')
+                              if x.strip() and x.strip() != mname)
+        dbe('UPDATE workgroups SET leader=? WHERE id=?', (new_leader, w['id']))
+        changed += 1
+    return changed
+
+
 def _sync_dept_participants_for_member(member_id: int):
     """把单个成员的部门选择映射到前两级节点的参与人（participants，存账号）。
 
@@ -4662,8 +4718,10 @@ def _ensure_center_participants_all():
     """中心节点（财务中心）参与人 = 全员：把全部有账号成员补进参与人（只增不减）。
 
     「只增不减」：不剔除任何已有参与人（可能是架构管理显式配置或任命自动加入的）。
+    ⚠️ T-013c：离岗成员不补 —— 已被名单剔除的人员不再回流。
     """
-    accounts = [r['account'].strip() for r in dbq("SELECT account FROM team_members WHERE account!=''")]
+    accounts = [r['account'].strip() for r in dbq(
+        "SELECT account FROM team_members WHERE account!='' AND IFNULL(status,'')!='departed'")]
     if not accounts:
         return
     for n in dbq("SELECT id, participants FROM org_nodes WHERE node_type='center'"):

@@ -538,6 +538,10 @@ def _migrate_schema(conn):
         conn.execute('''INSERT INTO team_members (id, name, workgroups, account, created_at)
                         SELECT id, name, workgroups, account, created_at FROM team_members_bak''')
         conn.execute('DROP TABLE team_members_bak')
+    # T-013c 离岗状态：'' = 在岗，'departed' = 离岗（各名单剔除、筛选不可见，
+    #   历史数据不动；恢复在岗不自动回填名单）
+    if 'status' not in tcols:
+        conn.execute('ALTER TABLE team_members ADD COLUMN status TEXT NOT NULL DEFAULT \'\'')
 
     # ---- team_members.departments（#165 部门：个人界面/账号管理共用，前两级架构节点多选）----
     # 单一来源 = team_members.departments（逗号分隔节点名）；org_nodes.participants 由它强映射同步。
