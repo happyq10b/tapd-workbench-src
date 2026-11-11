@@ -3176,8 +3176,10 @@ def _delete_card_core(card_id: str, username: str, request=None) -> int:
         dbe('UPDATE cards SET deleted=1 WHERE card_id=?', (sid,))
         dbe('DELETE FROM card_subtasks WHERE card_id=?', (sid,))
     dbe('DELETE FROM card_subtasks WHERE card_id=?', (card_id,))
-    # 数据不变量：板块至少留一个事项；空板块与空看板一并清理
-    cleanup_empty_columns_and_boards()
+    # ⚠️ #162 修订（用户明确）：删除事项**不再连带删除空板块** ——
+    #    原这里调用 cleanup_empty_columns_and_boards()，把删空了的板块整个物理删掉，
+    #    导致「批量删除勾选」误删板块 + 空板块无法显示。空板块按需求**保留展示**，
+    #    其清理改为显式动作（板块筛选栏【操作 ▾ → 清空无事项板块】，看板负责人及以上）。
     log_action(card_id, username, 'delete', f'subitems={len(victims)}')
     audit_log(username, client_ip(request), 'delete', f'卡片 {card_id}',
               f'删除卡片（含 {len(victims)} 个子事项）', 'success')

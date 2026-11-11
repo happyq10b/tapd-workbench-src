@@ -2873,7 +2873,9 @@ function refreshToolbarOps(canEdit){
     {label:'导入（xlsx）',fn:function(){openImportModal();}},
     // #158/#161 批量删除：只删当前用户勾选的板块+事项（勾选按用户隔离）；无勾选不执行
     {label:'— 危险操作 —',disabled:true},
-    {label:'🗑 批量删除勾选',fn:function(){bulkDeleteChecked();}});
+    {label:'🗑 批量删除勾选',fn:function(){bulkDeleteChecked();}},
+    // #162 清空无事项板块：删除当前看板下没有任何事项的板块（看板负责人及以上，服务端逐列校验）
+    {label:'🧹 清空无事项板块',fn:function(){purgeEmptyColumns();}});
   ROW_OPS['toolbarOps']=items;
 }
 
@@ -2881,72 +2883,94 @@ function refreshToolbarOps(canEdit){
 //   不落库不广播 → 多人同时操作互不影响）；无勾选直接提示返回，不执行删除。
 // 逐列调用 DELETE /api/columns/{col_key}（后端按列做「看板负责人及以上」校验，
 //   无权限/已被他人抢先删除的板块各自报错，不影响其余勾选板块的删除）。
-// #161 批量删除勾选（通用版）：删除当前用户勾选的**板块与事项**。
-//   勾选按用户隔离（COL_CHECKED/ITEM_CHECKED 本地会话状态）；无勾选不执行。
+// #161 批量删除勾选；#162 语义修订：勾选板块 = **只删除其下事项**，板块本身保留
+//   （空板块按需求展示）。勾选按用户隔离（本地会话状态）；无勾选不执行。
 //   并发安全三道防线：
 //   ① 下发前重校验：拉取全局可见清单，他人已删/已改名的板块与事项自动剔除并提示；
-//   ② 服务端逐条校验：DELETE /api/columns 与 POST /api/cards/batch-delete 各自
-//      做存在性/权限/编辑锁校验，失败项单独报告，不影响其余；
-//   ③ 已删除板块连带其下事项 → 从事项删除清单中剪掉，避免 404 误报。
+//   ② 服务端逐条校验：POST /api/cards/batch-delete 逐卡做存在性/权限/编辑锁校验，
+//      失败项单独报告，不影响其余；
+//   ③ 板块名下事项并入删除清单统一下发（一次请求）。
 async function bulkDeleteChecked(){
   const colKeys=[...COL_CHECKED];
   const cardIds=[...ITEM_CHECKED];
   if(!colKeys.length && !cardIds.length){toast('未勾选任何板块/事项');return}
   const colNameOf=function(k){const m=(window.COLS_META||[]).find(function(x){return x.col_key===k;});return m?(m.column_name||k):k;};
-  const cardNameOf=function(id){return (CHK_CURRENT_CARDS_META||{})[id]||id;};
+  // 待删事项 = 直接勾选的事项 ∪ 勾选板块名下的全部主事项
+  const delCards=new Set(cardIds);
+  colKeys.forEach(function(k){(CHK_COL_CARDS[k]||[]).forEach(function(id){delCards.add(id);});});
   // ① 有效性重校验：全局可见清单（不带筛选 → 权限范围内存在性判定）
   const dropped=[];
-  let validCols=colKeys, validCards=cardIds;
+  let validCards=[...delCards], validCols=colKeys;
   try{
-    const d=await api('/api/cards');
+    // size 放大绕过默认分页（否则勾选项不在第一页会被误判失效，#162 实测踩坑）
+    const d=await api('/api/cards?size=1000000');
     const alive=new Set((d.cards||[]).map(function(x){return x.card_id;}));
-    validCards=cardIds.filter(function(id){return alive.has(id);});
+    validCards=[...delCards].filter(function(id){return alive.has(id);});
     const colAlive=new Set((d.columns||[]).map(function(x){return x.col_key;}));
     validCols=colKeys.filter(function(k){return colAlive.has(k);});
-    cardIds.forEach(function(id){if(validCards.indexOf(id)<0)dropped.push('事项 '+cardNameOf(id));});
-    colKeys.forEach(function(k){if(validCols.indexOf(k)<0)dropped.push('板块 '+colNameOf(k));});
-  }catch(e){ /* 校验接口失败不阻断 —— 逐条删除时服务端仍会兜底 */ }
-  if(!validCols.length && !validCards.length){toast('勾选内容均已失效（可能已被他人删除），未执行删除');return}
+    cardIds.forEach(function(id){if(!alive.has(id))dropped.push('事项 '+id);});
+    colKeys.forEach(function(k){if(!colAlive.has(k))dropped.push('板块 '+colNameOf(k));});
+    // 勾选板块名下、但已不在可见清单的事项（他人已删）同样剔除
+    validCards=validCards.filter(function(id){return alive.has(id);});
+  }catch(e){ /* 校验接口失败不阻断 —— 服务端逐卡兜底 */ }
+  if(!validCards.length){toast('勾选内容均已失效（可能已被他人删除），未执行删除');return}
   const msg='确认删除勾选的'
-    +(validCols.length?(' 板块 '+validCols.length+' 个'):'')
-    +((validCols.length&&validCards.length)?' +':'')
-    +(validCards.length?(' 事项 '+validCards.length+' 个'):'')+'？\n'
-    +'板块下的事项与子事项将一并删除；事项与子事项走软删（可由管理员恢复）。';
+    +(validCols.length?(' '+validCols.length+' 个板块下的全部事项'):'')
+    +((validCols.length&&validCards.length)?' 与':'')
+    +(validCards.length?(' '+validCards.length+' 个事项'):'')+'？\n'
+    +'板块本身保留；事项与子事项走软删（可由管理员恢复）。';
   if(!bcConfirm(msg))return;
-  const okCols=[],failCols=[],failCards=[];
+  // ② 事项批量删除（服务端逐卡校验 + 级联软删子事项；板块保留）
   let okCards=0;
-  // ② 板块删除（每删一个板块，剪掉其名下的事项，避免批量删事项时 404 误报）
-  const deadCardIds=new Set();
-  for(const k of validCols){
-    try{
-      await api('/api/columns/'+encodeURIComponent(k),{method:'DELETE'});
-      okCols.push(k);COL_CHECKED.delete(k);
-      (CHK_COL_CARDS[k]||[]).forEach(function(id){deadCardIds.add(id);});
-    }catch(e){failCols.push(colNameOf(k)+'（'+e.message+'）');}
-  }
-  const restCards=validCards.filter(function(id){return !deadCardIds.has(id);});
-  // ③ 事项批量删除（服务端逐卡校验 + 级联软删子事项）
-  if(restCards.length){
-    try{
-      const r=await api('/api/cards/batch-delete',{method:'POST',
-        body:JSON.stringify({card_ids:restCards})});
-      (r.deleted||[]).forEach(function(x){
-        okCards++;ITEM_CHECKED.delete(x.card_id);
-        (CHK_CARD_SUBS[x.card_id]||[]).forEach(function(s){ITEM_CHECKED.delete(s);});
-      });
-      (r.failed||[]).forEach(function(x){failCards.push(cardNameOf(x.card_id)+'（'+x.reason+'）');});
-    }catch(e){failCards.push(e.message);}
-  }
+  const failCards=[];
+  try{
+    const r=await api('/api/cards/batch-delete',{method:'POST',
+      body:JSON.stringify({card_ids:validCards})});
+    okCards=(r.deleted||[]).length;
+    (r.deleted||[]).forEach(function(x){
+      ITEM_CHECKED.delete(x.card_id);
+      (CHK_CARD_SUBS[x.card_id]||[]).forEach(function(s){ITEM_CHECKED.delete(s);});
+    });
+    (r.failed||[]).forEach(function(x){failCards.push((CHK_CURRENT_CARDS_META||{})[x.card_id]||x.card_id);});
+  }catch(e){failCards.push(e.message);}
+  // 板块勾选完成使命（其下事项已删），清除勾选框；板块本身保留
+  colKeys.forEach(function(k){COL_CHECKED.delete(k);});
   saveColChecked();saveItemChecked();
-  const parts=[];
-  if(okCols.length)parts.push('板块 '+okCols.length+' 个');
-  if(okCards)parts.push('事项 '+okCards+' 个');
-  const fails=failCols.concat(failCards);
-  if(parts.length)toast('已删除 '+parts.join('、')+(fails.length?('；未删除：'+fails.slice(0,3).join('、')+(fails.length>3?' 等':'')):''));
-  else toast('未删除任何内容：'+fails.slice(0,2).join('、'));
+  const fails=failCards;
+  if(okCards)toast('已删除事项 '+okCards+' 个'+(fails.length?('；未删除：'+fails.slice(0,3).join('、')+(fails.length>3?' 等':'')):''));
+  else toast('未删除任何事项：'+fails.slice(0,2).join('、'));
   // 页面状态同步：板块列表 / 统计带 / 顶栏目录树都随删除刷新
   try{ ME=await api('/api/me'); }catch(e){}
   reload(1); renderProgress(); renderTabs();
+}
+
+// #162 清空无事项板块：找出当前看板下**没有任何事项**的板块并删除（板块本身）。
+//   空板块判定用当前看板的板块清单（/api/cards 返回的 columns 带 count）；
+//   权限 = 看板负责人及以上，逐列走 DELETE /api/columns（服务端校验，403 单独报告）。
+async function purgeEmptyColumns(){
+  try{
+    const ps=buildFilterParams();
+    const q=ps.toString()?('?'+ps.toString()):'';
+    const d=await api('/api/cards'+q);
+    const cols=(d.columns||[]);
+    const empty=cols.filter(function(x){return !(x.card_count||0);});
+    if(!empty.length){toast('当前看板下没有无事项的板块');return}
+    const names=empty.map(function(x){return x.column_name;});
+    if(!bcConfirm('确认删除 '+empty.length+' 个无事项板块？\n'
+      +names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n'
+      +'板块本身将被删除（其下没有事项，不涉及事项数据）；仅看板负责人及以上可删除。'))return;
+    let okN=0;const fails=[];
+    for(const c of empty){
+      try{
+        await api('/api/columns/'+encodeURIComponent(c.col_key),{method:'DELETE'});
+        okN++;COL_CHECKED.delete(c.col_key);
+      }catch(e){fails.push((c.column_name||c.col_key)+'（'+e.message+'）');}
+    }
+    if(okN)toast('已删除无事项板块 '+okN+' 个'+(fails.length?('；未删除：'+fails.slice(0,3).join('、')):''));
+    else toast('未删除任何板块：'+fails.slice(0,2).join('、'));
+    try{ ME=await api('/api/me'); }catch(e){}
+    reload(1); renderProgress(); renderTabs();
+  }catch(e){toast(e.message)}
 }
 
 async function init(){
@@ -4820,16 +4844,9 @@ function renderBoard(cards,cols,q,colHits){
       return;
     }
   }
-  // 筛选后无事项的板块整块隐藏（2026-11-03 用户需求）：
-  //   仅在**有筛选条件激活**时生效 —— 无筛选时空板块照常显示（刚建的板块要能看见）。
-  //   ⚠️ 全部板块都被筛空 → 走下方「没有符合条件的工作事项」空状态。
-  if(filtersActive(q)){
-    names=names.filter(k=>(groups[k]||[]).length>0);
-    if(!names.length){
-      c.innerHTML='<div class="empty">没有符合条件的工作事项</div>';
-      return;
-    }
-  }
+  // #162 修订（用户明确）：**空板块始终显示** —— 原「有筛选条件激活时空板块整块
+  //   隐藏」（2026-11-03 需求）已按新口径废弃：删空事项的板块要保留在界面上，
+  //   其清理走显式动作【操作 ▾ → 清空无事项板块】。
   // 末级排序数据源：板块内卡片的 column_sort（板块自身的排序字段，2026-11-04）
   const csort={};
   Object.keys(groups).forEach(k=>{
