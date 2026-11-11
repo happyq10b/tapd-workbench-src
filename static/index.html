@@ -8682,6 +8682,38 @@ function onOrgTypeChange(){
   renderOrgRoles();
 }
 // 岗位槽位渲染：选中节点时展示各岗位的人选
+// #168 任命候选按部门筛选 —— 判断条件 / 数据来源：
+//   ① 部门归属：成员的 team_members.departments（#165 字段，个人界面/账号管理维护，
+//      随 /api/team 下发到 ORG_MEMBERS）包含「当前选中节点的所属部门」：
+//      dept 节点=自身名；group 节点=最近 dept 祖先名；center 节点=不限制
+//      （中心负责人/管理员职能任命，不受部门字段约束）。
+//   ② 任职要求：已在该节点担任**同岗位**的成员不再出现（唯一槽位/重复任命由
+//      后端 POST /api/org/appointments 继续兜底校验）。
+function orgApptDeptOf(node){
+  if(!node)return null;
+  if(node.node_type==='dept')return node.name;
+  if(node.node_type==='group'){
+    const byId={};
+    ORG_FLAT.forEach(x=>{byId[x.id]=x;});
+    let p=node.parent_id;
+    while(p!=null&&byId[p]){
+      if(byId[p].node_type==='dept')return byId[p].name;
+      p=byId[p].parent_id;
+    }
+    return null;   // 结构异常（无部门祖先）→ 退化为不限制，避免误伤配置流程
+  }
+  return null;     // center / 其他 → 不限制
+}
+function orgApptCandidates(node, roleKey){
+  const deptName=orgApptDeptOf(node);
+  const appointed=new Set();
+  (node.appointments||[]).forEach(a=>{if(a.role_key===roleKey)appointed.add(a.member_id);});
+  return ORG_MEMBERS.filter(function(m){
+    if(appointed.has(m.id))return false;                                    // 任职要求：已任同岗位
+    if(deptName&&(m.departments||[]).indexOf(deptName)<0)return false;      // 部门归属
+    return true;
+  });
+}
 function renderOrgRoles(){
   const box=document.getElementById('g_roles_box');
   if(!box)return;
@@ -8760,10 +8792,13 @@ function renderOrgRoles(){
     }
     html+=`</div>
       <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
-        ${r.role_key==='member'&&rCan?'':`<select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${rCan?'':' disabled'}>
-          <option value="">选择成员…</option>
-          ${ORG_MEMBERS.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
-        </select>`}
+        ${r.role_key==='member'&&rCan?'':(function(){
+          // #168 候选按部门+任职要求过滤（部门=节点所属部门；已任同岗位者剔除）
+          const cands=orgApptCandidates(node,r.role_key);
+          return `<select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${rCan?'':' disabled'}>
+          <option value="">${cands.length?'选择成员…':'无可任命的部门成员'}</option>
+          ${cands.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
+        </select>`;})()}
         ${r.role_key==='member'&&rCan
           ?`<button class="icon-btn" style="flex-shrink:0" onclick="openOrgMemberPick(${nid},'member',this)"
               title="勾选多个成员批量任命为组员">🌳 选择成员（可多选）</button>`
@@ -8789,7 +8824,9 @@ function openOrgMemberPick(nodeId,roleKey,anchor){
   if(!node){toast('节点不存在');return}
   const appointed={};   // 已任命的组员：跳过重复
   (node.appointments||[]).forEach(a=>{appointed[a.member_id]=a.member_name;});
-  const names=ORG_MEMBERS.map(function(m){return m.name;});
+  // #168 候选按部门+任职要求过滤：仅同部门（team_members.departments）且未任该岗位者
+  const names=orgApptCandidates(node,roleKey).map(function(m){return m.name;});
+  if(!names.length){toast('该部门暂无可任命的成员（已按部门与任职要求过滤）');return;}
   const preselect=(node.appointments||[])
     .filter(function(a){return a.role_key===roleKey;})
     .map(function(a){return ORG_PERSON_PREFIX+a.member_name;});
@@ -9093,7 +9130,7 @@ async function openWgModal(){
   const keepSel=ORG_SELECTED;   // 记住当前选中节点，刷新后恢复
   await ensureOrgTree(true);
   ORG_TYPE_NAMES=ORG_TYPE_NAMES||{};
-  ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||''}));
+  ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||'',departments:m.departments||[]}));
   ORG_MEMBER_BY_ID={};
   ORG_MEMBERS.forEach(m=>{ORG_MEMBER_BY_ID[m.id]=m});
   // 板块绑定：新模型节点不存 boards，从旧 workgroups 视图补齐
