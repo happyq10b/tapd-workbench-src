@@ -377,6 +377,12 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     last_ip       TEXT NOT NULL DEFAULT '',        -- 最后一次失败的来源 IP
     updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+-- 全局键值配置（T-013b 登录页通知栏）：key=login_notice 存超级管理员配置的
+-- 登录页通知文案；空 = 显示默认提示「账号由管理员分配…」
+CREATE TABLE IF NOT EXISTS app_settings (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL DEFAULT ''
+);
 -- 导出模板（2026-11-06 #80）：每用户独立；fields = 逗号分隔列 key，顺序 = 导出列序
 CREATE TABLE IF NOT EXISTS export_templates (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

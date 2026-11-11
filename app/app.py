@@ -1572,6 +1572,24 @@ async def login(req: LoginReq, request: Request):
     raise HTTPException(401, '账号或密码错误')
 
 
+# ---- 全局键值配置（T-013b 登录页通知栏）----
+def _get_setting(key: str, default: str = '') -> str:
+    try:
+        rows = dbq('SELECT value FROM app_settings WHERE key=?', (key,))
+        return rows[0]['value'] if rows else default
+    except Exception:
+        return default
+
+def _set_setting(key: str, value: str) -> None:
+    dbe('INSERT INTO app_settings (key, value) VALUES (?,?) '
+        'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+
+@app.get('/api/login/notice')
+def login_notice():
+    """登录页通知栏文案（公开端点，登录前可取）。空 = 前端显示默认提示。"""
+    return {'notice': _get_setting('login_notice', '')}
+
+
 def require_super(username: str = Depends(require_auth)):
     """超级管理员（仅内置 admin 账号，2026-11-06 两级称谓口径）。
 
@@ -1786,6 +1804,7 @@ def me(username: str = Depends(require_auth)):
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
+            'login_notice': _get_setting('login_notice', ''),  # T-013b：超管「登入通知」字段回显（个人状态不受影响）
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'member_id': member_id,                # #152 个人界面展示：绑定的成员编号（未绑定=None）
             'emp_no': emp_no,                      # #153 工号：ID 列的展示值（未导入时回退成员编号）
@@ -5789,17 +5808,31 @@ def update_profile(req: ProfileReq, username: str = Depends(require_auth), reque
             raise HTTPException(400, '当前账号未绑定成员，无法保存部门')
         member_depts_out = _clean_dept_list(req.departments)
         _set_member_departments(mrow2[0]['id'], member_depts_out)
-    dbe('UPDATE users SET avatar=?, photo=?, status_text=?, gender=?, hire_date=?,'
-        ' birth_date=?, native_province=?, native_city=?, phone=?, political_status=?'
-        ' WHERE username=?',
-        (avatar, photo, status_text, gender, hire_date, birth_date,
-         native_province, native_city, phone, political_status, username))
+    # T-013b 登录页通知栏：超级管理员个人中心的「登入通知」字段（同一输入框）
+    #   写全局配置 app_settings.login_notice；**users.status_text 保持原值不动**
+    #   （顶栏个人状态栏语义不变）。非超管用户完全走原「个人状态」逻辑。
+    if username == SUPER_ADMIN:
+        _set_setting('login_notice', status_text)
+        dbe('UPDATE users SET avatar=?, photo=?, gender=?, hire_date=?,'
+            ' birth_date=?, native_province=?, native_city=?, phone=?, political_status=?'
+            ' WHERE username=?',
+            (avatar, photo, gender, hire_date, birth_date,
+             native_province, native_city, phone, political_status, username))
+    else:
+        dbe('UPDATE users SET avatar=?, photo=?, status_text=?, gender=?, hire_date=?,'
+            ' birth_date=?, native_province=?, native_city=?, phone=?, political_status=?'
+            ' WHERE username=?',
+            (avatar, photo, status_text, gender, hire_date, birth_date,
+             native_province, native_city, phone, political_status, username))
     parts = []
     if avatar:
         parts.append('更新头像')
     if photo:
         parts.append('更新个人照片')
-    if status_text:
+    if username == SUPER_ADMIN:
+        if status_text:
+            parts.append('更新登入通知')
+    elif status_text:
         parts.append('更新个人状态')
     if any((gender, hire_date, birth_date, native_province, native_city, phone, political_status)):
         parts.append('更新基本信息')

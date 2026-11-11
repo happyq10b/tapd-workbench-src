@@ -2033,9 +2033,9 @@ function goLogin(){
         <input type="file" id="profilePhotoFile" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="pickProfilePhoto(this)">
       </div>
       <div class="form-group">
-        <label>个人状态<span style="color:var(--text3)">（显示在页面顶部状态栏）</span></label>
+        <label id="profileStatusLbl">个人状态<span style="color:var(--text3)">（显示在页面顶部状态栏）</span></label>
         <input type="text" class="form-input" id="profileStatus" maxlength="120" placeholder="例如：本周聚焦成本复盘">
-        <div class="profile-avatar-hint" style="text-align:left">留空则不显示状态栏</div>
+        <div class="profile-avatar-hint" style="text-align:left" id="profileStatusHint">留空则不显示状态栏</div>
       </div>
       <div class="form-group">
         <label>修改密码</label>
@@ -3588,7 +3588,17 @@ function openProfileModal(){
   if(!ME)return;
   PROFILE_AVATAR=ME.avatar||'';
   PROFILE_PHOTO=ME.photo||'';
-  PROFILE_STATUS=ME.status_text||'';
+  // T-013b：超级管理员的该字段是「登入通知」（配置登录页通知栏，写全局配置）；
+  //   非超管保持「个人状态」不变（users.status_text，顶栏展示）
+  const isSuperMe=(ME.username==='admin');
+  PROFILE_STATUS=isSuperMe?(ME.login_notice||''):(ME.status_text||'');
+  const lbl=document.getElementById('profileStatusLbl');
+  if(lbl)lbl.innerHTML=isSuperMe?'登入通知<span style="color:var(--text3)">（登录页通知栏 · 文字居中可换行）</span>'
+                                :'个人状态<span style="color:var(--text3)">（显示在页面顶部状态栏）</span>';
+  const stHint=document.getElementById('profileStatusHint');
+  if(stHint)stHint.textContent=isSuperMe?'留空则登录页显示默认提示「账号由管理员分配，权限范围以账号配置为准」':'留空则不显示状态栏';
+  const stPh=document.querySelector('#profileStatus');
+  if(stPh)stPh.placeholder=isSuperMe?'例如：本月 25 日 22:00 系统维护，届时暂停登录':'例如：本周聚焦成本复盘';
   renderProfileAvatarBox();
   renderProfilePhotoBox();
   renderProfileAvatarHint();
@@ -3917,9 +3927,14 @@ async function saveProfile(){
     native_province:g('pf_native_province'),native_city:g('pf_native_city'),
     political_status:g('pf_political')};
   try{
-    const d=await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,photo:PROFILE_PHOTO,status_text,...basic,departments:PF_DEPTS})});
-    // 同步到 ME 并刷新顶栏
-    ME.avatar=PROFILE_AVATAR; ME.photo=PROFILE_PHOTO; ME.status_text=status_text;
+    const d=await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,photo:PROFILE_PHOTO,status_text,...basic,
+      // #165 部门仅在账号已绑定成员时提交（未绑定 → 不带该字段，避免后端 400
+      //   误伤超管的登入通知/未绑定用户的头像状态等保存）
+      departments:(ME.member_id!=null)?PF_DEPTS:undefined})});
+    // 同步到 ME 并刷新顶栏（T-013b：超管的该输入是「登入通知」，不顶替个人状态）
+    ME.avatar=PROFILE_AVATAR; ME.photo=PROFILE_PHOTO;
+    if(ME.username==='admin'){ME.login_notice=status_text;}
+    else{ME.status_text=status_text;}
     Object.assign(ME,basic);
     if(d.departments)ME.departments=d.departments;   // #165 部门回显同步
     renderMyProfile();
