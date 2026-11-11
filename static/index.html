@@ -3526,7 +3526,10 @@ function placeDropPopover(anchor, el, gap){
   el.style.top=top+'px';
   return top;
 }
-function openDeptPick(btn, current, applyFn){
+function openDeptPick(btn, current, applyFn, opts){
+  // opts（可选）：{title:'弹层标题', extra:[{value,label}]} —— 额外复选项
+  //   （#167 部门筛选的「未选部门」哨兵选项 __NO_DEPT__ 复用本弹层）
+  opts=opts||{};
   closeDeptPick();
   DEPT_PICK={btn:btn, sel:(current||[]).slice(), apply:applyFn};
   const pop=document.createElement('div');
@@ -3535,7 +3538,11 @@ function openDeptPick(btn, current, applyFn){
   pop.style.maxHeight='320px'; pop.style.overflow='auto';
   const r=btn.getBoundingClientRect();
   pop.style.position='fixed'; pop.style.left=r.left+'px';
-  pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">选择部门（可多选 · 保存后同步架构参与人）</div>`
+  pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">${esc(opts.title||'选择部门（可多选 · 保存后同步架构参与人）')}</div>`
+    +(opts.extra||[]).map(e=>
+      `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;white-space:nowrap">`
+      +`<input type="checkbox" value="${esc(e.value)}" ${DEPT_PICK.sel.indexOf(e.value)>=0?'checked':''}>`
+      +`<span>${esc(e.label)}</span></label>`).join('')
     +(DEPT_OPTIONS.length?DEPT_OPTIONS.map(d=>
       `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;white-space:nowrap">`
       +`<input type="checkbox" value="${esc(d.name)}" ${DEPT_PICK.sel.indexOf(d.name)>=0?'checked':''}>`
@@ -7800,7 +7807,7 @@ async function setCardStatus(ctx,st){
 var TM_ALL=[];  // [{id,name,workgroups:[...]}]
 var TM_VISIBLE_IDS=new Set();  // 当前表格可见的成员 id（筛选后的结果集）
 var TM_DEPT_DRAFT={};          // #165 部门编辑草稿：mid -> [部门名]（选择器确定后暂存，「保存全部」统一提交）
-var TM_FILTER={name:'',workgroup:[],role:[]};  // 成员表格筛选条件（workgroup/role 改为多选数组；role 空数组 = 全部角色）
+var TM_FILTER={name:'',dept:[],role:[]};  // 成员表格筛选条件（dept/role 为多选数组；role 空数组 = 全部角色；dept 含哨兵 __NO_DEPT__=未选部门）
 async function openTeamModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
   const isAdmin=ME.is_admin, isSuperUser=ME.username==='admin';
@@ -7811,7 +7818,7 @@ async function openTeamModal(){
     org_source:m.org_source||'none',org_conflict:m.org_conflict||[],org_nodes:m.org_nodes||[],
     departments:m.departments||[]}));
   TEAM_MEMBERS=TM_ALL.map(m=>m.name);
-  TM_FILTER={name:'',workgroup:[],role:[]};   // 默认全部角色（不再默认只看「无权限」）
+  TM_FILTER={name:'',dept:[],role:[]};   // 默认全部（不再默认只看「无权限」）
   TM_DEPT_DRAFT={};   // #165 部门草稿随弹窗重开清空（以服务端数据为准）
   initTeamFilterBar();
   renderTeamList();
@@ -8056,20 +8063,8 @@ function renderTeamList(){
   if(!tbody)return;
   // 筛选
   const q=(TM_FILTER.name||'').trim().toLowerCase();
-  const workgroupList=Array.isArray(TM_FILTER.workgroup)?TM_FILTER.workgroup:[];
+  const deptList=Array.isArray(TM_FILTER.dept)?TM_FILTER.dept:[];   // #167 部门筛选（含哨兵 __NO_DEPT__=未选部门）
   const roleList=Array.isArray(TM_FILTER.role)?TM_FILTER.role:[];   // 空数组 = 全部角色（不过滤）
-  // 架构筛选：按所选节点集合，汇总其自身+后代叶子集合；只要成员的 workgroups 命中任一即匹配
-  let wgMatchSet=new Set();
-  if(workgroupList.length){
-    (function collect(ns){
-      (ns||[]).forEach(n=>{
-        if(workgroupList.includes(n.name)) (function walk(x){ wgMatchSet.add(x.name); (x.children||[]).forEach(c=>walk(c)); })(n);
-        else collect(n.children||[]);
-      });
-    })(WG_ALL||[]);
-  }
-  // 特殊：未分组（虚拟节点）→ 匹配 m.workgroups 为空
-  if(workgroupList.includes('未分组')) wgMatchSet.add('__NO_GROUP__');
   const filtered=TM_ALL.filter(m=>{
     if(q && !m.name.toLowerCase().includes(q)) return false;
     // 角色筛选：无权限(noaccount)=无账号成员；其他=匹配 m.role
@@ -8088,25 +8083,21 @@ function renderTeamList(){
         }
       }
     }
-    // 架构筛选：分三种语义
-    //  - 只选了"未分组"→ 匹配 workgroups 为空的成员
-    //  - 选了"未分组"+ 其他工作组 → 同时满足空 workgroups 或命中后代
-    //  - 只选了具体工作组 → 命中任一后代
-    if(workgroupList.length){
-      const noGroup=wgMatchSet.has('__NO_GROUP__');
-      const realWgSel=workgroupList.filter(x=>x!=='未分组');
-      const hasGroup=m.workgroups&&m.workgroups.length;
-      if(realWgSel.length===0 && noGroup){
-        // 只选了"未分组"
-        if(hasGroup) return false;
-      }else if(realWgSel.length>0 && noGroup){
-        // "未分组" + 其他工作组（OR）
-        if(!hasGroup) return true;
-        if(!m.workgroups.some(g=>wgMatchSet.has(g))) return false;
+    // #167 部门筛选：扁平列表 OR 匹配（无层级展开）；
+    //   哨兵 __NO_DEPT__（「未选部门」）= 匹配 departments 为空的成员，
+    //   与真实部门的匹配为 OR 关系（同旧「未分组」语义）
+    if(deptList.length){
+      const noDept=deptList.includes('__NO_DEPT__');
+      const realSel=deptList.filter(x=>x!=='__NO_DEPT__');
+      const hasDept=m.departments&&m.departments.length;
+      if(realSel.length===0 && noDept){
+        if(hasDept) return false;                      // 只看未选部门
+      }else if(realSel.length>0 && noDept){
+        if(!hasDept) return true;                      // 未选部门 OR 命中任一所选部门
+        if(!m.departments.some(d=>realSel.includes(d))) return false;
       }else{
-        // 只选了具体工作组
-        if(!hasGroup) return false;
-        if(!m.workgroups.some(g=>wgMatchSet.has(g))) return false;
+        if(!hasDept) return false;                     // 只看具体部门
+        if(!m.departments.some(d=>realSel.includes(d))) return false;
       }
     }
     return true;
@@ -8169,9 +8160,9 @@ if(typeof document!=='undefined' && typeof document.addEventListener==='function
 }
 
 function resetTmFilter(){
-  TM_FILTER={name:'',workgroup:[],role:[]};   // 重置回全部角色
+  TM_FILTER={name:'',dept:[],role:[]};   // 重置回全部角色
   const ni=document.getElementById('tm_filter_name'); if(ni)ni.value='';
-  const oi=document.getElementById('tm_filter_workgroup'); if(oi)oi.value='';
+  const oi=document.getElementById('tm_filter_dept'); if(oi)oi.value='';
   const ri=document.getElementById('tm_filter_role'); if(ri){ri.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false); ri.textContent='全部角色';}
   renderTeamList();
 }
@@ -8260,10 +8251,14 @@ function renderRoleBtn(){
   btn.textContent=txt;
   btn.title=txt;   // 截断时 hover 看完整内容
 }
-function openWgFilterPicker(anchor){
-  // 架构筛选：在树顶部插入虚拟节点【未分组】（成员 workgroups 为空），与财务中心并列
-  // 用 name='__no_group__' 作为语义哨兵（避免与真实工作组名冲突），label 显示中文
-  openTreePick(anchor, TM_FILTER.workgroup||[], (sel)=>{ TM_FILTER.workgroup=sel; anchor.value=sel.join(' / '); renderTeamList(); }, {mode:'select', width:300, height:360, tree:[{id:-1,name:'未分组',label:'未分组',children:[]}].concat(WG_ALL||[]), showSelectAll:true});
+function openDeptFilterPicker(anchor){
+  // #167 部门筛选：复用部门多选弹层，附「未选部门」哨兵选项（__NO_DEPT__，
+  //   匹配 departments 为空的成员）。部门为扁平列表，无层级展开。
+  openDeptPick(anchor, TM_FILTER.dept||[], function(b,sel){
+    TM_FILTER.dept=sel;
+    b.value=sel.map(x=>x==='__NO_DEPT__'?'未选部门':x).join(' / ');
+    renderTeamList();
+  }, {title:'筛选部门（可多选 · 含未选部门）', extra:[{value:'__NO_DEPT__',label:'未选部门'}]});
 }
 function tpSelectAll(){
   if(!TREE_PICK||!TREE_PICK.tree)return;
@@ -8297,7 +8292,7 @@ function initTeamFilterBar(){
   list.innerHTML=`
     <div id="tm_filter_bar" style="position:sticky;top:0;background:var(--bg);z-index:5;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <input type="text" class="form-input" id="tm_filter_name" placeholder="姓名搜索" value="${esc(TM_FILTER.name||'')}" style="width:140px" oninput="TM_FILTER.name=this.value;renderTeamList()">
-      <input type="text" class="form-input" id="tm_filter_workgroup" readonly value="${TM_FILTER.workgroup.length?TM_FILTER.workgroup.join(' / '):''}" placeholder="架构筛选（全部）" style="width:240px;cursor:pointer" onclick="openWgFilterPicker(this)">
+      <input type="text" class="form-input" id="tm_filter_dept" readonly value="${TM_FILTER.dept.length?TM_FILTER.dept.map(x=>x==='__NO_DEPT__'?'未选部门':x).join(' / '):''}" placeholder="部门筛选（全部）" style="width:240px;cursor:pointer" onclick="openDeptFilterPicker(this)" title="按部门筛选成员（可多选；含「未选部门」= 未设置部门的成员）">
       <button type="button" class="form-input" id="tm_filter_role" style="width:140px;height:32px;cursor:pointer;text-align:left;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex;align-items:center;padding:0 8px" title="${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}" onclick="openRoleMulti(this)">${TM_FILTER.role.length?TM_FILTER.role.map(r=>({admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'})[r]||r).join(' / '):'全部角色'}</button>
       <button class="icon-btn" onclick="resetTmFilter()">清空</button>
     </div>
