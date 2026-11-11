@@ -674,6 +674,8 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .week-header .col-chk{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--primary);margin:0}
 /* 勾选模式（#159）：事项/子事项勾选框；开关按钮两态 */
 .item-card .item-chk,.sub-node .sub-chk{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--primary);margin:0}
+/* 无勾选权限（#163）：灰色禁用态 */
+.col-chk:disabled,.item-chk:disabled,.sub-chk:disabled{opacity:.35;cursor:not-allowed;accent-color:var(--text3)}
 .chk-mode-btn{transition:all .15s}
 .chk-mode-btn.on{background:var(--primary);color:#fff;border-color:var(--primary)}
 .week-header:hover{background:#fafafa}
@@ -4802,8 +4804,8 @@ function renderBoard(cards,cols,q,colHits){
   window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id
   CHK_COL_CARDS={};            // #159：板块→主事项映射随每次重绘重建
   CHK_CURRENT_CARDS=(cards||[]).map(x=>x.card_id);   // #161：全选当前的本轮卡片清单
-  CHK_CURRENT_CARDS_META={};                          // #161：card_id→名称（失败报告用）
-  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]=x.card_name;});
+  CHK_CURRENT_CARDS_META={};                          // #161/#163：card_id→{name,owner}
+  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]={name:x.card_name,owner:x.owner};});
   // 没有事项但有板块（如刚建的空板块）时仍要展示板块列表
   if(!(cards||[]).length && !(cols||[]).length){
     // 空状态文案要区分两种情形（需求2）：
@@ -4869,6 +4871,7 @@ function renderBoard(cards,cols,q,colHits){
     const colKey=meta?meta.col_key:(curBoard+'::'+k);
     CHK_COL_CARDS[colKey]=(groups[k]||[]).map(x=>x.card_id);   // #159 供板块聚合勾选
     const boardId=meta?meta.board_id:curBoard;
+    CHK_COL_BOARD[colKey]=boardId;   // #163 勾选权限判定用
     // 板块置顶同样是**个人设置**：读当前账号自己的置顶集合
     const pinned=isPinned('column',colKey);
     // 归属年份：板块元信息里的独立字段（板块名称里常带年份，但那是名称的一部分）
@@ -4915,8 +4918,8 @@ function renderBoard(cards,cols,q,colHits){
       <div class="week-header">
         <span class="chev" onclick="toggleWeek(${i});event.stopPropagation()" title="展开 / 收起该板块下的事项">▶</span>
         ${CHK_MODE?`<input type="checkbox" class="col-chk" data-ck="${esc(colKey)}" onclick="toggleColChk(this.dataset.ck,this);event.stopPropagation()"
-          ondblclick="event.stopPropagation()"
-          title="勾选板块（= 全选其下事项与子事项；部分勾选呈半选态；勾选仅本人可见）">`:''}
+          ondblclick="event.stopPropagation()" ${chkColOwnerOf(colKey,boardId)?'':'disabled'}
+          title="${chkColOwnerOf(colKey,boardId)?'勾选板块（= 全选其下事项与子事项；部分勾选呈半选态；勾选仅本人可见）':CHK_DISABLED_TIP}">`:''}
         ${titleHtml}
         ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
         <span class="week-meta">${done}/${total} 完成</span>
@@ -5166,7 +5169,7 @@ function renderSearchResults(container,cards,cols,q,colHits){
   // #161 搜索视图同样支持「全选当前」：注册本轮命中的事项清单
   CHK_CURRENT_CARDS=(cards||[]).map(x=>x.card_id);
   CHK_CURRENT_CARDS_META={};
-  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]=x.card_name;});
+  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]={name:x.card_name,owner:x.owner};});
   const hitByKey={};
   (colHits||[]).forEach(h=>{hitByKey[h.col_key]=h});
   // 年份筛选在搜索视图同样生效：只保留归属年份匹配的板块与其事项
@@ -5338,13 +5341,18 @@ function cardItem(c,seq){
   // 负责人 / 周数 / 创建日期 / 截止日期 —— 四列固定网格，跨行纵向对齐。
   // 负责人与子事项**各自独立取值**，不做父子关联或继承。
   const colsHtml=fieldCols({owner:c.owner,week_no:c.week_no,created:c.created,due:c.due,column_name:c.column_name});
+  // #163 勾选权限：板块负责人及以上可勾板块内全部事项；否则仅事项负责人可勾自己的
+  const _colKey=(c.board_id||curBoard)+'::'+(c.column_name||'');
+  const _boardId=c.board_id||curBoard;
+  CHK_CARD_COL[c.card_id]=_colKey;
+  const _canChk=chkCanCheckCard(c.owner,_colKey,_boardId);
   return `<div class="item-wrap" id="iw_${c.card_id}">
   <div class="item-card ${lockedByOther?'locked':''}">
     ${subArrow}
     ${seqHtml}
     ${CHK_MODE?`<input type="checkbox" class="item-chk" data-ck="${c.card_id}" onclick="toggleItemChk(this.dataset.ck,this);event.stopPropagation()"
-      ondblclick="event.stopPropagation()"
-      title="勾选事项（= 勾选其下全部子事项；部分子事项勾选时呈半选态）">`:''}
+      ondblclick="event.stopPropagation()" ${_canChk?'':'disabled'}
+      title="${_canChk?'勾选事项（= 勾选其下全部子事项；部分子事项勾选时呈半选态）':CHK_DISABLED_TIP}">`:''}
     <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)} ${lockHtml}</span>
     <span class="fcols">${colsHtml}</span>
     <span class="item-tail">
@@ -5402,10 +5410,14 @@ function renderSubTree(box,nodes,level){
     box.innerHTML='<div class="sub-node" style="color:var(--text3)">暂无子事项</div>';
     return;
   }
-  box.innerHTML=nodes.map(n=>subNodeHtml(n,level)).join('');
+  box.innerHTML=nodes.map(n=>subNodeHtml(n,level,parentId)).join('');
   if(typeof syncCheckStates==='function')syncCheckStates();   // #159 渲染后同步三态
 }
-function subNodeHtml(n,level){
+function subNodeHtml(n,level,parentId){
+  // #163 子事项勾选权限：板块负责人及以上可勾；否则仅子事项负责人可勾自己的
+  const _pColKey=CHK_CARD_COL[parentId]||'';
+  const _pBoard=CHK_COL_BOARD[_pColKey]||'';
+  const _subCanChk=chkCanCheckCard(n.owner,_pColKey,_pBoard);
   // 本期只支持「主事项 → 子事项」两层：子事项不再渲染自己的子节点（也不给展开箭头）
   const kids=[];
   const open=!!SUBTREE_OPEN[n.card_id];
@@ -5424,8 +5436,8 @@ function subNodeHtml(n,level){
     <span class="s-chev leaf">▶</span>
     <span class="s-dot"></span>
     ${CHK_MODE?`<input type="checkbox" class="sub-chk" data-ck="${n.card_id}" onclick="toggleSubChk(this.dataset.ck,this);event.stopPropagation()"
-      ondblclick="event.stopPropagation()"
-      title="勾选子事项（父事项随子事项聚合：全部勾选=全选、部分=半选）">`:''}
+      ondblclick="event.stopPropagation()" ${_subCanChk?'':'disabled'}
+      title="${_subCanChk?'勾选子事项（父事项随子事项聚合：全部勾选=全选、部分=半选）':CHK_DISABLED_TIP}">`:''}
     <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>
     <span class="fcols">${colsHtml}</span>
     <span class="sub-tail">
@@ -7740,12 +7752,32 @@ function colCheckToggle(key,on){
   if(on)COL_CHECKED.add(key); else COL_CHECKED.delete(key);
   saveColChecked();
 }
+// ── 勾选权限三级（#163）──
+//   板块负责人及以上 = 可勾选板块内全部事项（板块勾选框可用）
+//   事项负责人       = 仅可勾选自己负责的事项
+//   其他             = 勾选框灰色禁用（不可勾选）
+// 前端口径：板块负责人及以上 = 管理员/editor 角色 ∪ 我管理的看板 ∪ 我管理的板块
+//   （/api/me 的 managed_boards / managed_columns，后端权威口径的前端映射）；
+//   事项负责人 = isCardOwnerOf（owner 与显示名/账号双口径，管理员直通）。
+function chkColOwnerOf(colKey,boardId){
+  if(!ME)return false;
+  if(ME.is_admin||ME.is_super||ME.can_edit)return true;
+  if((ME.managed_columns||[]).indexOf(colKey)>=0)return true;
+  if((ME.managed_boards||[]).indexOf(boardId)>=0)return true;
+  return false;
+}
+function chkCanCheckCard(ownerStr,colKey,boardId){
+  return chkColOwnerOf(colKey,boardId)||isCardOwnerOf(ownerStr);
+}
+const CHK_DISABLED_TIP='无勾选权限：仅板块负责人及以上可整列勾选，事项负责人可勾选自己负责的事项';
 // ── 勾选模式开关 + 事项/子事项勾选（#159）──
 // 层级：板块 → 主事项 → 子事项；父级勾选框状态 = 子级聚合（全选/半选/未选）。
 // 勾选数据仍按用户隔离：sessionStorage 按账号分桶，不落库不广播。
 var CHK_MODE=false;               // 勾选开关（关 = 隐藏全部勾选框并清空记录）
 var ITEM_CHECKED=new Set();       // 勾选的事项 card_id（主事项与子事项同表同集合）
 var CHK_COL_CARDS={};             // col_key -> [主事项 card_id]（renderBoard 时注册）
+var CHK_COL_BOARD={};             // col_key -> board_id（#163 勾选权限判定）
+var CHK_CARD_COL={};              // card_id -> col_key（#163 子事项权限判定）
 var CHK_CARD_SUBS={};             // 主事项 card_id -> [子事项 card_id]（子树渲染时注册）
 function itemChkStoreKey(){ return 'itemChk_'+((ME&&ME.username)||''); }
 function chkModeStoreKey(){ return 'chkMode_'+((ME&&ME.username)||''); }
@@ -7885,19 +7917,28 @@ function selectAllCurrent(){
   if(!CHK_MODE)return;
   const ids=CHK_CURRENT_CARDS||[];
   if(!ids.length){toast('当前没有可勾选的事项');return}
+  // #163 权限过滤：只勾当前用户有权勾选的事项（板块负责人及以上=板块内全部；
+  //   否则仅自己负责的事项）；板块也仅在全部事项均可勾时随勾选
+  let n=0;
   ids.forEach(function(id){
-    ITEM_CHECKED.add(id);
+    const meta=(CHK_CURRENT_CARDS_META||{})[id]||{};
+    const colKey=CHK_CARD_COL[id]||'';
+    const boardId=CHK_COL_BOARD[colKey]||'';
+    if(!chkCanCheckCard(meta.owner,colKey,boardId))return;
+    ITEM_CHECKED.add(id);n++;
     (CHK_CARD_SUBS[id]||[]).forEach(function(s){ITEM_CHECKED.add(s);});
   });
-  // 板块联动：仅当该板块的**全部**主事项都在本轮筛选结果中（完整可见）才随勾选，
-  //   避免把含不可见事项的板块整列勾上（批量删除板块会连带删除不可见事项）
+  // 板块联动：仅当该板块的**全部**主事项都在本轮筛选结果中（完整可见）且
+  //   本用户对其拥有板块负责人及以上权限时才随勾选
   Object.keys(CHK_COL_CARDS).forEach(function(k){
     const cards=CHK_COL_CARDS[k]||[];
-    if(cards.length&&cards.every(function(id){return ids.indexOf(id)>=0;}))COL_CHECKED.add(k);
+    if(!cards.length)return;
+    const allVisible=cards.every(function(id){return ids.indexOf(id)>=0;});
+    if(allVisible&&chkColOwnerOf(k,CHK_COL_BOARD[k]||''))COL_CHECKED.add(k);
   });
   saveItemChecked();saveColChecked();
   syncCheckStates();
-  toast('已勾选当前筛选结果 '+ids.length+' 个事项');
+  toast(n?('已勾选 '+n+' 个事项（无权限的事项未勾选）'):'没有可勾选权限的事项');
 }
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
