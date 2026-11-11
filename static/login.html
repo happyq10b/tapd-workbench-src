@@ -71,9 +71,10 @@ button{padding:12px;border:none;border-radius:8px;background:#1890ff;color:#fff;
 button:hover{opacity:.9}
 button:disabled{opacity:.5;cursor:not-allowed}
 .msg{margin-top:14px;font-size:13px;text-align:center;color:#d63c3c;min-height:18px}
-/* 通知栏（T-013b）：超管「登入通知」配置内容；文字居中、允许换行；
-   padding-left 避让左侧小精灵（30+56=86px，文本区从 92px 起） */
-.hint{margin-top:18px;font-size:11.5px;color:#7a88a0;text-align:center;line-height:1.6;padding-left:56px;word-break:break-word}
+/* 通知栏（T-013b）：超管「登入通知」配置内容；文字左对齐（紧随精灵之后
+   固定间距起排，不居中）、允许换行；padding-left 与精灵（30+56=86px）
+   保持 10px 固定间距 → 文本区从 96px 起 */
+.hint{margin-top:18px;font-size:11.5px;color:#7a88a0;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word}
 </style>
 </head>
 <body>
