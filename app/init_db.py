@@ -512,6 +512,13 @@ def _migrate_schema(conn):
         conn.execute('ALTER TABLE board_columns ADD COLUMN description TEXT NOT NULL DEFAULT \'\'')
         conn.execute("UPDATE board_columns SET description='' WHERE description IS NULL")
 
+    # ---- 看板协作部门（T-013d）：逗号分隔的 org_nodes.id（dept 型）----
+    #   仅中心级归属的看板可配；被选部门的负责人自动获得该看板可见权
+    #   （纯可见、不进参与人名单、其余权限不变）
+    cfcols = [r[1] for r in conn.execute('PRAGMA table_info(board_config)').fetchall()]
+    if cfcols and 'collab_depts' not in cfcols:
+        conn.execute('ALTER TABLE board_config ADD COLUMN collab_depts TEXT NOT NULL DEFAULT \'\'')
+
     # ---- users.active_seq（#110 单点登录）----
     ucols = [r[1] for r in conn.execute('PRAGMA table_info(users)').fetchall()]
     if 'active_seq' not in ucols:

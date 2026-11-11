@@ -3527,8 +3527,9 @@ function placeDropPopover(anchor, el, gap){
   return top;
 }
 function openDeptPick(btn, current, applyFn, opts){
-  // opts（可选）：{title:'弹层标题', extra:[{value,label}]} —— 额外复选项
-  //   （#167 部门筛选的「未选部门」哨兵选项 __NO_DEPT__ 复用本弹层）
+  // opts（可选）：{title:'弹层标题', extra:[{value,label}], options:[{value,label}]}
+  //   extra=#167 哨兵选项；options=T-013d 自定义选项集（协作部门=中心直属部门），
+  //   不传时用全局 DEPT_OPTIONS（归属部门编辑/个人界面场景）
   opts=opts||{};
   closeDeptPick();
   DEPT_PICK={btn:btn, sel:(current||[]).slice(), apply:applyFn};
@@ -3536,6 +3537,13 @@ function openDeptPick(btn, current, applyFn, opts){
   pop.className='tree-pick'; pop.id='dept_pick_pop';
   pop.style.padding='8px 10px'; pop.style.minWidth='190px';
   pop.style.maxHeight='320px'; pop.style.overflow='auto';
+  const optList=opts.options||DEPT_OPTIONS;
+  const optHtml=optList.length?optList.map(d=>{
+    const v=d.value!==undefined?d.value:d.name, lb=d.label!==undefined?d.label:d.name;
+    return `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;white-space:nowrap">`
+      +`<input type="checkbox" value="${esc(v)}" ${DEPT_PICK.sel.indexOf(v)>=0?'checked':''}>`
+      +`<span>${esc(lb)}${(!opts.options&&d.node_type==='center')?'<span style="color:var(--text3)">（全员）</span>':''}</span></label>`;
+  }).join(''):'<div style="color:var(--text3);font-size:12px">架构管理暂无部门节点</div>';
   const r=btn.getBoundingClientRect();
   pop.style.position='fixed'; pop.style.left=r.left+'px';
   pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">${esc(opts.title||'选择部门（可多选 · 保存后同步架构参与人）')}</div>`
@@ -3543,11 +3551,7 @@ function openDeptPick(btn, current, applyFn, opts){
       `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;white-space:nowrap">`
       +`<input type="checkbox" value="${esc(e.value)}" ${DEPT_PICK.sel.indexOf(e.value)>=0?'checked':''}>`
       +`<span>${esc(e.label)}</span></label>`).join('')
-    +(DEPT_OPTIONS.length?DEPT_OPTIONS.map(d=>
-      `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;white-space:nowrap">`
-      +`<input type="checkbox" value="${esc(d.name)}" ${DEPT_PICK.sel.indexOf(d.name)>=0?'checked':''}>`
-      +`<span>${esc(d.name)}${d.node_type==='center'?'<span style="color:var(--text3)">（全员）</span>':''}</span></label>`).join('')
-      :'<div style="color:var(--text3);font-size:12px">架构管理暂无部门节点</div>')
+    +optHtml
     +`<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:flex-end;gap:8px">
       <button class="btn-secondary" onclick="closeDeptPick()">取消</button>
       <button class="btn-primary" onclick="applyDeptPick()">确定</button></div>`;
@@ -9917,7 +9921,7 @@ var BC_BOARDS=[];
 var BC_SELECTED=null;
 var BC_SEL=new Set();     // 批量选中的**看板**（进入看板管理时默认【不选中】，由用户自行勾选）
 var BC_FORM={board_name:'',dept:'',dept_node_id:0,attr:'日常',status:'启用',remark:'',
-          owner:'',participants:[]};        // owner = 看板负责人（账号）；participants = 参与人（账号数组，2026-11-04 恢复）
+          owner:'',participants:[],collab_depts:[]};   // owner=负责人（账号）；participants=参与人；collab_depts=T-013d 协作部门（org_nodes.id 数组）
 var BC_FILTER={dept:'',attr:'',status:'',owner:''};   // owner: 负责人筛选（存**账号**；'__no_owner__' = 无负责人）
 var BC_DEPTS=[];          // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
 var BC_DEPTS_LOADED=false;
@@ -10056,7 +10060,7 @@ async function openBoardConfigModalFor(bid){
     bcSelect(bid);                 // 回填该看板现有信息并渲染右侧编辑区
   }else{
     BC_SELECTED=null; BC_EDIT_ID=0;
-    BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
+    BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[],collab_depts:[]};
     renderBoardList();
     renderEditArea();
     toast('看板不存在或不在你的可见范围内');
@@ -10067,7 +10071,7 @@ async function openBoardConfigModal(){
   BC_FROM_CARD=false;
   BC_SELECTED=null; BC_EDIT_ID=0;
   BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
-            owner:'',participants:[]};
+            owner:'',participants:[],collab_depts:[]};
   // 默认不选中：进入看板管理时所有**看板**均未勾选（需用户主动勾选）
   BC_SEL=new Set();
   // ⚠️ 先显示弹窗再渲染（2026-11-05 修首开尺寸异常）：
@@ -10389,7 +10393,8 @@ function bcSelect(bid){
   BC_SELECTED=b;
   BC_EDIT_ID=b.config_id||0;
   BC_FORM={board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',
-          owner:b.owner||'',participants:(b.participants||'').split(',').filter(Boolean)};
+          owner:b.owner||'',participants:(b.participants||'').split(',').filter(Boolean),
+          collab_depts:(b.collab_depts||'').split(',').filter(Boolean)};   // T-013d
   renderBoardList();
   renderEditArea();
 }
@@ -10398,7 +10403,7 @@ function configBoard(){
   if(!unconf.length){toast('所有看板均已配置');return;}
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
-  BC_FORM={board_name:unconf[0].board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[]};
+  BC_FORM={board_name:unconf[0].board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[],collab_depts:[]};
   renderBoardList();
   renderEditArea();
 }
@@ -10406,7 +10411,7 @@ function bcChangeBoard(bid){
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
   if(b){
     BC_SELECTED=b;BC_EDIT_ID=0;
-    BC_FORM={board_name:b.board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[]};
+    BC_FORM={board_name:b.board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
     renderBoardList();
     renderEditArea();
   }
@@ -10415,8 +10420,31 @@ function bcChangeBoard(bid){
 function bcSetDept(name){
   BC_FORM.dept=name||'';
   BC_FORM.dept_node_id=bcDeptNodeId(name||'');
+  // T-013d：归属切离中心 → 协作部门清空（仅中心级归属可配）
+  if(!bcIsCenterDept(BC_FORM.dept))BC_FORM.collab_depts=[];
   const h=document.getElementById('bc_dept_hint');
   if(h)h.textContent=bcDeptHint(BC_FORM.dept);
+  if(typeof renderEditArea==='function')renderEditArea();   // 协作部门控件随中心/部门切换显隐
+}
+// ---------- 协作部门（T-013d，仅中心级归属可配）----------
+function bcIsCenterDept(name){
+  const d=BC_DEPTS.find(function(x){return x.name===name;});
+  return !!(d&&d.is_center);
+}
+function bcCollabLabel(){
+  return (BC_FORM.collab_depts||[]).map(function(id){
+    const d=BC_DEPTS.find(function(x){return String(x.id)===String(id);});
+    return d?d.name:id;
+  }).join('、');
+}
+function openBcCollabPick(btn){
+  // 选项 = 财务中心的下级部门（BC_DEPTS 里的 dept 型节点），多选
+  const opts=BC_DEPTS.filter(function(d){return !d.is_center;})
+    .map(function(d){return {value:String(d.id),label:d.name};});
+  openDeptPick(btn,(BC_FORM.collab_depts||[]).map(String),function(b,sel){
+    BC_FORM.collab_depts=sel.slice();
+    b.textContent=bcCollabLabel()||'选择协作部门（可选）';
+  },{title:'选择协作部门（可多选 · 被选部门负责人自动可见该看板）',options:opts});
 }
 function bcDeptHint(name){
   if(!name)return '归属部门取自【架构管理】的部门层级';
@@ -10478,7 +10506,17 @@ function renderEditArea(){
     +'<input type="text" class="form-input" id="bc_board_name" maxlength="100" style="max-width:320px"'+roAttr
     +' value="'+esc(BC_FORM.board_name||'')+'" oninput="BC_FORM.board_name=this.value" title="看板名称（目录树、看板卡片、事项导出中显示的名字）"></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div>'
+    +'<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">'
     +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="max-width:320px"'+roAttr+'>'+deptOpts+'</select>'
+    +(bcIsCenterDept(BC_FORM.dept)
+      ?'<div><button type="button" class="form-input" id="bc_collab_btn" style="min-width:240px;max-width:320px;cursor:pointer;text-align:left;background:#fff;'+(canEdit?'':'pointer-events:none;opacity:.6')+'"'
+      +' title="协作部门（可多选）：被选部门的负责人自动获得该看板的可见权（不显示在参与人名单中，其余权限不变）"'
+      +' onclick="openBcCollabPick(this)">'
+      +esc(bcCollabLabel()||'选择协作部门（可选）')+'</button>'
+      +(bcCollabLabel()?'<div class="bc-hint" style="margin-top:3px">协作部门负责人可见此看板（仅可见，不进参与人名单）</div>':'')
+      +'</div>'
+      :'')
+    +'</div>'
     +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+'</div></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+attrPills+'</div></div>'
     +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+statusPills+'</div></div>'
@@ -10673,7 +10711,8 @@ async function saveBoardAll(){
     if(canEdit){
       const payload={board_id:bid, dept:BC_FORM.dept,
         dept_node_id:BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept),
-        attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark};
+        attr:BC_FORM.attr, status:BC_FORM.status, remark:BC_FORM.remark,
+        collab_depts:bcIsCenterDept(BC_FORM.dept)?(BC_FORM.collab_depts||[]):[]};   // T-013d 协作部门
       if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
       else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
       await api('/api/boards/'+encodeURIComponent(bid)+'/participants',{method:'PUT',
@@ -10714,7 +10753,7 @@ function resetBoardConfigForm(){
     return;
   }
   BC_EDIT_ID=0; BC_SELECTED=null;
-  BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[]};
+  BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
   renderBoardList();
   renderEditArea();
 }

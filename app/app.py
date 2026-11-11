@@ -1003,6 +1003,27 @@ def cleanup_empty_columns_and_boards() -> dict:
     return {'deleted_columns': deleted_cols, 'deleted_boards': deleted_boards}
 
 
+def _collab_dept_boards(username):
+    """T-013d：协作部门授权集 —— 用户担任**部门负责人**的部门，若被某看板
+    配置为「协作部门」（仅中心级归属看板可配），该看板对其可见。
+
+    纯可见授权：不写入任何 participants/owner 存储（界面上不显示在参与人
+    名单里）；编辑/管理等其余权限完全按既有配置判定。
+    """
+    dept_ids = {n['id'] for n in _org_leader_nodes(username) if n['node_type'] == 'dept'}
+    if not dept_ids:
+        return set()
+    out = set()
+    for r in dbq("SELECT board_id, collab_depts FROM board_config WHERE IFNULL(collab_depts,'')!=''"):
+        try:
+            ids = {int(x) for x in (r['collab_depts'] or '').split(',') if x.strip()}
+        except Exception:
+            continue
+        if ids & dept_ids:
+            out.add(r['board_id'])
+    return out
+
+
 def user_allowed(username: str, arch_only: bool = False):
     """返回 (boards, columns)：
     boards=None=全部看板，否则 set(board_id)（普通用户**永远**是显式集合）
@@ -1045,6 +1066,8 @@ def user_allowed(username: str, arch_only: bool = False):
     # ① 架构授权集
     dept_boards = _dept_stage_boards(username)
     boards = _arch_scope_boards(username, dept_boards)
+    # ①' 协作部门授权（T-013d）：协作部门负责人 → 该看板可见（纯可见，名单不显示）
+    boards |= _collab_dept_boards(username)
     # ② 账号级看板白名单（与架构授权集取交集）
     raw_b = u.get('allowed_boards') or '*'
     if raw_b != '*':
@@ -5304,6 +5327,26 @@ class BoardConfigReq(BaseModel):
     attr: str
     status: str = '启用'
     remark: str = ''
+    collab_depts: Optional[List[str]] = None  # T-013d 协作部门（org_nodes.id 字符串数组）；None=本次不动
+
+def _clean_collab_depts(dept_node_id: int, raw):
+    """协作部门清单校验（T-013d）：仅中心级归属可配，且必须是该中心的**直属部门子节点**。
+
+    返回排序去重后的逗号串；非法/越权节点直接剔除（不报错，配置容错）。
+    """
+    if raw is None:
+        return None
+    ids = []
+    for x in raw or []:
+        try:
+            nid = int(str(x).strip())
+        except Exception:
+            continue
+        row = dbq("SELECT id FROM org_nodes WHERE id=? AND node_type='dept' AND parent_id=?",
+                  (nid, dept_node_id))
+        if row:
+            ids.append(nid)
+    return ','.join(str(i) for i in sorted(set(ids)))
 
 def _resolve_dept_node(dept, dept_node_id=0):
     """归属部门 → 架构节点。优先按 dept_node_id 解析，其次按名称解析。
@@ -5436,7 +5479,7 @@ def list_boards(username: str = Depends(require_auth)):
         if r.get('year'):
             col_years[r['board_id']].add(r['year'])
     cfgs = {}
-    for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, created_at'
+    for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, collab_depts, created_at'
                  ' FROM board_config'):
         cfgs[r['board_id']] = dict(r)
     # 看板负责人与参与人 —— 供【看板管理】配置与展示。
@@ -5464,6 +5507,7 @@ def list_boards(username: str = Depends(require_auth)):
             'attr': c.get('attr', ''),
             'status': c.get('status', ''),
             'remark': c.get('remark', ''),
+            'collab_depts': c.get('collab_depts', '') or '',
             'owner': a.get('owner', ''),
             'participants': a.get('participants', ''),
             # 该账号是否为该看板的负责人（决定能否修改该看板基本信息）
@@ -5494,7 +5538,7 @@ def list_board_config(username: str = Depends(require_auth)):
     """看板配置列表（含关联看板名称），按部门、属性排序。
     普通用户只返回其可见看板的配置（与看板列表口径一致）。
     ⚠️ 配置里**没有年份** —— 归属年份在板块层（board_columns.year）。"""
-    rows = dbq('''SELECT c.id, c.board_id, c.dept, c.attr, c.status, c.remark, c.created_at,
+    rows = dbq('''SELECT c.id, c.board_id, c.dept, c.attr, c.status, c.remark, c.collab_depts, c.created_at,
                         COALESCE(b.board_name, '') AS board_name
                  FROM board_config c
                  LEFT JOIN boards b ON b.board_id = c.board_id
@@ -5526,12 +5570,13 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_aut
     if not (dept and attr):
         raise HTTPException(400, '归属部门 / 属性 均必填')
     _validate_board_config(dept, attr, status)
+    collab_str = _clean_collab_depts(dept_node_id, req.collab_depts if _is_center else []) or ''
     if dbq('SELECT 1 FROM board_config WHERE board_id=?', (bid,)):
         raise HTTPException(409, '该看板已存在配置，请勿重复添加')
     try:
-        dbe('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark)'
-            ' VALUES (?,?,?,?,?,?)',
-            (bid, dept, dept_node_id, attr, status, remark))
+        dbe('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark, collab_depts)'
+            ' VALUES (?,?,?,?,?,?,?)',
+            (bid, dept, dept_node_id, attr, status, remark, collab_str))
     except sqlite3.IntegrityError:
         raise HTTPException(409, '该看板已存在配置')
     audit_log(username, client_ip(request), 'board_config_create', f'{bid}/{dept}/{attr}',
@@ -5757,10 +5802,16 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     if not (dept and attr):
         raise HTTPException(400, '归属部门 / 属性 均必填')
     _validate_board_config(dept, attr, status)
-    dbe('UPDATE board_config SET dept=?, dept_node_id=?, attr=?, status=?, remark=? WHERE id=?',
-        (dept, dept_node_id, attr, status, remark, cid))
+    # T-013d 协作部门：仅中心级归属可配（非中心一律清空）；None=保留原值（旧客户端兼容）
+    collab_str = _clean_collab_depts(dept_node_id, req.collab_depts if _is_center else [])
+    if collab_str is None:   # 未提交该字段 → 保留库中现值
+        old = dbq('SELECT collab_depts FROM board_config WHERE id=?', (cid,))
+        collab_str = (old[0]['collab_depts'] or '') if old else ''
+    dbe('UPDATE board_config SET dept=?, dept_node_id=?, attr=?, status=?, remark=?, collab_depts=? WHERE id=?',
+        (dept, dept_node_id, attr, status, remark, collab_str, cid))
     audit_log(username, client_ip(request), 'board_config_update', f'id={cid}',
-              f'{dept}/{attr} 状态={status}', 'success')
+              f'{dept}/{attr} 状态={status}' + (f' 协作部门={collab_str or "无"}' if collab_str is not None else ''),
+              'success')
     return {'ok': True}
 
 @app.delete('/api/board-config/{cid}')
