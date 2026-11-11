@@ -3503,20 +3503,26 @@ function renderMyProfile(){
 var DEPT_OPTIONS=[];
 var DEPT_PICK={btn:null,sel:[],apply:null};
 function fmtDepts(arr){ return (arr&&arr.length)?arr.join('、'):''; }
-// #166 下拉弹层通用定位：默认向下弹（anchor 下方 gap 处）；下方放不下且上方
-//   空间更大时改为向上弹；两侧都放不下则贴近视口顶并压缩面板高度（maxHeight）。
+// #166 下拉弹层通用定位：**弹层必须紧靠输入框**——
+//   下方放得下 → 向下弹（紧贴下方 gap）；下方放不下但上方空间更大 → 向上弹
+//   （底边紧贴输入框上方 gap，绝不飞到视口顶留大空隙）；兜底仍溢出时贴边限高。
 //   必须在 el 已挂载到 DOM 后调用（需要 offsetHeight 实测高度）。
 function placeDropPopover(anchor, el, gap){
   gap=(gap===undefined?4:gap);
   const r=anchor.getBoundingClientRect();
   const h=el.offsetHeight, vh=window.innerHeight, M=8;
-  const below=r.bottom+gap, above=r.top-gap-h;
-  let top=below;
-  if(below+h>vh-M && above>below) top=Math.max(M,above);   // 翻转向上
-  if(top+h>vh-M){                                           // 两侧都不够 → 贴顶限高
-    top=M;
-    el.style.maxHeight=Math.max(120, vh-M*2-top)+'px';
+  const belowSpace=vh-M-r.bottom, aboveSpace=r.top-M;
+  let top;
+  if(belowSpace>=h || belowSpace>=aboveSpace){
+    top=r.bottom+gap;                    // 向下（放得下，或下方空间更大）
+  }else{
+    top=r.top-gap-h;                     // 向上弹：底边紧靠输入框上方
   }
+  if(top+h>vh-M){                        // 兜底：仍溢出 → 贴视口底边；再不行贴顶限高
+    top=Math.max(M, vh-M-h);
+    if(top+h>vh-M){ top=M; el.style.maxHeight=Math.max(120, vh-M*2)+'px'; }
+  }
+  if(top<M)top=M;
   el.style.top=top+'px';
   return top;
 }
