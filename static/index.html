@@ -2991,7 +2991,7 @@ async function init(){
     document.getElementById('userName').textContent=meDisplayLabel();
     renderMyProfile();   // 顶栏头像 + 个人状态栏
   if(!cropBound){ cropBindDrag(); cropBound=true; }   // 裁切编辑器拖动/缩放事件（只绑一次）
-    document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读'}[ME.role]||ME.role;
+    document.getElementById('roleTag').textContent={'admin':'管理员','editor':'可编辑','viewer':'只读','departed':'离岗'}[ME.role]||ME.role;
     document.getElementById('roleTag').className='role-tag role-'+ME.role;
     applyPermissionUI();
     ensureInitialSelection();
@@ -8092,15 +8092,20 @@ function renderTeamList(){
     // 空数组 = 全部角色（不过滤）；勾满 4 类也视同「全部角色」——
     // 否则「有账号但 users 表无角色记录」的成员（m.role 为空串）会被漏掉。
     if(roleList.length){
-      const ALL_ROLES=['admin','editor','viewer','noaccount'];
+      const ALL_ROLES=['admin','editor','viewer','departed','noaccount'];
       const isAllRoles=roleList.length>=ALL_ROLES.length && ALL_ROLES.every(r=>roleList.includes(r));
       if(!isAllRoles){
-        const isNoAccount=!m.account;
-        if(isNoAccount){
-          if(!roleList.includes('noaccount')) return false;
-          // 不直接 return true —— 必须继续走架构筛选（保证全部筛选条件 AND 关系）
+        if(m.status==='departed'){
+          // T-013e：离岗是成员级状态（无账号成员也可离岗）→ 独立归类
+          if(!roleList.includes('departed')) return false;
         }else{
-          if(!roleList.includes(m.role)) return false;
+          const isNoAccount=!m.account;
+          if(isNoAccount){
+            if(!roleList.includes('noaccount')) return false;
+            // 不直接 return true —— 必须继续走架构筛选（保证全部筛选条件 AND 关系）
+          }else{
+            if(!roleList.includes(m.role)) return false;
+          }
         }
       }
     }
@@ -8160,22 +8165,14 @@ function renderTeamList(){
         <td style="padding:7px 10px">${pwdCell}</td>
         <td style="padding:7px 10px">${
           isAdmin || hasAccount ? `<select id="tm_role_${m.id}" class="form-select" style="padding:3px 8px;font-size:12px;width:100px">
-              <option value="" ${!m.role?'selected':''}>无权限</option>
+              <option value="" ${!m.role&&!m.status?'selected':''}>无权限</option>
               <option value="admin" ${m.role==='admin'?'selected':''}>管理员</option>
               <option value="editor" ${m.role==='editor'?'selected':''}>可编辑</option>
               <option value="viewer" ${m.role==='viewer'?'selected':''}>只读</option>
+              <option value="departed" ${m.role==='departed'||m.status==='departed'?'selected':''}>离岗</option>
             </select>`
           : '<span style="color:var(--text3);font-size:12px" title="该成员未开通登录账号，无权限">无权限</span>'
-        }
-          ${m.status==='departed'
-            ? `<div style="margin-top:5px;display:flex;align-items:center;gap:6px">
-                 <span class="bc-role-tag" style="color:#b3620b;background:#fff7ec;border-color:#f0c78a">离岗</span>
-                 ${isAdmin?`<button type="button" class="icon-btn" style="font-size:11px;padding:1px 6px" onclick="toggleMemberDeparted(${m.id},'')">恢复在岗</button>`:''}
-               </div>`
-            : (isAdmin?`<div style="margin-top:5px"><button type="button" class="icon-btn" style="font-size:11px;padding:1px 6px;color:#b3620b"
-                 title="设为离岗：自动从任命/负责人/参与人名单剔除，各筛选条件不再可见；历史数据保持不变"
-                 onclick="toggleMemberDeparted(${m.id},'departed')">离岗</button></div>`:'')}
-        </td>
+        }</td>
         ${canEdit?`<td style="padding:7px 10px">
           <button class="icon-btn delete" onclick="removeTeamMember(${m.id})">删除</button>
         </td>`:''}
@@ -8208,8 +8205,8 @@ function openRoleMulti(btn){
   const r=btn.getBoundingClientRect();
   pop.style.position='fixed';
   pop.style.left=r.left+'px';
-  const map={admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'};
-  const opts=['admin','editor','viewer','noaccount'];
+  const map={admin:'管理员',editor:'可编辑',viewer:'只读',departed:'离岗',noaccount:'无权限'};
+  const opts=['admin','editor','viewer','departed','noaccount'];
   pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">不勾选任何角色 = 显示全部角色</div>`+opts.map(v=>`<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer"><input type="checkbox" value="${v}" ${ROLE_SNAP.includes(v)?'checked':''}> <span>${map[v]}</span></label>`).join('')+`<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span id="role_select_all_btn"><button class="icon-btn" onclick="selectAllRoles()" id="role_select_all_btn_inner">全选</button></span><span style="display:flex;gap:8px"><button class="btn-secondary" onclick="closeRoleMulti()">取消</button><button class="btn-primary" onclick="applyRoleMulti()">确定</button></span></div>`;
   document.body.appendChild(pop);
   placeDropPopover(btn, pop);   // #166：挂载后定位——底部溢出时自动向上弹
@@ -8491,19 +8488,6 @@ async function removeTeamMember(mid){
   if(!confirm(`删除成员「${m?m.name:mid}」${m&&m.account?'及其关联账号':''}？不影响已有卡片的历史记录`))return;
   try{await api('/api/team/'+mid,{method:'DELETE'});toast('已移除');openTeamModal()}
   catch(e){toast(e.message)}
-}
-// T-013c 离岗/恢复在岗：立即生效（不走「保存全部」草稿——剔除名单是即时动作需确认）
-async function toggleMemberDeparted(mid, toStatus){
-  const m=TM_ALL.find(x=>x.id===mid);
-  if(!m)return;
-  if(toStatus==='departed'){
-    if(!confirm(`将成员「${m.name}」设为离岗？\n\n· 自动从任命 / 负责人 / 参与人名单中剔除；\n· 各类人员筛选条件中不再可见；\n· 历史数据（事项记录等）保持不变；\n· 恢复在岗后名单不会自动回填，需重新任命。`))return;
-  }
-  try{
-    await api('/api/team/'+mid,{method:'PUT',body:JSON.stringify({name:m.name,status:toStatus})});
-    toast(toStatus==='departed'?'已设为离岗（名单已剔除）':'已恢复在岗');
-    openTeamModal();
-  }catch(e){toast(e.message)}
 }
 // ---------- 操作日志（仅管理员） ----------
 const AUDIT_ACTIONS={'login':'登入','logout':'登出','view':'查看','create':'新建','update':'编辑','delete':'删除','move':'移动','lock':'锁定','unlock':'解锁','comment':'评论','subtask_add':'新增子事项','subtask_update':'更新子事项','subtask_delete':'删除子事项','member_create':'新增成员','member_update':'编辑成员','member_delete':'删除成员','group_create':'新增工作组','group_update':'编辑工作组','group_delete':'删除工作组','user_create':'新建账号','user_update':'编辑账号','user_delete':'删除账号','export':'导出','import':'导入'};

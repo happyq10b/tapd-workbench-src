@@ -1552,6 +1552,13 @@ async def login(req: LoginReq, request: Request):
     pwd_ok = bool(u) and verify_pw(req.password, u['password_hash'])
 
     if pwd_ok:
+        # T-013e 离岗拦截：成员已离岗（team_members.status 或账号角色=departed）
+        #   → 拒绝登录，文案按用户指定。放在计数清零/单点判定之前 ——
+        #   离岗不是「密码错误」，不动失败计数。
+        _m = dbq('SELECT status FROM team_members WHERE account=? LIMIT 1', (req.username,))
+        if (_m and (_m[0]['status'] or '') == 'departed') or u.get('role') == 'departed':
+            audit_log(req.username, ip, 'login', '账号登录', '登录被拒：已不在本岗位', 'denied')
+            raise HTTPException(403, '已不在本岗位，如需登入请联系管理员')
         # 密码正确：即使处于冷却期也放行（受限的是「密码错误」，不是「登录」），并清零计数
         _login_record_success(req.username)
         # 单点登录（#113 修订，原 #110「后来者踢先者」）：**先在线者占位，后来者拒绝**。
@@ -3832,9 +3839,10 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
     # 只改姓名；workgroups 归【架构管理】独占维护，本接口不触碰
     dbe('UPDATE team_members SET name=? WHERE id=?', (name, mid))
     # 只改角色：成员已有账号且本次未变更账号关联
+    # T-013e：'departed'（离岗）成为与 viewer/editor/admin 并列的角色值
     if req.account is None and req.role and old_acc:
-        if req.role not in ('viewer', 'editor', 'admin'):
-            raise HTTPException(400, '角色必须是 viewer/editor/admin')
+        if req.role not in ('viewer', 'editor', 'admin', 'departed'):
+            raise HTTPException(400, '角色必须是 viewer/editor/admin/departed')
         if old_acc == SUPER_ADMIN:
             raise HTTPException(403, f'「{SUPER_ADMIN}」是内置超级管理员，角色不可修改')
         dbe('UPDATE users SET role=? WHERE username=?', (req.role, old_acc))
@@ -3872,21 +3880,40 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
         dept_changed = True
     elif req.account is not None and req.account.strip() != old_acc:
         _sync_dept_participants_for_member(mid)
-    # T-013c 离岗状态：切到离岗 → 从任命/负责人/参与人名单剔除（历史数据不动）；
-    #   恢复在岗 → 名单不自动回填（需在架构管理重新任命/配置）。账号换绑与
-    #   部门同步先行，剔除用的是成员最新账号。
+    # T-013e：role='departed' 时账号角色同步 —— UI「保存全部」恒带 account 字段，
+    #   上面「只改角色」分支（req.account is None）会被跳过，这里统一兜底。
+    if req.role == 'departed' and old_acc and old_acc != SUPER_ADMIN:
+        dbe("UPDATE users SET role='departed' WHERE username=?", (old_acc,))
+    # T-013c/T-013e 离岗：role='departed'（离岗角色）与 status 字段双向桥接 ——
+    #   角色切到离岗 → 成员置离岗 + 从任命/负责人/参与人名单剔除（历史数据不动）；
+    #   切回常规角色/无权限 → 恢复在岗（名单不自动回填，需重新任命）。
+    #   账号换绑与部门同步先行，剔除用的是成员最新账号。
     status_changed = False
+    desired_status = None
     if req.status is not None:
         st = (req.status or '').strip()
         if st not in ('', 'departed'):
             raise HTTPException(400, '状态必须是 在岗 / 离岗')
+        desired_status = st
+    elif req.role is not None:
+        desired_status = 'departed' if req.role == 'departed' else ''
+    if desired_status is not None:
         old_st = dbq('SELECT status FROM team_members WHERE id=?', (mid,))
         old_st = (old_st[0]['status'] or '') if old_st else ''
-        if st != old_st:
-            dbe('UPDATE team_members SET status=? WHERE id=?', (st, mid))
+        if desired_status != old_st:
+            dbe('UPDATE team_members SET status=? WHERE id=?', (desired_status, mid))
             status_changed = True
-            if st == 'departed':
+            if desired_status == 'departed':
                 _strip_member_rosters(mid, action='离岗')
+            elif old_st == 'departed' and desired_status == '':
+                # 恢复在岗：账号角色若停留 departed → 复位为 viewer（最低在岗权限），
+                # 否则登录会被角色口径继续拦截
+                acc_row = dbq('SELECT account FROM team_members WHERE id=?', (mid,))
+                acc = (acc_row[0]['account'] or '').strip() if acc_row else ''
+                if acc:
+                    urow = dbq('SELECT role FROM users WHERE username=?', (acc,))
+                    if urow and urow[0]['role'] == 'departed':
+                        dbe("UPDATE users SET role='viewer' WHERE username=?", (acc,))
     changes = []
     if name != req.name.strip() or True:
         changes = ['姓名/工作组']
