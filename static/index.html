@@ -10641,18 +10641,16 @@ function renderEditArea(){
     +'<input type="text" class="form-input" id="bc_board_name" maxlength="100" style="max-width:320px"'+roAttr
     +' value="'+esc(BC_FORM.board_name||'')+'" oninput="BC_FORM.board_name=this.value" title="看板名称（目录树、看板卡片、事项导出中显示的名字）"></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>归属部门</div>'
-    +'<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">'
-    +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="max-width:320px"'+roAttr+'>'+deptOpts+'</select>'
+    +'<div style="display:flex;gap:14px;align-items:center;flex-wrap:nowrap">'
+    +'<select class="form-select" id="bc_dept" onchange="bcSetDept(this.value)" style="flex:1 1 240px;min-width:0;max-width:340px"'+roAttr+'>'+deptOpts+'</select>'
     +(bcIsCenterDept(BC_FORM.dept)
-      ?'<div><button type="button" class="form-input" id="bc_collab_btn" style="min-width:240px;max-width:320px;cursor:pointer;text-align:left;background:#fff;'+(canEdit?'':'pointer-events:none;opacity:.6')+'"'
+      ?'<button type="button" class="form-input" id="bc_collab_btn" style="flex:1 1 240px;min-width:0;max-width:340px;cursor:pointer;text-align:left;background:#fff;'+(canEdit?'':'pointer-events:none;opacity:.6')+'"'
       +' title="协作部门（可多选）：被选部门的负责人自动获得该看板的可见权（不显示在参与人名单中，其余权限不变）"'
       +' onclick="openBcCollabPick(this)">'
       +esc(bcCollabLabel()||'选择协作部门（可选）')+'</button>'
-      +(bcCollabLabel()?'<div class="bc-hint" style="margin-top:3px">协作部门负责人可见此看板（仅可见，不进参与人名单）</div>':'')
-      +'</div>'
       :'')
     +'</div>'
-    +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+'</div></div>'
+    +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+(bcIsCenterDept(BC_FORM.dept)&&bcCollabLabel()?'；协作部门负责人可见此看板（仅可见，不进参与人名单）':'')+'</div></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+attrPills+'</div></div>'
     +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+statusPills+'</div></div>'
     +'<div class="bc-hint" style="margin-top:-4px">归属年份在【板块】层单独配置 —— 每个板块绑定唯一归属年份（点板块标题即可编辑），看板本身不再有年份。</div>'
