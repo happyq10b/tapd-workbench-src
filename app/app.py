@@ -254,6 +254,9 @@ def get_conn():
         return conn
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # #165：并发写（保存全部/部门参与人同步）在 WAL 下仍可能撞写锁 ——
+    #   busy_timeout 让本连接等待锁释放（5s）而不是立刻 OperationalError: database is locked
+    conn.execute('PRAGMA busy_timeout=5000')
     if not _WAL_READY:
         # WAL 是**数据库文件级**设置（写进文件头），设置一次即持久生效，
         # 不需要每次连接都执行。
@@ -1739,10 +1742,13 @@ def me(username: str = Depends(require_auth)):
     # 显示名：顶栏展示「姓名(账号)」；账号未绑定成员时只显示账号
     display_name = _member_display_name(username)
     # 成员 ID（#152 个人界面展示用）：账号绑定的成员编号；未绑定 = None
-    mrow = dbq('SELECT id, name, emp_no FROM team_members WHERE account=? LIMIT 1', (username,))
+    mrow = dbq('SELECT id, name, emp_no, departments FROM team_members WHERE account=? LIMIT 1', (username,))
     member_id = mrow[0]['id'] if mrow else None
     # 工号（#153）：作为「ID」的展示值；未绑定/未导入时前端回退成员编号
     emp_no = (mrow[0]['emp_no'] or '') if mrow else ''
+    # 部门（#165）：成员维度单一来源列；dept_options = 前两级架构节点（个人界面多选选项）
+    member_depts = ([x.strip() for x in (mrow[0]['departments'] or '').split(',') if x.strip()]
+                    if mrow else [])
     # 部门清单：**按权限过滤** —— 只保留该账号**有可见看板**的部门。
     # ⚠️ 此前用 _dept_order()（架构里的全部部门）→ 普通用户的目录树会列出
     #    自己无权访问的部门（如「管理部 0」），既暴露无权部门的组织信息，
@@ -1783,6 +1789,9 @@ def me(username: str = Depends(require_auth)):
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'member_id': member_id,                # #152 个人界面展示：绑定的成员编号（未绑定=None）
             'emp_no': emp_no,                      # #153 工号：ID 列的展示值（未导入时回退成员编号）
+            'departments': member_depts,           # #165 部门（多选，成员维度单一来源）
+            'dept_options': [{'id': r['id'], 'name': r['name'], 'node_type': r['node_type']}
+                             for r in _top2_dept_nodes()],   # #165 个人界面部门多选选项（前两级）
             **_basic,                              # #152 基本信息：性别/入司时间/出生日期/籍贯/手机/政治面貌
             'allowed_columns': col_info,
             'managed_boards': managed_boards,      # 我是负责人的看板
@@ -3602,7 +3611,7 @@ async def delete_subtask(card_id: str, sid: int, username: str = Depends(require
 # ---------------- API：团队管理 ----------------
 @app.get('/api/team')
 def get_team(username: str = Depends(require_auth)):
-    rows = dbq('''SELECT m.id, m.name, m.workgroups, m.account, m.emp_no,
+    rows = dbq('''SELECT m.id, m.name, m.workgroups, m.account, m.emp_no, m.departments,
                         u.role AS role, u.allowed_boards AS allowed_boards,
                         (u.password_hash IS NOT NULL AND u.password_hash != '') AS password_set
                  FROM team_members m
@@ -3616,6 +3625,8 @@ def get_team(username: str = Depends(require_auth)):
         appt_nodes[r['member_id']].add(r['name'])
     for m in out:
         names = set(x.strip() for x in (m.get('workgroups') or '').split(';') if x.strip())
+        # #165 部门：逗号串 → 数组（与个人界面同一字段，双向同步一致）
+        m['departments'] = [x.strip() for x in (m.get('departments') or '').split(',') if x.strip()]
         org_names = appt_nodes.get(m['id'], set())
         if org_names:
             m['org_source'] = 'org'
@@ -3657,6 +3668,7 @@ class TeamUpdateReq(BaseModel):
     password: Optional[str] = None
     role: Optional[str] = None
     emp_no: Optional[str] = None    # #154 ID（工号）：仅超级管理员可改；空串=清除（回退成员编号展示）
+    departments: Optional[List[str]] = None   # #165 部门（多选）；None=本次不动该字段
 
 def _norm_workgroups(workgroups):
     """（兼容保留）工作组名归一化。
@@ -3795,6 +3807,25 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
                 if other:
                     raise HTTPException(409, '账号已存在，不允许重复添加（已被成员「%s」使用）' % other[0]['name'])
             _open_account(mid, acc, req.password, req.role)
+    # #165 账号换绑：旧账号从部门级参与人移除（新账号由下方部门同步按需加入）
+    if req.account is not None and req.account.strip() != old_acc and old_acc:
+        for n in _top2_dept_nodes():
+            row = dbq('SELECT participants FROM org_nodes WHERE id=?', (n['id'],))
+            if not row:
+                continue
+            cur = [x.strip() for x in (row[0]['participants'] or '').split(',') if x.strip()]
+            if old_acc in cur:
+                cur = [x for x in cur if x != old_acc]
+                dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur), n['id']))
+    # #165 部门（管理员/超级管理员可改）：写单一来源列 + 强映射架构参与人。
+    #   放在账号关联变更**之后**执行 —— 参与人同步用的是成员的最新账号；
+    #   账号换绑过（departments 未提交）也要重映射一次，让新账号补进既有部门。
+    dept_changed = False
+    if req.departments is not None:
+        _set_member_departments(mid, _clean_dept_list(req.departments))
+        dept_changed = True
+    elif req.account is not None and req.account.strip() != old_acc:
+        _sync_dept_participants_for_member(mid)
     changes = []
     if name != req.name.strip() or True:
         changes = ['姓名/工作组']
@@ -3806,6 +3837,8 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
         changes.append('变更账号关联')
     if emp_changed:
         changes.append(f'ID→{req.emp_no.strip()}')
+    if dept_changed:
+        changes.append('部门→' + '、'.join(req.departments or []))
     audit_log(username, client_ip(request), 'member_update', f'成员 {name} (id={mid})', '，'.join(changes) or '资料更新', 'success')
     return {'ok': True}
 
@@ -3827,6 +3860,17 @@ def del_team(mid: int, username: str = Depends(require_admin), request: Request 
     # 否则会残留孤儿任职数据。
     dbe('DELETE FROM org_appointments WHERE member_id=?', (mid,))
     dbe('DELETE FROM team_members WHERE id=?', (mid,))
+    # #165 部门强映射收尾：被删成员的账号从部门级参与人移除；
+    #   中心（财务中心）全员口径随之补齐/收敛。
+    if acc:
+        for n in _top2_dept_nodes():
+            row = dbq('SELECT participants FROM org_nodes WHERE id=?', (n['id'],))
+            if not row:
+                continue
+            cur = [x.strip() for x in (row[0]['participants'] or '').split(',') if x.strip()]
+            if acc in cur:
+                cur = [x for x in cur if x != acc]
+                dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur), n['id']))
     audit_log(username, client_ip(request), 'member_delete', f'成员 {mname} (id={mid})', f'删除成员' + (f'及关联账号 {acc}' if acc else '') + '，并清理架构管理中的任职记录', 'success')
     return {'ok': True}
 
@@ -4524,6 +4568,91 @@ def _auto_arch_participant(dept_node_id: int, account: str):
     if acc not in cur:
         cur.append(acc)
         dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur), dept_node_id))
+
+
+# ---------------- 部门 ↔ 架构参与人强映射（#165） ----------------
+# 部门数据模型：team_members.departments（逗号分隔节点名）= **单一来源**；
+#   · 个人界面 /api/profile 与 账号管理 PUT /api/team/{mid} 都写这一列（双向同步一致）；
+#   · org_nodes.participants（存账号，多来源累积字段）由部门选择**强映射**：
+#     选中部门 → 账号加入该节点参与人；部门级未选中 → 从参与人移除；
+#   · 中心节点（财务中心）参与人恒为全员 → 只增不减地补齐全部账号。
+def _top2_dept_nodes():
+    """前两级架构节点（center + dept），按架构管理排序（上移/下移维护的 sort）。"""
+    return dbq("SELECT id, name, node_type FROM org_nodes"
+               " WHERE node_type IN ('center','dept') ORDER BY sort, id")
+
+
+def _top2_dept_names():
+    return [r['name'] for r in _top2_dept_nodes()]
+
+
+def _clean_dept_list(raw_list):
+    """部门名单清洗：去空白、截断、去重；出现未知部门名直接拒绝（前端下拉只出合法项）。"""
+    valid = set(_top2_dept_names())
+    out = []
+    for x in (raw_list or []):
+        x = (x or '').strip()[:60]
+        if not x:
+            continue
+        if x not in valid:
+            raise HTTPException(400, '未知的部门：%s' % x)
+        if x not in out:
+            out.append(x)
+    return out
+
+
+def _set_member_departments(member_id: int, depts):
+    """写成员部门（单一来源列）+ 强映射同步架构参与人。"""
+    dbe('UPDATE team_members SET departments=? WHERE id=?', (','.join(depts), member_id))
+    _sync_dept_participants_for_member(member_id)
+
+
+def _sync_dept_participants_for_member(member_id: int):
+    """把单个成员的部门选择映射到前两级节点的参与人（participants，存账号）。
+
+    · 部门节点：选中 → 账号加入；未选中 → 账号移除（部门级参与人由部门字段驱动）；
+    · 中心节点：恒为全员（_ensure_center_participants_all 只增不减）；
+    · 成员未绑定账号：参与人存账号、无处挂载，跳过（部门字段照常保存）。
+    ⚠️ 小组（group）层参与人不受影响 —— 那是【架构管理】任命/显式配置的领地。
+    """
+    m = dbq('SELECT account, departments FROM team_members WHERE id=?', (member_id,))
+    if not m:
+        return
+    depts = {x.strip() for x in (m[0]['departments'] or '').split(',') if x.strip()}
+    acc = (m[0]['account'] or '').strip()
+    if acc:
+        for n in _top2_dept_nodes():
+            if n['node_type'] != 'dept':
+                continue
+            row = dbq('SELECT participants FROM org_nodes WHERE id=?', (n['id'],))
+            if not row:
+                continue
+            cur = [x.strip() for x in (row[0]['participants'] or '').split(',') if x.strip()]
+            has = acc in cur
+            should = n['name'] in depts
+            if should and not has:
+                cur.append(acc)
+                dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur), n['id']))
+            elif (not should) and has:
+                cur = [x for x in cur if x != acc]
+                dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur), n['id']))
+    _ensure_center_participants_all()
+
+
+def _ensure_center_participants_all():
+    """中心节点（财务中心）参与人 = 全员：把全部有账号成员补进参与人（只增不减）。
+
+    「只增不减」：不剔除任何已有参与人（可能是架构管理显式配置或任命自动加入的）。
+    """
+    accounts = [r['account'].strip() for r in dbq("SELECT account FROM team_members WHERE account!=''")]
+    if not accounts:
+        return
+    for n in dbq("SELECT id, participants FROM org_nodes WHERE node_type='center'"):
+        cur = [x.strip() for x in (n['participants'] or '').split(',') if x.strip()]
+        curset = set(cur)
+        add = [a for a in accounts if a not in curset]
+        if add:
+            dbe('UPDATE org_nodes SET participants=? WHERE id=?', (','.join(cur + add), n['id']))
 
 def _org_sync_legacy(node_id: int):
     """把新模型的任职关系回写到旧表 workgroups.leader 与 team_members.workgroups。
@@ -5613,6 +5742,7 @@ class ProfileReq(BaseModel):
     native_city: str = ''     # 籍贯市
     phone: str = ''           # 手机号码（11 位手机号，可空）
     political_status: str = ''# 政治面貌
+    departments: Optional[List[str]] = None   # #165 部门（多选）；None=本次不动该字段
 
 
 _DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -5650,6 +5780,15 @@ def update_profile(req: ProfileReq, username: str = Depends(require_auth), reque
     if phone and not _PHONE_RE.match(phone):
         raise HTTPException(400, '手机号码格式不正确（应为 11 位手机号）')
     political_status = (req.political_status or '').strip()[:20]
+    # #165 部门：写 team_members.departments（成员维度单一来源）+ 强映射架构参与人。
+    #   未绑定成员的账号无处落（列在 team_members 上）→ 明确报错而非假装成功。
+    member_depts_out = None
+    if req.departments is not None:
+        mrow2 = dbq('SELECT id FROM team_members WHERE account=? LIMIT 1', (username,))
+        if not mrow2:
+            raise HTTPException(400, '当前账号未绑定成员，无法保存部门')
+        member_depts_out = _clean_dept_list(req.departments)
+        _set_member_departments(mrow2[0]['id'], member_depts_out)
     dbe('UPDATE users SET avatar=?, photo=?, status_text=?, gender=?, hire_date=?,'
         ' birth_date=?, native_province=?, native_city=?, phone=?, political_status=?'
         ' WHERE username=?',
@@ -5666,10 +5805,16 @@ def update_profile(req: ProfileReq, username: str = Depends(require_auth), reque
         parts.append('更新基本信息')
     audit_log(username, client_ip(request), 'profile_update', '个人资料',
               '，'.join(parts) or '更新个人资料', 'success')
+    # 回显部门：本次提交了就用提交值；否则回读当前值（未绑定成员 = 空名单）
+    if member_depts_out is None:
+        _drow = dbq('SELECT departments FROM team_members WHERE account=? LIMIT 1', (username,))
+        member_depts_out = ([x.strip() for x in ((_drow[0]['departments'] if _drow else '') or '').split(',')
+                             if x.strip()] if _drow else [])
     return {'ok': True, 'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'gender': gender, 'hire_date': hire_date, 'birth_date': birth_date,
             'native_province': native_province, 'native_city': native_city,
-            'phone': phone, 'political_status': political_status}
+            'phone': phone, 'political_status': political_status,
+            'departments': member_depts_out}
 
 
 class PasswordChangeReq(BaseModel):

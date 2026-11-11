@@ -533,6 +533,12 @@ def _migrate_schema(conn):
                         SELECT id, name, workgroups, account, created_at FROM team_members_bak''')
         conn.execute('DROP TABLE team_members_bak')
 
+    # ---- team_members.departments（#165 部门：个人界面/账号管理共用，前两级架构节点多选）----
+    # 单一来源 = team_members.departments（逗号分隔节点名）；org_nodes.participants 由它强映射同步。
+    tcols2 = [r[1] for r in conn.execute('PRAGMA table_info(team_members)').fetchall()]
+    if 'departments' not in tcols2:
+        conn.execute("ALTER TABLE team_members ADD COLUMN departments TEXT NOT NULL DEFAULT ''")
+
     # ---- 用户个人看板排序表（2026-11-09 #101）：旧库幂等建表 ----
     conn.execute('''CREATE TABLE IF NOT EXISTS user_board_sorts (
         username   TEXT NOT NULL,

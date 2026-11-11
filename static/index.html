@@ -84,6 +84,10 @@ button{font-family:inherit}
 .pg-item>label{font-size:11.5px;color:var(--text2)}
 .pg-ro{padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg,#f7f8fa);
   font-size:13px;color:var(--text);min-height:30px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* #165 个人界面所有信息字段**不支持换行**：过长用「…」截断（pg-ro 已有，输入/下拉/按钮类统一补齐） */
+.profile-grid .form-input,.profile-grid .form-select,.profile-grid .pf-dept-btn{
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.profile-grid .pf-dept-btn{display:block;width:100%;background:var(--bg,#f7f8fa)}
 /* 密码框「小眼睛」：绝对定位在输入框右侧，点击切换可见 */
 .profile-avatar-hint{font-size:11.5px;color:var(--text3);margin-top:6px;
   display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:nowrap;
@@ -988,15 +992,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 #teamModal .modal-body>*{flex-shrink:0}
 .tm-table-scroll thead th{position:sticky;top:var(--tm-sticky-top,0px);z-index:2;background:var(--bg);
   box-shadow:inset 0 -1px 0 var(--border)}
-/* 「已选工作组」只读层级树 */
-.wgt{font-size:12.5px;line-height:1.5}
-.wgt-node{margin:0}
-.wgt-row{display:flex;align-items:center;gap:4px;padding:1px 0}
-.wgt-arrow{width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;
-  cursor:pointer;color:var(--text2);font-size:9px;flex-shrink:0;border-radius:3px}
-.wgt-arrow:hover{background:rgba(47,128,237,.12);color:var(--primary)}
-.wgt-leaf{opacity:.45;cursor:default}
-.wgt-label{color:var(--text)}
+/* #165：「已选工作组」只读层级树已随该列下线移除（.wgt*）*/
 .pp-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
 .pp-tag{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:12px;padding:2px 6px 2px 9px;border-radius:10px;border:1px solid #b5d4f4}
 .pp-tag i{font-style:normal;cursor:pointer;color:#85b7eb;font-size:13px;line-height:1}
@@ -2011,6 +2007,10 @@ function goLogin(){
             <input type="text" class="form-input" id="pf_political" maxlength="20" list="pf_political_list" placeholder="选择或输入">
             <datalist id="pf_political_list"><option>群众</option><option>中共党员</option><option>中共预备党员</option><option>共青团员</option><option>民主党派成员</option><option>无党派人士</option></datalist>
           </div>
+          <div class="pg-item"><label>部门</label>
+            <button type="button" class="form-input pf-dept-btn" id="pf_departments" style="cursor:pointer;text-align:left"
+              onclick="openPfDeptPick(this)" title="选择部门（可多选，保存后同步架构参与人）">未选择</button>
+          </div>
         </div>
         <div class="profile-avatar-hint" style="text-align:left">ID 与姓名由「成员与账号管理」统一维护；其余字段本人可修改</div>
       </div>
@@ -2982,6 +2982,7 @@ async function init(){
     ME=await api('/api/me');
     loadColChecked();   // #158：按当前账号载入板块勾选状态（sessionStorage 按用户分桶）
     loadItemChecked();  // #159：载入勾选开关与事项勾选（按用户分桶）
+    DEPT_OPTIONS=ME.dept_options||[];   // #165 部门多选选项（架构前两级节点）
     const cmBtn=document.getElementById('chkModeBtn');
     if(cmBtn)syncChkModeBtn(cmBtn);
     loadPins();   // 载入当前账号的个人置顶设置（按账号分桶，互不影响）
@@ -3493,6 +3494,63 @@ function renderMyProfile(){
   }
 }
 // 打开个人界面
+// ---------- 部门多选（#165）：个人界面 + 账号管理共用 ----------
+// 选项 = 架构管理前两级节点（center+dept，ME.dept_options 后端下发）；
+// 选中结果双向同步：个人界面 /api/profile、账号管理 PUT /api/team/{mid} 写同一列
+// （team_members.departments），后端统一强映射架构参与人（财务中心=全员）。
+var DEPT_OPTIONS=[];
+var DEPT_PICK={btn:null,sel:[],apply:null};
+function fmtDepts(arr){ return (arr&&arr.length)?arr.join('、'):''; }
+function openDeptPick(btn, current, applyFn){
+  closeDeptPick();
+  DEPT_PICK={btn:btn, sel:(current||[]).slice(), apply:applyFn};
+  const pop=document.createElement('div');
+  pop.className='tree-pick'; pop.id='dept_pick_pop';
+  pop.style.padding='8px 10px'; pop.style.minWidth='190px';
+  pop.style.maxHeight='320px'; pop.style.overflow='auto';
+  const r=btn.getBoundingClientRect();
+  pop.style.position='fixed'; pop.style.left=r.left+'px'; pop.style.top=(r.bottom+4)+'px';
+  pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">选择部门（可多选 · 保存后同步架构参与人）</div>`
+    +(DEPT_OPTIONS.length?DEPT_OPTIONS.map(d=>
+      `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;white-space:nowrap">`
+      +`<input type="checkbox" value="${esc(d.name)}" ${DEPT_PICK.sel.indexOf(d.name)>=0?'checked':''}>`
+      +`<span>${esc(d.name)}${d.node_type==='center'?'<span style="color:var(--text3)">（全员）</span>':''}</span></label>`).join('')
+      :'<div style="color:var(--text3);font-size:12px">架构管理暂无部门节点</div>')
+    +`<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn-secondary" onclick="closeDeptPick()">取消</button>
+      <button class="btn-primary" onclick="applyDeptPick()">确定</button></div>`;
+  pop.querySelectorAll('input[type=checkbox]').forEach(c=>c.addEventListener('change',()=>{
+    DEPT_PICK.sel=[...pop.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);
+  }));
+  document.body.appendChild(pop);
+  setTimeout(()=>document.addEventListener('click',_deptPickOutside),0);
+}
+function _deptPickOutside(e){
+  const pop=document.getElementById('dept_pick_pop');
+  if(pop&&!pop.contains(e.target)&&!(DEPT_PICK.btn&&DEPT_PICK.btn.contains(e.target)))closeDeptPick();
+}
+function closeDeptPick(){
+  const pop=document.getElementById('dept_pick_pop');
+  if(pop)pop.remove();
+  document.removeEventListener('click',_deptPickOutside);
+}
+function applyDeptPick(){
+  const sel=DEPT_PICK.sel.slice(), fn=DEPT_PICK.apply, btn=DEPT_PICK.btn;
+  closeDeptPick();
+  if(typeof fn==='function')fn(btn,sel);
+}
+// 个人界面：部门按钮 ↔ PF_DEPTS
+var PF_DEPTS=[];
+function updatePfDeptBtn(){
+  const b=document.getElementById('pf_departments');
+  if(!b)return;
+  const txt=fmtDepts(PF_DEPTS)||'未选择';
+  b.textContent=txt;
+  b.title=(fmtDepts(PF_DEPTS)||'未选择')+'（可多选，保存后同步架构参与人）';
+}
+function openPfDeptPick(btn){
+  openDeptPick(btn, PF_DEPTS, function(b,sel){ PF_DEPTS=sel; updatePfDeptBtn(); });
+}
 function openProfileModal(){
   if(!ME)return;
   PROFILE_AVATAR=ME.avatar||'';
@@ -3514,6 +3572,9 @@ function openProfileModal(){
   setV('pf_gender',ME.gender); setV('pf_hire_date',ME.hire_date); setV('pf_birth_date',ME.birth_date);
   setV('pf_native_province',ME.native_province); setV('pf_native_city',ME.native_city);
   setV('pf_political',ME.political_status);
+  // #165 部门：回显当前成员的部门多选
+  PF_DEPTS=(ME.departments||[]).slice();
+  updatePfDeptBtn();
   // 复用既有的 pwdEyeHtml()（SVG 眼睛图标）+ togglePwd()（点击切换可见）
   ['profileOldPwd','profileNewPwd','profileNewPwd2'].forEach(id=>{
     const el=document.getElementById(id);
@@ -3823,10 +3884,11 @@ async function saveProfile(){
     native_province:g('pf_native_province'),native_city:g('pf_native_city'),
     political_status:g('pf_political')};
   try{
-    const d=await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,photo:PROFILE_PHOTO,status_text,...basic})});
+    const d=await api('/api/profile',{method:'POST',body:JSON.stringify({avatar:PROFILE_AVATAR,photo:PROFILE_PHOTO,status_text,...basic,departments:PF_DEPTS})});
     // 同步到 ME 并刷新顶栏
     ME.avatar=PROFILE_AVATAR; ME.photo=PROFILE_PHOTO; ME.status_text=status_text;
     Object.assign(ME,basic);
+    if(d.departments)ME.departments=d.departments;   // #165 部门回显同步
     renderMyProfile();
     renderProfileAvatarHint('已保存');
     renderProfilePhotoHint('已保存');
@@ -7705,6 +7767,7 @@ async function setCardStatus(ctx,st){
 // ---------- 团队 ----------
 var TM_ALL=[];  // [{id,name,workgroups:[...]}]
 var TM_VISIBLE_IDS=new Set();  // 当前表格可见的成员 id（筛选后的结果集）
+var TM_DEPT_DRAFT={};          // #165 部门编辑草稿：mid -> [部门名]（选择器确定后暂存，「保存全部」统一提交）
 var TM_FILTER={name:'',workgroup:[],role:[]};  // 成员表格筛选条件（workgroup/role 改为多选数组；role 空数组 = 全部角色）
 async function openTeamModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
@@ -7713,9 +7776,11 @@ async function openTeamModal(){
   WG_ALL=groupsRes.groups||[];  // 树形工作组选择器使用架构树
   WG_FLAT=wgFlat(WG_ALL);
   TM_ALL=(team.members||[]).map(m=>({id:m.id,emp_no:m.emp_no||'',name:m.name,workgroups:(m.workgroups||'').split(';').filter(Boolean),account:m.account||'',role:m.role||'',password_set:!!m.password_set,
-    org_source:m.org_source||'none',org_conflict:m.org_conflict||[],org_nodes:m.org_nodes||[]}));
+    org_source:m.org_source||'none',org_conflict:m.org_conflict||[],org_nodes:m.org_nodes||[],
+    departments:m.departments||[]}));
   TEAM_MEMBERS=TM_ALL.map(m=>m.name);
   TM_FILTER={name:'',workgroup:[],role:[]};   // 默认全部角色（不再默认只看「无权限」）
+  TM_DEPT_DRAFT={};   // #165 部门草稿随弹窗重开清空（以服务端数据为准）
   initTeamFilterBar();
   renderTeamList();
   document.getElementById('t_new_name').value='';
@@ -7732,10 +7797,9 @@ async function openTeamModal(){
   openModal('teamModal');
 }
 // ---------- 「已选工作组」只读层级树 ----------
-// 归属以【架构管理】为准：org_source==='org' 时用架构任命的节点；
-// 架构管理无任命时才回退旧 workgroups 字段（兼容历史成员）。
-// 纯展示：默认收起、点击逐级展开，**不提供任何编辑 / 勾选 / 修改入口**。
-var WG_TREE_EXPANDED=new Set();   // 展开的节点 key（成员id + 节点名）
+// #165：该列已从账号管理表格下线（替换为可编辑的「部门」列），
+//   树渲染函数（memberWgTreeNodes/renderWgTreeLevel/renderMemberWgTree/toggleWgTree）一并移除；
+//   workgroups 数据本身仍由【架构管理】任命回写维护（架构筛选继续使用）。
 // ── 板块批量勾选（#158）：**按用户隔离** ──
 // 勾选状态只存当前浏览器会话（sessionStorage 按账号分桶），不落库、不广播 ——
 //   多人同时操作时各人只看到/删除自己的勾选；KEY 带用户名，换账号登录互不串扰。
@@ -7952,95 +8016,6 @@ function tmToggleSort(){
   if(th)th.innerHTML='ID '+(TM_SORT_DIR===-1?'↓':'↑');
   renderTeamList();
 }
-function memberWgNodeNames(m){
-  if(m.org_source==='org' && (m.org_nodes||[]).length) return m.org_nodes.slice();
-  return (m.workgroups||[]).slice();
-}
-// 取该成员相关节点（含全部祖先）在 WG_ALL 中的裁剪子树
-function memberWgTreeNodes(m){
-  const names=memberWgNodeNames(m);
-  if(!names.length) return [];
-  const byName={}, parentOf={};
-  (function walk(ns){
-    (ns||[]).forEach(n=>{
-      byName[n.name]=n;
-      (n.children||[]).forEach(c=>{ parentOf[c.name]=n.name; });
-      walk(n.children||[]);
-    });
-  })(WG_ALL||[]);
-  const keep=new Set();
-  names.forEach(nm=>{
-    let cur=nm, guard=0;
-    while(cur && !keep.has(cur) && guard++<20){
-      keep.add(cur);
-      cur=parentOf[cur];
-    }
-  });
-  if(!keep.size) return [];
-  // 按 WG_ALL 的层级裁剪出子树（只保留 keep 里的分支）
-  (function prune(ns){
-    (ns||[]).forEach(n=>{
-      if(!keep.has(n.name)) n.__cut=true;
-      prune(n.children||[]);
-    });
-  })(WG_ALL||[]);
-  function build(ns){
-    const out=[];
-    (ns||[]).forEach(n=>{
-      if(!keep.has(n.name)) return;
-      const kids=build(n.children||[]);
-      out.push({name:n.name, id:n.id, children:kids});
-    });
-    return out;
-  }
-  return build(WG_ALL||[]);
-}
-// 渲染单个节点（含递归子级）
-function renderWgTreeLevel(nodes, uid, depth){
-  return nodes.map(n=>{
-    const kids=n.children||[];
-    const key=uid+'::'+n.name;
-    const exp=WG_TREE_EXPANDED.has(key);
-    const arrow=kids.length
-      ? `<span class="wgt-arrow" onclick="toggleWgTree(this,'${esc(key)}')" title="展开/折叠">${exp?'▼':'▶'}</span>`
-      : '<span class="wgt-arrow wgt-leaf">·</span>';
-    return `<div class="wgt-node">
-      <div class="wgt-row" style="padding-left:${depth*14}px">${arrow}<span class="wgt-label">${esc(n.name)}</span></div>
-      ${kids.length?`<div class="wgt-children" style="display:${exp?'block':'none'}">${renderWgTreeLevel(kids,uid,depth+1)}</div>`:''}
-    </div>`;
-  }).join('');
-}
-// 单元格内容
-function renderMemberWgTree(m){
-  const nodes=memberWgTreeNodes(m);
-  if(!nodes.length){
-    return `<span style="color:var(--text3)">未分配</span>`;
-  }
-  const uid='m'+m.id;
-  const tree=`<div class="wgt">${renderWgTreeLevel(nodes,uid,0)}</div>`;
-  const conflict=(m.org_conflict||[]);
-  const note=m.org_source==='org'
-    ? (conflict.length
-        ? `<div style="margin-top:3px;font-size:11px;color:var(--danger,#d4380d)" title="架构管理未覆盖的工作组，按规则忽略">⚠ 忽略：${esc(conflict.join('、'))}</div>`
-        : `<div style="margin-top:3px;font-size:11px;color:var(--primary)" title="归属以【架构管理】的任命为准">🏛 架构管理任命</div>`)
-    : `<div style="margin-top:3px;font-size:11px;color:var(--text3)" title="该成员在【架构管理】中无任命，回退使用历史工作组归属">👥 历史归属（架构管理未任命）</div>`;
-  return tree+note;
-}
-function toggleWgTree(el, key){
-  // 局部 DOM 操作：**不重绘表格** —— 否则表格里未保存的姓名/账号/密码编辑会丢失，
-  // 滚动位置也会归零。
-  const node=el&&el.closest?el.closest('.wgt-node'):null;
-  if(!node)return;
-  const wrap=node.querySelector(':scope > .wgt-children');
-  if(!wrap)return;
-  const isOpen=wrap.style.display==='block';
-  wrap.style.display=isOpen?'none':'block';
-  el.textContent=isOpen?'▶':'▼';
-  // 同步展开状态，供下次整表重绘（筛选变化）时恢复
-  if(isOpen) WG_TREE_EXPANDED.delete(key); else WG_TREE_EXPANDED.add(key);
-}
-
-
 function renderTeamList(){
   const canEdit=ME.can_edit, isAdmin=ME.is_admin;
   const isSuperUser = ME.username === 'admin';  // 仅内置管理员账号可设置/重置密码
@@ -8128,7 +8103,12 @@ function renderTeamList(){
           <input type="text" id="tm_edit_name_${m.id}" value="${esc(m.name)}" style="width:100px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">
         </td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--text2)">
-          ${renderMemberWgTree(m)}
+          ${isAdmin
+            ? `<button type="button" class="form-input" id="tm_dept_${m.id}" style="width:210px;cursor:pointer;text-align:left;background:#fff"
+                title="${esc((m.departments||[]).join('、')||'点击选择部门（可多选）')}"
+                onclick="openTmDeptPick(this,${m.id})">${esc(fmtDepts(m.departments)||'点击选择')}</button>`
+            : `<span style="display:inline-block;max-width:210px;vertical-align:bottom;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                title="${esc((m.departments||[]).join('、'))}">${esc(fmtDepts(m.departments)||'—')}</span>`}
         </td>
         <td style="padding:7px 10px">${isAdmin
             ? `<input type="text" id="tm_account_${m.id}" value="${esc(m.account)}" placeholder="登录账号名" style="width:140px;padding:4px 8px;border:1px solid var(--primary);border-radius:4px;font-size:13px">`
@@ -8294,7 +8274,7 @@ function initTeamFilterBar(){
         <thead><tr style="background:var(--bg)">
           <th style="padding:6px 10px;text-align:left;width:122px;cursor:pointer;user-select:none" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
           <th style="padding:6px 10px;text-align:left;width:130px">姓名</th>
-          <th style="padding:6px 10px;text-align:left;width:230px">已选工作组</th>
+          <th style="padding:6px 10px;text-align:left;width:230px">部门</th>
           <th style="padding:6px 10px;text-align:left;width:150px">账号</th>
           <th style="padding:6px 10px;text-align:left;width:170px">密码</th>
           <th style="padding:6px 10px;text-align:left;width:120px">权限（角色）</th>
@@ -8316,6 +8296,15 @@ function syncTmStickyTop(){
     if(!box||!box.style||typeof box.style.setProperty!=='function')return;
     box.style.setProperty('--tm-sticky-top', '0px');
   }catch(e){ /* 测量失败不影响主流程 */ }
+}
+// #165 账号管理：部门多选（管理员可编辑；确定后暂存草稿，「保存全部」统一提交）
+function openTmDeptPick(btn, mid){
+  const cur=TM_DEPT_DRAFT[mid]!==undefined?TM_DEPT_DRAFT[mid]:((TM_ALL.find(m=>m.id===mid)||{}).departments||[]);
+  openDeptPick(btn, cur, function(b,sel){
+    TM_DEPT_DRAFT[mid]=sel;
+    b.textContent=fmtDepts(sel)||'点击选择';
+    b.title=sel.join('、')||'点击选择部门（可多选）';
+  });
 }
 async function addTeamMember(){
   const n=document.getElementById('t_new_name').value.trim();
@@ -8376,6 +8365,8 @@ async function saveAllTeamMembers(){
       const empInp=document.getElementById('tm_empno_'+m.id);
       u.emp_no=empInp?(empInp.value||'').trim():'';
     }
+    // #165 部门：仅提交本轮通过选择器改动过的行（草稿命中才带字段，未动的不覆盖他人修改）
+    if(TM_DEPT_DRAFT[m.id]!==undefined)u.departments=TM_DEPT_DRAFT[m.id];
     updates.push(u);
   }
   // #142 账号唯一性预检（2026-11-10）：批量保存是 Promise.all 并发，
@@ -8424,8 +8415,16 @@ async function saveAllTeamMembers(){
     }
   }
   try{
-    await Promise.all(updates.map(u=>api('/api/team/'+u.id,{method:'PUT',body:JSON.stringify(u)})));
-    toast(`已保存 ${updates.length} 位成员`+(pwdChanged?`，密码已更新 ${pwdChanged} 位`:'')+
+    // #165：改**串行**提交 —— 并发 Promise.all 会打出全部行的 PUT 风暴，
+    //   SQLite 写锁撞车（database is locked）导致整批 500；串行逐个提交，
+    //   单行失败也不再拖垮其他行（记录失败数，最后汇总提示）。
+    let failed=0;
+    for(const u of updates){
+      try{ await api('/api/team/'+u.id,{method:'PUT',body:JSON.stringify(u)}); }
+      catch(e){ failed++; console.warn('成员保存失败', u.id, e.message); }
+    }
+    if(failed===updates.length){ toast('保存失败：'+(updates[0]&&updates[0].id?'（含 id '+updates[0].id+' 在内的全部行）':'')); return }
+    toast(`已保存 ${updates.length-failed} 位成员`+(failed?`，${failed} 位失败（重试可续）`:'')+(pwdChanged?`，密码已更新 ${pwdChanged} 位`:'')+
           (hidden?`（另有 ${hidden} 位成员被筛选隐藏，未提交）`:''));
     openTeamModal();
   }catch(e){toast(e.message)}
