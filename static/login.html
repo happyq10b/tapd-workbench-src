@@ -8,9 +8,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f0f2f5 0%,#e6f0fa 100%);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
 .card{background:#fff;border-radius:12px;padding:40px 36px;width:360px;box-shadow:0 2px 8px rgba(0,0,0,.08);position:relative}
-/* 登录页小精灵挂件（T-013）：趴在卡片左上角，约1/3溢出卡外；纯装饰不挡点击 */
-.pet{position:absolute;left:0;top:0;width:56px;height:56px;
-  transform:translate(-30%,-48%);
+/* 登录页小精灵挂件（T-013）：趴在卡片左下角提示行旁；纯装饰不挡点击 */
+.pet{position:absolute;left:12px;bottom:28px;width:56px;height:56px;
   pointer-events:none;z-index:1}
 .pet img{width:100%;height:100%;image-rendering:pixelated}
 .logo{text-align:center;margin-bottom:24px}
@@ -70,7 +69,7 @@ button{padding:12px;border:none;border-radius:8px;background:#1890ff;color:#fff;
 button:hover{opacity:.9}
 button:disabled{opacity:.5;cursor:not-allowed}
 .msg{margin-top:14px;font-size:13px;text-align:center;color:#d63c3c;min-height:18px}
-.hint{margin-top:18px;font-size:11.5px;color:#7a88a0;text-align:center;line-height:1.6}
+.hint{margin-top:18px;font-size:11.5px;color:#7a88a0;text-align:center;line-height:1.6;padding-left:44px}
 </style>
 </head>
 <body>
