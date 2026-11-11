@@ -2096,6 +2096,7 @@ function goLogin(){
           <div class="form-group" style="flex:1;min-width:130px" id="t_new_account_wrap"><label>登录账号（可选）</label><input type="text" class="form-input" id="t_new_account" placeholder="留空则不开通"></div>
           <div class="form-group" style="flex:1;min-width:150px" id="t_new_pwd_wrap"><label>密码（开通时必填）</label><span class="pwd-wrap" style="width:100%"><input type="password" class="form-input" id="t_new_pwd" placeholder="设置密码" style="flex:1;min-width:0"><button type="button" class="pwd-eye" onclick="togglePwd('t_new_pwd',this)" title="显示/隐藏密码"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></span></div>
           <div class="form-group" style="min-width:100px"><label>角色</label><select class="form-select" id="t_new_role"><option value="">无权限</option><option value="editor" selected>可编辑</option><option value="viewer">只读</option><option value="admin">管理员</option></select></div>
+          <div class="form-group" style="flex:1.2;min-width:160px"><label>部门（可多选）</label><button type="button" class="form-input" id="t_new_dept" style="cursor:pointer;text-align:left;background:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="选择部门（可多选；保存后同步架构参与人）" onclick="openNewMemberDeptPick(this)">点击选择</button></div>
           <button class="btn-primary" onclick="addTeamMember()" style="flex-shrink:0;height:36px">添加成员</button>
         </div>
       </div>
@@ -7845,6 +7846,8 @@ async function openTeamModal(){
   renderTeamList();
   document.getElementById('t_new_name').value='';
   document.getElementById('t_new_account').value='';
+  TM_NEW_DEPT=[];
+  { const _nd=document.getElementById('t_new_dept'); if(_nd)_nd.textContent='点击选择'; }
   // 账号开通/密码管理对管理员可见（密码重置仍仅超管）
   const _accW=document.getElementById('t_new_account_wrap'), _pwdW=document.getElementById('t_new_pwd_wrap');
   if(_accW)_accW.style.display=isAdmin?'':'none';
@@ -8360,11 +8363,21 @@ function openTmDeptPick(btn, mid){
     b.title=sel.join('、')||'点击选择部门（可多选）';
   });
 }
+// T-0169 新成员部门草稿（多选；确定后暂存，随「添加成员」一并提交）
+var TM_NEW_DEPT=[];
+function openNewMemberDeptPick(btn){
+  openDeptPick(btn, TM_NEW_DEPT, function(b,sel){
+    TM_NEW_DEPT=sel.slice();
+    b.textContent=sel.join('、')||'点击选择';
+    b.title=sel.join('、')||'选择部门（可多选；保存后同步架构参与人）';
+  });
+}
 async function addTeamMember(){
   const n=document.getElementById('t_new_name').value.trim();
   if(!n){toast('请输入姓名');return}
   const role=document.getElementById('t_new_role').value;
   const body={name:n,role};   // 组织归属不在此处设置，归【架构管理】任命
+  if(TM_NEW_DEPT.length)body.departments=TM_NEW_DEPT.slice();   // T-0169 部门
   // 管理员可开通账号并设置首次密码/角色；密码重置仍仅超管
   if(ME.is_admin){
     const account=document.getElementById('t_new_account').value.trim();
@@ -8381,7 +8394,10 @@ async function addTeamMember(){
       body.account=account;body.password=pwd;
     }
   }
-  try{await api('/api/team',{method:'POST',body:JSON.stringify(body)});toast('已添加');openTeamModal()}
+  try{await api('/api/team',{method:'POST',body:JSON.stringify(body)});
+    TM_NEW_DEPT=[];
+    const _db=document.getElementById('t_new_dept'); if(_db)_db.textContent='点击选择';
+    toast('已添加');openTeamModal()}
   catch(e){toast(e.message)}
 }
 async function saveAllTeamMembers(){

@@ -3761,6 +3761,7 @@ class TeamReq(BaseModel):
     account: Optional[str] = None   # 配套登录账号（username），可空=不开通
     password: Optional[str] = None  # 开通账号时的密码
     role: str = 'editor'
+    departments: Optional[List[str]] = None   # T-0169 部门（多选）；None=不设置
 
 class TeamUpdateReq(BaseModel):
     name: str
@@ -3833,13 +3834,28 @@ def add_team(req: TeamReq, username: str = Depends(require_admin), request: Requ
         #   不回落），新成员会拿到 3590 这类大号，与存量 1..41 断层（用户反馈）。
         #   显式插入 rowid 会自动把 seq 顶到 max(id)，旧水位随之自愈。
         _nid = dbq('SELECT COALESCE(MAX(id),0)+1 AS nid FROM team_members')[0]['nid']
-        dbe('INSERT INTO team_members (id, name, workgroups) VALUES (?,?,?)',
-            (_nid, name, ''))
+        # T-0169 工号自动生成：【no+5位随机数】（与存量 no23892 等格式一致），
+        #   撞号重试（对 emp_no 与「未设工号回退展示的成员编号」双口径查重）
+        import random as _random
+        for _ in range(50):
+            cand = 'no%05d' % _random.randint(0, 99999)
+            clash = dbq('SELECT 1 FROM team_members WHERE emp_no=?', (cand,))
+            clash2 = dbq("SELECT 1 FROM team_members WHERE IFNULL(emp_no,'')='' AND CAST(id AS TEXT)=?",
+                         (cand[2:].lstrip('0') or '0',))
+            if not clash and not clash2:
+                break
+        else:
+            cand = ''
+        dbe('INSERT INTO team_members (id, name, workgroups, emp_no) VALUES (?,?,?,?)',
+            (_nid, name, '', cand))
     except sqlite3.IntegrityError:
         raise HTTPException(409, '成员已存在')
     mid = dbq('SELECT id FROM team_members WHERE name=?', (name,))[0]['id']
     if acc:
         _open_account(mid, acc, req.password, req.role)
+    # T-0169 部门（多选）：写单一来源列 + 强映射架构参与人（与 #165 同一套）
+    if req.departments is not None:
+        _set_member_departments(mid, _clean_dept_list(req.departments))
     audit_log(username, client_ip(request), 'member_create', f'成员 {name}', f'新增成员（id={mid}' + (f'，开通账号 {req.account.strip()}' if req.account and req.account.strip() else '，未开通账号') + '）', 'success')
     return {'ok': True}
 
