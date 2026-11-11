@@ -8698,9 +8698,11 @@ var ORG_TYPE_STYLE={
 };
 // 可输入下拉（带过滤 + 滚动面板，高度随窗口自适应）
 let _comboPanel=null;
-function comboMount(input){
+function comboMount(input,opts){
+  // T-0171 泛化：opts={items:[{v,label,sub}],onPick(input,v)} —— 自定义候选与选中回调；
+  //   不传 opts 时保持旧行为（联想 TEAM_MEMBERS 姓名，写回 input.value）
+  opts=opts||{};
   comboClose();
-  const opts=TEAM_MEMBERS||[];
   const rect=input.getBoundingClientRect();
   const panel=document.createElement('div');
   panel.className='combo-panel';
@@ -8708,15 +8710,28 @@ function comboMount(input){
   panel.style.width=Math.max(rect.width,150)+'px';
   panel._input=input;
   const kw=(input.value||'').trim().toLowerCase();
-  const list=opts.filter(o=>o.toLowerCase().includes(kw));
-  if(!list.length){
-    panel.innerHTML='<div class="combo-empty">无匹配成员</div>';
+  let list=[];
+  if(opts.items){
+    list=opts.items.filter(o=>((o.label||'')+' '+(o.sub||'')).toLowerCase().includes(kw));
+    panel.innerHTML=list.length
+      ?list.map(o=>`<div class="combo-opt" data-v="${esc(o.v)}">${esc(o.label)}${o.sub?` <span style="color:var(--text3);font-size:11px">${esc(o.sub)}</span>`:''}</div>`).join('')
+      :'<div class="combo-empty">无匹配成员</div>';
   }else{
-    panel.innerHTML=list.map(o=>`<div class="combo-opt" data-v="${esc(o)}">${esc(o)}</div>`).join('');
-    panel.querySelectorAll('.combo-opt').forEach(el=>{
-      el.addEventListener('mousedown', e=>{ e.preventDefault(); input.value=el.getAttribute('data-v'); comboClose(); });
-    });
+    const opts0=TEAM_MEMBERS||[];
+    list=opts0.filter(o=>o.toLowerCase().includes(kw)).map(o=>({v:o,label:o}));
+    panel.innerHTML=list.length
+      ?list.map(o=>`<div class="combo-opt" data-v="${esc(o.v)}">${esc(o.label)}</div>`).join('')
+      :'<div class="combo-empty">无匹配成员</div>';
   }
+  panel.querySelectorAll('.combo-opt').forEach(el=>{
+    el.addEventListener('mousedown', e=>{
+      e.preventDefault();
+      const v=el.getAttribute('data-v');
+      input.value=opts.items?((opts.items.find(o=>String(o.v)===String(v))||{}).label||v):v;
+      comboClose();
+      if(opts.onPick)opts.onPick(input,v);
+    });
+  });
   document.body.appendChild(panel);
   placeDropPopover(input, panel);   // #166：挂载后定位——底部溢出时自动向上弹
   _comboPanel=panel;
@@ -8892,26 +8907,71 @@ function renderOrgRoles(){
       <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
         ${r.role_key==='member'&&rCan?'':(function(){
           // #168 候选按部门+任职要求过滤（部门=节点所属部门；已任同岗位者剔除）
+          // T-0171 任命改「输入姓名」：联想候选仍取过滤后的 cands（部门+任职要求）
           const cands=orgApptCandidates(node,r.role_key);
-          return `<select class="form-select" id="g_appt_sel_${esc(r.role_key)}" style="flex:1;padding:4px 8px;font-size:12px" onchange="this.style.color=''"${rCan?'':' disabled'}>
-          <option value="">${cands.length?'选择成员…':'无可任命的部门成员'}</option>
-          ${cands.map(m=>`<option value="${m.id}">${esc(m.name)}${m.account?'（'+esc(m.account)+'）':''}</option>`).join('')}
-        </select>`;})()}
+          const disAttr=rCan?'':' disabled';
+          return `<input class="form-input" id="g_appt_inp_${esc(r.role_key)}" autocomplete="off"
+            placeholder="${cands.length?'输入姓名（可模糊联想）':'无可任命的部门成员'}"
+            style="flex:1;padding:4px 8px;font-size:12px;height:28px"${disAttr}
+            oninput="orgApptSuggest(this,${nid},'${esc(r.role_key)}')"
+            onfocus="orgApptSuggest(this,${nid},'${esc(r.role_key)}')"
+            onkeydown="orgApptKeydown(event,this,${nid},'${esc(r.role_key)}')">`;
+        })()}
         ${r.role_key==='member'&&rCan
           ?`<button class="icon-btn" style="flex-shrink:0" onclick="openOrgMemberPick(${nid},'member',this)"
               title="勾选多个成员批量任命为组员">🌳 选择成员（可多选）</button>`
-          :(rCan?`<button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_sel_${esc(r.role_key)}').value)">任命</button>`
+          :(rCan?`<button class="icon-btn" style="flex-shrink:0" onclick="addOrgAppt(${nid},'${esc(r.role_key)}',document.getElementById('g_appt_inp_${esc(r.role_key)}'))">任命</button>`
           :`<span style="font-size:11px;color:var(--text3);white-space:nowrap">${apptTipFor(r.role_key)}</span>`)}
       </div>
     </div>`;
   });
   box.innerHTML=html||'<div style="color:var(--text3);font-size:12px">该节点类型暂无可配置岗位</div>';
 }
-// 任命：加人
-async function addOrgAppt(nodeId,roleKey,memberId){
-  if(!memberId){toast('请先选择成员');return}
+// T-0171 任命输入联想：候选 = orgApptCandidates（部门+任职要求过滤，#168 口径不变）；
+//   选中项 member_id 存 input.dataset.mid；手动继续输入即清除（需重新匹配）
+function orgApptCandsOf(nid,roleKey){
+  const node=ORG_FLAT.find(x=>x.id===Number(nid));
+  return node?orgApptCandidates(node,roleKey):[];
+}
+function orgApptSuggest(inp,nid,roleKey){
+  inp.dataset.mid='';
+  const items=orgApptCandsOf(nid,roleKey).map(m=>({v:String(m.id),label:m.name,sub:m.account?'（'+m.account+'）':''}));
+  comboMount(inp,{items:items,onPick:function(el,v){el.dataset.mid=v;}});
+}
+function orgApptKeydown(e,inp,nid,roleKey){
+  if(e.key!=='Enter')return;
+  e.preventDefault();e.stopPropagation();
+  // Enter：优先已点选的联想项；否则取候选中首个命中（前缀→包含）的成员直接任命
+  const cands=orgApptCandsOf(nid,roleKey);
+  const q=(inp.value||'').trim();
+  if(inp.dataset.mid){addOrgAppt(nid,roleKey,inp);return}
+  const hit=cands.filter(m=>m.name===q)[0]
+        ||cands.filter(m=>m.name.startsWith(q))[0]
+        ||cands.filter(m=>m.name.includes(q))[0];
+  if(hit){inp.value=hit.name;inp.dataset.mid=String(hit.id);addOrgAppt(nid,roleKey,inp);}
+  else{comboClose();toast(q?('未找到成员「'+q+'」（仅限本部门候选名单）'):'请输入成员姓名');}
+}
+// 任命：加人（T-0171：memberId 参数为任命输入框元素 —— 点选联想项带 member_id，
+//   纯手输按「精确名 → 前缀 → 包含」顺序解析；唯一命中才放行，同名多个要求点选）
+async function addOrgAppt(nodeId,roleKey,inp){
+  if(!inp){toast('请先输入成员姓名');return}
+  const cands=orgApptCandsOf(nodeId,roleKey);
+  let mid=inp.dataset&&inp.dataset.mid?Number(inp.dataset.mid):0;
+  const q=(inp.value||'').trim();
+  if(!mid&&q){
+    const exact=cands.filter(m=>m.name===q);
+    if(exact.length===1){mid=exact[0].id;inp.dataset.mid=String(mid);}
+    else if(exact.length>1){toast('存在同名成员，请从联想列表中点选');return}
+    else{
+      const like=cands.filter(m=>m.name.startsWith(q)||m.name.includes(q));
+      if(like.length===1){mid=like[0].id;inp.dataset.mid=String(mid);}
+      else if(like.length>1){toast('匹配到 '+like.length+' 位成员，请从联想列表中点选');return}
+      else{toast('未找到成员「'+q+'」（仅限本部门候选名单）');return}
+    }
+  }
+  if(!mid){toast('请输入成员姓名');return}
   try{
-    await api('/api/org/appointments',{method:'POST',body:JSON.stringify({node_id:nodeId,member_id:Number(memberId),role_key:roleKey})});
+    await api('/api/org/appointments',{method:'POST',body:JSON.stringify({node_id:nodeId,member_id:Number(mid),role_key:roleKey})});
     toast('已任命');
     await openWgModal();
   }catch(e){toast(e.message)}
