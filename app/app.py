@@ -4584,7 +4584,7 @@ class OrgAppointmentReq(BaseModel):
     role_key: str
     is_primary: int = 0
 
-def _collect_node_members(node_id: int, nodes, appts):
+def _collect_node_members(node_id: int, nodes, appts, role_sort=None):
     """节点（含全部后代）的末级人员名单。
 
     返回 [{name, role_name, node_name, node_id}]，按姓名去重（同名人员在不同节点各占一项）。
@@ -4594,17 +4594,27 @@ def _collect_node_members(node_id: int, nodes, appts):
     前端树形组件据此把人员挂到「真正所属的那个节点」下，
     否则父节点的成员表（含全部后代）会与子节点的成员表重复 —— 同一批人
     在树上出现两次（父节点一份、子节点一份），看起来就是「树状展开异常」。
+
+    ⚠️ #164（用户确认）：岗位标签 = **该人员所挂节点上的最高岗位**
+      （同节点多条任命按 org_roles.sort 取最小；跨节点不合并）——
+      原实现按遍历顺序取第一条，「组员」任命（先创建）排在「组长」之前
+      → 升组长后各架构树仍显示「组员」。
     """
     by_parent = defaultdict(list)
     for n in nodes:
         by_parent[n['parent_id']].append(n)
     name_by_id = {n['id']: n['name'] for n in nodes}
+    type_of = {n['id']: n['node_type'] for n in nodes}
+    role_sort = role_sort or {}
     out = []
     seen = set()
     stack = [node_id]
     while stack:
         cur = stack.pop()
-        for a in appts.get(cur, []):
+        # 本节点任命按岗位高→低排序，去重取首条 = 该人在此节点的最高岗位
+        appt_list = sorted(appts.get(cur, []),
+                           key=lambda a: role_sort.get((type_of.get(cur, ''), a.get('role_key') or ''), 99))
+        for a in appt_list:
             nm = a.get('member_name') or ''
             if not nm or nm in seen:
                 continue          # 同一人只在最靠近的节点出现一次，避免父节点重复列出
@@ -4672,8 +4682,10 @@ def get_org_tree(username: str = Depends(require_auth)):
     # 全部任职（按节点分组）
     appts = {}
     role_names = {}
-    for r in dbq('SELECT node_type, role_key, role_name FROM org_roles'):
+    role_sort = {}
+    for r in dbq('SELECT node_type, role_key, role_name, sort FROM org_roles'):
         role_names[(r['node_type'], r['role_key'])] = r['role_name']
+        role_sort[(r['node_type'], r['role_key'])] = r['sort']
     for r in dbq('''SELECT a.id, a.node_id, a.member_id, a.role_key, a.is_primary,
                            m.name AS member_name, m.account
                     FROM org_appointments a JOIN team_members m ON m.id=a.member_id
@@ -4759,7 +4771,7 @@ def get_org_tree(username: str = Depends(require_auth)):
                 n, owned=owned, wg_by_id=wg_by_id)))
             # 该节点的末级人员名单（姓名 + 岗位），供前端树形组件渲染「人员」层。
             # 取该节点的任职人 + 其所有后代节点的任职人（末级=最深层的实际人员）。
-            node['members'] = _collect_node_members(n['id'], nodes, appts)
+            node['members'] = _collect_node_members(n['id'], nodes, appts, role_sort)
             node['children'] = build(n['id'])
             out.append(node)
         return out
