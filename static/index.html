@@ -1000,6 +1000,8 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .pp-ip{position:relative}
 .pp-in{width:100%;border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;box-sizing:border-box}
 .pp-drop{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:min(240px,60vh);overflow:auto;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow-lg);z-index:400;padding:4px}
+/* #166：靠近视口底部时向上弹（JS 检测溢出后加 .up 类） */
+.pp-drop.up{top:auto;bottom:calc(100% + 4px)}
 .pp-opt{padding:6px 10px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-radius:4px;white-space:nowrap}
 .pp-opt:hover{background:rgba(47,128,237,.1);color:var(--primary)}
 .pp-opt.sel{background:rgba(47,128,237,.12);color:var(--primary);font-weight:500}
@@ -3501,6 +3503,23 @@ function renderMyProfile(){
 var DEPT_OPTIONS=[];
 var DEPT_PICK={btn:null,sel:[],apply:null};
 function fmtDepts(arr){ return (arr&&arr.length)?arr.join('、'):''; }
+// #166 下拉弹层通用定位：默认向下弹（anchor 下方 gap 处）；下方放不下且上方
+//   空间更大时改为向上弹；两侧都放不下则贴近视口顶并压缩面板高度（maxHeight）。
+//   必须在 el 已挂载到 DOM 后调用（需要 offsetHeight 实测高度）。
+function placeDropPopover(anchor, el, gap){
+  gap=(gap===undefined?4:gap);
+  const r=anchor.getBoundingClientRect();
+  const h=el.offsetHeight, vh=window.innerHeight, M=8;
+  const below=r.bottom+gap, above=r.top-gap-h;
+  let top=below;
+  if(below+h>vh-M && above>below) top=Math.max(M,above);   // 翻转向上
+  if(top+h>vh-M){                                           // 两侧都不够 → 贴顶限高
+    top=M;
+    el.style.maxHeight=Math.max(120, vh-M*2-top)+'px';
+  }
+  el.style.top=top+'px';
+  return top;
+}
 function openDeptPick(btn, current, applyFn){
   closeDeptPick();
   DEPT_PICK={btn:btn, sel:(current||[]).slice(), apply:applyFn};
@@ -3509,7 +3528,7 @@ function openDeptPick(btn, current, applyFn){
   pop.style.padding='8px 10px'; pop.style.minWidth='190px';
   pop.style.maxHeight='320px'; pop.style.overflow='auto';
   const r=btn.getBoundingClientRect();
-  pop.style.position='fixed'; pop.style.left=r.left+'px'; pop.style.top=(r.bottom+4)+'px';
+  pop.style.position='fixed'; pop.style.left=r.left+'px';
   pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">选择部门（可多选 · 保存后同步架构参与人）</div>`
     +(DEPT_OPTIONS.length?DEPT_OPTIONS.map(d=>
       `<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;white-space:nowrap">`
@@ -3523,6 +3542,7 @@ function openDeptPick(btn, current, applyFn){
     DEPT_PICK.sel=[...pop.querySelectorAll('input[type=checkbox]:checked')].map(x=>x.value);
   }));
   document.body.appendChild(pop);
+  placeDropPopover(btn, pop);   // #166：挂载后定位——底部溢出时自动向上弹
   setTimeout(()=>document.addEventListener('click',_deptPickOutside),0);
 }
 function _deptPickOutside(e){
@@ -6729,7 +6749,13 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
     // 2026-11-05：取消负责人/参与人互斥 —— 参与人下拉不再隐藏当前负责人
     drop.innerHTML=list.map(n=>`<div class="pp-opt ${arr.includes(n)?'sel':''}" onmousedown="ppToggle('${containerId}','${esc(n)}')">${esc(n)}</div>`).join('')
       ||(ALL.length?'<div class="pp-empty">无匹配成员</div>':'<div class="pp-empty">无可选人员（请先在上级层级配置负责人/参与人）</div>');
-    drop.style.display='block';};
+    drop.style.display='block';
+    // #166：下拉底部溢出视口 → 向上弹（改锚定输入框上方）
+    const _dr=drop.getBoundingClientRect();
+    if(_dr.bottom>window.innerHeight-8 && _dr.top-input.getBoundingClientRect().top>0){
+      const upSpace=input.getBoundingClientRect().top-8;
+      drop.classList.toggle('up', upSpace>_dr.height || upSpace>(window.innerHeight-_dr.top));
+    }else drop.classList.remove('up');};
   PP[containerId].rd=rd;
   rt();
   inp.addEventListener('focus',()=>rd(inp.value));
@@ -8155,11 +8181,11 @@ function openRoleMulti(btn){
   const r=btn.getBoundingClientRect();
   pop.style.position='fixed';
   pop.style.left=r.left+'px';
-  pop.style.top=(r.bottom+4)+'px';
   const map={admin:'管理员',editor:'可编辑',viewer:'只读',noaccount:'无权限'};
   const opts=['admin','editor','viewer','noaccount'];
   pop.innerHTML=`<div style="font-size:11px;color:var(--text3);margin-bottom:4px">不勾选任何角色 = 显示全部角色</div>`+opts.map(v=>`<label style="display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer"><input type="checkbox" value="${v}" ${ROLE_SNAP.includes(v)?'checked':''}> <span>${map[v]}</span></label>`).join('')+`<div style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span id="role_select_all_btn"><button class="icon-btn" onclick="selectAllRoles()" id="role_select_all_btn_inner">全选</button></span><span style="display:flex;gap:8px"><button class="btn-secondary" onclick="closeRoleMulti()">取消</button><button class="btn-primary" onclick="applyRoleMulti()">确定</button></span></div>`;
   document.body.appendChild(pop);
+  placeDropPopover(btn, pop);   // #166：挂载后定位——底部溢出时自动向上弹
   // 初始化"全选/取消全选"按钮文字：若快照里全部选项都已选，显示"取消全选"；否则显示"全选"
   const _all=['admin','editor','viewer','noaccount'];
   const _btnInit=document.getElementById('role_select_all_btn_inner');
@@ -8581,7 +8607,6 @@ function comboMount(input){
   const panel=document.createElement('div');
   panel.className='combo-panel';
   panel.style.left=rect.left+'px';
-  panel.style.top=(rect.bottom+4)+'px';
   panel.style.width=Math.max(rect.width,150)+'px';
   panel._input=input;
   const kw=(input.value||'').trim().toLowerCase();
@@ -8595,6 +8620,7 @@ function comboMount(input){
     });
   }
   document.body.appendChild(panel);
+  placeDropPopover(input, panel);   // #166：挂载后定位——底部溢出时自动向上弹
   _comboPanel=panel;
   setTimeout(()=>document.addEventListener('mousedown', comboOutside, true), 0);
 }
