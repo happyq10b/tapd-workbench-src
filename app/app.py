@@ -5309,6 +5309,16 @@ def create_org_appointment(req: OrgAppointmentReq, username: str = Depends(requi
     _check_role_allowed(node['node_type'], role_key)
     _check_appoint_perm(username, node, role_key)
     _check_unique_slot(req.node_id, role_key, req.member_id)
+    # T-0172 同一小组内组长与组员不可由同一人兼任（与前端提交拦截同口径兜底）
+    if role_key in ('group_leader', 'member'):
+        other = 'member' if role_key == 'group_leader' else 'group_leader'
+        other_name = '组员' if role_key == 'group_leader' else '组长'
+        clash = dbq('SELECT m.name FROM org_appointments a JOIN team_members m ON m.id=a.member_id'
+                    ' WHERE a.node_id=? AND a.role_key=? AND a.member_id=?',
+                    (req.node_id, other, req.member_id))
+        if clash:
+            raise HTTPException(409, f'「{clash[0]["name"]}」已是本组的{other_name}，组长与组员不可兼任；'
+                                    f'请先移除其{other_name}身份')
     try:
         dbe('INSERT INTO org_appointments (node_id, member_id, role_key, is_primary) VALUES (?,?,?,?)',
             (req.node_id, req.member_id, role_key, 1 if req.is_primary else 0))

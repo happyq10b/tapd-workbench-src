@@ -8951,6 +8951,19 @@ function orgApptKeydown(e,inp,nid,roleKey){
   if(hit){inp.value=hit.name;inp.dataset.mid=String(hit.id);addOrgAppt(nid,roleKey,inp);}
   else{comboClose();toast(q?('未找到成员「'+q+'」（仅限本部门候选名单）'):'请输入成员姓名');}
 }
+// T-0172 同一小组内组长与组员不可由同一人兼任：
+//   提交前检查目标成员是否已在**同节点**担任对侧岗位（组长⇄组员），
+//   命中返回冲突名单（用于 toast 提示并阻止提交）；后端另有同口径兜底校验
+function orgLeaderMemberClash(node,roleKey,memberIds){
+  if(!node||!node.appointments)return null;
+  const isMemberRole=roleKey==='member';
+  const isLeaderRole=roleKey==='group_leader';
+  if(!isMemberRole&&!isLeaderRole)return null;
+  const other=isMemberRole?'group_leader':'member';
+  const ids=memberIds.map(Number);
+  const conflict=node.appointments.filter(a=>a.role_key===other&&ids.indexOf(Number(a.member_id))>=0);
+  return conflict.length?conflict.map(a=>a.member_name):null;
+}
 // 任命：加人（T-0171：memberId 参数为任命输入框元素 —— 点选联想项带 member_id，
 //   纯手输按「精确名 → 前缀 → 包含」顺序解析；唯一命中才放行，同名多个要求点选）
 async function addOrgAppt(nodeId,roleKey,inp){
@@ -8970,6 +8983,9 @@ async function addOrgAppt(nodeId,roleKey,inp){
     }
   }
   if(!mid){toast('请输入成员姓名');return}
+  // T-0172 角色冲突：该成员已是本组组员 → 拦截任命组长
+  const clash=orgLeaderMemberClash(ORG_FLAT.find(x=>x.id===Number(nodeId)),roleKey,[mid]);
+  if(clash){toast('「'+clash.join('、')+'」已是本组组员，组长与组员不可兼任；请先移除其组员身份再任命组长');return}
   try{
     await api('/api/org/appointments',{method:'POST',body:JSON.stringify({node_id:nodeId,member_id:Number(mid),role_key:roleKey})});
     toast('已任命');
@@ -9006,6 +9022,9 @@ function openOrgMemberPick(nodeId,roleKey,anchor){
 }
 // 批量任命：逐个提交（member 可多人，无唯一槽位冲突），失败明细汇总
 async function addOrgApptMulti(nodeId,roleKey,ids,skip){
+  // T-0172 角色冲突：批量名单中有人已是本组组长 → 整批拦截（阻止提交）
+  const clash=orgLeaderMemberClash(ORG_FLAT.find(x=>x.id===Number(nodeId)),roleKey,(ids||[]).map(it=>it.id));
+  if(clash){toast('组长与组员不可兼任：'+clash.join('、')+' 已是本组组长，请先移除其组长身份，或从名单中去掉后再提交');return}
   const okList=[],failList=(skip||[]).slice();
   for(const it of ids){
     try{
@@ -9325,7 +9344,9 @@ function renderWgList(){
     const a=(n.appointments||[]).find(x=>x.role_key===r.role_key);
     return a?a.member_name:'';
   };
-  const apptCount=(n)=>(n.appointments||[]).length;
+  // T-0172 任职人数按**唯一成员**统计：一人兼任组长+组员只计一次
+  //   （原实现按任命条数计，兼任被重复计算）
+  const apptCount=(n)=>{const s=new Set();(n.appointments||[]).forEach(a=>s.add(a.member_id));return s.size;};
   const row=(n,dep,sib)=>{
     const st=ORG_TYPE_STYLE[n.node_type]||ORG_TYPE_STYLE.group;
     // 权限渲染（2026-11-03）：
@@ -9350,7 +9371,7 @@ function renderWgList(){
       <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:76px">${st.icon} ${esc(n.name)}</span>
       <span style="font-size:10.5px;color:${st.color};background:${st.bg};border:1px solid ${st.bd};border-radius:3px;padding:0 5px;flex-shrink:0">${esc(n.type_name||'')}</span>
       <span style="color:var(--text2);font-size:11.5px;width:66px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(()=>{const l=leaderOf(n);return l?esc(l):'<span style="color:var(--text3)">未任命</span>'})()}</span>
-      <span style="font-size:11.5px;color:var(--text3);flex-shrink:0;min-width:44px;text-align:right" title="任职人数">${apptCount(n)} 人</span>
+      <span style="font-size:11.5px;color:var(--text3);flex-shrink:0;min-width:44px;text-align:right" title="任职人数（一人多岗只计一次）">${apptCount(n)} 人</span>
       <span style="color:${(n.node_type==='dept'||n.node_type==='center')?(n.owned_boards&&n.owned_boards.length?'var(--primary)':'var(--text3)'):(n.wg_boards?'var(--primary)':'var(--text3)')};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;padding-left:8px">${n.node_type==='center'?'🔒 全部看板（中心）':(n.node_type==='dept'?((n.owned_boards&&n.owned_boards.length)?('板块：'+boardNames(n.owned_boards.join(','))):'未归属板块（看板管理中指定）'):(n.wg_boards?('板块：'+boardNames(n.wg_boards)):'未绑定板块'))}</span>
       <span style="flex-shrink:0" onclick="event.stopPropagation()">
         ${(canEdit&&sib)?(()=>{const si=sib.findIndex(x=>x.id===n.id);const up=si>0,down=si>=0&&si<sib.length-1;
