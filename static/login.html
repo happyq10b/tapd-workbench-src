@@ -7,7 +7,12 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f0f2f5 0%,#e6f0fa 100%);font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
-.card{background:#fff;border-radius:12px;padding:40px 36px;width:360px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.card{background:#fff;border-radius:12px;padding:40px 36px;width:360px;box-shadow:0 2px 8px rgba(0,0,0,.08);position:relative}
+/* 登录页小精灵挂件（T-013）：趴在卡片左上角，约1/3溢出卡外；纯装饰不挡点击 */
+.pet{position:absolute;left:0;top:0;width:56px;height:56px;
+  transform:translate(-30%,-48%);
+  pointer-events:none;z-index:1}
+.pet img{width:100%;height:100%;image-rendering:pixelated}
 .logo{text-align:center;margin-bottom:24px}
 /* ===== 品牌字母标（2026-11-02 UI设计师）=====
    原为 📊 emoji 图标 → 改为 **FISP** 字母标（英文缩写）。
@@ -70,6 +75,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </head>
 <body>
 <div class="card">
+  <div class="pet" id="pet" aria-hidden="true"><img id="petImg" alt=""></div>
   <div class="logo">
     <div class="icon" aria-hidden="true">FISP</div>
     <h1>财务综合事务平台</h1>
@@ -194,6 +200,14 @@ async function doLogin(){
 }
 btn.onclick=doLogin;
 p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+
+// —— 登录页小精灵挂件（T-013）：每次加载随机趴一只，纯装饰 ——
+(function(){
+  const no=1+Math.floor(Math.random()*386);
+  const img=document.getElementById('petImg');
+  img.onerror=function(){document.getElementById('pet').style.display='none'};
+  img.src='/pet/'+no;
+})();
 </script>
 </body>
 </html>

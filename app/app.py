@@ -7134,6 +7134,22 @@ def index():
 def login_page():
     return _login_resp()
 
+# 登录页小精灵挂件（T-013）：GET /pet/{no} → 仓库根 pokemon_sprites/ 下按
+# NNNN 前缀匹配的宝可梦像素图（0001~0386）。只读、按编号白名单前缀匹配，
+# 不做通用目录挂载（避免路径穿越暴露任意文件）。版权素材仅限内部使用。
+_PET_DIR = os.path.join(BASE_DIR, '..', '..', 'pokemon_sprites')
+
+@app.get('/pet/{no:int}')
+def pet_sprite(no: int):
+    if not 1 <= no <= 386:
+        raise HTTPException(404, '精灵编号超出范围')
+    import glob as _glob
+    hits = _glob.glob(os.path.join(_PET_DIR, '%04d_*.png' % no))
+    if not hits:
+        raise HTTPException(404, '精灵图不存在')
+    return FileResponse(hits[0],
+                        headers={'Cache-Control': 'public, max-age=86400'})
+
 # 默认占位图（用户未上传头像/个人照片时统一展示）。
 # 用白名单而非通用静态目录挂载 —— 避免路径穿越把任意文件暴露出去。
 _STATIC_FILES = {
