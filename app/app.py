@@ -1614,10 +1614,58 @@ def _set_setting(key: str, value: str) -> None:
     dbe('INSERT INTO app_settings (key, value) VALUES (?,?) '
         'ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
 
+# ---- 非看板数据状态快照（T-013f）：变更即记录（旧值+新值），支持追踪与回滚 ----
+def _record_state(scope: str, entity: str, field: str, old_value, new_value, changed_by: str):
+    """状态变更快照：新旧值不同才记一条。old/new 统一转字符串存储。"""
+    ov, nv = '' if old_value is None else str(old_value), '' if new_value is None else str(new_value)
+    if ov == nv:
+        return
+    dbe('INSERT INTO state_history (scope, entity, field, old_value, new_value, changed_by)'
+        ' VALUES (?,?,?,?,?,?)', (scope, entity, field, ov, nv, changed_by))
+
+def _state_history_rollback(row_id: int, username: str):
+    """按快照条目回滚：把 old_value 写回该字段的现值来源，并记录一条回滚快照。"""
+    row = dbq('SELECT * FROM state_history WHERE id=?', (row_id,))
+    if not row:
+        raise HTTPException(404, '快照不存在')
+    r = dict(row[0])
+    if r['scope'] == 'login_notice':
+        _set_setting('login_notice', r['old_value'])
+    elif r['scope'] == 'profile_status':
+        dbe('UPDATE users SET status_text=? WHERE username=?', (r['old_value'], r['entity']))
+    else:
+        raise HTTPException(400, '该快照类型不支持回滚：%s' % r['scope'])
+    _record_state(r['scope'], r['entity'], r['field'], r['new_value'], r['old_value'], username)
+    audit_log(username, '-', 'update', '状态快照回滚',
+              f'{r["scope"]}/{r["entity"] or "global"} 恢复至 {r["changed_at"]} 的旧值', 'success')
+    return r
+
 @app.get('/api/login/notice')
 def login_notice():
     """登录页通知栏文案（公开端点，登录前可取）。空 = 前端显示默认提示。"""
     return {'notice': _get_setting('login_notice', '')}
+
+
+# ---------------- 状态快照：查询 / 回滚（T-013f，仅管理员） ----------------
+@app.get('/api/state-history')
+def list_state_history(scope: str = '', limit: int = 100,
+                       username: str = Depends(require_admin)):
+    """非看板数据的状态快照清单（时间倒序）。scope 可选过滤。"""
+    limit = max(1, min(int(limit), 500))
+    if scope:
+        rows = dbq('SELECT * FROM state_history WHERE scope=? ORDER BY id DESC LIMIT ?',
+                   (scope, limit))
+    else:
+        rows = dbq('SELECT * FROM state_history ORDER BY id DESC LIMIT ?', (limit,))
+    return {'items': [dict(r) for r in rows]}
+
+@app.post('/api/state-history/{rid}/rollback')
+def rollback_state_history(rid: int, username: str = Depends(require_admin),
+                           request: Request = None):
+    """按快照回滚：把该条记录的旧值写回（并追加一条回滚快照，可追溯）。"""
+    r = _state_history_rollback(rid, username)
+    return {'ok': True, 'scope': r['scope'], 'entity': r['entity'],
+            'restored_value': r['old_value']}
 
 
 def require_super(username: str = Depends(require_auth)):
@@ -5948,18 +5996,25 @@ def update_profile(req: ProfileReq, username: str = Depends(require_auth), reque
     #   写全局配置 app_settings.login_notice；**users.status_text 保持原值不动**
     #   （顶栏个人状态栏语义不变）。非超管用户完全走原「个人状态」逻辑。
     if username == SUPER_ADMIN:
+        # T-013f：登入通知变更 → 状态快照（旧值→新值）
+        _notice_old = _get_setting('login_notice', '')
         _set_setting('login_notice', status_text)
+        _record_state('login_notice', 'global', 'login_notice', _notice_old, status_text, username)
         dbe('UPDATE users SET avatar=?, photo=?, gender=?, hire_date=?,'
             ' birth_date=?, native_province=?, native_city=?, phone=?, political_status=?'
             ' WHERE username=?',
             (avatar, photo, gender, hire_date, birth_date,
              native_province, native_city, phone, political_status, username))
     else:
+        # T-013f：个人状态变更 → 状态快照
+        _st_old = dbq('SELECT status_text FROM users WHERE username=?', (username,))
+        _st_old = (_st_old[0]['status_text'] or '') if _st_old else ''
         dbe('UPDATE users SET avatar=?, photo=?, status_text=?, gender=?, hire_date=?,'
             ' birth_date=?, native_province=?, native_city=?, phone=?, political_status=?'
             ' WHERE username=?',
             (avatar, photo, status_text, gender, hire_date, birth_date,
              native_province, native_city, phone, political_status, username))
+        _record_state('profile_status', username, 'status_text', _st_old, status_text, username)
     parts = []
     if avatar:
         parts.append('更新头像')
@@ -7303,21 +7358,27 @@ def index():
 def login_page():
     return _login_resp()
 
-# 登录页小精灵挂件（T-013）：GET /pet/{no} → 仓库根 pokemon_sprites/ 下按
-# NNNN 前缀匹配的宝可梦像素图（0001~0386）。只读、按编号白名单前缀匹配，
-# 不做通用目录挂载（避免路径穿越暴露任意文件）。版权素材仅限内部使用。
-_PET_DIR = os.path.join(BASE_DIR, '..', '..', 'pokemon_sprites')
+# 登录页小精灵挂件（T-013）：GET /pet/{no} → 按 NNNN 前缀匹配的宝可梦像素图。
+# T-013f：素材随包部署 —— 主路径 src/static/pokemon_sprites/（sync.sh 整包推
+# static/，服务器无需仓库根目录）；仓库根 pokemon_sprites/ 保留为本地兼容回退。
+# 只读、按编号白名单前缀匹配，不做通用目录挂载（避免路径穿越暴露任意文件）。
+# 版权素材仅限内部使用。
+_PET_DIRS = [
+    os.path.join(STATIC_DIR, 'pokemon_sprites'),
+    os.path.join(BASE_DIR, '..', '..', 'pokemon_sprites'),
+]
 
 @app.get('/pet/{no:int}')
 def pet_sprite(no: int):
     if not 1 <= no <= 386:
         raise HTTPException(404, '精灵编号超出范围')
     import glob as _glob
-    hits = _glob.glob(os.path.join(_PET_DIR, '%04d_*.png' % no))
-    if not hits:
-        raise HTTPException(404, '精灵图不存在')
-    return FileResponse(hits[0],
-                        headers={'Cache-Control': 'public, max-age=86400'})
+    for d in _PET_DIRS:
+        hits = _glob.glob(os.path.join(d, '%04d_*.png' % no))
+        if hits:
+            return FileResponse(hits[0],
+                                headers={'Cache-Control': 'public, max-age=86400'})
+    raise HTTPException(404, '精灵图不存在')
 
 # 默认占位图（用户未上传头像/个人照片时统一展示）。
 # 用白名单而非通用静态目录挂载 —— 避免路径穿越把任意文件暴露出去。

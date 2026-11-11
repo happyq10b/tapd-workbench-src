@@ -383,6 +383,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL DEFAULT ''
 );
+-- 非看板数据的状态快照（T-013f）：登录通知/个人状态等每次变更各记一条
+-- （旧值+新值+操作人），支持追踪历史与按条回滚。看板数据走数据库同步
+-- 回滚.bat 的整库快照，两者互补。
+CREATE TABLE IF NOT EXISTS state_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope       TEXT NOT NULL,             -- 'login_notice' / 'profile_status' / ...
+    entity      TEXT NOT NULL DEFAULT '',  -- 归属主体：全局配置='global'；个人字段=用户名
+    field       TEXT NOT NULL DEFAULT '',
+    old_value   TEXT NOT NULL DEFAULT '',
+    new_value   TEXT NOT NULL DEFAULT '',
+    changed_by  TEXT NOT NULL DEFAULT '',
+    changed_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 -- 导出模板（2026-11-06 #80）：每用户独立；fields = 逗号分隔列 key，顺序 = 导出列序
 CREATE TABLE IF NOT EXISTS export_templates (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
