@@ -205,12 +205,16 @@ async function doLogin(){
 btn.onclick=doLogin;
 p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 
-// —— 登录页小精灵挂件（T-013）：每次加载随机趴一只，纯装饰 ——
+// —— 登录页小精灵挂件（T-013/T-0175）：超管固定形象优先，未配置则随机 ——
 (function(){
-  const no=1+Math.floor(Math.random()*386);
   const img=document.getElementById('petImg');
   img.onerror=function(){document.getElementById('pet').style.display='none'};
-  img.src='/pet/'+no;
+  const fallback=function(){img.src='/pet/'+(1+Math.floor(Math.random()*386));};
+  fetch('/api/login/notice').then(function(r){return r.ok?r.json():null;}).then(function(d){
+    const no=d&&d.pet?parseInt(d.pet,10):0;
+    if(no>=1&&no<=386)img.src='/pet/'+no;   // 超管固定形象（T-0175）
+    else fallback();                        // 未配置/配置无效 → 随机
+  }).catch(fallback);
 })();
 
 // —— 通知栏（T-013b）：拉取超管配置的「登入通知」，空则保持默认提示 ——

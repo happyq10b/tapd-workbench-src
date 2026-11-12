@@ -1631,6 +1631,8 @@ def _state_history_rollback(row_id: int, username: str):
     r = dict(row[0])
     if r['scope'] == 'login_notice':
         _set_setting('login_notice', r['old_value'])
+    elif r['scope'] == 'login_pet':
+        _set_setting('login_pet', r['old_value'])
     elif r['scope'] == 'profile_status':
         dbe('UPDATE users SET status_text=? WHERE username=?', (r['old_value'], r['entity']))
     else:
@@ -1642,11 +1644,12 @@ def _state_history_rollback(row_id: int, username: str):
 
 @app.get('/api/login/notice')
 def login_notice():
-    """登录页通知栏文案（公开端点，登录前可取）。空 = 前端显示默认提示。"""
-    return {'notice': _get_setting('login_notice', '')}
+    """登录页通知栏文案 + 小精灵设置（公开端点，登录前可取）。
+    pet：'' = 随机精灵；'1'~'386' = 固定显示该编号形象（T-0175）。"""
+    return {'notice': _get_setting('login_notice', ''),
+            'pet': _get_setting('login_pet', '')}
 
 
-# ---------------- 状态快照：查询 / 回滚（T-013f，仅管理员） ----------------
 @app.get('/api/state-history')
 def list_state_history(scope: str = '', limit: int = 100,
                        username: str = Depends(require_admin)):
@@ -1677,6 +1680,43 @@ def require_super(username: str = Depends(require_auth)):
     if username != SUPER_ADMIN:
         raise HTTPException(403, '仅超级管理员可操作')
     return username
+
+
+# ---------------- 登录页小精灵设置（T-0175，仅超级管理员） ----------------
+@app.get('/api/admin/pet')
+def get_pet_setting(username: str = Depends(require_super)):
+    """读取登录页小精灵模式：random=每次随机 / fixed=固定编号形象。"""
+    v = _get_setting('login_pet', '')
+    if v.isdigit() and 1 <= int(v) <= 386:
+        return {'mode': 'fixed', 'no': int(v)}
+    return {'mode': 'random', 'no': None}
+
+@app.post('/api/admin/pet')
+def set_pet_setting(req: dict, username: str = Depends(require_super),
+                    request: Request = None):
+    """保存登录页小精灵模式（全局生效于所有用户的登录界面）。"""
+    mode = (req.get('mode') or '').strip()
+    if mode not in ('random', 'fixed'):
+        raise HTTPException(400, '模式必须是 random / fixed')
+    old = _get_setting('login_pet', '')
+    if mode == 'fixed':
+        try:
+            no = int(req.get('no') or 0)
+        except (TypeError, ValueError):
+            no = 0
+        if not 1 <= no <= 386:
+            raise HTTPException(400, '精灵编号必须在 1~386 之间')
+        new = str(no)
+    else:
+        new = ''
+    _set_setting('login_pet', new)
+    _record_state('login_pet', 'global', 'pet', old, new, username)
+    audit_log(username, client_ip(request), 'pet_setting_update',
+              '登录页小精灵', '固定编号 ' + new if new else '随机出现', 'success')
+    return {'ok': True, 'mode': mode, 'no': int(new) if new else None}
+
+
+# ---------------- 状态快照：查询 / 回滚（T-013f，仅管理员） ----------------
 
 
 @app.get('/api/admin/online')
