@@ -1445,6 +1445,18 @@ def visible_columns(username, boards, columns, board_id=None, counts=None, board
         d['done_count'] = dn
         d['pinned'] = int(d.get('pinned') or 0)
         out.append(d)
+    # 板块待办计数（T-0190）：目录板块行显示【待办：已完成/总数】（与事项行代办槽位对齐）
+    if out:
+        tmap = {}
+        for r in dbq('SELECT col_key, done, COUNT(*) n FROM column_todos GROUP BY col_key, done'):
+            t = tmap.setdefault(r['col_key'], [0, 0])
+            t[0] += r['n']
+            if r['done']:
+                t[1] = r['n']
+        for d in out:
+            t = tmap.get(d['col_key'])
+            d['todo_total'] = t[0] if t else 0
+            d['todo_done'] = t[1] if t else 0
     # 排序：置顶优先；置顶项内部与普通项各自按创建时间降序
     out.sort(key=lambda d: (0 if d['pinned'] else 1, -_ts(d.get('created_at')), d['column_name']))
     return out
@@ -1895,9 +1907,9 @@ def restore_pref_snapshot(sid: int, username: str = Depends(require_auth),
 
     数据一致性：
       · 全程单事务 —— 快照读取、旧配置清理、新配置写入要么全成要么全不动；
-      · 回滚前**自动备份**当前配置为一条新快照（note='回滚前自动备份'），
-        版本冲突（回滚错了/想反悔）可再次回滚找回；
       · 快照不存在或非本人 → 404（不泄露他人配置）。
+      · T-0190：备份**仅由用户在偏好备份弹窗手动执行**，回滚不再自动产生快照
+        （用户明确要求：任何情况下不得自动触发备份）。
     """
     row = dbq('SELECT data FROM user_pref_snapshots WHERE id=? AND username=?',
               (sid, username))
@@ -1907,12 +1919,6 @@ def restore_pref_snapshot(sid: int, username: str = Depends(require_auth),
         data = json.loads(row[0]['data'])
     except Exception:
         raise HTTPException(500, '快照数据损坏，无法回滚')
-    # 回滚前自动备份（保留回滚前状态，形成可回退链）
-    cur = {r['key']: r['value'] for r in
-           dbq('SELECT key, value FROM user_prefs WHERE username=?', (username,))}
-    dbe('INSERT INTO user_pref_snapshots (username, data, note) VALUES (?,?,?)',
-        (username, json.dumps(cur, ensure_ascii=False, separators=(',', ':')),
-         '回滚前自动备份（快照 #%d → 当前）' % sid))
     # 整包替换（busy_timeout 已全局设置；单连接内顺序执行保证原子可见性）
     dbe('DELETE FROM user_prefs WHERE username=?', (username,))
     restored = []
@@ -1923,7 +1929,7 @@ def restore_pref_snapshot(sid: int, username: str = Depends(require_auth),
             (username, k, v))
         restored.append(k)
     audit_log(username, client_ip(request), 'pref_restore', f'配置快照 #{sid}',
-              f'回滚个人配置（恢复 {len(restored)} 类，回滚前状态已自动备份）', 'success')
+              f'回滚个人配置（恢复 {len(restored)} 类）', 'success')
     return {'ok': True, 'restored_keys': sorted(restored)}
 
 # ---------------- 登录页小精灵设置（T-0175/T-0177，仅超级管理员） ----------------
@@ -3153,9 +3159,9 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
     """删除单个板块（#158 批量删除的执行单元）。
 
     连带清理：板块下全部事项与子事项**软删**（deleted=1，可用全局备份恢复找回）、
-    子事项清单行、板块元信息行。
-    权限：与新建/删除看板同口径 = **看板负责人及以上**（架构负责人继承；逐列校验，
-    批量场景下无权限的板块各自 403，不影响其他板块）。
+    子事项清单行、板块元信息行、板块评论/待办。
+    权限（T-0190 用户口径）= **板块负责人及以上**（板块负责人 / 看板负责人 /
+    架构负责人 / 管理员；逐列校验，批量场景下无权限的板块各自 403，不影响其他板块）。
     """
     key = (col_key or '').strip()
     row = dbq('SELECT * FROM board_columns WHERE col_key=?', (key,))
@@ -3164,8 +3170,8 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
     col = row[0]
     bid, cname, cid = col['board_id'], col['column_name'], col['column_id']
     # 分级权限先于可见性校验（与 create_column 同款理由）
-    perm_check(username, perm_chain(board_id=bid, column_id=cid), OP_DELETE, LV_BOARD_OWNER,
-               'column:' + key, min_level=LV_BOARD_OWNER)
+    perm_check(username, perm_chain(board_id=bid, column_id=cid), OP_DELETE, LV_COLUMN_OWNER,
+               'column:' + key, min_level=LV_COLUMN_OWNER)
     boards, _cols = user_allowed(username)
     if boards is not None and bid not in boards:
         raise HTTPException(403, '无权删除该板块')

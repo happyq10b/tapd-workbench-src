@@ -695,7 +695,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 板块卡片之间间距（2026-11-10 #129 用户反馈「各行事项间间距略大」）：12 → 8px */
 .board-content{display:flex;flex-direction:column;gap:8px}
 .week-group{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
-.week-header{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:default;user-select:none;transition:background .15s}
+.week-header{display:flex;align-items:center;gap:12px;padding:12px 22px;cursor:default;user-select:none;transition:background .15s}
 /* 板块勾选框（#158）：位于 ▶ 三角与标题之间 —— 各自独立不重叠；勾选状态按用户隔离 */
 .week-header .col-chk{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--primary);margin:0}
 /* 勾选模式（#159）：事项/子事项勾选框；开关按钮两态 */
@@ -848,8 +848,11 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .sub-node .s-chev.leaf{visibility:hidden}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
-/* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小） */
-.sub-node .fcols{grid-template-columns:96px 118px 104px 104px;gap:0 8px;width:446px;flex:0 0 446px}
+/* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小）。
+   T-0190 修复：父行 fcols 已扩为 5 列（+倒计时 72px = 530px），此处仍是旧
+   4 列 446px → 子行的字段列与父行错位、尾部槽位被挤压换行。
+   必须与 .fcols 完全同步（列宽/列数/宽度三处一致）。 */
+.sub-node .fcols{grid-template-columns:96px 118px 104px 104px 72px;gap:0 8px;width:530px;flex:0 0 530px}
 .sub-node .fcol{font-size:11px}
 /* 子事项行的尾部槽位：同样固定宽度 → 与父事项行同样的对齐逻辑 */
 /* 子事项行的尾部槽位宽度与父事项行**完全一致**（含 gap），
@@ -1279,7 +1282,10 @@ body{
 /* Week groups */
 .week-group{border-radius:var(--radius);box-shadow:var(--shadow);transition:box-shadow .25s,transform .25s;animation:fadeUp .4s ease both}
 .week-group:hover{box-shadow:var(--shadow-md)}
-.week-header{padding:14px 18px}
+/* T-0190：水平内边距 = .item-card（14px）+ .week-body（8px）= 22px —— 事项行
+   嵌在 .week-body（8px 内边距）里，标题行不补这 8px 行尾槽位就会整体错位 8px，
+   板块行【待办】与事项行【代办】无法纵向同列 */
+.week-header{padding:14px 22px}
 .week-header:hover{background:#f7f9fc}
 .week-title{font-size:15px}
 .week-bar{background:#eef1f6;border-radius:6px}
@@ -1866,9 +1872,26 @@ function goLogin(){
         </div>
       </div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="c_desc" style="min-height:72px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
+      <!-- 待办管理（T-0190）：待办的**设置入口只在编辑板块弹窗**（浏览界面只展示和勾选）；
+           勾选/增/删即时落库（板块锁由编辑弹窗持有，待办写校验放行本人） -->
+      <div class="form-group" id="c_todos_group" style="display:none"><label>待办</label>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
+          <div id="c_todos_list" class="subtask-list" style="max-height:160px;overflow:auto"></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input type="text" class="form-input" id="c_todo_new" placeholder="添加待办，回车确认…" style="flex:1"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();colAddTodo()}">
+            <button class="btn-default" onclick="colAddTodo()" style="flex-shrink:0">添加</button>
+          </div>
+        </div>
+      </div>
       <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。</div>
     </div>
-    <div class="modal-footer"><button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" id="c_submit" onclick="saveColumn()">创建板块</button></div>
+    <div class="modal-footer" style="display:flex;align-items:center">
+      <!-- 删除板块（T-0190）：仅编辑态且**板块负责人及以上**可见（chkColOwnerOf 口径，
+           与后端 DELETE /api/columns 的 LV_COLUMN_OWNER 门槛一致）；确认后删除 -->
+      <button class="btn-clear" id="c_delete_btn" style="display:none;margin-right:auto;color:var(--danger);border-color:var(--danger)"
+              onclick="colDeleteFromEdit()" title="删除该板块（其下事项与子事项一并删除，可用全局备份找回）">🗑 删除板块</button>
+      <button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" id="c_submit" onclick="saveColumn()">创建板块</button></div>
   </div>
 </div>
 
@@ -1887,17 +1910,11 @@ function goLogin(){
     <div class="modal-body">
       <div class="detail-meta" id="cd_meta"></div>
       <div class="detail-desc" id="cd_desc" style="display:none"></div>
-      <!-- 待办（T-0188）：板块级清单，结构与事项详情的「代办任务」一致；
-           增删改需编辑权（ME.can_edit）且板块未被他人锁定，勾选/删除即时落库 -->
+      <!-- 待办（T-0190）：浏览界面**只展示和勾选**，设置入口（增/删）在编辑板块弹窗 -->
       <div class="subtask-box">
         <div class="subtask-head"><span class="subtask-title">待办</span><span class="subtask-count" id="cd_todo_count"></span></div>
         <div id="cd_todos" class="subtask-list"></div>
-        <div class="subtask-add" id="cd_todo_add_row" style="display:none">
-          <div style="display:flex;gap:8px;flex:1;min-width:0">
-            <input type="text" class="form-input" id="cd_todo_new" placeholder="添加待办，回车确认…" onkeydown="if(event.key==='Enter')cdAddTodo()">
-            <button class="btn-default" onclick="cdAddTodo()" style="flex-shrink:0">添加</button>
-          </div>
-        </div>
+      </div>
       </div>
       <!-- 评论（T-0188）：板块级讨论，可见即可评（与事项评论同款布局/样式） -->
       <div class="comment-box"><h4>评论</h4><div id="cd_comments"></div>
@@ -2509,7 +2526,7 @@ function goLogin(){
     <div class="modal-body">
       <div style="font-size:12px;color:var(--text3);margin-bottom:10px;line-height:1.7">
         备份 = 把当前个人配置（置顶项、偏好设置等）保存为一份完整快照；<br>
-        回滚 = 恢复到所选快照的状态。<b>回滚前会自动备份当前配置</b>，随时可再回滚找回。
+        回滚 = 恢复到所选快照的状态。<b>仅在你点击「备份当前」时才创建备份</b>，其余任何操作不会自动备份。
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <input type="text" class="form-input" id="psnap_note" placeholder="备份备注（选填，如：调整置顶前）" style="flex:1" maxlength="100">
@@ -3096,7 +3113,7 @@ function refreshToolbarOps(canEdit){
 
 // #158 批量删除板块：严格以**当前用户本人勾选**为准（COL_CHECKED 本地会话状态，
 //   不落库不广播 → 多人同时操作互不影响）；无勾选直接提示返回，不执行删除。
-// 逐列调用 DELETE /api/columns/{col_key}（后端按列做「看板负责人及以上」校验，
+// 逐列调用 DELETE /api/columns/{col_key}（后端按列做「板块负责人及以上」校验，T-0190 放宽，
 //   无权限/已被他人抢先删除的板块各自报错，不影响其余勾选板块的删除）。
 // #161 批量删除勾选；#162 语义修订：勾选板块 = **只删除其下事项**，板块本身保留
 //   （空板块按需求展示）。勾选按用户隔离（本地会话状态）；无勾选不执行。
@@ -5339,7 +5356,7 @@ function renderBoard(cards,cols,q,colHits){
         ${_colFcols}
         <span class="item-tail">
           <span class="slot-overdue"></span>
-          <span class="slot-subtask"></span>
+          <span class="slot-subtask">${(meta?meta.todo_total:0)>0?`<span class="st-mini ${meta.todo_done===meta.todo_total?'all':''}" title="板块待办完成进度（勾选在板块编辑界面或浏览界面进行）">【待办：${meta.todo_done}/${meta.todo_total}】</span>`:''}</span>
           <span class="slot-status">${_compTag}</span>
           <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_colOpsId}')" title="新建事项 / 置顶 / 复制 / 折叠 / 展开">操作 ▾</button></span>
         </span>
@@ -5695,11 +5712,10 @@ function cdDays(due){
   return Math.round((dueT-today)/86400000);
 }
 function cdText(due){
+  // T-0190（用户口径）：倒计时列**只显示数字**，逾期用负数（今天=0）。
+  // 语义说明放 tooltip（fcol 渲染处），列内不再出现「天/今天/逾期」文案。
   const n=cdDays(due);
-  if(n===null)return '';
-  if(n>0)return n+' 天';
-  if(n===0)return '今天';
-  return '逾期'+(-n)+' 天';
+  return n===null?'':String(n);
 }
 function cdOver(due){const n=cdDays(due);return n!==null&&n<0;}
 // ---------- 字段列：负责人 / 周数 / 创建日期 / 截止日期 / 倒计时 ----------
@@ -5988,7 +6004,7 @@ async function renderPrefSnapList(){
         +'<div style="font-size:11.5px;color:var(--text3)">'+(s.note?esc(s.note):'<span style="color:var(--text3)">（无备注）</span>')
         +'　·　配置：'+esc((s.keys||[]).join('、')||'（空）')+'</div></div>'
         +'<button class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0;color:var(--primary);border-color:var(--primary)" '
-        +'onclick="restorePrefSnap('+s.id+',this)" title="恢复到该快照的状态（当前配置会先自动备份）">回滚到此</button>'
+        +'onclick="restorePrefSnap('+s.id+',this)" title="恢复到该快照的状态（不会产生新的备份）">回滚到此</button>'
         +'</div>';
     }).join('');
   }catch(e){ box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:8px 2px">加载失败：'+esc(e.message||'')+'</div>'; }
@@ -6003,7 +6019,7 @@ async function createPrefSnap(){
   }catch(e){toast(e.message)}
 }
 async function restorePrefSnap(sid,btn){
-  if(!confirm('确定回滚到快照 #'+sid+'？\n当前配置会先自动备份，回滚后页面将刷新。'))return;
+  if(!confirm('确定回滚到快照 #'+sid+'？\n当前配置将被快照内容覆盖，回滚后页面将刷新。\n（不会自动备份；如需保留当前配置，请先点「备份当前」）'))return;
   if(btn)btn.disabled=true;
   try{
     await api('/api/prefs/snapshots/'+sid+'/restore',{method:'POST'});
@@ -6538,6 +6554,16 @@ var COLUMN_EDIT_BOARD='';     // 编辑模式：所属看板（板块归属不�
 var YEAR_TOUCHED=false;        // 用户是否手动改过「归属年份」（改过就不再自动跟随创建日期）
 // 板块是否可编辑：统一看账号角色（可见性由归属判定，这里不再开特例）
 function canEditColumn(boardId){return !!(ME&&ME.can_edit)}
+// 板块删除权（T-0190）：板块负责人及以上 —— 与后端 DELETE /api/columns 的
+// min_level=LV_COLUMN_OWNER 严格同口径（板块负责人/看板负责人/架构负责人/管理员）。
+function colCanDelete(colKey,boardId){
+  if(!ME)return false;
+  if(ME.is_admin||ME.is_super)return true;
+  if((ME.managed_columns||[]).indexOf(colKey)>=0)return true;    // 我是板块负责人
+  if((ME.managed_boards||[]).indexOf(boardId)>=0)return true;    // 我是看板负责人
+  const b=((ME&&ME.boards)||[]).find(function(x){return x.board_id===boardId});
+  return !!(b&&b.can_assign_owner);                              // 架构负责人及以上（继承）
+}
 // 归属年份默认 = 板块创建年份：
 // 新建时跟随「创建日期」自动填；编辑时只在原值为空时才补（已登记的年份不被日期覆盖）
 function syncYearFromDate(){
@@ -6804,6 +6830,11 @@ function openColumnModal(){
   colRenderCompletion();
   document.getElementById('c_submit').textContent='创建板块';
   document.getElementById('c_tip').textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。';
+  // 新建模式：无板块可删、无既有待办（T-0190：待办要在板块创建后才有归属）
+  const delBtn=document.getElementById('c_delete_btn');
+  if(delBtn)delBtn.style.display='none';
+  const tg=document.getElementById('c_todos_group');
+  if(tg)tg.style.display='none';
   openModal('columnModal');
 }
 // 编辑板块：从板块浏览界面的「✏️ 编辑」进入（T-0183）。
@@ -6850,6 +6881,18 @@ async function openColumnEdit(d,fromDetail){
   document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
   document.getElementById('c_submit').textContent='保存';
   document.getElementById('c_tip').innerHTML='保存后板块名称、归属年份等立即生效。<b>修改板块名称会同步更新该板块下所有事项的所属板块</b>。';
+  // 删除按钮（T-0190）：仅**板块负责人及以上**可见可用。
+  // 口径与后端 DELETE /api/columns（min_level=LV_COLUMN_OWNER）一致：
+  //   板块负责人（managed_columns）∪ 看板负责人及以上（managed_boards /
+  //   can_assign_owner，架构负责人经 perm_chain 继承）∪ 管理员。
+  // ⚠️ 不能复用 chkColOwnerOf —— 其 ME.can_edit 分支是全局角色（editor），
+  //    会让无板块责任的普通编辑也看到删除按钮（后端必 403）。
+  const delBtn=document.getElementById('c_delete_btn');
+  if(delBtn)delBtn.style.display=(colCanDelete(COLUMN_EDIT_KEY,COLUMN_EDIT_BOARD)?'':'none');
+  // 待办管理（T-0190）：设置入口只在编辑弹窗 —— 加载当前板块待办清单
+  const tg=document.getElementById('c_todos_group');
+  if(tg)tg.style.display='';
+  colLoadTodos(COLUMN_EDIT_KEY);
   COLUMN_EDIT_FROM_DETAIL=!!fromDetail;   // 标记来源：关闭编辑后回浏览界面
   openModal('columnModal');
   return true;
@@ -6908,13 +6951,14 @@ async function cdLoadTodos(colkey){
   }
 }
 function renderCdTodos(){
+  // T-0190（用户口径）：浏览界面（预览）对待办**只展示和勾选**，不做任何设置入口
+  //  —— 增/删在【编辑板块】弹窗里进行；待办项**不显示创建人账号**。
   const box=document.getElementById('cd_todos');
   const canEdit=!!(ME&&ME.can_edit);
-  document.getElementById('cd_todo_add_row').style.display=canEdit?'':'none';
   document.getElementById('cd_todo_count').textContent=CD_TODOS.length?String(CD_TODOS.length):'';
   const done=CD_TODOS.filter(x=>x.done).length;
   if(!CD_TODOS.length){
-    box.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px">暂无待办'+(canEdit?'（在下方输入后回车添加）':'')+'</div>';
+    box.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px">暂无待办</div>';
     return;
   }
   box.innerHTML=CD_TODOS.map(function(t){
@@ -6922,9 +6966,6 @@ function renderCdTodos(){
       +`<input type="checkbox" ${t.done?'checked':''} ${canEdit?'':'disabled'}`
       +` onclick="cdToggleTodo(${t.id},this.checked);event.stopPropagation()" title="${canEdit?'勾选/取消待办':'仅编辑权限可勾选待办'}">`
       +`<span class="subtask-name ${t.done?'done':''}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.name||'')}</span>`
-      +`<span style="color:var(--text3);font-size:11px;flex-shrink:0">${esc(t.created_by||'')}</span>`
-      +(canEdit?`<button class="subtask-del" title="删除该待办" onclick="cdDeleteTodo(${t.id});event.stopPropagation()" `
-        +`style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;line-height:17px;padding:0;font-size:11px;cursor:pointer;color:var(--text2);flex-shrink:0">✕</button>`:'')
       +`</div>`;
   }).join('')
   +`<div style="padding:5px 4px 0;font-size:11.5px;color:var(--text3)">已完成 ${done}/${CD_TODOS.length}</div>`;
@@ -6954,6 +6995,81 @@ async function cdDeleteTodo(id){
     await api('/api/columns/todos/'+id,{method:'DELETE'});
     CD_TODOS=CD_TODOS.filter(x=>x.id!==id);
     renderCdTodos();
+  }catch(e){toast(e.message||'删除失败')}
+}
+// ---------- 板块待办管理（T-0190）：设置入口**只在编辑板块弹窗** ----------
+// 浏览界面只展示和勾选（renderCdTodos 已去增删）；这里增/删/勾即时落库。
+// 编辑弹窗持有板块锁 → 待办写校验（_todo_guard）对本人放行。
+var COL_TODOS=[];   // 编辑弹窗里的待办清单
+async function colLoadTodos(colkey){
+  const list=document.getElementById('c_todos_list');
+  if(!list)return;
+  COL_TODOS=[];
+  if(!colkey){list.innerHTML='';return}
+  try{
+    const res=await api('/api/columns/todos?col_key='+encodeURIComponent(colkey));
+    COL_TODOS=res.todos||[];
+  }catch(e){COL_TODOS=[]}
+  colRenderTodos();
+}
+function colRenderTodos(){
+  const list=document.getElementById('c_todos_list');
+  if(!list)return;
+  if(!COL_TODOS.length){
+    list.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px 2px">暂无待办，在下方输入后回车添加</div>';
+    return;
+  }
+  list.innerHTML=COL_TODOS.map(function(t){
+    return `<div class="subtask-item" data-todo="${t.id}">`
+      +`<input type="checkbox" ${t.done?'checked':''}`
+      +` onclick="colToggleTodo(${t.id},this.checked);event.stopPropagation()" title="勾选/取消待办">`
+      +`<span class="subtask-name ${t.done?'done':''}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.name||'')}</span>`
+      +`<button class="subtask-del" title="删除该待办" onclick="colDeleteTodo(${t.id});event.stopPropagation()" `
+      +`style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;line-height:17px;padding:0;font-size:11px;cursor:pointer;color:var(--text2);flex-shrink:0">✕</button>`
+      +`</div>`;
+  }).join('');
+}
+async function colAddTodo(){
+  const key=COLUMN_MODE==='edit'?COLUMN_EDIT_KEY:'';
+  const inp=document.getElementById('c_todo_new');
+  const name=((inp||{}).value||'').trim();
+  if(!name){toast('请输入待办内容');return}
+  try{
+    await api('/api/columns/todos',{method:'POST',body:JSON.stringify({col_key:key,name:name})});
+    if(inp)inp.value='';
+    await colLoadTodos(key);
+  }catch(e){toast(e.message||'添加失败')}
+}
+async function colToggleTodo(id,done){
+  try{
+    await api('/api/columns/todos/'+id,{method:'PUT',body:JSON.stringify({done:!!done})});
+    const t=COL_TODOS.find(x=>x.id===id);
+    if(t)t.done=done?1:0;
+    colRenderTodos();
+  }catch(e){toast(e.message||'更新失败');colLoadTodos(COLUMN_MODE==='edit'?COLUMN_EDIT_KEY:'')}
+}
+async function colDeleteTodo(id){
+  if(!confirm('确定删除该待办吗？'))return;
+  try{
+    await api('/api/columns/todos/'+id,{method:'DELETE'});
+    COL_TODOS=COL_TODOS.filter(x=>x.id!==id);
+    colRenderTodos();
+  }catch(e){toast(e.message||'删除失败')}
+}
+// ---------- 删除板块（T-0190）：编辑弹窗内按钮，仅板块负责人及以上可见 ----------
+async function colDeleteFromEdit(){
+  if(COLUMN_MODE!=='edit'||!COLUMN_EDIT_KEY)return;
+  const d=COLUMN_DETAIL||{};
+  const cname=d.cname||'';
+  if(!confirm('确定删除板块「'+cname+'」吗？\n板块下的全部事项与子事项将一并删除（可用全局备份找回），此操作不可撤销。'))return;
+  try{
+    await api('/api/columns/'+encodeURIComponent(COLUMN_EDIT_KEY),{method:'DELETE'});
+    toast('板块已删除：'+cname);
+    releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 先释放本人持有的板块编辑锁
+    COLUMN_EDIT_FROM_DETAIL=false;                        // 板块已不存在，不再回浏览
+    closeModal('columnModal');
+    closeModal('columnDetailModal');                      // 浏览界面同步关闭（板块没了）
+    reload(1);renderProgress();
   }catch(e){toast(e.message||'删除失败')}
 }
 // ---------- 板块评论（T-0188）：可见即可评，布局/样式与事项评论一致 ----------
