@@ -1990,6 +1990,39 @@ def pet_zone_create(req: dict, username: str = Depends(require_super),
     row = dbq('SELECT id FROM pet_zones WHERE name=?', (name,))
     return {'ok': True, 'id': row[0]['id'], 'name': name}
 
+@app.put('/api/admin/pet/zones/{name}')
+def pet_zone_rename(name: str, req: dict, username: str = Depends(require_super),
+                    request: Request = None):
+    """重命名分区：图片随迁（pet_images.zone）、随机范围引用随迁（login_pet）。
+    校验与新增一致：1~20 字、非保留名、不与现有分区重名。"""
+    new_name = (req.get('name') or '').strip()
+    if not new_name:
+        raise HTTPException(400, '分区名不能为空')
+    if len(new_name) > PET_SETTING_MAX_ZONE_LEN:
+        raise HTTPException(400, '分区名最长 %d 字' % PET_SETTING_MAX_ZONE_LEN)
+    if new_name == BUILTIN_PET_ZONE or new_name == BUILTIN_PET_ZONE_LABEL:
+        raise HTTPException(400, '该名称为内置分区保留名')
+    if new_name == name:
+        raise HTTPException(400, '新名称与当前名称相同')
+    if not dbq('SELECT 1 FROM pet_zones WHERE name=?', (name,)):
+        raise HTTPException(404, '分区不存在')
+    if dbq('SELECT 1 FROM pet_zones WHERE name=?', (new_name,)):
+        raise HTTPException(409, '分区「%s」已存在' % new_name)
+    n = dbq('SELECT COUNT(*) AS c FROM pet_images WHERE zone=?', (name,))[0]['c']
+    dbe('UPDATE pet_zones SET name=? WHERE name=?', (new_name, name))
+    dbe('UPDATE pet_images SET zone=? WHERE zone=?', (new_name, name))
+    # 随机范围指向旧名 → 引用随迁（登录页随机不中断）
+    p = _parse_pet_setting(_get_setting('login_pet', ''))
+    if p['mode'] == 'random' and p['kind'] == 'zone' and p['zone'] == name:
+        old = _get_setting('login_pet', '')
+        new_v = json.dumps({'mode': 'random', 'zone': new_name},
+                           ensure_ascii=False, separators=(',', ':'))
+        _set_setting('login_pet', new_v)
+        _record_state('login_pet', 'global', 'pet', old, new_v, username)
+    audit_log(username, client_ip(request), 'pet_zone_rename',
+              '小精灵分区', '「%s」重命名为「%s」（图片 %d 张随迁）' % (name, new_name, n), 'success')
+    return {'ok': True, 'name': new_name, 'moved_images': n}
+
 @app.delete('/api/admin/pet/zones/{name}')
 def pet_zone_delete(name: str, username: str = Depends(require_super),
                     request: Request = None):

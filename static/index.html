@@ -115,6 +115,9 @@ button{font-family:inherit}
   touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
 /* 头像裁切：裁切框为圆形（与最终展示的圆形头像一致） */
 .crop-stage.crop-round{border-radius:50%}
+/* 裁切弹窗必须盖在其它弹窗（如精灵设置）之上 —— 同为 modal-overlay，
+   默认 z-index:100 时 DOM 靠后的弹窗会把它压在下面（T-0179 用户反馈无法编辑） */
+#cropModal{z-index:120}
 /* 小精灵分区 tab 的 ✕ 删除钮（T-0177）：默认淡色，hover 变红提示可删 */
 .pet-tab-del{width:14px;height:14px;line-height:12px;text-align:center;font-size:10px;
   color:var(--text3);border-radius:50%;cursor:pointer;margin-left:2px}
@@ -8809,12 +8812,13 @@ function renderPetZoneTabs(){
   const box=document.getElementById('petZoneTabs');
   box.innerHTML=PET_ZONES.map(function(z){
     const act=z.name===PET_ZONE;
-    const del=z.builtin?'':'<span class="pet-tab-del" data-delzone="'+esc(z.name)+'" title="删除该分区（仅空分区可删）">✕</span>';
+    const ops=z.builtin?'':'<span class="pet-tab-del" data-renamezone="'+esc(z.name)+'" title="重命名该分区（图片随迁）">✎</span>'
+      +'<span class="pet-tab-del" data-delzone="'+esc(z.name)+'" title="删除该分区（仅空分区可删）">✕</span>';
     return '<span class="pet-tab'+(act?' pet-tab-act':'')+'" data-zone="'+esc(z.name)+'" '
       +'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid '
       +(act?'var(--primary)':'var(--border)')+';border-radius:16px;cursor:pointer;font-size:12.5px;'
       +'background:'+(act?'rgba(0,45,116,.08)':'#fff')+';user-select:none">'
-      +esc(z.label)+'<b style="font-weight:400;color:var(--text3)">'+z.count+'</b>'+del+'</span>';
+      +esc(z.label)+'<b style="font-weight:400;color:var(--text3)">'+z.count+'</b>'+ops+'</span>';
   }).join('')
   +'<button type="button" class="icon-btn" style="padding:2px 10px;font-size:12px" onclick="petNewZone()">＋ 新增分区</button>';
   // 内置分区显示网格，自定义分区显示上传列表
@@ -8826,12 +8830,28 @@ function renderPetZoneTabs(){
 (function(){
   const box=document.getElementById('petZoneTabs');
   box.addEventListener('click',function(e){
+    const rn=e.target.closest('[data-renamezone]');
+    if(rn){petRenameZone(rn.dataset.renamezone);return}
     const del=e.target.closest('.pet-tab-del');
     if(del){petDelZone(del.dataset.delzone);return}
     const tab=e.target.closest('.pet-tab');
     if(tab)switchPetZone(tab.dataset.zone);
   });
 })();
+async function petRenameZone(oldName){
+  if(PET_SAVING){toast('正在保存，请稍候');return}
+  const name=(prompt('请输入「'+petZoneLabel(oldName)+'」的新名称（1~20 字，分区下图片随迁）：',oldName)||'').trim();
+  if(!name||name===oldName)return;
+  try{
+    await api('/api/admin/pet/zones/'+encodeURIComponent(oldName),
+      {method:'PUT',body:JSON.stringify({name:name})});
+    if(PET_RAND_ZONE===oldName)PET_RAND_ZONE=name;   // 随机范围引用随迁
+    toast('分区已重命名为「'+name+'」');
+    const zs=await api('/api/admin/pet/zones');PET_ZONES=zs.zones||[];
+    renderPetRandZone();
+    await switchPetZone(name);
+  }catch(e){toast(e.message)}
+}
 async function switchPetZone(z,keepPick){
   if(!z)z=PET_ZONE;
   PET_ZONE=z;
@@ -9147,7 +9167,7 @@ async function savePetSetting(){
         body:JSON.stringify({mode:'random',zone:PET_RAND_ZONE})});
       toast('已设为随机出现小精灵（范围：'+petZoneLabel(PET_RAND_ZONE)+'，所有用户生效）');
     }
-    closeModal('petSettingModal');
+    // 保存后**留在弹窗内**（T-0179 用户要求不退出）——可继续查看/调整；由「取消」或 ✕ 关闭
   }catch(e){toast(e.message)}
 }
 async function loadOnlineList(){
