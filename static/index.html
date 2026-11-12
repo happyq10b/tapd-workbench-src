@@ -387,7 +387,18 @@ button{font-family:inherit}
 /* 工具栏整体最小宽度（2026-11-06 #84 重算）：四框 148px ×4 = 592 + 搜索 187
    （🔍 emoji 占位）+ 日期 ~290 + gap 40 ≈ 1109 → min-width **1131px** 不变仍容纳。
    ⚠️ 改任一子控件宽度都要同步此值，否则控件会被压回折行/截断状态。 */
-.toolbar{min-width:1131px}
+.toolbar{min-width:1210px}
+/* ===== 板块筛选标题行（T-0189）=====
+   与【看板】带标题（.tb-band-head / .tb-band-title）同款形态：
+   标题居左，筛选明细（#filterHint，band-sel-hint 同款）紧随其右，
+   三个勾选类按钮（全选当前/启用关闭勾选/清空筛选）恒定贴行尾。
+   占独行（flex:1 0 100%）+ 底部分隔线，与顶部导航带的分带视觉呼应。 */
+.toolbar-title-row{order:-1;flex:1 0 100%;display:flex;align-items:center;gap:12px;min-width:0;
+  padding-bottom:9px;border-bottom:1px solid var(--border);margin-bottom:11px}
+.toolbar-title-row .tb-band-title{margin-bottom:0}
+/* 按钮组：margin-left:auto 恒定贴右 —— 即使明细为空被 :empty 隐藏，
+   按钮也不会失去推挤力塌向行首（#84「清空筛选后按钮错位」根因修复）。 */
+.toolbar-title-btns{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex-shrink:0}
 /* 筛选明细（当前生效条件汇总）：**独占一行**，宽度不限。
    需求（2026-11-02）：原先它夹在 .toolbar-left 里、与日期区间同行，
    受 max-width:260px + ellipsis 限制 → 明细被截断（「人员：王伟娜 | 周数：2026·第1...」），
@@ -429,7 +440,11 @@ button{font-family:inherit}
    👤人员/📅周数）→ label 定宽收窄 76→50px；field 104→84px；四框 = 153px 等宽。
    主行 = 搜索 167 + 四框 612 + 日期 ~290 + gap 40 ≈ 1109，1200 视口（内容 1152）内
    完整放下，不再横向溢出；「清空筛选/操作」移到明细行右端后 toolbar-right 不再占主行。 */
-.toolbar-left .cf-label{width:50px;box-sizing:border-box}
+/* 五个下拉筛选框等宽对称（T-0189 重算）：「负责人/参与人」三字标签 →
+   label 定宽 50→64px；五框 = 64+84+padding14+gap5 = 167px 等宽。
+   主行 = 搜索 187(min) + 五框 835 + 操作 ~90 + gap 60 ≈ 1172 + padding 32
+   → .toolbar min-width 1210px（窄视口由横向滚动承载）。 */
+.toolbar-left .cf-label{width:64px;box-sizing:border-box}
 /* ↑ 2026-11-04 #56：max-width 520→760 —— 工具栏右侧合并出一个按钮位后，
    多出的 ~300px 空白全部由搜索框吸收（需求：拉宽搜索栏、无浪费空间）。 */
 /* ↑ max-width 230→360：搜索框要能吃掉 .toolbar-left 的 grow 空间，
@@ -1477,7 +1492,7 @@ function goLogin(){
     <div class="tb-navgroup">
       <div class="tb-band tb-dept-band">
         <div class="tb-band-head">
-          <div class="tb-band-title">架构部门</div>
+          <div class="tb-band-title">架构</div>
           <!-- 【架构管理】入口：并入【架构部门】带的标题行右侧（2026-11-03 用户需求）。
                id 保持不变 → renderPermissionEntries() 的权限显隐逻辑零改动：
                无权限时整个入口槽 display:none（按钮随之消失），语义与原「整带隐藏」一致。 -->
@@ -1491,7 +1506,7 @@ function goLogin(){
       </div>
       <div class="tb-band tb-board-band">
         <div class="tb-band-head">
-          <div class="tb-band-title">可选看板</div>
+          <div class="tb-band-title">看板</div>
           <!-- 已选看板明细（2026-11-10 #126）：标题后一行小字，列示当前选中的看板；
                样式与筛选明细行（.filter-hint）同款。内容由 renderTabs() 按 curBoards 更新。 -->
           <span class="band-sel-hint" id="boardSelHint"></span>
@@ -1552,6 +1567,20 @@ function goLogin(){
 <div class="wrap" id="boardListWrap">
   <!-- 统计概览已上移到顶部栏左半第三行（#progressOverview），此处只留筛选工具栏 -->
   <div class="toolbar">
+    <!-- 板块筛选标题行（T-0189）：与【看板】带标题（.tb-band-title）同款样式；
+         筛选明细上移到标题右侧（同 band-sel-hint 形态）；三个勾选类按钮恒定贴行尾。
+         ⚠️ 布局稳定的关键（#84 按钮错位 bug 根因修复）：按钮组容器 margin-left:auto
+            —— 明细 #filterHint 为空时 :empty{display:none} 会让 flex:1 占位消失，
+            若按钮自身不带 auto 外距就会塌向行首（旧版「清空筛选后按钮跑左边」根因）。 -->
+    <div class="toolbar-title-row">
+      <div class="tb-band-title">板块</div>
+      <span id="filterHint" class="band-sel-hint" title="当前生效的筛选条件汇总"></span>
+      <span class="toolbar-title-btns">
+        <button id="chkAllBtn" class="btn-clear" style="display:none" onclick="selectAllCurrent()" title="一键勾选当前筛选结果中的全部事项（板块随之全选/半选）">全选当前</button>
+        <button id="chkModeBtn" class="btn-clear chk-mode-btn" onclick="toggleChkMode()" title="点击开启勾选模式（板块/事项/子事项前显示勾选框）">启用勾选</button>
+        <button class="btn-clear" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/负责人/参与人/年份/周数）">清空筛选</button>
+      </span>
+    </div>
     <div class="toolbar-left">
       <!-- 搜索区（2026-11-10 #122）：输入框 + 搜索按钮拼为**一体化组件**
            （共用边框/圆角连续，按钮贴右侧成整体）。搜索行为 = 仅点击按钮或回车触发，
@@ -1575,23 +1604,38 @@ function goLogin(){
         </span>
         <div class="cf-drop" id="colStatusDrop" hidden></div>
       </span>
+      <!-- 负责人筛选（T-0189 由「人员」更名）：锚定事项 owner 字段 -->
+      <span class="combo-filter" id="personFilterWrap">
+        <span class="cf-label">👤 负责人</span>
+        <span class="cf-field">
+          <input type="text" class="cf-input" id="personFilterInput" autocomplete="off" readonly
+                 placeholder="" onclick="openPersonFilterPicker(this)"
+                 onfocus="openPersonFilterPicker(this)" title="打开组织架构树：搜索人员、勾选「无负责人」"
+                 aria-label="负责人筛选，点击从组织架构树选择人员">
+          <span class="cf-count" id="personFilterCount" title="已选负责人（点击打开架构树）"
+                onclick="openPersonFilterPicker(document.getElementById('personFilterInput'))"></span>
+          <span class="cf-chips" id="personFilterChips"></span>
+        </span>
+      </span>
+      <!-- 参与人筛选（T-0189 新增）：与负责人框同款样式，锚定事项 cc 字段
+           （后端 /api/cards 的 cc 参数已支持，按姓名匹配）。 -->
+      <span class="combo-filter" id="ccFilterWrap">
+        <span class="cf-label">👥 参与人</span>
+        <span class="cf-field">
+          <input type="text" class="cf-input" id="ccFilterInput" autocomplete="off" readonly
+                 placeholder="" onclick="openCcFilterPicker(this)"
+                 onfocus="openCcFilterPicker(this)" title="打开组织架构树：搜索并勾选参与人"
+                 aria-label="参与人筛选，点击从组织架构树选择人员">
+          <span class="cf-count" id="ccFilterCount" title="已选参与人（点击打开架构树）"
+                onclick="openCcFilterPicker(document.getElementById('ccFilterInput'))"></span>
+          <span class="cf-chips" id="ccFilterChips"></span>
+        </span>
+      </span>
       <!-- 归属年份筛选（2026-11-06 #81）：从【可选看板】带标题行移入本栏，改为
            与周数同款的 combo 下拉（多选 + 全选/清空）。状态机不变：curYears /
            renderYearFilter / buildFilterParams 的 years 参数零改动 → 过滤语义与
            服务端交互完全兼容；仅渲染层从「chips 带」换成「combo 框」。
            id 保持 yearFilter / yearDrop → 全局点击委托零改动。 -->
-      <span class="combo-filter" id="personFilterWrap">
-        <span class="cf-label">👤 人员</span>
-        <span class="cf-field">
-          <input type="text" class="cf-input" id="personFilterInput" autocomplete="off" readonly
-                 placeholder="" onclick="openPersonFilterPicker(this)"
-                 onfocus="openPersonFilterPicker(this)" title="打开组织架构树：搜索人员、勾选「无负责人」"
-                 aria-label="人员筛选，点击从组织架构树选择人员">
-          <span class="cf-count" id="personFilterCount" title="已选人员（点击打开架构树）"
-                onclick="openPersonFilterPicker(document.getElementById('personFilterInput'))"></span>
-          <span class="cf-chips" id="personFilterChips"></span>
-        </span>
-      </span>
       <span class="combo-filter" id="yearFilter" title="按归属年份筛选板块（可多选，可直接输入年份回车）">
         <span class="cf-label">🗓️ 年份</span>
         <span class="cf-field">
@@ -1605,7 +1649,7 @@ function goLogin(){
         <div class="cf-drop" id="yearDrop" hidden></div>
       </span>
       <!-- 状态下拉已移除（2026-11-04）：状态筛选改由顶部统计卡片点击承担（支持多选组合） -->
-      <!-- 人员筛选：入口**直接是【架构树】**（含全部末级人员 + 「无负责人」选项）。
+      <!-- 负责人筛选：入口**直接是【架构树】**（含全部末级人员 + 「无负责人」选项）。
            原先的候选下拉面板只列「事项负责人」名单，多数场景为空（显示"暂无可选人员"），
            且右侧还要另挂一个 🌳 按钮才能进树 —— 两个入口冗余、语义割裂。
            现在统一：点击输入框 → 打开树弹窗，在树里搜索/勾选/取消。 -->
@@ -1623,26 +1667,9 @@ function goLogin(){
         </span>
         <div class="cf-drop" id="weekFilterDrop" hidden></div>
       </span>
-      <span class="date-filter" id="dateFilterBox" title="按创建日期区间筛选（起止都留空 = 不限；只填一端 = 单边区间）">
-        <input type="date" class="filter-date" id="createdStart" onchange="onDateFilterChange()" aria-label="创建日期 起">
-        <span class="date-sep">~</span>
-        <input type="date" class="filter-date" id="createdEnd" onchange="onDateFilterChange()" aria-label="创建日期 止">
-        <button type="button" class="filter-clear" id="dateClearBtn" onclick="clearDateFilter()" title="清除创建日期筛选" hidden>✕</button>
-      </span>
-    </div>
-    <!-- 筛选明细（当前生效条件汇总）—— **单独起一行**。
-         原先夹在 .toolbar-left 内、与日期区间同行，受 max-width:260px 限制被 ellipsis 截断
-         （截图实测：「人员：王伟娜 | 周数：2026·第1...」后半截看不到）。
-         → 移出 .toolbar-left，作为 .toolbar 的独立子项，用 flex-basis:100% 强制换行。
-         → 宽度放宽到 100%，明细完整可读。 -->
-    <!-- 筛选明细行（2026-11-06 #83）：明细文本居左，「清空筛选 / 操作」恒定贴行右端
-         （margin-left:auto，不依赖明细有无 —— :empty 隐藏明细时按钮也不塌向左端）。 -->
-    <div style="order:10;flex:1 0 100%;display:flex;align-items:center;gap:8px;min-width:0">
-      <span id="filterHint" class="filter-hint" style="flex:1 1 auto"></span>
-      <button id="chkAllBtn" class="btn-clear" style="flex-shrink:0;display:none" onclick="selectAllCurrent()" title="一键勾选当前筛选结果中的全部事项（板块随之全选/半选）">全选当前</button>
-      <button id="chkModeBtn" class="btn-clear chk-mode-btn" style="flex-shrink:0" onclick="toggleChkMode()" title="点击开启勾选模式（板块/事项/子事项前显示勾选框）">启用勾选</button>
-      <button class="btn-clear" style="flex-shrink:0" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/年份/人员/周数/日期区间）">清空筛选</button>
-      <span class="slot-ops" style="flex-shrink:0;width:auto"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
+      <!-- 创建日期区间筛选已移除（T-0189）：该行右尾空间交由操作按钮与搜索框自适应 -->
+      <!-- 操作按钮（T-0189）：从筛选明细行移到筛选框行末尾 —— 新建板块/展开/折叠 -->
+      <span class="slot-ops" style="flex-shrink:0;width:auto;margin-left:auto"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
     </div>
   </div>
   <main class="board-content" id="boardContent"></main>
@@ -4747,8 +4774,9 @@ function buildFilterParams(extra){
   // 状态筛选：来自统计卡片的点击多选（2026-11-04，状态下拉已移除）
   const st=[...STATUS_SEL].join(',');
   const cc=window._ccFilter||'';
-  // 创建日期区间：两端都空 = 不筛选；只填一端 = 单边区间（从某天起 / 到某天止）
-  const ds=document.getElementById('createdStart').value,de=document.getElementById('createdEnd').value;
+  // 创建日期区间（T-0189 该筛选项已从 UI 移除）：元素不存在时按未筛选处理
+  const dsEl=document.getElementById('createdStart'),deEl=document.getElementById('createdEnd');
+  const ds=dsEl?dsEl.value:'',de=deEl?deEl.value:'';
   // 多看板：board_ids 逗号分隔（单个时也走 board_ids，后端同一处理）
   if(curBoards.size)ps.set('board_ids',[...curBoards].join(','));
   if(st)ps.set('status',st);if(q)ps.set('q',q);
@@ -4800,7 +4828,8 @@ async function reload(page){
 //  ③ 候选来源都是接口返回的**权限可见范围**内的数据，越权数据不出现在候选里。
 let WEEK_OPTIONS=[];      // 当前筛选结果下存在事项的周数（接口返回，联动口径，renderWeekFilter 维护）
 let WEEK_SEL=new Set();   // 已选周数（多选，任一命中）
-let PERSON_SEL=new Set();  // 已选人员（多选；锚定 owner 字段）
+let PERSON_SEL=new Set();  // 已选人员（多选；锚定 owner 字段）—— T-0189 更名「负责人」筛选
+let CC_SEL=new Set();      // T-0189 参与人筛选已选人员（锚定 cc 字段；window._ccFilter 为其逗号串形态）
 let FILTER_COMBO=null;    // 当前展开的候选面板：'person' | 'week' | null
 // 「无负责人」的特殊值（与后端 OWNER_NONE 一致）
 const OWNER_NONE='__no_owner__';
@@ -4971,25 +5000,26 @@ function onFilterOptionClick(kind,val){
   reload(1);
 }
 function removeFilterChip(kind,val){
-  const set=(kind==='person')?PERSON_SEL:WEEK_SEL;
-  set.delete(val);
+  if(kind==='cc'){CC_SEL.delete(val);window._ccFilter=[...CC_SEL].join(',');}
+  else{
+    const set=(kind==='person')?PERSON_SEL:WEEK_SEL;
+    set.delete(val);
+  }
   paintFilterCombos();
   reload(1);
 }
 // 【清空筛选】（2026-11-04）：一键清空筛选行的全部条件 ——
-//   搜索词 / 人员 / 周数 / 创建日期区间（统计卡的状态筛选不在本行，不受影响）
-//   2026-11-06 #81：归属年份（移入本栏）与板块状态（新增）也纳入本行清空范围
+//   搜索词 / 负责人 / 参与人 / 周数 / 归属年份 / 板块状态（T-0189：创建日期区间已移除）
 function clearAllRowFilters(){
   const q=document.getElementById('searchInput');
   if(q)q.value='';
   PERSON_SEL=new Set();
+  CC_SEL=new Set();
+  window._ccFilter='';
   WEEK_SEL=new Set();
   curYears=new Set();
   COL_STATUS_SEL=new Set();
-  const s=document.getElementById('createdStart'),e=document.getElementById('createdEnd');
-  if(s)s.value='';
-  if(e)e.value='';
-  syncDateFilterUI();
+  syncDateFilterUI();     // 日期元素已移除 → 函数内部判空直接跳过（保留防外部引用）
   paintFilterCombos();
   paintYearChips();
   paintColStatus();
@@ -5003,7 +5033,7 @@ function clearFilterSel(kind){
 }
 // ---------- 渲染两个控件 ----------
 function paintFilterCombos(){
-  // 人员（入口 = 架构树弹窗，这里只渲染已选 chips）
+  // 负责人（T-0189 由「人员」更名；入口 = 架构树弹窗，这里只渲染已选 chips）
   const pWrap=document.getElementById('personFilterWrap');
   const pChips=document.getElementById('personFilterChips');
   if(pWrap)pWrap.classList.toggle('active',PERSON_SEL.size>0);
@@ -5011,10 +5041,18 @@ function paintFilterCombos(){
     `<span class="cf-chip" title="${esc(personLabel(n))}"><span>${esc(personLabel(n))}</span><i onclick="removeFilterChip('person','${esc(n)}')">×</i></span>`).join('');
   // 已选人数徽标（2026-11-02 UI设计师）：框内**不再显示已选项文本**，
   // 改为计数徽标；已选项的完整清单由 ① 树状图节点的勾选态
-  // ② 下方「筛选明细」行（#filterHint）承担。
+  // ② 标题行「筛选明细」（#filterHint）承担。
   // ⚠️ 仅写展示层文本，不动 PERSON_SEL / WEEK_SEL 等数据与状态。
   const pCount=document.getElementById('personFilterCount');
   if(pCount)pCount.textContent=PERSON_SEL.size?('已选 '+PERSON_SEL.size):'';
+  // 参与人（T-0189 新增；锚定 cc 字段，与负责人框同款渲染）
+  const cWrap=document.getElementById('ccFilterWrap');
+  const cChips=document.getElementById('ccFilterChips');
+  if(cWrap)cWrap.classList.toggle('active',CC_SEL.size>0);
+  if(cChips)cChips.innerHTML=[...CC_SEL].map(n=>
+    `<span class="cf-chip" title="${esc(n)}"><span>${esc(n)}</span><i onclick="removeFilterChip('cc','${esc(n)}')">×</i></span>`).join('');
+  const cCount=document.getElementById('ccFilterCount');
+  if(cCount)cCount.textContent=CC_SEL.size?('已选 '+CC_SEL.size):'';
   // 周数
   const wWrap=document.getElementById('weekFilterWrap');
   const wChips=document.getElementById('weekFilterChips');
@@ -5047,10 +5085,10 @@ function syncFilterHint(){
   const box=document.getElementById('filterHint');
   if(!box)return;
   const parts=[];
-  // 顺序与筛选栏一致：状态 → 人员 → 年份 → 周数（#84）
+  // 顺序与筛选栏一致：状态 → 负责人 → 参与人 → 年份 → 周数（T-0189）
   if(typeof COL_STATUS_SEL!=='undefined'&&COL_STATUS_SEL.size)
     parts.push('状态：'+[...COL_STATUS_SEL].map(colStatusLabel).join('、'));
-  if(PERSON_SEL.size)parts.push('人员：'+[...PERSON_SEL].map(personLabel).join('、'));
+  if(PERSON_SEL.size)parts.push('负责人：'+[...PERSON_SEL].map(personLabel).join('、'));
   if(typeof curYears!=='undefined'&&curYears.size)
     parts.push('年份：'+[...curYears].map(y=>y+' 年').join('、'));
   if(WEEK_SEL.size)parts.push('周数：'+[...WEEK_SEL].map(weekLabelOf).join('、'));
@@ -5092,8 +5130,23 @@ async function openPersonFilterPicker(anchor){
     if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
-  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
+  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
       showNoneOwner:true, clearable:true, keyword:''});
+}
+// T-0189 参与人筛选：与负责人同款架构树选人（无「无负责人」特殊值 —— 参与人语义为
+// 「事项参与人包含所勾选的任意一人」，锚定 cc 字段，后端 /api/cards 已支持）。
+async function openCcFilterPicker(anchor){
+  try{ await ensureOrgTree(true); }catch(e){ toast('架构数据加载失败'); return; }
+  if(!ORG_TREE.length){ toast('架构数据为空'); return; }
+  const cur=[...CC_SEL].map(n=>ORG_PERSON_PREFIX+n);
+  openTreePick(anchor, cur, (persons)=>{
+    // 全部取消勾选后点确定 → 视为清空该筛选（与负责人同口径）
+    CC_SEL=new Set(persons||[]);
+    window._ccFilter=[...CC_SEL].join(',');
+    paintFilterCombos();
+    reload(1);
+  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
+      clearable:true, keyword:''});
 }
 function applyPersonFilter(kind, persons){
   // 兼容旧调用点：人员筛选已统一锚定到「负责人」维度（owner 字段），
@@ -5121,8 +5174,11 @@ function clearDateFilter(){
   reload(1);
 }
 // 任一端有值时：日期区间的容器高亮，并显示清除按钮
+// T-0189：创建日期区间筛选已从 UI 移除 → 元素不存在时静默跳过
 function syncDateFilterUI(){
-  const on=!!(document.getElementById('createdStart').value||document.getElementById('createdEnd').value);
+  const sEl=document.getElementById('createdStart'),eEl=document.getElementById('createdEnd');
+  if(!sEl&&!eEl)return;
+  const on=!!((sEl&&sEl.value)||(eEl&&eEl.value));
   const box=document.getElementById('dateFilterBox');
   if(box)box.classList.toggle('active',on);
   const btn=document.getElementById('dateClearBtn');
@@ -8683,6 +8739,7 @@ function syncCheckStates(){
   document.querySelectorAll('.sub-chk').forEach(function(chk){
     chk.checked=ITEM_CHECKED.has(chk.dataset.ck);
   });
+  syncChkAllBtn();   // T-0189：全选/取消全选按钮文案随勾选态切换
 }
 // 开关切换：关 = 隐藏全部勾选框并清空勾选记录（板块+事项）；开 = 重绘显示
 function toggleChkMode(){
@@ -8705,6 +8762,7 @@ function syncChkModeBtn(btn){
   // #161 「全选当前」仅在勾选启用后出现
   const ab=document.getElementById('chkAllBtn');
   if(ab)ab.style.display=CHK_MODE?'':'none';
+  syncChkAllBtn();   // T-0189：文案随勾选态刷新
 }
 // #161 一键勾选当前筛选结果：renderBoard 时注册的本轮卡片清单
 var CHK_CURRENT_CARDS=null;   // #161 全选当前的本轮卡片清单（renderBoard/renderSearchResults 注册）
@@ -8713,6 +8771,36 @@ function selectAllCurrent(){
   if(!CHK_MODE)return;
   const ids=CHK_CURRENT_CARDS||[];
   if(!ids.length){toast('当前没有可勾选的事项');return}
+  // T-0189 切换语义：先算出「本轮筛选结果中当前用户有权勾选」的事项集合 ——
+  //   若已全部处于勾选态 → 本次点击 = 取消全选；否则 = 全选。
+  const checkable=ids.filter(function(id){
+    const meta=(CHK_CURRENT_CARDS_META||{})[id]||{};
+    const colKey=CHK_CARD_COL[id]||'';
+    const boardId=CHK_COL_BOARD[colKey]||'';
+    return chkCanCheckCard(meta.owner,colKey,boardId);
+  });
+  if(!checkable.length){toast('没有可勾选权限的事项');return}
+  const allOn=checkable.every(function(id){return ITEM_CHECKED.has(id);});
+  if(allOn){
+    // —— 取消全选：清除本轮全部可勾选事项及其子事项，随勾的板块一并取消 ——
+    let cols=0;
+    ids.forEach(function(id){
+      ITEM_CHECKED.delete(id);
+      (CHK_CARD_SUBS[id]||[]).forEach(function(s){ITEM_CHECKED.delete(s);});
+    });
+    Object.keys(CHK_COL_CARDS).forEach(function(k){
+      const cards=CHK_COL_CARDS[k]||[];
+      if(!cards.length)return;
+      const allVisible=cards.every(function(id){return ids.indexOf(id)>=0;});
+      if(allVisible&&chkColOwnerOf(k,CHK_COL_BOARD[k]||'')&&COL_CHECKED.has(k)){COL_CHECKED.delete(k);cols++;}
+    });
+    saveItemChecked();saveColChecked();
+    syncCheckStates();
+    toast('已取消全选'+(cols?('（'+cols+' 个板块勾选一并取消）'):''));
+    syncChkAllBtn();
+    return;
+  }
+  // —— 全选 ——
   // #163 权限过滤：只勾当前用户有权勾选的事项（板块负责人及以上=板块内全部；
   //   否则仅自己负责的事项）；板块也仅在全部事项均可勾时随勾选
   let n=0;
@@ -8735,6 +8823,23 @@ function selectAllCurrent(){
   saveItemChecked();saveColChecked();
   syncCheckStates();
   toast(n?('已勾选 '+n+' 个事项（无权限的事项未勾选）'):'没有可勾选权限的事项');
+  syncChkAllBtn();
+}
+// T-0189 「全选当前」按钮文案与当前勾选态联动：全选态显示「取消全选」
+function syncChkAllBtn(){
+  const ab=document.getElementById('chkAllBtn');
+  if(!ab)return;
+  const ids=CHK_CURRENT_CARDS||[];
+  const checkable=ids.filter(function(id){
+    const meta=(CHK_CURRENT_CARDS_META||{})[id]||{};
+    const colKey=CHK_CARD_COL[id]||'';
+    const boardId=CHK_COL_BOARD[colKey]||'';
+    return chkCanCheckCard(meta.owner,colKey,boardId);
+  });
+  const allOn=checkable.length>0&&checkable.every(function(id){return ITEM_CHECKED.has(id);});
+  ab.textContent=allOn?'取消全选':'全选当前';
+  ab.title=allOn?'当前筛选结果已全部勾选，点击取消全选'
+                :'一键勾选当前筛选结果中的全部事项（板块随之全选/半选）';
 }
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
