@@ -2026,26 +2026,27 @@ def pet_zone_rename(name: str, req: dict, username: str = Depends(require_super)
 @app.delete('/api/admin/pet/zones/{name}')
 def pet_zone_delete(name: str, username: str = Depends(require_super),
                     request: Request = None):
-    """删除分区：仅允许删除**空分区**（有图先删图，防误删批量脏数据）；
-    若随机范围指向该分区 → 重置为随机内置。"""
+    """删除分区：**连带删除分区下全部图片，不留存**（T-0181 用户要求，前端二次确认）。
+    引用清理：固定形象引用了被删图片 → 回退随机内置；随机范围指向该分区 → 回退随机内置。"""
     if name == BUILTIN_PET_ZONE:
         raise HTTPException(400, '内置分区不可删除')
     _pet_zone_row_check(name)
-    n = dbq('SELECT COUNT(*) AS c FROM pet_images WHERE zone=?', (name,))[0]['c']
-    if n:
-        raise HTTPException(409, '分区「%s」下仍有 %d 张图片，请先删除图片' % (name, n))
+    ids = [r['id'] for r in dbq('SELECT id FROM pet_images WHERE zone=?', (name,))]
+    dbe('DELETE FROM pet_images WHERE zone=?', (name,))
     dbe('DELETE FROM pet_zones WHERE name=?', (name,))
-    # 随机范围指向该分区 → 回退随机内置（登录页保持可用）
-    p = _parse_pet_setting(_get_setting('login_pet', ''))
-    if p['mode'] == 'random' and p['kind'] == 'zone' and p['zone'] == name:
-        old = _get_setting('login_pet', '')
+    # 引用清理（登录页保持可用）：固定形象引用被删图片 / 随机范围指向被删分区 → 回退随机内置
+    old = _get_setting('login_pet', '')
+    p = _parse_pet_setting(old)
+    need_reset = ((p['mode'] == 'fixed' and p['kind'] == 'upload' and p['image_id'] in ids)
+                  or (p['mode'] == 'random' and p['kind'] == 'zone' and p['zone'] == name))
+    if need_reset:
         new = json.dumps({'mode': 'random', 'zone': BUILTIN_PET_ZONE},
                          ensure_ascii=False, separators=(',', ':'))
         _set_setting('login_pet', new)
         _record_state('login_pet', 'global', 'pet', old, new, username)
     audit_log(username, client_ip(request), 'pet_zone_delete',
-              '小精灵分区', '删除空分区「%s」' % name, 'success')
-    return {'ok': True}
+              '小精灵分区', '删除分区「%s」（连带删除图片 %d 张，不留存）' % (name, len(ids)), 'success')
+    return {'ok': True, 'removed_images': len(ids)}
 
 @app.get('/api/admin/pet/images')
 def pet_images_list(zone: str = '', username: str = Depends(require_super)):

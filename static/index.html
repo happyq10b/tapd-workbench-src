@@ -8813,7 +8813,7 @@ function renderPetZoneTabs(){
   box.innerHTML=PET_ZONES.map(function(z){
     const act=z.name===PET_ZONE;
     const ops=z.builtin?'':'<span class="pet-tab-del" data-renamezone="'+esc(z.name)+'" title="重命名该分区（图片随迁）">✎</span>'
-      +'<span class="pet-tab-del" data-delzone="'+esc(z.name)+'" title="删除该分区（仅空分区可删）">✕</span>';
+      +'<span class="pet-tab-del" data-delzone="'+esc(z.name)+'" title="删除该分区（图片一并删除）">✕</span>';
     return '<span class="pet-tab'+(act?' pet-tab-act':'')+'" data-zone="'+esc(z.name)+'" '
       +'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid '
       +(act?'var(--primary)':'var(--border)')+';border-radius:16px;cursor:pointer;font-size:12.5px;'
@@ -8892,10 +8892,16 @@ async function petNewZone(){
   }catch(e){toast(e.message)}
 }
 async function petDelZone(z){
-  if(!confirm('确定删除分区「'+petZoneLabel(z)+'」吗？（仅空分区可删除）'))return;
+  const zc=(PET_ZONES.find(function(x){return x.name===z})||{}).count||0;
+  // 删除分区 = 连带删除分区下全部图片（T-0181 用户要求不留存），二次确认
+  if(!confirm('确定删除分区「'+petZoneLabel(z)+'」吗？\n分区下的 '+zc+' 张图片将被一并删除，不可恢复！'))return;
   try{
     await api('/api/admin/pet/zones/'+encodeURIComponent(z),{method:'DELETE'});
-    toast('分区已删除');
+    toast('分区「'+petZoneLabel(z)+'」已删除（连带图片 '+zc+' 张）');
+    // 本地状态同步：随机范围指向被删分区 / 固定选中引用被删图片 → 按服务端重置结果回读
+    const d=await api('/api/admin/pet');
+    if(d&&d.mode==='random')PET_RAND_ZONE=d.zone||'__builtin__';
+    if(PET_PICK&&PET_PICK.kind==='upload'){PET_PICK=null;}
     const zs=await api('/api/admin/pet/zones');PET_ZONES=zs.zones||[];
     renderPetRandZone();
     if(PET_ZONE===z)await switchPetZone('__builtin__');else renderPetZoneTabs();
