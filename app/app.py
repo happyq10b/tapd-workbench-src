@@ -1109,7 +1109,8 @@ def user_allowed(username: str, arch_only: bool = False):
     dept_boards = _dept_stage_boards(username)
     boards = _arch_scope_boards(username, dept_boards)
     # ①' 协作部门授权（T-013d）：协作部门负责人 → 该看板可见（纯可见，名单不显示）
-    boards |= _collab_dept_boards(username)
+    collab = _collab_dept_boards(username)
+    boards |= collab
     # ② 账号级看板白名单（与架构授权集取交集）
     raw_b = u.get('allowed_boards') or '*'
     if raw_b != '*':
@@ -1123,10 +1124,46 @@ def user_allowed(username: str, arch_only: bool = False):
             cols = {k: set(v) for k, v in json.loads(raw_c).items() if v} or None
         except Exception:
             cols = None
-    # ④ 负责人层（2026-11-02 语义修订）：**不再收窄可见性**。
-    #    负责人 = 管理权（可改看板 / 板块基本信息），可见性完全由 ①~③ 决定。
+    # ④ 负责人层（2026-11-02 语义修订）：**不再收窄看板可见性**。
+    #    负责人 = 管理权（可改看板 / 板块基本信息），看板可见性完全由 ①~③ 决定。
     #    旧实现里 ACL 层会把「配了 owner/参与人」的看板对其他人藏起来，
     #    与【架构管理】的绑定规则互相打架 —— 现已移除该层。
+    # ⑤ 板块级可见性收紧（2026-11-12 用户确认「严格全量执行」）：
+    #    可见板块 = 板块负责人 / 板块参与人
+    #             ∪ 对该看板权限 ≥ 看板负责人（LV_BOARD_OWNER）的用户：
+    #               · 看板负责人（boards.owner 命中）
+    #               · 架构负责人岗位任命（组长/部门长/中心负责人/总经理）负责范围
+    #                 覆盖该看板 —— 与 perm.py effective_level 的架构层映射一致
+    #    未配置负责人/参与人的板块，普通小组成员一律不可见（用户逐个配置 ACL）。
+    #    收口在单一出处：看板列 / 事项列表 / 导出 / 统计 / 事项详情全部经
+    #    user_allowed 的 (boards, columns) 二元组过滤，本层改动自动全链路生效。
+    if boards:
+        # 看板级明确授权名单命中 → 该看板**全部板块**可见（否则出现「看得到看板壳、
+        # 看不到任何内容」的悬挂态）：看板负责人 / 看板参与人 / 协作部门负责人（T-013d）
+        mgr = {r['board_id'] for r in dbq('SELECT board_id, owner, participants FROM boards')
+               if (r['owner'] or '').strip() == username
+               or username in {x.strip() for x in (r['participants'] or '').split(',') if x.strip()}}
+        mgr |= collab
+        mgr |= _leader_scope_boards(username)          # 架构负责人及以上（岗位任命）
+        vis = {}                                       # 非管理看板：命中 ACL 的板块
+        for r in dbq('SELECT board_id, column_id, owner, participants FROM board_columns'):
+            b = r['board_id']
+            if b not in boards or b in mgr:
+                continue
+            accs = {x.strip() for x in (r['participants'] or '').replace(';', ',').split(',') if x.strip()}
+            if (r['owner'] or '').strip() == username or username in accs:
+                vis.setdefault(b, set()).add(r['column_id'])
+        if cols is None:
+            cols = {}
+        # 对每个可见看板给出**显式**集合（缺省键=全部板块的旧语义只保留给
+        # 管理看板；非管理看板一律显式列举，未命中 = 空集 = 不可见）
+        for b in boards:
+            if b in mgr:
+                continue
+            if b in cols:                    # ③ 账号级板块白名单 → 取交集
+                cols[b] = cols[b] & vis.get(b, set())
+            else:
+                cols[b] = vis.get(b, set())
     return boards, cols
 
 
@@ -1203,6 +1240,12 @@ def check_card_access(card_id: str, username: str, need_edit: bool = False):
     bid = row[0]['board_id']
     if boards is not None and bid not in boards:
         raise HTTPException(403, '无权访问该看板')
+    # 板块级可见性（2026-11-12 ⑤层）：事项所在板块对用户不可见 → 越权读，拒绝
+    # （此前只查看板层，板块收紧后直接调 API 仍能读到不可见板块的详情/评论/子事项）
+    if columns is not None:
+        cols = columns.get(bid)
+        if cols is not None and row[0]['column_id'] not in cols:
+            raise HTTPException(403, '无权访问该板块的事项')
     if need_edit and not can_edit(username):
         raise HTTPException(403, '无编辑权限，请联系管理员')
     return dict(row[0])
@@ -3779,24 +3822,35 @@ def heartbeat(card_id: str, username: str = Depends(require_writer)):
 # ---------------- 通用编辑锁端点（2026-11-12）----------------
 # 一个可编辑事项一把锁：板块/看板/架构/成员/账号/通知等资源的编辑弹窗
 # 用这套端点认领/续约/释放锁；key 见 LockManager 顶部注释的资源 key 表。
+#
+# ⚠️ key 经**请求体 / 查询串**传递（不走路径段）——2026-11-12 修复：
+#    col_key = board_id::column_name，真实库 83% 的板块名含全角括号/斜杠/点等字符，
+#    旧路径式端点 /api/locks/{key}/... 有两层故障：
+#    ① 旧字符白名单 [\w\-:] 拒绝全角括号等 → 400「非法的锁资源标识」；
+#    ② col_key 含 / 时 encodeURIComponent 的 %2F 被服务器解码回 /，
+#       路径段被切碎 → 404（连校验层都到不了）。
+#    白名单改为「前缀白名单 + 任意非控制字符 + 长度上限」——key 由服务端按
+#    数据库主键/名称生成，本就不是自由用户输入，字符级白名单只会误伤真实数据。
 import re as _re
-_LOCK_KEY_RE = _re.compile(
-    r'^(card:[\w\-]+|board:[\w\-]+|column:[\w\:\-]+|org:\d+|team:[\w\-]+'
-    r'|user:[\w\.\-\u4e00-\u9fa5]+|notice:\d+|dept:.{1,80})$')
+_LOCK_KEY_RE = _re.compile(r'^(card|board|column|org|team|user|notice|dept):[^\x00-\x1f]{1,180}$')
 
 def _check_lock_key(key: str):
     if not _LOCK_KEY_RE.match(key or ''):
         raise HTTPException(400, '非法的锁资源标识')
 
-@app.get('/api/locks/{key}/holder')
-def lock_holder(key: str, username: str = Depends(require_auth)):
-    """查询某资源的锁持有者（显示名；None=无锁）。"""
+class LockKeyReq(BaseModel):
+    key: str
+
+@app.get('/api/locks/holder')
+def lock_holder(key: str = '', username: str = Depends(require_auth)):
+    """查询某资源的锁持有者（显示名；None=无锁）。key 走查询串（col_key 可含 / 等字符）。"""
     _check_lock_key(key)
     return {'ok': True, 'locked_by': lock_mgr.who(key), 'locked_by_name': lock_mgr.who_name(key)}
 
-@app.post('/api/locks/{key}/acquire')
-def acquire_lock(key: str, username: str = Depends(require_writer), request: Request = None):
+@app.post('/api/locks/acquire')
+def acquire_lock(req: LockKeyReq, username: str = Depends(require_writer), request: Request = None):
     """编辑弹窗打开时认领编辑锁；他人持有 → 409（姓名提示）。"""
+    key = (req.key or '').strip()
     _check_lock_key(key)
     ok, holder, _fresh = lock_mgr.acquire(key, username)
     if not ok:
@@ -3804,15 +3858,17 @@ def acquire_lock(key: str, username: str = Depends(require_writer), request: Req
     audit_log(username, client_ip(request), 'lock', key, '锁定编辑', 'success')
     return {'ok': True, 'locked_by': username, 'locked_by_name': _lock_holder_name(username)}
 
-@app.post('/api/locks/{key}/heartbeat')
-def lock_beat(key: str, username: str = Depends(require_writer)):
+@app.post('/api/locks/heartbeat')
+def lock_beat(req: LockKeyReq, username: str = Depends(require_writer)):
+    key = (req.key or '').strip()
     _check_lock_key(key)
     lock_mgr.heartbeat(key, username)
     return {'ok': True}
 
-@app.post('/api/locks/{key}/release')
-def release_lock(key: str, username: str = Depends(require_writer), request: Request = None):
+@app.post('/api/locks/release')
+def release_lock(req: LockKeyReq, username: str = Depends(require_writer), request: Request = None):
     """编辑弹窗关闭/保存后释放编辑锁（仅持有者本人可释放）。"""
+    key = (req.key or '').strip()
     _check_lock_key(key)
     if lock_mgr.release(key, username):
         audit_log(username, client_ip(request), 'unlock', key, '解锁编辑', 'success')

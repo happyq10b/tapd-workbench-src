@@ -5855,18 +5855,20 @@ async function unlockCard(id){clearInterval(editLockTimer);try{await api('/api/c
 //   / team:<id|roster> / notice:<nid>。事项（card）沿用既有 /api/cards/{id}/lock 系列端点。
 const EDIT_LOCKS={};   // key -> heartbeat 定时器
 async function acquireEditLock(key,what){
-  try{await api('/api/locks/'+encodeURIComponent(key)+'/acquire',{method:'POST'})}
+  // key 走请求体（不走路径段）：col_key 含 / 时 encodeURIComponent 的 %2F 会被
+  // 服务器解码回 / 导致路径切碎 404（2026-11-12 修复「非法的锁资源标识」）
+  try{await api('/api/locks/acquire',{method:'POST',body:JSON.stringify({key:key})})}
   // 409 时 e.message 已含后端拼好的「已被 <姓名> 编辑中」（姓名优先显示）
   catch(e){toast(e.message||((what||'该事项')+'已被他人编辑中，请稍后再试'));return false}
   if(EDIT_LOCKS[key])clearInterval(EDIT_LOCKS[key]);   // 重复认领（同 key）只保留一个心跳
-  EDIT_LOCKS[key]=setInterval(()=>{api('/api/locks/'+encodeURIComponent(key)+'/heartbeat',{method:'POST'}).catch(()=>{})},30000);
+  EDIT_LOCKS[key]=setInterval(()=>{api('/api/locks/heartbeat',{method:'POST',body:JSON.stringify({key:key})}).catch(()=>{})},30000);
   return true;
 }
 async function releaseEditLock(key){
   const t=EDIT_LOCKS[key];
   if(!t)return;
   clearInterval(t);delete EDIT_LOCKS[key];
-  try{await api('/api/locks/'+encodeURIComponent(key)+'/release',{method:'POST'})}catch(e){}
+  try{await api('/api/locks/release',{method:'POST',body:JSON.stringify({key:key})})}catch(e){}
 }
 // 弹窗关闭 → 释放对应编辑锁（兜底：✕ / 取消 / 保存后关闭统一走 closeModal）
 MODAL_CLOSE_HOOKS.columnModal=function(){releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';};
