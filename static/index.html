@@ -1428,6 +1428,7 @@ function goLogin(){
         <button id="teamBtn" onclick="openTeamModal()" title="账号管理（仅管理员）">👥 账号管理</button>
         <button id="onlineBtn" onclick="openOnlineModal()" title="在线用户管理（仅超级管理员）">🟢 在线用户</button>
         <button id="petBtn" onclick="openPetSettingModal()" title="登录页小精灵设置（仅超级管理员，全局生效）">🐾 精灵设置</button>
+        <button id="prefSnapBtn" onclick="openPrefSnapModal()" title="个人配置的备份与回滚（置顶项、偏好设置等）">💾 偏好备份</button>
         <button id="auditBtn" onclick="openAuditModal()" title="操作日志（仅管理员）">📋 操作日志</button>
         <!-- ⚠️ 备份/恢复按钮已移除（2026-11-10 #121 用户判断）：浏览器端 JSON 导出/
              覆盖式导入与本地 bat 快照链（prod_/dev_/local_ 快照 + 数据库同步回滚.bat）
@@ -2453,6 +2454,24 @@ function goLogin(){
 <!-- 登录页小精灵设置弹窗（仅超级管理员，T-0175/T-0177）：配置全局生效于所有用户登录界面。
      T-0177：分区管理（内置 + 自定义分区）、单/批量上传（裁切确认后入库）、拖拽排序/置顶、
      随机范围按分区隔离（服务端随机）。 -->
+<!-- 个人配置备份/回滚弹窗（T-0187）：置顶项、偏好设置等持久化配置的快照管理 -->
+<div class="modal-overlay" id="prefSnapModal" style="display:none">
+  <div class="modal" style="width:min(480px,94vw)">
+    <div class="modal-header"><h2>💾 偏好备份与回滚</h2><button class="modal-close" onclick="closeModal('prefSnapModal')">✕</button></div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text3);margin-bottom:10px;line-height:1.7">
+        备份 = 把当前个人配置（置顶项、偏好设置等）保存为一份完整快照；<br>
+        回滚 = 恢复到所选快照的状态。<b>回滚前会自动备份当前配置</b>，随时可再回滚找回。
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input type="text" class="form-input" id="psnap_note" placeholder="备份备注（选填，如：调整置顶前）" style="flex:1" maxlength="100">
+        <button class="btn-primary" style="padding:5px 14px;font-size:12.5px;flex-shrink:0" onclick="createPrefSnap()">备份当前</button>
+      </div>
+      <div id="psnap_list" style="display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow:auto"></div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="petSettingModal" style="display:none">
   <div class="modal" style="width:min(640px,94vw)">
     <div class="modal-header"><h2>🐾 登录页小精灵设置</h2><button class="modal-close" onclick="closeModal('petSettingModal')">✕</button></div>
@@ -3131,7 +3150,8 @@ async function init(){
     DEPT_OPTIONS=ME.dept_options||[];   // #165 部门多选选项（架构前两级节点）
     const cmBtn=document.getElementById('chkModeBtn');
     if(cmBtn)syncChkModeBtn(cmBtn);
-    loadPins();   // 载入当前账号的个人置顶设置（按账号分桶，互不影响）
+    loadPins();   // 载入当前账号的个人置顶设置（本地缓存先行，服务端异步覆盖）
+    loadUserPrefs();   // T-0187：服务端个人配置（置顶/偏好）拉取 + 本地旧数据一次性迁移
     document.getElementById('userName').textContent=meDisplayLabel();
     renderMyProfile();   // 顶栏头像 + 个人状态栏
   if(!cropBound){ cropBindDrag(); cropBound=true; }   // 裁切编辑器拖动/缩放事件（只绑一次）
@@ -3183,7 +3203,9 @@ function loadDeptOpen(){
   }catch(e){DEPT_OPEN={};}
 }
 function saveDeptOpen(){
+  // 本地兜底 + 服务端持久化（T-0187：原 localStorage 未按账号分桶，入库后天然按用户隔离）
   try{localStorage.setItem('tapd.deptOpen',JSON.stringify(DEPT_OPEN));}catch(e){}
+  _prefPush('dept_open',DEPT_OPEN);
 }
 // 单选：展开 name 时收起其他所有部门
 function expandOnly(name){
@@ -5787,10 +5809,102 @@ async function foldItems(gid,expand){
   toast(expand?'已展开该板块的事项目录':'已折叠该板块的事项目录');
 }
 // ---------- 个人级「置顶」设置 ----------
-// 置顶是**个人偏好**：只对当前登录账号生效，不写入服务端、不影响其他人。
-// 暂不涉及服务端存储，先落在浏览器本地（按账号分桶，换账号互不影响）。
+// 置顶是**个人偏好**：只对当前登录账号生效，不影响其他人。
+// T-0187：持久化到服务端 user_prefs 表（跨浏览器/设备一致）；localStorage 仍同步写
+// 作为兜底缓存（服务端短暂不可达时界面不丢配置），登录后一次性迁移本地旧数据。
 const PIN_STORE_PREFIX='my_pins_v1:';
 let MY_PINS={card:{},column:{}};   // {card:{card_id:1}, column:{col_key:1}}
+let _PREF_SAVE_TIMERS={};          // 按 key 防抖：连续变更合并成一次 PUT
+function _prefPush(key,value){
+  // 防抖上传（800ms）：置顶/折叠等连续点击只发最后一次，失败静默（内存态已生效）
+  clearTimeout(_PREF_SAVE_TIMERS[key]);
+  _PREF_SAVE_TIMERS[key]=setTimeout(function(){
+    api('/api/prefs/'+key,{method:'PUT',body:JSON.stringify({value:value})}).catch(function(){});
+  },800);
+}
+function _migrateLocalPref(key,localValue,serverHas){
+  // 一次性迁移：服务端没有该配置而本地浏览器有 → 上传本地值（迁移后本地保留作兜底）
+  if(!serverHas&&localValue!==null&&localValue!==undefined){
+    _prefPush(key,localValue);
+    return localValue;
+  }
+  return null;
+}
+// 登录后调用：拉取服务端配置 → 覆盖内存；服务端缺、本地有 → 迁移上传
+async function loadUserPrefs(){
+  try{
+    const d=await api('/api/prefs');
+    const p=(d&&d.prefs)||{};
+    // 置顶
+    if(p.pins&&typeof p.pins==='object'&&p.pins.card){
+      MY_PINS={card:(p.pins.card&&typeof p.pins.card==='object')?p.pins.card:{},
+               column:(p.pins.column&&typeof p.pins.column==='object')?p.pins.column:{}};
+      renderCurrentViewForPrefs();
+    }else{
+      const local=(function(){try{const raw=localStorage.getItem(PIN_STORE_PREFIX+((ME&&ME.username)||'anon'));return raw?JSON.parse(raw):null}catch(e){return null}})();
+      const mv=_migrateLocalPref('pins',local&&local.card?p.pins||local:local,!!p.pins);
+      if(mv&&mv.card){MY_PINS={card:mv.card||{},column:mv.column||{}};renderCurrentViewForPrefs();}
+    }
+    // 目录展开状态（原 localStorage tapd.deptOpen 未按账号分桶 → 入库后天然按用户隔离）
+    if(p.dept_open&&typeof p.dept_open==='object'){
+      DEPT_OPEN=p.dept_open;
+      renderCurrentViewForPrefs();
+    }else{
+      const local=(function(){try{const raw=localStorage.getItem('tapd.deptOpen');return raw?JSON.parse(raw):null}catch(e){return null}})();
+      const mv=_migrateLocalPref('dept_open',local,!!p.dept_open);
+      if(mv){DEPT_OPEN=mv;renderCurrentViewForPrefs();}
+    }
+  }catch(e){}
+}
+// 配置到达后刷新受影响视图（静默，不打扰用户）
+function renderCurrentViewForPrefs(){
+  try{ if(typeof renderTabs==='function')renderTabs(); }catch(e){}
+}
+// ---------- 个人配置备份/回滚（T-0187） ----------
+async function openPrefSnapModal(){
+  openModal('prefSnapModal');
+  await renderPrefSnapList();
+}
+async function renderPrefSnapList(){
+  const box=document.getElementById('psnap_list');
+  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px 2px">加载中…</div>';
+  try{
+    const d=await api('/api/prefs/snapshots');
+    const list=d.snapshots||[];
+    if(!list.length){
+      box.innerHTML='<div style="color:var(--text2);font-size:12px;padding:8px 2px">还没有备份。点上方「备份当前」保存一份完整配置快照。</div>';
+      return;
+    }
+    box.innerHTML=list.map(function(s){
+      return '<div style="border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+        +'<div style="flex:1;min-width:180px">'
+        +'<div style="font-size:12.5px">#'+s.id+'　'+esc(s.created_at)+'</div>'
+        +'<div style="font-size:11.5px;color:var(--text3)">'+(s.note?esc(s.note):'<span style="color:var(--text3)">（无备注）</span>')
+        +'　·　配置：'+esc((s.keys||[]).join('、')||'（空）')+'</div></div>'
+        +'<button class="btn-default" style="padding:4px 12px;font-size:12px;flex-shrink:0;color:var(--primary);border-color:var(--primary)" '
+        +'onclick="restorePrefSnap('+s.id+',this)" title="恢复到该快照的状态（当前配置会先自动备份）">回滚到此</button>'
+        +'</div>';
+    }).join('');
+  }catch(e){ box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:8px 2px">加载失败：'+esc(e.message||'')+'</div>'; }
+}
+async function createPrefSnap(){
+  const note=(document.getElementById('psnap_note').value||'').trim();
+  try{
+    const d=await api('/api/prefs/snapshots',{method:'POST',body:JSON.stringify({note:note})});
+    toast('已备份（快照 #'+(d.id||'?')+'）');
+    document.getElementById('psnap_note').value='';
+    renderPrefSnapList();
+  }catch(e){toast(e.message)}
+}
+async function restorePrefSnap(sid,btn){
+  if(!confirm('确定回滚到快照 #'+sid+'？\n当前配置会先自动备份，回滚后页面将刷新。'))return;
+  if(btn)btn.disabled=true;
+  try{
+    await api('/api/prefs/snapshots/'+sid+'/restore',{method:'POST'});
+    toast('已回滚，页面即将刷新');
+    setTimeout(function(){location.reload();},800);
+  }catch(e){toast(e.message);if(btn)btn.disabled=false;}
+}
 function loadPins(){
   MY_PINS={card:{},column:{}};
   try{
@@ -5803,7 +5917,9 @@ function loadPins(){
   }catch(e){MY_PINS={card:{},column:{}}}
 }
 function savePins(){
+  // 本地兜底（立即可用）+ 服务端持久化（防抖）
   try{localStorage.setItem(PIN_STORE_PREFIX+((ME&&ME.username)||'anon'),JSON.stringify(MY_PINS))}catch(e){}
+  _prefPush('pins',MY_PINS);
 }
 function isPinned(kind,key){return !!(MY_PINS[kind]&&MY_PINS[kind][key])}
 function setPinned(kind,key,on){
@@ -6443,6 +6559,60 @@ function poolTree(names,label){
   //    按 m.name 取名、按 m.node_id 过滤归属，传字符串会渲染成空面板。
   return [{id:-99,name:'__pool__',label:label||'可选人员',children:[],
            members:(names||[]).map(function(n){return {name:n,node_id:-99};})}];
+}
+// ── 看板管理选人树（T-0186）：架构树形状 + 部门成员挂载 ──
+// 口径：
+//   · **保留原有架构树节点层级**（不再是 poolTree 的单节点扁平池）；
+//   · 成员从 team_members.departments（部门单一来源）挂到**同名节点**下
+//     （成员可属多部门 → 在多个部门节点下各出现一次）；
+//   · **无成员的节点不显示**（递归剪枝：节点直属无挂载成员且子树全空 → 剪掉）；
+//   · **各节点默认展开**（保留节点全部写入 TREE_EXPANDED；面板内手动折叠
+//     由 tpToggle 即时生效，与搜索筛选、勾选互不干扰）；
+//   · 池约束不变：部门级归属 → 只挂该部门成员；中心级/未配置 → 全部成员。
+function bcDeptShapeTree(dept){
+  // 中心级判定（双保险）：bcIsCenterDept 依赖 BC_DEPTS（看板管理弹窗打开时才加载）；
+  // 未加载时按架构树中心节点名兜底，避免组件独立调用时把中心级误判成部门级。
+  const isCenter=bcIsCenterDept(dept)||(ORG_TREE||[]).some(function(n){
+    return n.node_type==='center'&&n.name===dept;});
+  const poolAcc=isCenter?null:bcDeptPoolAccounts(dept);   // null=不限（中心级/未配置）
+  const poolSet=poolAcc===null?null:new Set(poolAcc);
+  if(!ORG_TREE||!ORG_TREE.length)return poolTree(bcDeptPoolNames(dept));  // 兜底：无架构数据
+  // 节点名 → id（同名取第一个）
+  const byName={};
+  (function walk(ns){(ns||[]).forEach(function(n){ if(!(n.name in byName))byName[n.name]=n.id; walk(n.children||[]); });})(ORG_TREE);
+  // 成员挂载：nodeId → [{name,node_id}]
+  const mounted={};
+  const rootIds=(ORG_TREE||[]).map(function(n){return n.id;});
+  BC_ACL_MEMBERS.forEach(function(m){
+    if(poolSet&&!poolSet.has(m.account))return;     // 池外成员不挂（部门级约束）
+    if(!m.name)return;
+    // ⚠️ BC_ACL_MEMBERS 的部门字段是 **depts（数组）**（bcLoadAclMembers 映射时改名）
+    const depts=(m.depts||[]);
+    let hit=false;
+    depts.forEach(function(d){
+      const id=byName[d];
+      if(id!==undefined){(mounted[id]=mounted[id]||[]).push({name:m.name,node_id:id});hit=true;}
+    });
+    if(!hit){   // 无部门 / 部门名不在树中 → 挂首个顶层节点保底（不丢人）
+      const rid=rootIds[0];
+      if(rid!==undefined)(mounted[rid]=mounted[rid]||[]).push({name:m.name,node_id:rid});
+    }
+  });
+  // 剪枝：直属有挂载成员或子树有保留节点 → 保留
+  function shape(ns){
+    const out=[];
+    (ns||[]).forEach(function(n){
+      const kids=shape(n.children||[]);
+      const mem=mounted[n.id]||[];
+      if(!mem.length&&!kids.length)return;
+      out.push(Object.assign({},n,{children:kids,members:mem}));
+    });
+    return out;
+  }
+  const shaped=shape(ORG_TREE);
+  if(!shaped.length)return poolTree(bcDeptPoolNames(dept));   // 整树剪空 → 退回扁平池
+  (function ex(ns){(ns||[]).forEach(function(n){ TREE_EXPANDED.add(n.id); ex(n.children||[]); });})(shaped);
+  return shaped;
 }
 async function colPickParticipants(anchor){
   // 人员选择层级约束（2026-11-04）：板块参与人从**所属看板**的负责人与参与人中选
@@ -7442,6 +7612,7 @@ function tpSearch(kw){
   if(TREE_PICK.keyword===low)return;
   TREE_PICK.keywordRaw=raw;
   TREE_PICK.keyword=low;
+  TREE_PICK.manualFold=new Set();   // 新搜索词 → 清空手动折叠（命中路径重新自动展开）
   renderTreePickBody();
   // 同步输入框显示值（清空搜索等场景），但不抢焦点
   const inp=document.getElementById('tp_search');
@@ -7496,7 +7667,11 @@ function treePickNodes(nodes,dep){
     const hasBody=hasCh||allMembers.length>0;
     // 搜索时**自动展开**到命中项的路径：子树里有匹配人员的节点一律展开，
     // 否则命中的人员藏在折叠的容器里看不见。
-    const showBody=kw?tpSubtreeHasMatch(n,kw):exp;
+    // T-0186：搜索态下用户手动折叠（manualFold）优先于自动展开 ——
+    // 且箭头文案与实际展开态一致（此前箭头显示 ▶ 但内容被搜索强制展开，点击无效）。
+    const manual=TREE_PICK.manualFold||new Set();
+    const showBody=kw?(tpSubtreeHasMatch(n,kw)&&!manual.has(n.id)):exp;
+    const arrowTxt=hasBody?(showBody?'▼':'▶'):'▼';
     const memberHtml=members.map(m=>{
       const key=ORG_PERSON_PREFIX+m.name;
       const on=TREE_PICK.selected.includes(key);
@@ -7515,7 +7690,7 @@ function treePickNodes(nodes,dep){
       </div>`;
     }).join('');
     return `<div class="tp-node" style="padding-left:${dep*16}px">
-      ${hasBody?`<span class="tp-arrow" id="tp_arrow_${n.id}" onclick="tpToggle(${n.id})" title="展开/折叠">${exp?'▼':'▶'}</span>`:'<span class="tp-arrow" style="visibility:hidden">▶</span>'}
+      ${hasBody?`<span class="tp-arrow" id="tp_arrow_${n.id}" onclick="tpToggle(${n.id})" title="展开/折叠">${arrowTxt}</span>`:'<span class="tp-arrow" style="visibility:hidden">▶</span>'}
       <label class="tp-label" tabindex="0" role="${TREE_PICK.pickMode==='person'?'group':'checkbox'}" aria-label="选择 ${esc(labelText)}" onclick="tpBoxClick('${esc(n.name)}',${n.id})" onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpBoxClick('${esc(n.name)}',${n.id})}"><span class="tp-box${TREE_PICK.pickMode==='person'?' tp-box-node':''}" id="tp_box_${n.id}"></span><span>${esc(labelText)}</span></label>
     </div>${hasBody?`<div id="tp_children_${n.id}" style="display:${showBody?'block':'none'}">${memberHtml}${hasCh?treePickNodes(n.children,dep+1):''}</div>`:''}`;
   }).join('');
@@ -7675,6 +7850,14 @@ function tpBoxClick(name,id){
 }
 function tpToggle(id){
   if(!TREE_PICK)return;
+  // T-0186：搜索态下手动折叠写入 manualFold（优先于「命中路径自动展开」）；
+  // 非搜索态走原有 expanded 逻辑。两套状态互不污染。
+  if(TREE_PICK.keyword){
+    if(!TREE_PICK.manualFold)TREE_PICK.manualFold=new Set();
+    TREE_PICK.manualFold.has(id)?TREE_PICK.manualFold.delete(id):TREE_PICK.manualFold.add(id);
+    renderTreePickBody();
+    return;
+  }
   TREE_PICK.expanded.has(id)?TREE_PICK.expanded.delete(id):TREE_PICK.expanded.add(id);
   // 展开状态写入**全局**存储：这样「筛选变更后重开弹窗」「架构数据刷新后重开」
   // 都能保持用户上次展开到哪一层，不会每次都跳回根节点。
@@ -11609,13 +11792,11 @@ function bcOpenOwnerTree(anchor){
   // ⚠️ 树里选的是**姓名**（ORG_TREE 的 members 只有 name），
   //    而负责人字段存的是**账号** → 回填时按姓名反查账号。
   const cur=BC_FORM.owner?bcMemberName(BC_FORM.owner):'';
-  // 部门约束（2026-11-12）：财务中心（中心级）= 全部成员（原架构树全范围）；
-  // 其他部门 = 仅该部门成员（departments 单一来源）→ 合成单节点成员池。
+  // 部门约束（2026-11-12）：财务中心（中心级）= 全部成员；其他部门 = 仅该部门成员。
+  // T-0186：统一改用「架构树形状 + 部门成员挂载」的合成树 —— 保留原有架构树节点
+  //（无成员节点剪掉不显示、各节点默认展开），不再是单节点扁平池。
   const _dept=BC_FORM.dept||'';
-  const _pool=bcDeptPoolAccounts(_dept);
-  const _tree=_pool===null
-    ?orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(_dept))
-    :poolTree(bcDeptPoolNames(_dept),'可选人员（归属部门「'+_dept+'」成员）');
+  const _tree=bcDeptShapeTree(_dept);
   openTreePick(anchor, cur?[ORG_PERSON_PREFIX+cur]:[], function(persons){
     if(!persons||!persons.length)return;
     const acc=bcAccountByName(persons[0]);
@@ -11656,12 +11837,10 @@ function bcPickParticipants(anchor){
 }
 function bcOpenParticipantsTree(anchor){
   // 选人范围 = 归属部门成员池（2026-11-12 部门约束，与负责人同池）。
+  // T-0186：同样改用「架构树形状 + 部门成员挂载」合成树（负责人入口同款）。
   // 2026-11-05：取消互斥 —— 不再排除当前负责人。
   const _dept=BC_FORM.dept||'';
-  const _pool=bcDeptPoolAccounts(_dept);
-  const tree=_pool===null
-    ?orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(_dept))
-    :poolTree(bcDeptPoolNames(_dept),'可选人员（归属部门「'+_dept+'」成员）');
+  const tree=bcDeptShapeTree(_dept);
   const cur=(BC_FORM.participants||[]).map(function(a){return bcMemberName(a);}).filter(Boolean);
   openTreePick(anchor, cur.map(function(n){return ORG_PERSON_PREFIX+n;}), function(persons){
     if(!persons||!persons.length){BC_FORM.participants=[];renderEditArea();return;}

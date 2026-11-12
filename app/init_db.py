@@ -407,6 +407,28 @@ CREATE TABLE IF NOT EXISTS export_templates (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_exp_tpl_user ON export_templates(username);
+-- 用户个人配置（T-0187）：置顶项 / 偏好设置等持久化入库（原 localStorage 分散存储）。
+-- key 是配置命名空间（pins=置顶、dept_open=目录展开…），value 为 JSON 字符串——
+-- 每类配置一个 key、内部结构自描述，新增偏好只加 key 不改表（可扩展）。
+CREATE TABLE IF NOT EXISTS user_prefs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL DEFAULT '{}',
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(username, key)
+);
+CREATE INDEX IF NOT EXISTS idx_user_prefs_user ON user_prefs(username);
+-- 个人配置快照（T-0187）：备份 = 当前该用户全部配置的完整快照（data 为 {key:value}）；
+-- 回滚 = 整包替换该用户全部配置（事务内先自动备份回滚前状态，可再回滚找回）。
+CREATE TABLE IF NOT EXISTS user_pref_snapshots (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    TEXT NOT NULL,
+    data        TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_pref_snap_user ON user_pref_snapshots(username);
 -- 登录页小精灵分区（T-0177）：上传图片按分区管理，随机仅在指定分区范围内选取。
 -- 内置 386 张宝可梦精灵不入库（静态资源），以保留名 __builtin__ 虚拟分区参与选择。
 CREATE TABLE IF NOT EXISTS pet_zones (

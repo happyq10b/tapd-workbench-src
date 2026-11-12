@@ -1817,6 +1817,110 @@ def require_super(username: str = Depends(require_auth)):
     return username
 
 
+# ---------------- 用户个人配置持久化（T-0187） ----------------
+# 置顶项 / 偏好设置等原散落在浏览器 localStorage（换浏览器/换设备即丢），
+# 统一入库 user_prefs：每类配置一个 key（pins=置顶、dept_open=目录展开…），
+# value 为 JSON —— 新增偏好只加 key 不改表。快照表支持备份与整包回滚。
+_PREF_KEY_RE = re.compile(r'^[a-z_]{1,40}$')
+_PREF_VALUE_MAX = 64 * 1024        # 单 key 配置上限 64KB（防止异常膨胀）
+
+@app.get('/api/prefs')
+def get_prefs(username: str = Depends(require_auth)):
+    """当前用户的全部个人配置。value 解析失败的条目跳过（坏数据不堵接口）。"""
+    out = {}
+    for r in dbq('SELECT key, value FROM user_prefs WHERE username=?', (username,)):
+        try:
+            out[r['key']] = json.loads(r['value'])
+        except Exception:
+            continue
+    return {'prefs': out}
+
+@app.put('/api/prefs/{key}')
+def put_pref(key: str, req: dict, username: str = Depends(require_auth),
+             request: Request = None):
+    """保存一类个人配置（整体覆盖该 key 的 value）。"""
+    if not _PREF_KEY_RE.match(key or ''):
+        raise HTTPException(400, '配置键名不合法')
+    value = req.get('value')
+    try:
+        s = json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+    except (TypeError, ValueError):
+        raise HTTPException(400, '配置值必须可 JSON 序列化')
+    if len(s.encode('utf-8')) > _PREF_VALUE_MAX:
+        raise HTTPException(400, '配置过大（上限 64KB）')
+    dbe('INSERT INTO user_prefs (username, key, value) VALUES (?,?,?) '
+        'ON CONFLICT(username, key) DO UPDATE SET value=excluded.value, '
+        'updated_at=datetime(\'now\',\'localtime\')', (username, key, s))
+    audit_log(username, client_ip(request), 'pref_update', f'配置 {key}',
+              '保存个人配置', 'success')
+    return {'ok': True}
+
+@app.post('/api/prefs/snapshots')
+def create_pref_snapshot(req: dict, username: str = Depends(require_auth),
+                         request: Request = None):
+    """备份：把当前该用户**全部**个人配置存为一条完整快照。"""
+    data = {r['key']: r['value'] for r in
+            dbq('SELECT key, value FROM user_prefs WHERE username=?', (username,))}
+    note = (req.get('note') or '').strip()[:100]
+    dbe('INSERT INTO user_pref_snapshots (username, data, note) VALUES (?,?,?)',
+        (username, json.dumps(data, ensure_ascii=False, separators=(',', ':')), note))
+    sid = dbq('SELECT last_insert_rowid() AS id')[0]['id']
+    audit_log(username, client_ip(request), 'pref_backup', f'配置快照 #{sid}',
+              f'备份个人配置（{len(data)} 类）', 'success')
+    return {'ok': True, 'id': sid, 'keys': sorted(data.keys())}
+
+@app.get('/api/prefs/snapshots')
+def list_pref_snapshots(username: str = Depends(require_auth)):
+    """快照列表（不含完整数据，只回概要：id/时间/备注/包含的配置键）。"""
+    out = []
+    for r in dbq('SELECT id, data, note, created_at FROM user_pref_snapshots '
+                 'WHERE username=? ORDER BY id DESC LIMIT 50', (username,)):
+        try:
+            keys = sorted(json.loads(r['data']).keys())
+        except Exception:
+            keys = []
+        out.append({'id': r['id'], 'note': r['note'],
+                    'created_at': r['created_at'], 'keys': keys})
+    return {'snapshots': out}
+
+@app.post('/api/prefs/snapshots/{sid}/restore')
+def restore_pref_snapshot(sid: int, username: str = Depends(require_auth),
+                          request: Request = None):
+    """回滚到指定快照（整包替换）。
+
+    数据一致性：
+      · 全程单事务 —— 快照读取、旧配置清理、新配置写入要么全成要么全不动；
+      · 回滚前**自动备份**当前配置为一条新快照（note='回滚前自动备份'），
+        版本冲突（回滚错了/想反悔）可再次回滚找回；
+      · 快照不存在或非本人 → 404（不泄露他人配置）。
+    """
+    row = dbq('SELECT data FROM user_pref_snapshots WHERE id=? AND username=?',
+              (sid, username))
+    if not row:
+        raise HTTPException(404, '快照不存在')
+    try:
+        data = json.loads(row[0]['data'])
+    except Exception:
+        raise HTTPException(500, '快照数据损坏，无法回滚')
+    # 回滚前自动备份（保留回滚前状态，形成可回退链）
+    cur = {r['key']: r['value'] for r in
+           dbq('SELECT key, value FROM user_prefs WHERE username=?', (username,))}
+    dbe('INSERT INTO user_pref_snapshots (username, data, note) VALUES (?,?,?)',
+        (username, json.dumps(cur, ensure_ascii=False, separators=(',', ':')),
+         '回滚前自动备份（快照 #%d → 当前）' % sid))
+    # 整包替换（busy_timeout 已全局设置；单连接内顺序执行保证原子可见性）
+    dbe('DELETE FROM user_prefs WHERE username=?', (username,))
+    restored = []
+    for k, v in data.items():
+        if not _PREF_KEY_RE.match(str(k)):
+            continue                     # 快照中的脏 key 跳过不落库
+        dbe('INSERT INTO user_prefs (username, key, value) VALUES (?,?,?)',
+            (username, k, v))
+        restored.append(k)
+    audit_log(username, client_ip(request), 'pref_restore', f'配置快照 #{sid}',
+              f'回滚个人配置（恢复 {len(restored)} 类，回滚前状态已自动备份）', 'success')
+    return {'ok': True, 'restored_keys': sorted(restored)}
+
 # ---------------- 登录页小精灵设置（T-0175/T-0177，仅超级管理员） ----------------
 # 内置 386 张宝可梦精灵以保留分区名 __builtin__ 参与固定/随机选择；
 # 上传图片按自定义分区管理（pet_zones / pet_images）。
@@ -2264,14 +2368,14 @@ def me(username: str = Depends(require_auth)):
         item['dept'] = dn
         item['dept_node_id'] = dnode or 0
         item['owner'], item['participants'] = _acl_map.get(b['board_id'], ('', ''))
-        # 板块弹窗的负责人/参与人指派门槛（2026-11-04）：与后端写接口**同一判定**，
+        # 板块弹窗的负责人/参与人指派门槛（2026-11-04 / T-0185 修订）：与后端写接口**同一判定**，
         # 前端不再手写 is_admin（#43 同款问题的教训）。
         #   can_edit          → 可指派板块参与人（板块负责人及以上，看板/架构负责人继承）
-        #   can_assign_owner  → 可指派板块负责人（架构负责人及以上）
+        #   can_assign_owner  → 可指派板块负责人（T-0185：看板负责人及以上，上级权逐层下放）
         _chain = perm_chain(board_id=b['board_id'])
         item['can_edit'] = perm_check_pass(username, _chain, OP_UPDATE, LV_BOARD_OWNER)
         item['can_assign_owner'] = perm_check_pass(username, _chain, OP_ASSIGN_OWNER, LV_BOARD_OWNER,
-                                                   min_level=LV_ARCH_OWNER)
+                                                   min_level=LV_BOARD_OWNER)
         boards_out.append(item)
     # 板块级权限信息（供前端配置/展示）
     col_info = None
@@ -2742,11 +2846,13 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     if dbq('SELECT col_key FROM board_columns WHERE col_key=?', (key,)):
         raise HTTPException(409, '该看板下已存在同名板块')
     year = _norm_year(req.year) or created[:4]   # 归属年份：单值必填，未填默认取创建年份
-    # 板块负责人（2026-11-04）：指定权 = **架构负责人及以上**；未传 = 不指定
+    # 板块负责人（T-0185 修订）：指定权 = **看板负责人及以上**（上级权逐层下放：
+    # 架构负责人指派看板负责人 → 看板负责人指派板块负责人；原「架构负责人及以上」
+    # 挡住了看板负责人 —— 与 /api/me 的 can_assign_owner 能力位同口径）。未传 = 不指定
     new_owner = ''
     if (req.owner or '').strip():
         perm_check(username, perm_chain(board_id=req.board_id), OP_ASSIGN_OWNER, LV_BOARD_OWNER,
-                   'board:' + req.board_id, min_level=LV_ARCH_OWNER)
+                   'board:' + req.board_id, min_level=LV_BOARD_OWNER)
         new_owner = _norm_acl_owner(req.owner)
     # ⚠️ 参与人此前**模型有字段但 create 没落库**（静默丢弃）—— 一并补上
     parts = _norm_acl_participants(req.participants) if (req.participants or '').strip() else ''
@@ -2800,14 +2906,14 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     boards, _cols = user_allowed(username)
     if boards is not None and board_id not in boards:
         raise HTTPException(403, '无权编辑该板块')
-    # 负责人字段（2026-11-04 修订）：指定权 = **架构负责人及以上**（上级权，与看板
-    # 负责人指派同口径）。原「仅管理员」与前端能力位脱节 —— #43 同款问题第四次。
+    # 负责人字段（T-0185 修订）：指定权 = **看板负责人及以上**（上级权逐层下放，
+    # 原「架构负责人及以上」挡住了看板负责人 —— 与 /api/me 能力位同口径）。
     owner_val = (req.owner or '').strip()
     new_owner = None
     if owner_val:
         perm_check(username, perm_chain(board_id=board_id, column_id=(old['column_id'] if old else '')),
                    OP_ASSIGN_OWNER, LV_BOARD_OWNER, 'column:' + (req.col_key or ''),
-                   min_level=LV_ARCH_OWNER)
+                   min_level=LV_BOARD_OWNER)
         new_owner = _norm_acl_owner('' if owner_val == '__CLEAR__' else owner_val)
     nature = (req.nature or '').strip() or (old['nature'] if old else '日常')
     if nature not in COLUMN_NATURES:
