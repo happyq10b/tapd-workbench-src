@@ -299,7 +299,9 @@ CREATE TABLE IF NOT EXISTS board_columns (
     --    completion 是负责人对整体完成度的**声明**，两者并存展示。
     completion  TEXT NOT NULL DEFAULT 'open',
     -- 板块描述（2026-11-09 #93）：编辑/新建板块弹窗的可选说明文字，板块标题 tooltip 展示
-    description TEXT NOT NULL DEFAULT ''
+    description TEXT NOT NULL DEFAULT '',
+    -- 板块截止日期（T-0188 倒计时）：YYYY-MM-DD，空 = 未设置
+    due_date    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
 CREATE INDEX IF NOT EXISTS idx_board_columns_name ON board_columns(column_name);
@@ -842,6 +844,31 @@ def init_db(force_import=False):
     # 板块「完成情况」（2026-11-04 需求3）：负责人手动标记的完成状态
     if 'completion' not in bcols:
         conn.execute("ALTER TABLE board_columns ADD COLUMN completion TEXT NOT NULL DEFAULT 'open'")
+    # 板块截止日期（T-0188 倒计时）：YYYY-MM-DD，空 = 未设置（倒计时列显示 —）
+    if 'due_date' not in bcols:
+        conn.execute("ALTER TABLE board_columns ADD COLUMN due_date TEXT NOT NULL DEFAULT ''")
+    # ---- 板块评论 / 板块待办（T-0188）：板块浏览界面的两个功能模块 ----
+    # 评论 = 板块级讨论（可见即可评，与 T-013d 口径一致）；待办 = 板块级清单。
+    # ⚠️ 独立成表而非复用 comments/card_subtasks：那两张表的主键维度是 card_id，
+    #    板块没有 card_id，塞伪 ID 会污染事项侧的统计与级联删除。
+    conn.execute('''CREATE TABLE IF NOT EXISTS column_comments (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        col_key     TEXT NOT NULL,
+        username    TEXT NOT NULL,
+        content     TEXT NOT NULL,
+        created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_col_cmt ON column_comments(col_key, id)')
+    conn.execute('''CREATE TABLE IF NOT EXISTS column_todos (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        col_key     TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        done        INTEGER NOT NULL DEFAULT 0,
+        sort        INTEGER NOT NULL DEFAULT 0,
+        created_by  TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_col_todo ON column_todos(col_key, sort, id)')
     # ---- 分级权限模型（2026-11-02）----
     # 四层资源统一记录「负责人 + 参与人集合」：
     #   架构 org_nodes.owner / .participants

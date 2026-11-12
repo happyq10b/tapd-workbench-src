@@ -705,9 +705,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    meta 不加任何 margin；标题 flex:1 仍吸收全部剩余空间。 */
 /* 2026-11-04 需求2：板块进度条**宽度固定**（≈ 两个周数列的宽度），不做伸缩。
    它现在是板块行字段网格的**第一格**（原为独立的弹性元素）：
-     板块行 fcols = [进度条 192px][负责人 118][创建 104][截止 104]
+     板块行 fcols = [进度条 192px][负责人 118][创建 104][截止 104][倒计时 72]
    → 进度条右端 = 负责人列起点（对齐），而板块行 fcols 比事项行宽 96px，
-     两者右端都锚在 item-tail 前 → 负责人/创建/截止三列**仍纵向对齐**。 */
+     两者右端都锚在 item-tail 前 → 负责人/创建/截止/倒计时四列**仍纵向对齐**。 */
 /* ⚠️ display:block —— 进度条是 <span>（行内元素），行内元素的 width:100% 不生效 → 宽度会是 0 */
 .week-bar{display:block;width:100%;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
 .week-bar i{display:block;height:100%;background:var(--success)}
@@ -737,15 +737,15 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    用 grid 定宽列 → 负责人姓名长短、周数文本长短、空值占位都不影响后续列的起始位置。
    父事项行与子事项行共用同一套类名与同一套字段定义（列宽也必须完全一致，
    否则父行与子行的字段列起点会错位）。 */
-.fcols{display:grid;grid-template-columns:96px 118px 104px 104px;gap:0 8px;align-items:center;
-  width:446px;flex:0 0 446px}
+.fcols{display:grid;grid-template-columns:96px 118px 104px 104px 72px;gap:0 8px;align-items:center;
+  width:530px;flex:0 0 530px}
 /* 板块行的字段网格（2026-11-04 需求2）：第一格是**固定宽度的进度条**（192px ≈ 两个周数列），
-   后面三格与事项行同宽同序 → 负责人列起点与事项行完全一致。 */
-/* 板块行字段网格：**与事项行完全同构**（96/118/104/104 = 446px）
-   → 板块的「负责人/创建/截止」三列与事项行的对应列**像素级一一对齐**。
+   后面几格与事项行同宽同序 → 负责人列起点与事项行完全一致。 */
+/* 板块行字段网格：**与事项行完全同构**（96/118/104/104/72 = 530px）
+   → 板块的「负责人/创建/截止/倒计时」四列与事项行的对应列**像素级一一对齐**。
    板块本身没有周数 → 第一格（周数位）复用为**进度条位**。
-   ⚠️ 两行 fcols 宽度必须相同（都 446px），否则右端锚点相同但左端错位。 */
-.fcols.week-fcols{grid-template-columns:96px 118px 104px 104px;width:446px;flex:0 0 446px}
+   ⚠️ 两行 fcols 宽度必须相同（都 530px），否则右端锚点相同但左端错位。 */
+.fcols.week-fcols{grid-template-columns:96px 118px 104px 104px 72px;width:530px;flex:0 0 530px}
 /* 进度条：**占满整个周数位格（96px）**，并向左溢出 8px 进入列间距区。
    - margin-left:-8px  → 起点 = 格起点 - 8 = -8 → 紧靠「n/N 完成」（间距 4px）
    - margin-right:8px  → 终点 = 格右端 - 8 = 88 → 距「负责人」列 16px
@@ -760,6 +760,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .fcol-week_no{color:var(--text2)}
 .fcol-created{color:var(--text3)}
 .fcol-due{color:var(--text2)}
+/* 倒计时列（T-0188）：随当前日期自动计算；逾期红色高亮（与「逾期」标签同色系） */
+.fcol-cd{color:var(--text2);font-variant-numeric:tabular-nums}
+.fcol-cd.fcol-cd-over{color:var(--danger);font-weight:600}
 /* 空值占位：与「截止日期」同款（灰色 + 破折号），不占额外视觉重量 */
 .fcol-empty{color:var(--text3);opacity:.85}
 /* 行尾区块：整体右对齐（margin-left:auto）→ 锚定在行的最右端。
@@ -1796,7 +1799,10 @@ function goLogin(){
       <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
       <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，必填；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
       <!-- 归属年份说明段已删（2026-11-04 用户反馈），布局上移 -->
-      <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
+      <div class="form-row">
+        <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
+        <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="c_due" title="板块截止日期（选填）；目录【倒计时】列按此日期与今天自动计算"></div>
+      </div>
       <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
       <!-- 负责人/参与人：并排两框（2026-11-04 用户反馈：加外框、删大段说明、并成一排） -->
       <div class="form-group" style="display:flex;gap:10px;align-items:stretch">
@@ -1854,9 +1860,24 @@ function goLogin(){
     <div class="modal-body">
       <div class="detail-meta" id="cd_meta"></div>
       <div class="detail-desc" id="cd_desc" style="display:none"></div>
+      <!-- 待办（T-0188）：板块级清单，结构与事项详情的「代办任务」一致；
+           增删改需编辑权（ME.can_edit）且板块未被他人锁定，勾选/删除即时落库 -->
       <div class="subtask-box">
-        <div class="subtask-head"><span class="subtask-title">板块事项</span><span class="subtask-count" id="cd_card_count"></span></div>
-        <div id="cd_cards" class="subtask-list"></div>
+        <div class="subtask-head"><span class="subtask-title">待办</span><span class="subtask-count" id="cd_todo_count"></span></div>
+        <div id="cd_todos" class="subtask-list"></div>
+        <div class="subtask-add" id="cd_todo_add_row" style="display:none">
+          <div style="display:flex;gap:8px;flex:1;min-width:0">
+            <input type="text" class="form-input" id="cd_todo_new" placeholder="添加待办，回车确认…" onkeydown="if(event.key==='Enter')cdAddTodo()">
+            <button class="btn-default" onclick="cdAddTodo()" style="flex-shrink:0">添加</button>
+          </div>
+        </div>
+      </div>
+      <!-- 评论（T-0188）：板块级讨论，可见即可评（与事项评论同款布局/样式） -->
+      <div class="comment-box"><h4>评论</h4><div id="cd_comments"></div>
+        <div class="comment-form">
+          <input id="cd_new_comment" placeholder="写评论…" autocomplete="off" onkeydown="if(event.key==='Enter')cdAddComment()">
+          <button class="btn-default" onclick="cdAddComment()">发送</button>
+        </div>
       </div>
     </div>
   </div>
@@ -5209,7 +5230,7 @@ function renderBoard(cards,cols,q,colHits){
     // 标题点击 = 打开板块浏览界面（T-0183：浏览 → 编辑两级，与事项「详情 → 编辑」一致）；
     // 展开/收起只由左侧三角控制，两者互不干扰
     const titleEditable=canEditColumn(boardId);
-    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}" data-completion="${esc(meta?(meta.completion||'open'):'open')}" data-desc="${esc(meta?(meta.description||''):'')}"`;
+    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}" data-completion="${esc(meta?(meta.completion||'open'):'open')}" data-desc="${esc(meta?(meta.description||''):'')}" data-due="${esc(meta?(meta.due_date||''):'')}"`;
     // 板块描述 tooltip（2026-11-09 #93）：有描述时悬停标题展示，否则提示可查看详情
     const colDesc=(meta&&(meta.description||'').trim())||'';
     const titleTip=colDesc?('【板块描述】'+colDesc):'点击查看板块详情';
@@ -5217,8 +5238,10 @@ function renderBoard(cards,cols,q,colHits){
       ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnDetail(this)" title="${esc(titleTip)}">${esc(k)}</span>`
       :`<span class="week-title" title="${esc(colDesc?('【板块描述】'+colDesc):'')}">${esc(k)}</span>`;
     // ── 板块行布局（2026-11-04 #55）：与事项行同构 → 字段列纵向对齐 ──
-    // 字段：负责人 / 创建 / 截止（板块无周数与逾期 → 周数列留空、逾期槽位空占位）
+    // 字段：负责人 / 创建 / 截止 / 倒计时（板块无周数 → 周数列复用为进度条位）
+    // 截止日期（T-0188）：板块编辑弹窗可配置；倒计时按截止日期与今天自动计算
     const _ownerName=bcMemberName(meta?(meta.owner||''):'');
+    const _colDue=meta?(meta.due_date||''):'';
     // 2026-11-04 需求2/3：
     //  ① 第一格 = **固定宽度进度条**（192px ≈ 两个周数列），右端与负责人列起点对齐
     //  ② 板块「完成情况」= 负责人手动声明的独立字段（completion），
@@ -5229,7 +5252,10 @@ function renderBoard(cards,cols,q,colHits){
       +(_ownerName?`<span class="fcol fcol-owner" title="板块负责人">负责人 ${esc(_ownerName)}</span>`
                   :'<span class="fcol fcol-owner fcol-empty" title="未设置板块负责人">负责人 —</span>')
       +`<span class="fcol fcol-created" title="板块创建日期">创建 ${esc(created||'—')}</span>`
-      +'<span class="fcol fcol-due fcol-empty" title="板块无截止日期">截止 —</span>'
+      +(_colDue?`<span class="fcol fcol-due" title="板块截止日期">截止 ${esc(_colDue)}</span>`
+            :'<span class="fcol fcol-due fcol-empty" title="未设置板块截止日期">截止 —</span>')
+      +(cdText(_colDue)?`<span class="fcol fcol-cd${cdOver(_colDue)?' fcol-cd-over':''}" title="${cdOver(_colDue)?('已逾期 '+(-cdDays(_colDue))+' 天'):(cdDays(_colDue)===0?'截止日期就是今天':('距截止日期还有 '+cdDays(_colDue)+' 天'))}">倒计时 ${esc(cdText(_colDue))}</span>`
+                      :'<span class="fcol fcol-cd fcol-empty" title="未设置截止日期，无倒计时">倒计时 —</span>')
       +'</span>';
     // 板块完成情况标签（与事项的状态标签同一形态，只读展示）
     const _comp=meta?(meta.completion||'open'):'open';
@@ -5601,11 +5627,31 @@ function fmtDate(v){
   if(!m)return s;
   return m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0');
 }
-// ---------- 字段列：负责人 / 周数 / 创建日期 / 截止日期 ----------
+// ---------- 倒计时（T-0188）：按截止日期与今天自动计算，每次渲染即时得出 ----------
+// null = 无截止日期；>0 还剩 N 天；=0 今天到期；<0 已逾期 N 天
+function cdDays(due){
+  const d=String(due||'').slice(0,10);
+  const m=d.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(!m)return null;
+  const dueT=new Date(+m[1],+m[2]-1,+m[3]);
+  const now=new Date();
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  return Math.round((dueT-today)/86400000);
+}
+function cdText(due){
+  const n=cdDays(due);
+  if(n===null)return '';
+  if(n>0)return n+' 天';
+  if(n===0)return '今天';
+  return '逾期'+(-n)+' 天';
+}
+function cdOver(due){const n=cdDays(due);return n!==null&&n<0;}
+// ---------- 字段列：负责人 / 周数 / 创建日期 / 截止日期 / 倒计时 ----------
 // 单一数据源：父事项与子事项共用 fieldItems()，
 // 字段集合与顺序由这里定义，渲染器只负责排版 → 两者必然一致，不会各写一份而漂移。
 // 负责人与父事项**各自独立取值**，不做任何父子关联或继承。
 // 「周数」放在创建信息列（创建日期）**之前** —— 它本身就是按创建日期算出来的维度。
+// 「倒计时」（T-0188）紧随「截止」之后，由截止日期与当前日期自动计算，不落库。
 function fieldItems(o){
   // 2026-11-04 #55：周数移到负责人左侧（紧随标题之后的第一个字段）
   return [
@@ -5613,6 +5659,7 @@ function fieldItems(o){
     {key:'owner',   label:'负责人',   value:String(o.owner||'').trim()},
     {key:'created', label:'创建',     value:fmtDate(o.created)},
     {key:'due',     label:'截止',     value:fmtDate(o.due)},
+    {key:'cd',      label:'倒计时',   value:cdText(o.due)},
   ];
 }
 // 周数压缩显示（#55）：「2026年第32周」→「2026·W32」，全称放悬停提示
@@ -5635,7 +5682,10 @@ function fieldCols(o){
     const v=f.key==='week_no'?weekCompact(f.value):f.value;
     let tip=f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label);
     if(f.key==='week_no'&&f.value&&cy)tip+='（所属板块年份：'+esc(cy)+'年）';
-    return `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}" title="${tip}">${f.label} ${v?esc(v):'—'}</span>`;
+    if(f.key==='cd'&&f.value)tip=f.value==='今天'?'截止日期就是今天':(cdOver(o.due)?('已逾期 '+(-cdDays(o.due))+' 天'):('距截止日期还有 '+cdDays(o.due)+' 天'));
+    // 倒计时逾期红色高亮（与「逾期」标签同色系）；未设置则灰色占位
+    const extra=(f.key==='cd'&&f.value&&cdOver(o.due))?' fcol-cd-over':'';
+    return `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}${extra}" title="${tip}">${f.label} ${v?esc(v):'—'}</span>`;
   }).join('');
 }
 // 紧凑版（右侧抽屉面板，宽度有限无法并排三列）：字段集合与顺序同上，仅改为单行堆叠
@@ -6684,6 +6734,8 @@ function openColumnModal(){
   document.getElementById('c_year').value=String(d.getFullYear());
   // 创建人：取当前登录用户并锁定
   document.getElementById('c_creator').value=ME.username||'';
+  // 截止日期：新建时默认空（T-0188 倒计时）
+  document.getElementById('c_due').value='';
   const nat=document.querySelector('input[name="c_nature"]:checked');
   if(nat)nat.checked=true;
   COL_OWNER='';
@@ -6722,6 +6774,8 @@ async function openColumnEdit(d,fromDetail){
   document.getElementById('c_name').value=d.cname||'';
   document.getElementById('c_year').value=d.year||'';
   document.getElementById('c_created').value=(d.created||'').slice(0,10);
+  // 截止日期回填（T-0188 倒计时）
+  document.getElementById('c_due').value=(d.due||'').slice(0,10);
   document.getElementById('c_creator').value=d.creator||ME.username||'';
   const nat=document.querySelector(`input[name="c_nature"][value="${d.nature||'日常'}"]`);
   if(nat)nat.checked=true;
@@ -6744,56 +6798,132 @@ async function openColumnEdit(d,fromDetail){
   openModal('columnModal');
   return true;
 }
-// ---------- 板块浏览界面（T-0183）：整体参照事项详情弹窗的浏览/编辑两级模式 ----------
-// 点击板块标题 → 浏览界面（元信息 + 描述 + 板块下事项列表 + 头部「✏️ 编辑」按钮）；
+// ---------- 板块浏览界面（T-0183；T-0188 动态区改为「待办 + 评论」）----------
+// 点击板块标题 → 浏览界面（元信息 + 描述 + 待办/评论模块 + 头部「✏️ 编辑」按钮）；
 // 浏览**不认锁**（与事项详情一致），进入编辑时才认领锁。
 // dataset 来自行内 data-*（openColumnDetail）或保存后的表单值（backToColumnDetail）。
 async function openColumnDetail(el){
   const d=(el&&el.dataset)||{};
   COLUMN_DETAIL=d;
   openModal('columnDetailModal');
-  document.getElementById('cd_title').textContent=d.cname||'';
-  // 头部先渲染编辑按钮，锁信息异步补齐
-  renderColumnDetailOps(null);
-  // 元信息（排版参照事项详情 d_meta）
-  const ownerName=d.owner?bcMemberName(d.owner):'';
-  const parts=(d.parts||'').split(',').map(x=>x.trim()).filter(Boolean).map(bcMemberName).filter(Boolean);
-  const _comp=d.completion||'open';
-  document.getElementById('cd_meta').innerHTML=
-    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
-    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<b>${esc(parts.length?parts.join('、'):'—')}</b>　完成情况：<b><span class="status-tag ${statusCls(_comp)}">${statusText(_comp)}</span></b><br>`
-    +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>`;
-  const dd=document.getElementById('cd_desc');
-  if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
-  // 板块下事项列表（异步拉取；点击行打开事项详情弹窗——DOM 在本弹窗之后，自动盖在上层）
-  const box=document.getElementById('cd_cards');
-  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
-  document.getElementById('cd_card_count').textContent='';
-  try{
-    const res=await api('/api/cards?size=2000');
-    const cards=(res.cards||[]).filter(x=>x.board_id===d.bid&&(x.column_name||'')===(d.cname||'')&&!x.deleted&&!x.parent_id);
-    cards.sort(cmpCard);
-    document.getElementById('cd_card_count').textContent=cards.length?String(cards.length):'';
-    box.innerHTML=cards.length?cards.map(function(c){
-      const _lk=c.locked_by&&c.locked_by!==ME.username;
-      return `<div class="subtask-item" style="cursor:pointer;gap:8px" onclick="openDetail('${esc(c.card_id)}')" `
-        +`title="点击查看事项详情">`
-        +`<span class="status-tag ${statusCls(c.status)}">${statusText(c.status)}</span>`
-        +`<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.card_name||'')}</span>`
-        +(_lk?`<span class="lock-tag">🔒 ${esc(c.locked_by_name||c.locked_by)} 已锁定</span>`:'')
-        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(c.owner||'—')}</span>`
-        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(fmtDate(c.created)||'')}</span>`
-        +`</div>`;
-    }).join('')
-      :'<div style="color:var(--text2);font-size:12px;padding:4px">该板块下暂无事项（可通过板块行「操作 ▾ → ＋ 新建事项」添加）</div>';
-  }catch(e){
-    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">事项列表加载失败：'+esc(e.message||'')+'</div>';
-  }
+  // 元信息/描述/待办/评论同步渲染（与事项详情打开路径同构）
+  renderColumnDetail(d);
   // 编辑锁状态（与事项详情的 🔒 标签同款显示）：他人持锁时浏览界面头部展示
   try{
     const h=await api('/api/locks/holder?key='+encodeURIComponent('column:'+(d.colkey||'')));
     renderColumnDetailOps(h);
   }catch(e){}
+}
+// 元信息（排版参照事项详情 d_meta）+ 描述 + 待办/评论动态区
+function renderColumnDetail(d){
+  document.getElementById('cd_title').textContent=d.cname||'';
+  renderColumnDetailOps(null);
+  const ownerName=d.owner?bcMemberName(d.owner):'';
+  const parts=(d.parts||'').split(',').map(x=>x.trim()).filter(Boolean).map(bcMemberName).filter(Boolean);
+  const _comp=d.completion||'open';
+  // 截止日期 + 倒计时（T-0188）：倒计时随当前日期自动计算
+  const _due=(d.due||'').slice(0,10);
+  const _cd=cdText(_due);
+  const _cdHtml=_cd?`<b><span class="fcol-cd${cdOver(_due)?' fcol-cd-over':''}">${esc(_cd)}</span></b>`
+                  :'<b>—</b>';
+  document.getElementById('cd_meta').innerHTML=
+    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
+    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<b>${esc(parts.length?parts.join('、'):'—')}</b>　完成情况：<b><span class="status-tag ${statusCls(_comp)}">${statusText(_comp)}</span></b><br>`
+    +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>　截止日期：<b>${esc(_due||'—')}</b>　倒计时：${_cdHtml}`;
+  const dd=document.getElementById('cd_desc');
+  if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
+  // 待办 + 评论（T-0188）：两者互不依赖 → 并行拉取（与事项详情 #98 同款提速）
+  cdLoadTodos(d.colkey||'');
+  cdLoadComments(d.colkey||'');
+}
+// ---------- 板块待办（T-0188）：结构与事项「代办任务」一致 ----------
+var CD_TODOS=[];   // 当前浏览板块的待办清单
+async function cdLoadTodos(colkey){
+  const box=document.getElementById('cd_todos');
+  if(!box)return;
+  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
+  document.getElementById('cd_todo_count').textContent='';
+  try{
+    const res=await api('/api/columns/todos?col_key='+encodeURIComponent(colkey));
+    CD_TODOS=res.todos||[];
+    renderCdTodos();
+  }catch(e){
+    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">待办加载失败：'+esc(e.message||'')+'</div>';
+  }
+}
+function renderCdTodos(){
+  const box=document.getElementById('cd_todos');
+  const canEdit=!!(ME&&ME.can_edit);
+  document.getElementById('cd_todo_add_row').style.display=canEdit?'':'none';
+  document.getElementById('cd_todo_count').textContent=CD_TODOS.length?String(CD_TODOS.length):'';
+  const done=CD_TODOS.filter(x=>x.done).length;
+  if(!CD_TODOS.length){
+    box.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px">暂无待办'+(canEdit?'（在下方输入后回车添加）':'')+'</div>';
+    return;
+  }
+  box.innerHTML=CD_TODOS.map(function(t){
+    return `<div class="subtask-item" data-todo="${t.id}">`
+      +`<input type="checkbox" ${t.done?'checked':''} ${canEdit?'':'disabled'}`
+      +` onclick="cdToggleTodo(${t.id},this.checked);event.stopPropagation()" title="${canEdit?'勾选/取消待办':'仅编辑权限可勾选待办'}">`
+      +`<span class="subtask-name ${t.done?'done':''}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.name||'')}</span>`
+      +`<span style="color:var(--text3);font-size:11px;flex-shrink:0">${esc(t.created_by||'')}</span>`
+      +(canEdit?`<button class="subtask-del" title="删除该待办" onclick="cdDeleteTodo(${t.id});event.stopPropagation()" `
+        +`style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;line-height:17px;padding:0;font-size:11px;cursor:pointer;color:var(--text2);flex-shrink:0">✕</button>`:'')
+      +`</div>`;
+  }).join('')
+  +`<div style="padding:5px 4px 0;font-size:11.5px;color:var(--text3)">已完成 ${done}/${CD_TODOS.length}</div>`;
+}
+async function cdAddTodo(){
+  const d=COLUMN_DETAIL||{};
+  const inp=document.getElementById('cd_todo_new');
+  const name=(inp.value||'').trim();
+  if(!name){toast('请输入待办内容');return}
+  try{
+    await api('/api/columns/todos',{method:'POST',body:JSON.stringify({col_key:d.colkey||'',name:name})});
+    inp.value='';
+    await cdLoadTodos(d.colkey||'');
+  }catch(e){toast(e.message||'添加失败')}
+}
+async function cdToggleTodo(id,done){
+  try{
+    await api('/api/columns/todos/'+id,{method:'PUT',body:JSON.stringify({done:!!done})});
+    const t=CD_TODOS.find(x=>x.id===id);
+    if(t)t.done=done?1:0;
+    renderCdTodos();
+  }catch(e){toast(e.message||'更新失败');cdLoadTodos((COLUMN_DETAIL||{}).colkey||'')}
+}
+async function cdDeleteTodo(id){
+  if(!confirm('确定删除该待办吗？'))return;
+  try{
+    await api('/api/columns/todos/'+id,{method:'DELETE'});
+    CD_TODOS=CD_TODOS.filter(x=>x.id!==id);
+    renderCdTodos();
+  }catch(e){toast(e.message||'删除失败')}
+}
+// ---------- 板块评论（T-0188）：可见即可评，布局/样式与事项评论一致 ----------
+async function cdLoadComments(colkey){
+  const box=document.getElementById('cd_comments');
+  if(!box)return;
+  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
+  try{
+    const res=await api('/api/columns/comments?col_key='+encodeURIComponent(colkey));
+    const cs=res.comments||[];
+    box.innerHTML=cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')
+      ||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
+  }catch(e){
+    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">评论加载失败：'+esc(e.message||'')+'</div>';
+  }
+}
+async function cdAddComment(){
+  const d=COLUMN_DETAIL||{};
+  const inp=document.getElementById('cd_new_comment');
+  const content=(inp.value||'').trim();
+  if(!content){toast('请输入评论内容');return}
+  try{
+    await api('/api/columns/comments',{method:'POST',body:JSON.stringify({col_key:d.colkey||'',content:content})});
+    inp.value='';
+    await cdLoadComments(d.colkey||'');
+  }catch(e){toast(e.message||'评论失败')}
 }
 // 浏览界面头部：锁标签（他人持锁）+「✏️ 编辑」按钮 —— 与事项详情 renderDetailOps 同款
 function renderColumnDetailOps(lockInfo){
@@ -6833,46 +6963,11 @@ function backToColumnDetail(d){
   renderColumnDetail(d);
   openModal('columnDetailModal');
 }
-function renderColumnDetail(d){
-  document.getElementById('cd_title').textContent=d.cname||'';
-  renderColumnDetailOps(null);
-  const ownerName=d.owner?bcMemberName(d.owner):'';
-  const parts=(d.parts||'').split(',').map(x=>x.trim()).filter(Boolean).map(bcMemberName).filter(Boolean);
-  const _comp=d.completion||'open';
-  document.getElementById('cd_meta').innerHTML=
-    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
-    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<b>${esc(parts.length?parts.join('、'):'—')}</b>　完成情况：<b><span class="status-tag ${statusCls(_comp)}">${statusText(_comp)}</span></b><br>`
-    +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>`;
-  const dd=document.getElementById('cd_desc');
-  if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
-  const box=document.getElementById('cd_cards');
-  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
-  document.getElementById('cd_card_count').textContent='';
-  api('/api/cards?size=2000').then(function(res){
-    const cards=(res.cards||[]).filter(x=>x.board_id===d.bid&&(x.column_name||'')===(d.cname||'')&&!x.deleted&&!x.parent_id);
-    cards.sort(cmpCard);
-    document.getElementById('cd_card_count').textContent=cards.length?String(cards.length):'';
-    box.innerHTML=cards.length?cards.map(function(c){
-      const _lk=c.locked_by&&c.locked_by!==ME.username;
-      return `<div class="subtask-item" style="cursor:pointer;gap:8px" onclick="openDetail('${esc(c.card_id)}')" title="点击查看事项详情">`
-        +`<span class="status-tag ${statusCls(c.status)}">${statusText(c.status)}</span>`
-        +`<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.card_name||'')}</span>`
-        +(_lk?`<span class="lock-tag">🔒 ${esc(c.locked_by_name||c.locked_by)} 已锁定</span>`:'')
-        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(c.owner||'—')}</span>`
-        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(fmtDate(c.created)||'')}</span>`
-        +`</div>`;
-    }).join('')
-      :'<div style="color:var(--text2);font-size:12px;padding:4px">该板块下暂无事项</div>';
-  }).catch(function(e){
-    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">事项列表加载失败：'+esc(e.message||'')+'</div>';
-  });
-  api('/api/locks/holder?key='+encodeURIComponent('column:'+(d.colkey||'')))
-    .then(h=>renderColumnDetailOps(h)).catch(()=>{});
-}
 async function saveColumn(){
   const board_id=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:document.getElementById('c_board').value;
   const column_name=document.getElementById('c_name').value.trim();
   const created_at=document.getElementById('c_created').value;
+  const due_date=document.getElementById('c_due').value.trim();   // T-0188 倒计时
   const year=document.getElementById('c_year').value.trim();
   const nature=(document.querySelector('input[name="c_nature"]:checked')||{}).value||'日常';
   if(!column_name){toast('板块名称不能为空');return}
@@ -6891,7 +6986,8 @@ async function saveColumn(){
       // 完成情况：仅板块负责人/管理员可提交（其他成员不传 = 不改，服务端也会 403 兜底）
       const compPayload=colCanEditCompletion()?{completion:document.getElementById('c_completion').value}:{};
       const descPayload={description:document.getElementById('c_desc').value.trim()};
-      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload))});
+      const duePayload={due_date:due_date};   // T-0188：截止日期随编辑整包提交（空 = 清空）
+      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload,duePayload))});
       toast('板块已保存：'+column_name);
       releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 保存成功释放板块编辑锁
       // 从浏览界面进来的编辑：保存后带着**最新表单值**回浏览界面（T-0183，
@@ -6904,7 +7000,8 @@ async function saveColumn(){
           owner:(ownerPayload.owner!==undefined&&ownerPayload.owner!=='__CLEAR__')?ownerPayload.owner:(COLUMN_DETAIL?COLUMN_DETAIL.owner:''),
           parts:(partsPayload.participants||COL_PARTS||[]).join(','),
           completion:compPayload.completion||((COLUMN_DETAIL&&COLUMN_DETAIL.completion)||'open'),
-          desc:descPayload.description};
+          desc:descPayload.description,
+          due:due_date};
       }
       closeModal('columnModal');
       reload(1);renderProgress();
@@ -6913,7 +7010,7 @@ async function saveColumn(){
       const ownerCreate=colCanAssignOwner()?{owner:COL_OWNER||''}:{};
       const compCreate=colCanEditCompletion()?{completion:document.getElementById('c_completion').value}:{};
       const descCreate={description:document.getElementById('c_desc').value.trim()};
-      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(',')},ownerCreate,compCreate,descCreate))});
+      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(','),due_date:due_date},ownerCreate,compCreate,descCreate))});
       toast('板块已创建：'+column_name);
       closeModal('columnModal');
       // ⚠️ curBoards 是内容区的**权威选择**（#51 多看板语义）——
@@ -8006,7 +8103,7 @@ async function openDetail(id){
   // 状态不在元信息里重复呈现 —— 由头部的状态按钮统一承载，避免多处出现导致不一致
   document.getElementById('d_meta').innerHTML=
     `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b><br>`+
-    `负责人：<b>${esc(c.owner||'—')}</b>　周数：<b>${esc(c.week_no||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>`;
+    `负责人：<b>${esc(c.owner||'—')}</b>　周数：<b>${esc(c.week_no||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>　倒计时：<b><span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span></b>`;
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
   document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';

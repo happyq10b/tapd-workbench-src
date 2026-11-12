@@ -1020,6 +1020,9 @@ def cleanup_empty_columns_and_boards() -> dict:
     deleted_cols = 0
     for c in dead_cols:
         dbe('DELETE FROM board_columns WHERE col_key=?', (c['col_key'],))
+        # 板块评论/待办随板块清除（T-0188）
+        dbe('DELETE FROM column_comments WHERE col_key=?', (c['col_key'],))
+        dbe('DELETE FROM column_todos WHERE col_key=?', (c['col_key'],))
         deleted_cols += 1
 
     # 看板判定：剩余板块数为 0 且无未删事项 → 空看板
@@ -1037,6 +1040,8 @@ def cleanup_empty_columns_and_boards() -> dict:
 
     deleted_boards = 0
     for bid, bname in dead_boards:
+        dbe('DELETE FROM column_comments WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
+        dbe('DELETE FROM column_todos WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         dbe('DELETE FROM board_columns WHERE board_id=?', (bid,))
         dbe('DELETE FROM board_config WHERE board_id=?', (bid,))
         dbe('DELETE FROM boards WHERE board_id=?', (bid,))
@@ -2767,6 +2772,8 @@ class ColumnCreate(BaseModel):
     completion: str = 'open'
     # 板块描述（2026-11-09 #93）：可选说明文字，板块标题 tooltip 展示
     description: str = ''
+    # 板块截止日期（T-0188 倒计时）：YYYY-MM-DD，空 = 未设置
+    due_date: str = ''
 
 
 class ColumnUpdate(BaseModel):
@@ -2787,6 +2794,8 @@ class ColumnUpdate(BaseModel):
     participants: str = None
     # 板块描述（2026-11-09 #93）：None = 不改；传值 = 覆盖（空串 = 清空）
     description: Optional[str] = None
+    # 板块截止日期（T-0188 倒计时）：None = 不改；传值 = 覆盖（空串 = 清空）
+    due_date: Optional[str] = None
     # ⚠️ owner 语义（2026-11-02）：板块负责人 = 该板块的**管理权**，
     #    在【板块编辑】弹窗里配置；不影响板块可见性（可见性由架构绑定决定）。
     #    仅管理员可改负责人本身；板块负责人（editor）改其他字段不受此限。
@@ -2803,6 +2812,14 @@ def _norm_year(v):
     if y and not re.match(r'^\d{4}$', y):
         raise HTTPException(400, '归属年份应为 4 位数字，如 2026')
     return y
+
+
+def _norm_due_date(v):
+    """板块截止日期（T-0188 倒计时）：留空允许；非空必须 YYYY-MM-DD"""
+    d = (v or '').strip()[:10]
+    if d and not re.match(r'^\d{4}-\d{2}-\d{2}$', d):
+        raise HTTPException(400, '截止日期格式应为 YYYY-MM-DD')
+    return d
 
 
 class PinReq(BaseModel):
@@ -2861,10 +2878,10 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     new_completion = (req.completion or '').strip() or 'open'
     if new_completion not in COLUMN_COMPLETIONS:
         raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion, description)'
-        ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)',
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion, description, due_date)'
+        ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?)',
         (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts, new_completion,
-         (req.description or '').strip()))
+         (req.description or '').strip(), _norm_due_date(req.due_date)))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
               f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year}，创建日期 {created}）', 'success')
@@ -2883,8 +2900,18 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     改名等于换 key，事项的 column_name 不跟着改就会掉出板块。
     """
     # 编辑锁（2026-11-12）：板块编辑弹窗开锁，key = column:<col_key>
+    # ⚠️ 认锁后所有校验/写库都在 try 内，finally 统一释放 —— 此前校验抛异常
+    #    （400/403/404/409）会跳过末尾释放，锁泄漏到超时（T-0188 测试暴露）。
     _lk = 'column:' + (req.col_key or '')
     _fresh = _lock_oneshot(_lk, username, '板块', '编辑')
+    try:
+        return await _update_column_locked(req, username, request)
+    finally:
+        if _fresh:
+            _lock_release(_lk, username)
+
+
+async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     row = dbq('SELECT * FROM board_columns WHERE col_key=?', (req.col_key,))
     old = dict(row[0]) if row else None
     if old:
@@ -2943,6 +2970,9 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     if old and name != old_name:
         dbe('UPDATE cards SET column_name=? WHERE board_id=? AND column_name=? AND deleted=0',
             (name, board_id, old_name))
+        # 板块评论/待办挂在 col_key 上（T-0188）—— 改名换 key 必须随迁，否则数据失联
+        dbe('UPDATE column_comments SET col_key=? WHERE col_key=?', (new_key, req.col_key))
+        dbe('UPDATE column_todos SET col_key=? WHERE col_key=?', (new_key, req.col_key))
     if old:
         if new_owner is not None:
             dbe('UPDATE board_columns SET owner=? WHERE col_key=?', (new_owner, req.col_key))
@@ -2957,9 +2987,10 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
                        min_level=LV_COLUMN_OWNER)
             dbe('UPDATE board_columns SET participants=? WHERE col_key=?',
                 (_norm_acl_participants(req.participants), req.col_key))
-        dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=?, description=? WHERE col_key=?',
+        dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=?, description=?, due_date=? WHERE col_key=?',
             (new_key, name, year, created, nature,
              (req.description if req.description is not None else (old['description'] if old and 'description' in old.keys() else '')) or '',
+             _norm_due_date(req.due_date) if req.due_date is not None else ((old['due_date'] if old and 'due_date' in old.keys() else '') or ''),
              req.col_key))
     else:
         new_cid = 'COL' + str(int(time.time() * 1000))
@@ -2972,8 +3003,6 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
               f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
-    if _fresh:
-        _lock_release(_lk, username)
     return {'ok': True, 'col_key': new_key, 'column_name': name, 'year': year,
             'nature': nature, 'created_at': created,
             'owner': (new_owner if new_owner is not None else (old['owner'] if old else ''))}
@@ -2998,6 +3027,125 @@ async def pin_column(req: ColumnPinReq, username: str = Depends(require_writer),
               f'{"置顶" if val else "取消置顶"}板块：{row[0]["column_name"]}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': req.col_key, 'pinned': val}
+
+
+# ---------------- 板块评论 / 板块待办（T-0188：板块浏览界面的两个功能模块） ----------------
+# 口径对齐事项侧：评论 = 可见即可评（require_auth + 板块可见）；待办增删改 = 编辑权
+# （require_writer + 板块可见 + 板块未被他人锁定 —— 与事项子事项的锁约束同思路，
+#   但只做 who 检查不认锁：浏览界面不持锁，待办是轻量清单不应抢占编辑锁）。
+
+def _column_for_access(col_key: str, username: str):
+    """板块可见性校验（评论/待办的读写准入）：板块不存在 404，看板不可见 403。
+    返回板块行供后续使用。"""
+    row = dbq('SELECT * FROM board_columns WHERE col_key=?', (col_key or '',))
+    if not row:
+        raise HTTPException(404, '板块不存在')
+    boards, cols = user_allowed(username)
+    if boards is not None and row[0]['board_id'] not in boards:
+        raise HTTPException(403, '无权访问该板块')
+    if cols is not None:
+        allowed = cols.get(row[0]['board_id'])
+        if allowed is not None and row[0]['column_id'] not in allowed:
+            raise HTTPException(403, '无权访问该板块')
+    return row[0]
+
+
+class ColumnCommentReq(BaseModel):
+    col_key: str
+    content: str
+
+
+class ColumnTodoReq(BaseModel):
+    col_key: str
+    name: str
+
+
+class ColumnTodoToggleReq(BaseModel):
+    done: bool
+    name: str = ''          # 传值 = 顺带改名
+
+
+@app.get('/api/columns/comments')
+def column_comments_list(col_key: str, username: str = Depends(require_auth)):
+    _column_for_access(col_key, username)
+    rows = dbq('SELECT id, username, content, created_at FROM column_comments'
+               ' WHERE col_key=? ORDER BY id DESC LIMIT 200', (col_key,))
+    return {'comments': [dict(r) for r in rows]}
+
+
+@app.post('/api/columns/comments')
+async def add_column_comment(req: ColumnCommentReq, username: str = Depends(require_auth),
+                             request: Request = None):
+    """板块评论：可见即可评（与 T-013d「可见即可评论」口径一致）。"""
+    _column_for_access(req.col_key, username)
+    content = (req.content or '').strip()[:2000]
+    if not content:
+        raise HTTPException(400, '评论内容不能为空')
+    dbe('INSERT INTO column_comments (col_key, username, content) VALUES (?,?,?)',
+        (req.col_key, username, content))
+    audit_log(username, client_ip(request), 'comment', f'板块 {req.col_key}',
+              '发表板块评论', 'success')
+    return {'ok': True}
+
+
+@app.get('/api/columns/todos')
+def column_todos_list(col_key: str, username: str = Depends(require_auth)):
+    _column_for_access(col_key, username)
+    rows = dbq('SELECT id, name, done, sort, created_by, created_at FROM column_todos'
+               ' WHERE col_key=? ORDER BY done, sort, id', (col_key,))
+    return {'todos': [dict(r) for r in rows]}
+
+
+def _todo_guard(col_key: str, username: str):
+    """待办写操作的公共校验：板块可见 + 板块未被**他人**锁定（编辑互斥）。"""
+    _column_for_access(col_key, username)
+    holder = lock_mgr.who('column:' + col_key)
+    if holder and holder != username:
+        raise HTTPException(409, f'板块已被 {_lock_holder_name(holder)} 锁定，无法修改待办')
+
+
+@app.post('/api/columns/todos')
+def add_column_todo(req: ColumnTodoReq, username: str = Depends(require_writer),
+                    request: Request = None):
+    _todo_guard(req.col_key, username)
+    name = (req.name or '').strip()[:200]
+    if not name:
+        raise HTTPException(400, '待办内容不能为空')
+    mx = dbq('SELECT COALESCE(MAX(sort),0) m FROM column_todos WHERE col_key=?',
+             (req.col_key,))[0]['m']
+    dbe('INSERT INTO column_todos (col_key, name, sort, created_by) VALUES (?,?,?,?)',
+        (req.col_key, name, mx + 1, username))
+    audit_log(username, client_ip(request), 'subtask_add', f'板块 {req.col_key}',
+              '新增板块待办', 'success')
+    return {'ok': True}
+
+
+@app.put('/api/columns/todos/{tid}')
+def update_column_todo(tid: int, req: ColumnTodoToggleReq, username: str = Depends(require_writer),
+                       request: Request = None):
+    row = dbq('SELECT col_key FROM column_todos WHERE id=?', (tid,))
+    if not row:
+        raise HTTPException(404, '待办不存在')
+    _todo_guard(row[0]['col_key'], username)
+    if req.name.strip():
+        dbe('UPDATE column_todos SET done=?, name=? WHERE id=?',
+            (1 if req.done else 0, req.name.strip()[:200], tid))
+    else:
+        dbe('UPDATE column_todos SET done=? WHERE id=?', (1 if req.done else 0, tid))
+    return {'ok': True}
+
+
+@app.delete('/api/columns/todos/{tid}')
+def delete_column_todo(tid: int, username: str = Depends(require_writer),
+                       request: Request = None):
+    row = dbq('SELECT col_key, name FROM column_todos WHERE id=?', (tid,))
+    if not row:
+        raise HTTPException(404, '待办不存在')
+    _todo_guard(row[0]['col_key'], username)
+    dbe('DELETE FROM column_todos WHERE id=?', (tid,))
+    audit_log(username, client_ip(request), 'subtask_delete', f'板块 {row[0]["col_key"]}',
+              '删除板块待办', 'success')
+    return {'ok': True}
 
 
 @app.delete('/api/columns/{col_key}')
@@ -3044,6 +3192,9 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
             conn.execute(f'DELETE FROM card_subtasks WHERE card_id IN ({ph})', ids)
         # ③ 板块元信息
         conn.execute('DELETE FROM board_columns WHERE col_key=?', (key,))
+        # ④ 板块评论/待办随板块删除（T-0188）
+        conn.execute('DELETE FROM column_comments WHERE col_key=?', (key,))
+        conn.execute('DELETE FROM column_todos WHERE col_key=?', (key,))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -3440,7 +3591,11 @@ def _purge_board(bid: str) -> dict:
         # ② 子事项清单（card_subtasks）与评论/操作记录随事项失效
         conn.execute('DELETE FROM card_subtasks WHERE card_id IN '
                      '(SELECT card_id FROM cards WHERE board_id=?)', (bid,))
-        # ③ 板块 / 配置 / 看板本体
+        # ③ 板块 / 配置 / 看板本体（板块评论/待办随板块一并清除，T-0188）
+        conn.execute('DELETE FROM column_comments WHERE col_key IN '
+                     '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
+        conn.execute('DELETE FROM column_todos WHERE col_key IN '
+                     '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         conn.execute('DELETE FROM board_columns WHERE board_id=?', (bid,))
         conn.execute('DELETE FROM board_config WHERE board_id=?', (bid,))
         conn.execute('DELETE FROM boards WHERE board_id=?', (bid,))
@@ -7781,11 +7936,15 @@ async def import_data(req: ImportReq, username: str = Depends(require_admin), re
                     continue
                 cols = [k for k in ('col_key', 'column_id', 'board_id', 'column_name',
                                     'created_at', 'creator', 'nature', 'year', 'pinned',
-                                    'copy_from', 'owner', 'participants', 'completion')
+                                    'copy_from', 'owner', 'participants', 'completion',
+                                    'due_date')
                         if k in c]
                 conn.execute(f'INSERT OR REPLACE INTO board_columns ({",".join(cols)}) '
                              f'VALUES ({",".join("?"*len(cols))})',
                              [c[k] for k in cols])
+            # 板块评论/待办按 col_key 挂靠（T-0188）—— 导入替换后清掉失联数据
+            conn.execute('DELETE FROM column_comments WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
+            conn.execute('DELETE FROM column_todos WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
         # ---- 板块配置 ----
         if req.board_config:
             conn.execute('DELETE FROM board_config')
