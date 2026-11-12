@@ -1838,6 +1838,29 @@ function goLogin(){
   </div>
 </div>
 
+<!-- 板块浏览弹窗（T-0183）：点击板块标题先进浏览界面（整体参照事项详情弹窗），
+     浏览界面里的「✏️ 编辑」按钮才进入板块编辑弹窗 —— 与事项「详情 → 编辑」两级交互一致。
+     ⚠️ 必须排在 detailModal 之前：两个弹窗同为 z-index:100，靠后声明者在上层，
+     浏览界面里点击事项要打开事项详情弹窗盖在本弹窗之上。 -->
+<div class="modal-overlay" id="columnDetailModal" style="display:none">
+  <div class="modal modal-wide">
+    <div class="modal-header"><h2 id="cd_title"></h2>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <span id="cd_ops" style="display:flex;gap:6px;align-items:center"></span>
+        <button class="modal-close" onclick="closeModal('columnDetailModal')">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="detail-meta" id="cd_meta"></div>
+      <div class="detail-desc" id="cd_desc" style="display:none"></div>
+      <div class="subtask-box">
+        <div class="subtask-head"><span class="subtask-title">板块事项</span><span class="subtask-count" id="cd_card_count"></span></div>
+        <div id="cd_cards" class="subtask-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 复制弹窗：看板 / 板块 / 主事项 / 子事项 共用
      · 标题等关键字段可编辑，默认「原标题（副本）」
      · 归属重选：目标看板 → 目标板块 →（子事项）所属主事项
@@ -5161,14 +5184,15 @@ function renderBoard(cards,cols,q,colHits){
     const pinned=isPinned('column',colKey);
     // 归属年份：板块元信息里的独立字段（板块名称里常带年份，但那是名称的一部分）
     const year=meta?(meta.year||''):'';
-    // 标题点击 = 打开板块编辑界面；展开/收起只由左侧三角控制，两者互不干扰
+    // 标题点击 = 打开板块浏览界面（T-0183：浏览 → 编辑两级，与事项「详情 → 编辑」一致）；
+    // 展开/收起只由左侧三角控制，两者互不干扰
     const titleEditable=canEditColumn(boardId);
     const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}" data-completion="${esc(meta?(meta.completion||'open'):'open')}" data-desc="${esc(meta?(meta.description||''):'')}"`;
-    // 板块描述 tooltip（2026-11-09 #93）：有描述时悬停标题展示，否则提示可编辑
+    // 板块描述 tooltip（2026-11-09 #93）：有描述时悬停标题展示，否则提示可查看详情
     const colDesc=(meta&&(meta.description||'').trim())||'';
-    const titleTip=colDesc?('【板块描述】'+colDesc):'点击编辑板块';
+    const titleTip=colDesc?('【板块描述】'+colDesc):'点击查看板块详情';
     const titleHtml=titleEditable
-      ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnEdit(this)" title="${esc(titleTip)}">${esc(k)}</span>`
+      ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnDetail(this)" title="${esc(titleTip)}">${esc(k)}</span>`
       :`<span class="week-title" title="${esc(colDesc?('【板块描述】'+colDesc):'')}">${esc(k)}</span>`;
     // ── 板块行布局（2026-11-04 #55）：与事项行同构 → 字段列纵向对齐 ──
     // 字段：负责人 / 创建 / 截止（板块无周数与逾期 → 周数列留空、逾期槽位空占位）
@@ -5909,7 +5933,15 @@ async function releaseEditLock(key){
   try{await api('/api/locks/release',{method:'POST',body:JSON.stringify({key:key})})}catch(e){}
 }
 // 弹窗关闭 → 释放对应编辑锁（兜底：✕ / 取消 / 保存后关闭统一走 closeModal）
-MODAL_CLOSE_HOOKS.columnModal=function(){releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';};
+MODAL_CLOSE_HOOKS.columnModal=function(){
+  releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';
+  // 从浏览界面进来的编辑：关闭编辑（保存/取消/✕）后回到浏览界面，保持操作上下文不断
+  //（保存路径已在 saveColumn 里把 COLUMN_DETAIL 刷成最新表单值）
+  if(COLUMN_EDIT_FROM_DETAIL){
+    COLUMN_EDIT_FROM_DETAIL=false;
+    if(COLUMN_DETAIL){renderColumnDetail(COLUMN_DETAIL);openModal('columnDetailModal');}
+  }
+};
 MODAL_CLOSE_HOOKS.wgModal=function(){releaseEditLock(ORG_LOCK_KEY);ORG_LOCK_KEY='';};
 MODAL_CLOSE_HOOKS.teamModal=function(){releaseEditLock(TEAM_LOCK_KEY);TEAM_LOCK_KEY='';};
 MODAL_CLOSE_HOOKS.noticeModal=function(){releaseEditLock(NOTICE_LOCK_KEY);NOTICE_LOCK_KEY='';};
@@ -6496,15 +6528,18 @@ function openColumnModal(){
   document.getElementById('c_tip').textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。';
   openModal('columnModal');
 }
-// 编辑板块：从板块标题点击进入。数据取自标题元素上的 data-*，
-// 避免在 onclick 里拼字符串（名称里的引号/括号会把属性截断）
+// 编辑板块：从板块浏览界面的「✏️ 编辑」进入（T-0183）。
+// 数据取自浏览界面缓存的 dataset 对象（原标题 data-*），
+// 避免拼字符串（名称里的引号/括号会把属性截断）
 var COLUMN_LOCK_KEY='';   // 板块编辑锁 key（column:<col_key>；create 模式为空）
-async function openColumnEdit(el){
-  if(!ME||!ME.can_edit){toast('无编辑权限');return}
-  const d=(el&&el.dataset)||{};
+var COLUMN_DETAIL=null;   // 浏览界面缓存的板块 dataset（编辑返回浏览时复用/刷新）
+var COLUMN_EDIT_FROM_DETAIL=false;  // 本次编辑是否来自浏览界面（关闭编辑后回浏览，与事项 EDIT_FROM_DETAIL 同范式）
+async function openColumnEdit(d,fromDetail){
+  if(!ME||!ME.can_edit){toast('无编辑权限');return false}
+  d=d||{};
   // 编辑锁（2026-11-12）：板块编辑弹窗打开即认领 column:<col_key>；他人持有 → 409 姓名 toast
   const _lk='column:'+(d.colkey||'');
-  if(!await acquireEditLock(_lk,'板块'))return;
+  if(!await acquireEditLock(_lk,'板块'))return false;
   if(COLUMN_LOCK_KEY&&COLUMN_LOCK_KEY!==_lk)releaseEditLock(COLUMN_LOCK_KEY);
   COLUMN_LOCK_KEY=_lk;
   COLUMN_MODE='edit';
@@ -6535,7 +6570,134 @@ async function openColumnEdit(el){
   document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
   document.getElementById('c_submit').textContent='保存';
   document.getElementById('c_tip').innerHTML='保存后板块名称、归属年份等立即生效。<b>修改板块名称会同步更新该板块下所有事项的所属板块</b>。';
+  COLUMN_EDIT_FROM_DETAIL=!!fromDetail;   // 标记来源：关闭编辑后回浏览界面
   openModal('columnModal');
+  return true;
+}
+// ---------- 板块浏览界面（T-0183）：整体参照事项详情弹窗的浏览/编辑两级模式 ----------
+// 点击板块标题 → 浏览界面（元信息 + 描述 + 板块下事项列表 + 头部「✏️ 编辑」按钮）；
+// 浏览**不认锁**（与事项详情一致），进入编辑时才认领锁。
+// dataset 来自行内 data-*（openColumnDetail）或保存后的表单值（backToColumnDetail）。
+async function openColumnDetail(el){
+  const d=(el&&el.dataset)||{};
+  COLUMN_DETAIL=d;
+  openModal('columnDetailModal');
+  document.getElementById('cd_title').textContent=d.cname||'';
+  // 头部先渲染编辑按钮，锁信息异步补齐
+  renderColumnDetailOps(null);
+  // 元信息（排版参照事项详情 d_meta）
+  const ownerName=d.owner?bcMemberName(d.owner):'';
+  const parts=(d.parts||'').split(',').map(x=>x.trim()).filter(Boolean).map(bcMemberName).filter(Boolean);
+  const _comp=d.completion||'open';
+  document.getElementById('cd_meta').innerHTML=
+    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
+    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<b>${esc(parts.length?parts.join('、'):'—')}</b>　完成情况：<b><span class="status-tag ${statusCls(_comp)}">${statusText(_comp)}</span></b><br>`
+    +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>`;
+  const dd=document.getElementById('cd_desc');
+  if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
+  // 板块下事项列表（异步拉取；点击行打开事项详情弹窗——DOM 在本弹窗之后，自动盖在上层）
+  const box=document.getElementById('cd_cards');
+  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
+  document.getElementById('cd_card_count').textContent='';
+  try{
+    const res=await api('/api/cards?size=2000');
+    const cards=(res.cards||[]).filter(x=>x.board_id===d.bid&&(x.column_name||'')===(d.cname||'')&&!x.deleted&&!x.parent_id);
+    cards.sort(cmpCard);
+    document.getElementById('cd_card_count').textContent=cards.length?String(cards.length):'';
+    box.innerHTML=cards.length?cards.map(function(c){
+      const _lk=c.locked_by&&c.locked_by!==ME.username;
+      return `<div class="subtask-item" style="cursor:pointer;gap:8px" onclick="openDetail('${esc(c.card_id)}')" `
+        +`title="点击查看事项详情">`
+        +`<span class="status-tag ${statusCls(c.status)}">${statusText(c.status)}</span>`
+        +`<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.card_name||'')}</span>`
+        +(_lk?`<span class="lock-tag">🔒 ${esc(c.locked_by_name||c.locked_by)} 已锁定</span>`:'')
+        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(c.owner||'—')}</span>`
+        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(fmtDate(c.created)||'')}</span>`
+        +`</div>`;
+    }).join('')
+      :'<div style="color:var(--text2);font-size:12px;padding:4px">该板块下暂无事项（可通过板块行「操作 ▾ → ＋ 新建事项」添加）</div>';
+  }catch(e){
+    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">事项列表加载失败：'+esc(e.message||'')+'</div>';
+  }
+  // 编辑锁状态（与事项详情的 🔒 标签同款显示）：他人持锁时浏览界面头部展示
+  try{
+    const h=await api('/api/locks/holder?key='+encodeURIComponent('column:'+(d.colkey||'')));
+    renderColumnDetailOps(h);
+  }catch(e){}
+}
+// 浏览界面头部：锁标签（他人持锁）+「✏️ 编辑」按钮 —— 与事项详情 renderDetailOps 同款
+function renderColumnDetailOps(lockInfo){
+  const box=document.getElementById('cd_ops');
+  if(!box)return;
+  const parts=[];
+  if(lockInfo&&lockInfo.locked_by&&lockInfo.locked_by!==ME.username){
+    // 显示口径（2026-11-12）：锁定提示统一显示姓名，姓名为空回退账号
+    parts.push(`<span class="lock-tag">🔒 ${esc(lockInfo.locked_by_name||lockInfo.locked_by)} 已锁定</span>`);
+  }
+  parts.push(`<button class="btn-primary" style="padding:4px 12px;font-size:12px" onclick="openColumnDetailEdit()" title="打开板块编辑弹窗">✏️ 编辑</button>`);
+  box.innerHTML=parts.join('');
+}
+// 从浏览界面进入编辑：先复核锁（对齐事项「已被 X 锁定」的提示口径），再切换弹窗
+async function openColumnDetailEdit(){
+  const d=COLUMN_DETAIL;
+  if(!d)return;
+  if(!ME.can_edit){toast('无编辑权限');return}
+  try{
+    const h=await api('/api/locks/holder?key='+encodeURIComponent('column:'+(d.colkey||'')));
+    if(h&&h.locked_by&&h.locked_by!==ME.username){
+      toast(`已被 ${h.locked_by_name||h.locked_by} 锁定`);   // 与事项编辑入口同一文案
+      renderColumnDetailOps(h);                              // 顺带刷新头部锁标签
+      return;
+    }
+  }catch(e){}
+  closeModal('columnDetailModal');
+  const ok=await openColumnEdit(d,true);
+  if(!ok){  // 认锁竞争失败（他人刚抢先）→ 回到浏览界面，保持上下文
+    renderColumnDetail(COLUMN_DETAIL);
+    openModal('columnDetailModal');
+  }
+}
+// 回到浏览界面：渲染缓存 dataset 并重拉事项列表（编辑保存后数据可能已变）
+function backToColumnDetail(d){
+  COLUMN_DETAIL=d;
+  renderColumnDetail(d);
+  openModal('columnDetailModal');
+}
+function renderColumnDetail(d){
+  document.getElementById('cd_title').textContent=d.cname||'';
+  renderColumnDetailOps(null);
+  const ownerName=d.owner?bcMemberName(d.owner):'';
+  const parts=(d.parts||'').split(',').map(x=>x.trim()).filter(Boolean).map(bcMemberName).filter(Boolean);
+  const _comp=d.completion||'open';
+  document.getElementById('cd_meta').innerHTML=
+    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
+    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<b>${esc(parts.length?parts.join('、'):'—')}</b>　完成情况：<b><span class="status-tag ${statusCls(_comp)}">${statusText(_comp)}</span></b><br>`
+    +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>`;
+  const dd=document.getElementById('cd_desc');
+  if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
+  const box=document.getElementById('cd_cards');
+  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
+  document.getElementById('cd_card_count').textContent='';
+  api('/api/cards?size=2000').then(function(res){
+    const cards=(res.cards||[]).filter(x=>x.board_id===d.bid&&(x.column_name||'')===(d.cname||'')&&!x.deleted&&!x.parent_id);
+    cards.sort(cmpCard);
+    document.getElementById('cd_card_count').textContent=cards.length?String(cards.length):'';
+    box.innerHTML=cards.length?cards.map(function(c){
+      const _lk=c.locked_by&&c.locked_by!==ME.username;
+      return `<div class="subtask-item" style="cursor:pointer;gap:8px" onclick="openDetail('${esc(c.card_id)}')" title="点击查看事项详情">`
+        +`<span class="status-tag ${statusCls(c.status)}">${statusText(c.status)}</span>`
+        +`<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.card_name||'')}</span>`
+        +(_lk?`<span class="lock-tag">🔒 ${esc(c.locked_by_name||c.locked_by)} 已锁定</span>`:'')
+        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(c.owner||'—')}</span>`
+        +`<span style="color:var(--text3);font-size:11.5px;flex-shrink:0">${esc(fmtDate(c.created)||'')}</span>`
+        +`</div>`;
+    }).join('')
+      :'<div style="color:var(--text2);font-size:12px;padding:4px">该板块下暂无事项</div>';
+  }).catch(function(e){
+    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">事项列表加载失败：'+esc(e.message||'')+'</div>';
+  });
+  api('/api/locks/holder?key='+encodeURIComponent('column:'+(d.colkey||'')))
+    .then(h=>renderColumnDetailOps(h)).catch(()=>{});
 }
 async function saveColumn(){
   const board_id=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:document.getElementById('c_board').value;
@@ -6562,6 +6724,18 @@ async function saveColumn(){
       await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload))});
       toast('板块已保存：'+column_name);
       releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 保存成功释放板块编辑锁
+      // 从浏览界面进来的编辑：保存后带着**最新表单值**回浏览界面（T-0183，
+      // 与事项「保存后回详情」一致）；其余入口保持原行为直接关窗
+      if(COLUMN_EDIT_FROM_DETAIL){
+        // ⚠️ flag 不在这里清 —— 由 columnModal 的关闭钩子统一清并回浏览界面；
+        // 先清会让钩子读不到「来自浏览」而直接关窗不返回
+        COLUMN_DETAIL={colkey:COLUMN_EDIT_KEY,bid:board_id,cname:column_name,year:year,
+          nature:nature,created:created_at,creator:COLUMN_DETAIL?COLUMN_DETAIL.creator:'',
+          owner:(ownerPayload.owner!==undefined&&ownerPayload.owner!=='__CLEAR__')?ownerPayload.owner:(COLUMN_DETAIL?COLUMN_DETAIL.owner:''),
+          parts:(partsPayload.participants||COL_PARTS||[]).join(','),
+          completion:compPayload.completion||((COLUMN_DETAIL&&COLUMN_DETAIL.completion)||'open'),
+          desc:descPayload.description};
+      }
       closeModal('columnModal');
       reload(1);renderProgress();
     }else{
