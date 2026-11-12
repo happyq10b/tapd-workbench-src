@@ -2461,7 +2461,7 @@ function goLogin(){
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
           <button type="button" class="btn-primary" id="petUploadBtn" style="padding:5px 14px;font-size:12.5px" onclick="petUploadClick()">📤 批量上传</button>
           <button type="button" class="btn-primary" id="petSaveAllBtn" style="padding:5px 14px;font-size:12.5px;display:none" onclick="petSaveAll()">💾 保存全部</button>
-          <input type="file" id="petFileInput" multiple accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="petFilesChosen(this)">
+          <input type="file" id="petFileInput" multiple accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml" style="display:none" onchange="petFilesChosen(this)">
           <span id="petUploadProgress" style="font-size:12px;color:var(--text2)"></span>
           <span style="font-size:11.5px;color:var(--text3);margin-left:auto">上传先入暂存区 · 点击卡片可裁剪/旋转 · 「⤒」置顶 · 点已保存卡片设为固定形象</span>
         </div>
@@ -8943,11 +8943,14 @@ async function petFilesChosen(inp){
   renderPetUpList();
 }
 // 进入单张编辑模式：裁剪 / 旋转 / 缩放，确认后回写暂存项并刷新列表预览
+// SVG（矢量）不进位图编辑器 —— 裁剪会栅格化丢失矢量特性，保持原样上传
+function petIsSvg(dataUrl){return /^data:image\/svg\+xml/i.test(dataUrl||'')}
 function petEditPending(uid){
   if(PET_SAVING)return;
   if(PET_EDITING!==null)return;                     // 同一时刻只编辑一张
   const it=PET_PENDING.find(function(x){return x.uid===uid});
   if(!it)return;
+  if(petIsSvg(it.dataUrl)){toast('SVG 为矢量格式，不支持裁剪编辑（将按原样保存）');return}
   PET_EDITING=uid;
   document.getElementById('petUploadProgress').textContent='正在编辑：'+it.name;
   openCropper('pet',it.dataUrl,function(dataUrl){
@@ -8966,8 +8969,10 @@ function petRemovePending(uid){
   renderPetUpList();
 }
 // 未调整图片保存前的标准处理：等比缩放至最长边 ≤256、PNG 保透明（服务端 2MB 上限内）
+// SVG 矢量图直通（不栅格化，保持矢量特性；大小由服务端 2MB 校验兜底）
 function petAutoFit(dataUrl){
   return new Promise(function(res){
+    if(petIsSvg(dataUrl)){res(dataUrl);return}
     const img=new Image();
     img.onload=function(){
       try{
@@ -9038,15 +9043,16 @@ function renderPetUpList(){
   const list=document.getElementById('petUpList');
   if(!PET_UP.length&&!PET_PENDING.length){
     list.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text3);font-size:12px;padding:24px 0">'
-      +'该分区还没有图片，点上方「批量上传」添加（上传后可点击卡片逐张调整）</div>';
+      +'该分区还没有图片，点上方「批量上传」添加（支持 PNG/JPG/GIF/WebP/SVG，上传后可点击卡片逐张调整）</div>';
     return;
   }
   const mode=document.querySelector('input[name=petMode]:checked').value;
-  // 暂存区卡片（橙色虚线框，「待保存/已调整」徽标，点击进编辑模式）
+  // 暂存区卡片（橙色虚线框，「待保存/已调整」徽标，点击进编辑模式；SVG 标注矢量不可编辑）
   const pendHtml=PET_PENDING.map(function(it){
+    const svg=petIsSvg(it.dataUrl);
     return '<div class="pet-up-card" data-pend="'+it.uid+'" title="'+esc(it.name)
-      +'（点击编辑：裁剪/旋转）" style="position:relative;aspect-ratio:1;'
-      +'border:2px dashed #e6a23c;border-radius:8px;background:#fff;cursor:pointer;overflow:hidden">'
+      +'（'+(svg?'SVG 矢量图：按原样保存，不支持裁剪':'点击编辑：裁剪/旋转')+'）" style="position:relative;aspect-ratio:1;'
+      +'border:2px dashed #e6a23c;border-radius:8px;background:#fff;cursor:'+(svg?'default':'pointer')+';overflow:hidden">'
       +'<img src="'+it.dataUrl+'" alt="" draggable="false" '
       +'style="width:100%;height:100%;object-fit:contain;pointer-events:none;'+(PET_EDITING===it.uid?'opacity:.35':'')+'">'
       +'<button type="button" title="从暂存区移除" onclick="event.stopPropagation();petRemovePending('+it.uid+')" '
@@ -9054,6 +9060,8 @@ function renderPetUpList(){
       +'font-size:11px;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,.92);cursor:pointer">✕</button>'
       +'<span style="position:absolute;left:3px;bottom:3px;font-size:10px;color:#8a5300;background:#ffe7ba;'
       +'border-radius:4px;padding:1px 5px;pointer-events:none">'+(PET_EDITING===it.uid?'编辑中…':(it.adjusted?'已调整·待保存':'待保存'))+'</span>'
+      +(svg?'<span style="position:absolute;right:3px;bottom:3px;font-size:10px;color:#fff;background:#8a6d3b;'
+        +'border-radius:4px;padding:1px 5px;pointer-events:none">SVG</span>':'')
       +'</div>';
   }).join('');
   // 已保存卡片（拖拽排序 / 置顶 / 删除 / 点选固定）

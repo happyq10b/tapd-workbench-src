@@ -2065,13 +2065,15 @@ def pet_images_list(zone: str = '', username: str = Depends(require_super)):
 def pet_image_upload(req: dict, username: str = Depends(require_super),
                      request: Request = None):
     """上传一张小精灵图片（裁切确认后的 data URL）→ 挂到指定分区尾部。
-    校验链：分区存在 → 名称长度 → 图片格式/大小 → 入库；任一失败即 400，不产生脏数据。"""
+    校验链：分区存在 → 名称长度 → 图片格式/大小 → 入库；任一失败即 400，不产生脏数据。
+    T-0181：开放 SVG（服务端净化脚本内容后入库，公开直出附加沙箱响应头）。"""
     zone = (req.get('zone') or '').strip()
     if zone == BUILTIN_PET_ZONE:
         raise HTTPException(400, '内置分区为只读，不可上传图片')
     _pet_zone_row_check(zone)
     name = (req.get('name') or '').strip()[:50]
-    data = _check_image_data_url(req.get('data') or '', PET_SETTING_MAX_IMG_BYTES)
+    data = _check_image_data_url(req.get('data') or '', PET_SETTING_MAX_IMG_BYTES,
+                                 allow_svg=True)
     if not data:
         raise HTTPException(400, '图片数据为空')
     mx = dbq('SELECT COALESCE(MAX(sort),-1) AS m FROM pet_images WHERE zone=?',
@@ -6660,11 +6662,54 @@ def delete_board_config(cid: int, username: str = Depends(require_auth), request
 MAX_IMAGE_BYTES = 512 * 1024        # 单张图片上限 512KB（data URL 后的实际字节数）
 MAX_PHOTO_BYTES = 2 * 1024 * 1024   # 个人照片上限 2MB（形象照比头像大得多）
 ALLOWED_IMAGE_TYPES = ('image/jpeg', 'image/png', 'image/gif', 'image/webp')
+ALLOWED_IMAGE_TYPES_SVG = ALLOWED_IMAGE_TYPES + ('image/svg+xml',)   # 仅小精灵上传开放（T-0181）
 
-def _check_image_data_url(data_url: str, max_bytes: int = None) -> str:
+
+def _sanitize_svg(svg_text: str) -> str:
+    """SVG 净化（T-0181）：SVG 可携带脚本，公开直出前必须剥离危险内容。
+    标准库 ElementTree 白名单式清理：移除脚本类元素、事件属性、javascript: 与
+    外链引用；拒绝 DOCTYPE/ENTITY（防 XML 实体炸弹）。非法 XML 直接 400。"""
+    import xml.etree.ElementTree as ET
+    head = svg_text[:600].lower()
+    if '<!doctype' in head or '<!entity' in svg_text.lower():
+        raise HTTPException(400, 'SVG 不允许包含 DOCTYPE / ENTITY 声明')
+    try:
+        root = ET.fromstring(svg_text)
+    except Exception:
+        raise HTTPException(400, 'SVG 内容不是合法的 XML')
+    bad_tags = {'script', 'foreignobject', 'iframe', 'embed', 'object',
+                'animate', 'set', 'handler', 'listener'}
+    unsafe = False
+
+    def clean(el):
+        nonlocal unsafe
+        tag = el.tag.rsplit('}', 1)[-1].lower()
+        if tag in bad_tags:
+            unsafe = True
+            return True                      # 通知父级移除
+        for k in list(el.attrib):
+            kl = k.lower()
+            v = (el.attrib[k] or '').strip().lower()
+            if kl.startswith('on') or v.startswith('javascript:') or (
+                    kl.endswith('href') and not (v.startswith('#') or v.startswith('data:'))):
+                del el.attrib[k]             # 事件属性 / js: 引用 / 外链引用
+        for child in list(el):
+            if clean(child):
+                el.remove(child)
+        return False
+
+    clean(root)
+    if unsafe:
+        raise HTTPException(400, 'SVG 含不允许的脚本或嵌入对象，请去除后重新上传')
+    return ET.tostring(root, encoding='unicode')
+
+
+def _check_image_data_url(data_url: str, max_bytes: int = None, allow_svg: bool = False) -> str:
     """校验图片 data URL：类型必须是常见图片格式，大小不得超过上限。
-    返回去掉前缀的纯 base64 载荷（入库用）。不合规则抛 400。
-    max_bytes：按用途区分上限（头像 512KB、个人照片 2MB）。"""
+    返回完整 data URL（入库用）。不合规则抛 400。
+    max_bytes：按用途区分上限（头像 512KB、个人照片 2MB）。
+    allow_svg：仅小精灵上传开放 SVG（image/svg+xml，先净化再入库——SVG 可携带脚本，
+    头像/照片等其它入口一律不开放）。"""
     limit = MAX_IMAGE_BYTES if max_bytes is None else max_bytes
     s = (data_url or '').strip()
     if not s:
@@ -6675,12 +6720,22 @@ def _check_image_data_url(data_url: str, max_bytes: int = None) -> str:
     if not payload:
         raise HTTPException(400, '图片数据为空')
     mime = head[5:].split(';')[0].strip().lower()
-    if mime not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(400, '仅支持 JPG / PNG / GIF / WebP 格式的图片')
+    if mime not in (ALLOWED_IMAGE_TYPES_SVG if allow_svg else ALLOWED_IMAGE_TYPES):
+        raise HTTPException(400, '仅支持 JPG / PNG / GIF / WebP' + (' / SVG' if allow_svg else '') + ' 格式的图片')
     # base64 长度 → 原始字节数（约 3/4）
     approx = len(payload) * 3 // 4
     if approx > limit:
         raise HTTPException(400, f'图片过大（{approx//1024}KB），请压缩到 {limit//1024}KB 以内')
+    if mime == 'image/svg+xml':
+        if ';base64' not in head.lower():
+            raise HTTPException(400, 'SVG 必须以 base64 编码上传')
+        import base64 as _b64
+        try:
+            svg_text = _b64.b64decode(payload).decode('utf-8')
+        except Exception:
+            raise HTTPException(400, 'SVG 数据无法解码')
+        cleaned = _sanitize_svg(svg_text)
+        return 'data:image/svg+xml;base64,' + _b64.b64encode(cleaned.encode('utf-8')).decode('ascii')
     return s
 
 class ProfileReq(BaseModel):
@@ -8187,8 +8242,12 @@ def pet_uploaded_sprite(iid: int):
         raw = base64.b64decode(payload)
     except Exception:
         raise HTTPException(500, '图片数据损坏')
-    return Response(content=raw, media_type=mime,
-                    headers={'Cache-Control': 'public, max-age=86400'})
+    headers = {'Cache-Control': 'public, max-age=86400',
+               'X-Content-Type-Options': 'nosniff'}
+    if mime == 'image/svg+xml':
+        # SVG 直出沙箱（T-0181）：入库前已净化，双保险封死脚本执行面
+        headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'"
+    return Response(content=raw, media_type=mime, headers=headers)
 
 # 默认占位图（用户未上传头像/个人照片时统一展示）。
 # 用白名单而非通用静态目录挂载 —— 避免路径穿越把任意文件暴露出去。
