@@ -3884,7 +3884,7 @@ def lock_holder(key: str = '', username: str = Depends(require_auth)):
     return {'ok': True, 'locked_by': lock_mgr.who(key), 'locked_by_name': lock_mgr.who_name(key)}
 
 @app.post('/api/locks/acquire')
-def acquire_lock(req: LockKeyReq, username: str = Depends(require_writer), request: Request = None):
+async def acquire_lock(req: LockKeyReq, username: str = Depends(require_writer), request: Request = None):
     """编辑弹窗打开时认领编辑锁；他人持有 → 409（姓名提示）。"""
     key = (req.key or '').strip()
     _check_lock_key(key)
@@ -3892,6 +3892,9 @@ def acquire_lock(req: LockKeyReq, username: str = Depends(require_writer), reque
     if not ok:
         raise HTTPException(409, f'已被 {_lock_holder_name(holder)} 编辑中，请稍后再试')
     audit_log(username, client_ip(request), 'lock', key, '锁定编辑', 'success')
+    # 实时提示（T-0184）：架构树等界面据此显示行内 🔒 提示（避免用 'lock' 类型——
+    # 那是事项锁的专用消息，前端会触发整页 reload）
+    await ws_mgr.broadcast({'type': 'edit_lock', 'key': key, 'by': username})
     return {'ok': True, 'locked_by': username, 'locked_by_name': _lock_holder_name(username)}
 
 @app.post('/api/locks/heartbeat')
@@ -3902,12 +3905,13 @@ def lock_beat(req: LockKeyReq, username: str = Depends(require_writer)):
     return {'ok': True}
 
 @app.post('/api/locks/release')
-def release_lock(req: LockKeyReq, username: str = Depends(require_writer), request: Request = None):
+async def release_lock(req: LockKeyReq, username: str = Depends(require_writer), request: Request = None):
     """编辑弹窗关闭/保存后释放编辑锁（仅持有者本人可释放）。"""
     key = (req.key or '').strip()
     _check_lock_key(key)
     if lock_mgr.release(key, username):
         audit_log(username, client_ip(request), 'unlock', key, '解锁编辑', 'success')
+        await ws_mgr.broadcast({'type': 'edit_lock', 'key': key, 'by': username})
     return {'ok': True}
 
 # ---------------- API：评论 / 日志 ----------------
@@ -5729,6 +5733,10 @@ def get_org_tree(username: str = Depends(require_auth)):
             # 该节点的末级人员名单（姓名 + 岗位），供前端树形组件渲染「人员」层。
             # 取该节点的任职人 + 其所有后代节点的任职人（末级=最深层的实际人员）。
             node['members'] = _collect_node_members(n['id'], nodes, appts, role_sort)
+            # 编辑锁（T-0184）：节点被他人编辑中 → 行内 🔒 提示（与事项行 locked_by 同口径：
+            # locked_by=账号，locked_by_name=姓名优先显示；自己持有则前端不提示）
+            node['locked_by'] = lock_mgr.who('org:%d' % n['id'])
+            node['locked_by_name'] = lock_mgr.who_name('org:%d' % n['id'])
             node['children'] = build(n['id'])
             out.append(node)
         return out

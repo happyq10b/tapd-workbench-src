@@ -10138,11 +10138,17 @@ function renderWgList(){
     const rowCls=(n.parent_id?'':' root')+(canBind?'':' org-node-ro');
     const clickAttr=canBind?('onclick="selectOrgNode('+n.id+')"'):'';
     const roTitle=canBind?'':' title="该节点不在你的管辖范围内（仅查看）"';
+    // 编辑锁提示（T-0184）：节点被他人编辑中 → 行内 🔒 人名提示（与事项行同款 lock-tag：
+    // 姓名优先显示，姓名为空回退账号；自己持锁不提示）。数据随 /api/org/tree 下发。
+    const _olocked=n.locked_by&&n.locked_by!==ME.username;
+    const _olockDisp=n.locked_by_name||n.locked_by||'';
+    const _olockHtml=_olocked?`<span class="lock-tag" title="${esc(_olockDisp)} 正在编辑该节点">🔒 ${esc(_olockDisp)} 已锁定</span>`:'';
     return `
     <div class="org-node-row${rowCls}" data-org-id="${n.id}" style="padding-left:${10+dep*20}px"${clickAttr}${roTitle}>
       ${(n.children&&n.children.length)?`<button class="icon-btn" onclick="event.stopPropagation();toggleWg(${n.id})" style="padding:0;width:20px;height:20px;flex-shrink:0" title="展开/折叠">${WG_COLLAPSED.has(n.id)?'▶':'▼'}</button>`:'<span style="width:20px;flex-shrink:0"></span>'}
       <span style="font-weight:${n.parent_id?'normal':'600'};flex-shrink:0;min-width:76px">${st.icon} ${esc(n.name)}</span>
       <span style="font-size:10.5px;color:${st.color};background:${st.bg};border:1px solid ${st.bd};border-radius:3px;padding:0 5px;flex-shrink:0">${esc(n.type_name||'')}</span>
+      ${_olockHtml}
       <span style="color:var(--text2);font-size:11.5px;width:66px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(()=>{const l=leaderOf(n);return l?esc(l):'<span style="color:var(--text3)">未任命</span>'})()}</span>
       <span style="font-size:11.5px;color:var(--text3);flex-shrink:0;min-width:44px;text-align:right" title="任职人数（一人多岗只计一次）">${apptCount(n)} 人</span>
       <span style="color:${(n.node_type==='dept'||n.node_type==='center')?(n.owned_boards&&n.owned_boards.length?'var(--primary)':'var(--text3)'):(n.wg_boards?'var(--primary)':'var(--text3)')};font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;padding-left:8px">${n.node_type==='center'?'🔒 全部看板（中心）':(n.node_type==='dept'?((n.owned_boards&&n.owned_boards.length)?('板块：'+boardNames(n.owned_boards.join(','))):'未归属板块（看板管理中指定）'):(n.wg_boards?('板块：'+boardNames(n.wg_boards)):'未绑定板块'))}</span>
@@ -10788,6 +10794,13 @@ function connectWS(){
   const ws=new WebSocket(wsBase+'/ws?token='+encodeURIComponent(TOKEN));
   ws.onmessage=e=>{const m=JSON.parse(e.data);
     if(m.type==='force_logout'){toast('账号已在其他设备登录，本机已下线');goLogin();return}
+    if(m.type==='edit_lock'&&m.key&&m.key.indexOf('org:')===0){
+      // T-0184：架构节点编辑锁变化 → 架构管理弹窗开着时实时刷新行内 🔒 提示
+      //（树数据里的 locked_by/locked_by_name 由 /api/org/tree 下发）
+      if(document.getElementById('wgModal').style.display==='flex'){
+        ensureOrgTree(true).then(()=>renderWgList()).catch(()=>{});
+      }
+    }
     if(m.type==='lock'||m.type==='unlock'||m.type==='card_update'||m.type==='card_create'||m.type==='card_delete'){
       reload(curPage);renderProgress();
       // 编辑/详情弹窗开着且是同一张卡 → 刷新代办任务
