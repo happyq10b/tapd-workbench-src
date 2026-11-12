@@ -205,14 +205,16 @@ async function doLogin(){
 btn.onclick=doLogin;
 p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 
-// —— 登录页小精灵挂件（T-013/T-0175）：超管固定形象优先，未配置则随机 ——
+// —— 登录页小精灵挂件（T-013/T-0175/T-0177）：服务端解析 pet_url 优先（含分区随机/上传图）——
 (function(){
   const img=document.getElementById('petImg');
   img.onerror=function(){document.getElementById('pet').style.display='none'};
   const fallback=function(){img.src='/pet/'+(1+Math.floor(Math.random()*386));};
   fetch('/api/login/notice').then(function(r){return r.ok?r.json():null;}).then(function(d){
+    // T-0177：pet_url 由服务端解析（固定内置/固定上传图/分区内随机，随机每次拉取换一张）
+    if(d&&d.pet_url){img.src=d.pet_url;return}
     const no=d&&d.pet?parseInt(d.pet,10):0;
-    if(no>=1&&no<=386)img.src='/pet/'+no;   // 超管固定形象（T-0175）
+    if(no>=1&&no<=386)img.src='/pet/'+no;   // 兼容旧格式（T-0175 固定编号）
     else fallback();                        // 未配置/配置无效 → 随机
   }).catch(fallback);
 })();

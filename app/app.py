@@ -1735,9 +1735,11 @@ def _state_history_rollback(row_id: int, username: str):
 @app.get('/api/login/notice')
 def login_notice():
     """登录页通知栏文案 + 小精灵设置（公开端点，登录前可取）。
-    pet：'' = 随机精灵；'1'~'386' = 固定显示该编号形象（T-0175）。"""
+    pet：原始配置值（兼容旧格式）；pet_url：服务端解析好的最终图片地址
+    （T-0177：固定内置/固定上传图/分区随机——随机在服务端完成，每次拉取换一张）。"""
+    v = _get_setting('login_pet', '')
     return {'notice': _get_setting('login_notice', ''),
-            'pet': _get_setting('login_pet', '')}
+            'pet': v, 'pet_url': _pet_resolved_url(v)}
 
 
 @app.get('/api/state-history')
@@ -1772,38 +1774,282 @@ def require_super(username: str = Depends(require_auth)):
     return username
 
 
-# ---------------- 登录页小精灵设置（T-0175，仅超级管理员） ----------------
+# ---------------- 登录页小精灵设置（T-0175/T-0177，仅超级管理员） ----------------
+# 内置 386 张宝可梦精灵以保留分区名 __builtin__ 参与固定/随机选择；
+# 上传图片按自定义分区管理（pet_zones / pet_images）。
+BUILTIN_PET_ZONE = '__builtin__'
+BUILTIN_PET_ZONE_LABEL = '内置精灵'
+PET_SETTING_MAX_ZONE_LEN = 20
+PET_SETTING_MAX_IMG_BYTES = 2 * 1024 * 1024   # 裁切产物 256×256 PNG，上限 2MB 留余量
+
+
+def _parse_pet_setting(v: str) -> dict:
+    """解析 login_pet 存储值 → 结构化设置。兼容三代格式：
+    ''                              → 随机内置（T-013 原始语义）
+    'N'（1~386）                    → 固定内置编号 N（T-0175）
+    JSON {"mode","kind","no"/"image_id"/"zone"}（T-0177）
+    非法值一律回退随机内置（登录页永不因脏配置挂掉）。"""
+    s = (v or '').strip()
+    if s.startswith('{'):
+        try:
+            d = json.loads(s)
+        except Exception:
+            return {'mode': 'random', 'kind': 'builtin'}
+        mode = d.get('mode')
+        if mode == 'fixed':
+            if d.get('kind') == 'upload':
+                try:
+                    return {'mode': 'fixed', 'kind': 'upload', 'image_id': int(d['image_id'])}
+                except Exception:
+                    return {'mode': 'random', 'kind': 'builtin'}
+            try:
+                no = int(d.get('no') or 0)
+            except Exception:
+                no = 0
+            if 1 <= no <= 386:
+                return {'mode': 'fixed', 'kind': 'builtin', 'no': no}
+            return {'mode': 'random', 'kind': 'builtin'}
+        if mode == 'random':
+            z = (d.get('zone') or '').strip()
+            if z and z != BUILTIN_PET_ZONE:
+                return {'mode': 'random', 'kind': 'zone', 'zone': z}
+            return {'mode': 'random', 'kind': 'builtin'}
+        return {'mode': 'random', 'kind': 'builtin'}
+    if s.isdigit() and 1 <= int(s) <= 386:
+        return {'mode': 'fixed', 'kind': 'builtin', 'no': int(s)}
+    return {'mode': 'random', 'kind': 'builtin'}
+
+
+def _pet_random_builtin() -> int:
+    import random as _rnd
+    return _rnd.randint(1, 386)
+
+
+def _pet_random_from_zone(zone: str):
+    """从指定分区随机挑一张已上传图片；分区不存在或无图返回 None（调用方回退）。"""
+    rows = dbq('SELECT id FROM pet_images WHERE zone=? ORDER BY RANDOM() LIMIT 1', (zone,))
+    return rows[0]['id'] if rows else None
+
+
+def _pet_resolved_url(v: str) -> str:
+    """把 login_pet 存储值解析为登录页可直接 <img src> 的地址。
+    random 类设置在此处完成服务端随机（每次拉取 /api/login/notice 换一张）。"""
+    p = _parse_pet_setting(v)
+    if p['mode'] == 'fixed':
+        if p['kind'] == 'upload':
+            row = dbq('SELECT id FROM pet_images WHERE id=?', (p['image_id'],))
+            if row:
+                return '/pet/up/%d' % p['image_id']
+            return '/pet/%d' % _pet_random_builtin()   # 图已被删 → 回退随机内置
+        return '/pet/%d' % p['no']
+    # random
+    if p['kind'] == 'zone':
+        iid = _pet_random_from_zone(p['zone'])
+        if iid:
+            return '/pet/up/%d' % iid
+    return '/pet/%d' % _pet_random_builtin()
+
+
 @app.get('/api/admin/pet')
 def get_pet_setting(username: str = Depends(require_super)):
-    """读取登录页小精灵模式：random=每次随机 / fixed=固定编号形象。"""
-    v = _get_setting('login_pet', '')
-    if v.isdigit() and 1 <= int(v) <= 386:
-        return {'mode': 'fixed', 'no': int(v)}
-    return {'mode': 'random', 'no': None}
+    """读取登录页小精灵设置（结构化）。"""
+    p = _parse_pet_setting(_get_setting('login_pet', ''))
+    out = {'mode': p['mode'], 'kind': p['kind'], 'no': p.get('no'),
+           'image_id': p.get('image_id'), 'zone': p.get('zone', '')}
+    return out
 
 @app.post('/api/admin/pet')
 def set_pet_setting(req: dict, username: str = Depends(require_super),
                     request: Request = None):
-    """保存登录页小精灵模式（全局生效于所有用户的登录界面）。"""
+    """保存登录页小精灵设置（全局生效于所有用户的登录界面）。
+    接受：{mode:'fixed', no:N}（内置）/ {mode:'fixed', image_id:N}（上传图）
+         / {mode:'random', zone:'__builtin__'|分区名}。"""
     mode = (req.get('mode') or '').strip()
-    if mode not in ('random', 'fixed'):
+    desc = ''
+    if mode == 'fixed':
+        if req.get('image_id') is not None:
+            try:
+                iid = int(req['image_id'])
+            except (TypeError, ValueError):
+                raise HTTPException(400, 'image_id 不合法')
+            if not dbq('SELECT 1 FROM pet_images WHERE id=?', (iid,)):
+                raise HTTPException(404, '所选小精灵图片不存在（可能已被删除）')
+            new = json.dumps({'mode': 'fixed', 'kind': 'upload', 'image_id': iid},
+                             ensure_ascii=False, separators=(',', ':'))
+            desc = '固定上传图片 #%d' % iid
+        else:
+            try:
+                no = int(req.get('no') or 0)
+            except (TypeError, ValueError):
+                no = 0
+            if not 1 <= no <= 386:
+                raise HTTPException(400, '精灵编号必须在 1~386 之间')
+            new = json.dumps({'mode': 'fixed', 'kind': 'builtin', 'no': no},
+                             ensure_ascii=False, separators=(',', ':'))
+            desc = '固定内置编号 %d' % no
+    elif mode == 'random':
+        z = (req.get('zone') or BUILTIN_PET_ZONE).strip()
+        if z != BUILTIN_PET_ZONE:
+            if not z:
+                raise HTTPException(400, '随机范围分区名不能为空')
+            if not dbq('SELECT 1 FROM pet_zones WHERE name=?', (z,)):
+                raise HTTPException(404, '随机范围分区不存在')
+        new = json.dumps({'mode': 'random', 'zone': z},
+                         ensure_ascii=False, separators=(',', ':'))
+        desc = '随机范围：' + (BUILTIN_PET_ZONE_LABEL if z == BUILTIN_PET_ZONE else z)
+    else:
         raise HTTPException(400, '模式必须是 random / fixed')
     old = _get_setting('login_pet', '')
-    if mode == 'fixed':
-        try:
-            no = int(req.get('no') or 0)
-        except (TypeError, ValueError):
-            no = 0
-        if not 1 <= no <= 386:
-            raise HTTPException(400, '精灵编号必须在 1~386 之间')
-        new = str(no)
-    else:
-        new = ''
     _set_setting('login_pet', new)
     _record_state('login_pet', 'global', 'pet', old, new, username)
     audit_log(username, client_ip(request), 'pet_setting_update',
-              '登录页小精灵', '固定编号 ' + new if new else '随机出现', 'success')
-    return {'ok': True, 'mode': mode, 'no': int(new) if new else None}
+              '登录页小精灵', desc, 'success')
+    return {'ok': True}
+
+
+# ---------------- 小精灵分区与上传图片管理（T-0177，仅超级管理员） ----------------
+
+def _pet_zone_row_check(name: str):
+    if not dbq('SELECT 1 FROM pet_zones WHERE name=?', (name,)):
+        raise HTTPException(404, '分区不存在')
+
+
+@app.get('/api/admin/pet/zones')
+def pet_zones_list(username: str = Depends(require_super)):
+    """分区清单（内置分区固定在首位）+ 各分区图片数。"""
+    rows = dbq('SELECT z.id, z.name, z.sort,'
+               ' (SELECT COUNT(*) FROM pet_images i WHERE i.zone=z.name) AS count'
+               ' FROM pet_zones z ORDER BY z.sort, z.id')
+    zones = [{'id': 0, 'name': BUILTIN_PET_ZONE, 'sort': -1,
+              'count': 386, 'builtin': True, 'label': BUILTIN_PET_ZONE_LABEL}]
+    zones += [{'id': r['id'], 'name': r['name'], 'sort': r['sort'],
+               'count': r['count'], 'builtin': False, 'label': r['name']}
+              for r in rows]
+    return {'zones': zones}
+
+@app.post('/api/admin/pet/zones')
+def pet_zone_create(req: dict, username: str = Depends(require_super),
+                    request: Request = None):
+    """新增分区：名称 1~20 字、去重；新分区排在最后。"""
+    name = (req.get('name') or '').strip()
+    if not name:
+        raise HTTPException(400, '分区名不能为空')
+    if len(name) > PET_SETTING_MAX_ZONE_LEN:
+        raise HTTPException(400, '分区名最长 %d 字' % PET_SETTING_MAX_ZONE_LEN)
+    if name == BUILTIN_PET_ZONE or name == BUILTIN_PET_ZONE_LABEL:
+        raise HTTPException(400, '该名称为内置分区保留名')
+    if dbq('SELECT 1 FROM pet_zones WHERE name=?', (name,)):
+        raise HTTPException(409, '分区「%s」已存在' % name)
+    mx = dbq('SELECT COALESCE(MAX(sort),-1) AS m FROM pet_zones')[0]['m']
+    dbe('INSERT INTO pet_zones (name, sort) VALUES (?,?)', (name, mx + 1))
+    audit_log(username, client_ip(request), 'pet_zone_create',
+              '小精灵分区', '新增分区「%s」' % name, 'success')
+    row = dbq('SELECT id FROM pet_zones WHERE name=?', (name,))
+    return {'ok': True, 'id': row[0]['id'], 'name': name}
+
+@app.delete('/api/admin/pet/zones/{name}')
+def pet_zone_delete(name: str, username: str = Depends(require_super),
+                    request: Request = None):
+    """删除分区：仅允许删除**空分区**（有图先删图，防误删批量脏数据）；
+    若随机范围指向该分区 → 重置为随机内置。"""
+    if name == BUILTIN_PET_ZONE:
+        raise HTTPException(400, '内置分区不可删除')
+    _pet_zone_row_check(name)
+    n = dbq('SELECT COUNT(*) AS c FROM pet_images WHERE zone=?', (name,))[0]['c']
+    if n:
+        raise HTTPException(409, '分区「%s」下仍有 %d 张图片，请先删除图片' % (name, n))
+    dbe('DELETE FROM pet_zones WHERE name=?', (name,))
+    # 随机范围指向该分区 → 回退随机内置（登录页保持可用）
+    p = _parse_pet_setting(_get_setting('login_pet', ''))
+    if p['mode'] == 'random' and p['kind'] == 'zone' and p['zone'] == name:
+        old = _get_setting('login_pet', '')
+        new = json.dumps({'mode': 'random', 'zone': BUILTIN_PET_ZONE},
+                         ensure_ascii=False, separators=(',', ':'))
+        _set_setting('login_pet', new)
+        _record_state('login_pet', 'global', 'pet', old, new, username)
+    audit_log(username, client_ip(request), 'pet_zone_delete',
+              '小精灵分区', '删除空分区「%s」' % name, 'success')
+    return {'ok': True}
+
+@app.get('/api/admin/pet/images')
+def pet_images_list(zone: str = '', username: str = Depends(require_super)):
+    """分区内图片清单（按 sort 升序；不含 data 载荷，url 走公开 /pet/up/{id}）。"""
+    zone = (zone or '').strip()
+    if zone == BUILTIN_PET_ZONE or not zone:
+        return {'images': []}
+    _pet_zone_row_check(zone)
+    rows = dbq('SELECT id, name, sort, created_by, created_at FROM pet_images'
+               ' WHERE zone=? ORDER BY sort, id', (zone,))
+    return {'images': [{'id': r['id'], 'name': r['name'], 'sort': r['sort'],
+                        'url': '/pet/up/%d' % r['id'],
+                        'created_by': r['created_by'], 'created_at': r['created_at']}
+                       for r in rows]}
+
+@app.post('/api/admin/pet/images')
+def pet_image_upload(req: dict, username: str = Depends(require_super),
+                     request: Request = None):
+    """上传一张小精灵图片（裁切确认后的 data URL）→ 挂到指定分区尾部。
+    校验链：分区存在 → 名称长度 → 图片格式/大小 → 入库；任一失败即 400，不产生脏数据。"""
+    zone = (req.get('zone') or '').strip()
+    if zone == BUILTIN_PET_ZONE:
+        raise HTTPException(400, '内置分区为只读，不可上传图片')
+    _pet_zone_row_check(zone)
+    name = (req.get('name') or '').strip()[:50]
+    data = _check_image_data_url(req.get('data') or '', PET_SETTING_MAX_IMG_BYTES)
+    if not data:
+        raise HTTPException(400, '图片数据为空')
+    mx = dbq('SELECT COALESCE(MAX(sort),-1) AS m FROM pet_images WHERE zone=?',
+             (zone,))[0]['m']
+    dbe('INSERT INTO pet_images (zone, name, data, sort, created_by) VALUES (?,?,?,?,?)',
+        (zone, name, data, mx + 1, username))
+    row = dbq('SELECT id FROM pet_images WHERE zone=? ORDER BY id DESC LIMIT 1', (zone,))
+    audit_log(username, client_ip(request), 'pet_image_upload',
+              '小精灵分区「%s」' % zone, '上传图片 #%d%s' % (row[0]['id'],
+              ('（%s）' % name) if name else ''), 'success')
+    return {'ok': True, 'id': row[0]['id'], 'url': '/pet/up/%d' % row[0]['id']}
+
+@app.put('/api/admin/pet/images/order')
+def pet_image_reorder(req: dict, username: str = Depends(require_super),
+                      request: Request = None):
+    """持久化分区内拖拽/置顶排序：ids 必须恰好覆盖该分区全部图片（防漏防串区）。"""
+    zone = (req.get('zone') or '').strip()
+    if zone == BUILTIN_PET_ZONE or not zone:
+        raise HTTPException(400, '内置分区为只读，不可排序')
+    _pet_zone_row_check(zone)
+    ids = req.get('ids') or []
+    try:
+        ids = [int(x) for x in ids]
+    except (TypeError, ValueError):
+        raise HTTPException(400, 'ids 必须是数字列表')
+    cur = [r['id'] for r in dbq('SELECT id FROM pet_images WHERE zone=?', (zone,))]
+    if sorted(ids) != sorted(cur):
+        raise HTTPException(400, '排序列表与分区内图片不一致（请刷新后重试）')
+    for i, iid in enumerate(ids):
+        dbe('UPDATE pet_images SET sort=? WHERE id=?', (i, iid))
+    audit_log(username, client_ip(request), 'pet_image_reorder',
+              '小精灵分区「%s」' % zone, '调整图片顺序（%d 张）' % len(ids), 'success')
+    return {'ok': True}
+
+@app.delete('/api/admin/pet/images/{iid}')
+def pet_image_delete(iid: int, username: str = Depends(require_super),
+                     request: Request = None):
+    """删除一张上传图片；若该图被「固定形象」引用 → 重置为随机内置。"""
+    row = dbq('SELECT id, zone, name FROM pet_images WHERE id=?', (iid,))
+    if not row:
+        raise HTTPException(404, '图片不存在（可能已被删除）')
+    dbe('DELETE FROM pet_images WHERE id=?', (iid,))
+    p = _parse_pet_setting(_get_setting('login_pet', ''))
+    if p['mode'] == 'fixed' and p['kind'] == 'upload' and p['image_id'] == iid:
+        old = _get_setting('login_pet', '')
+        new = json.dumps({'mode': 'random', 'zone': BUILTIN_PET_ZONE},
+                         ensure_ascii=False, separators=(',', ':'))
+        _set_setting('login_pet', new)
+        _record_state('login_pet', 'global', 'pet', old, new, username)
+    audit_log(username, client_ip(request), 'pet_image_delete',
+              '小精灵分区「%s」' % row[0]['zone'],
+              '删除图片 #%d%s' % (iid, ('（%s）' % row[0]['name']) if row[0]['name'] else ''),
+              'success')
+    return {'ok': True}
 
 
 # ---------------- 状态快照：查询 / 回滚（T-013f，仅管理员） ----------------
@@ -7835,6 +8081,25 @@ def pet_sprite(no: int):
             return FileResponse(hits[0],
                                 headers={'Cache-Control': 'public, max-age=86400'})
     raise HTTPException(404, '精灵图不存在')
+
+
+# 上传的小精灵图片（T-0177）：GET /pet/up/{id} → pet_images.data（data URL）解码直出。
+# 公开无鉴权 —— 登录页在登录前就要展示；id 由 AUTOINCREMENT 单调分配永不复用，
+# 故可放心长缓存。仅按 id 白名单读取，不暴露目录结构。
+@app.get('/pet/up/{iid:int}')
+def pet_uploaded_sprite(iid: int):
+    row = dbq('SELECT data FROM pet_images WHERE id=?', (iid,))
+    if not row:
+        raise HTTPException(404, '小精灵图片不存在')
+    data_url = row[0]['data']
+    try:
+        head, _, payload = data_url.partition(',')
+        mime = head[5:].split(';')[0].strip().lower() or 'image/png'
+        raw = base64.b64decode(payload)
+    except Exception:
+        raise HTTPException(500, '图片数据损坏')
+    return Response(content=raw, media_type=mime,
+                    headers={'Cache-Control': 'public, max-age=86400'})
 
 # 默认占位图（用户未上传头像/个人照片时统一展示）。
 # 用白名单而非通用静态目录挂载 —— 避免路径穿越把任意文件暴露出去。

@@ -407,6 +407,26 @@ CREATE TABLE IF NOT EXISTS export_templates (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_exp_tpl_user ON export_templates(username);
+-- 登录页小精灵分区（T-0177）：上传图片按分区管理，随机仅在指定分区范围内选取。
+-- 内置 386 张宝可梦精灵不入库（静态资源），以保留名 __builtin__ 虚拟分区参与选择。
+CREATE TABLE IF NOT EXISTS pet_zones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,          -- 分区名（1~20 字，超管自定义）
+    sort        INTEGER NOT NULL DEFAULT 0,    -- tab 展示顺序
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+-- 上传的小精灵图片：data URL 与头像同范式入库（单文件部署无需额外资产目录）；
+-- sort 为分区内展示顺序（0 起连续），拖拽/置顶后整区重排持久化。
+CREATE TABLE IF NOT EXISTS pet_images (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    zone        TEXT NOT NULL,                 -- 所属分区名（pet_zones.name）
+    name        TEXT NOT NULL DEFAULT '',      -- 原文件名（仅展示用途，≤50 字）
+    data        TEXT NOT NULL,                 -- 图片 data URL（裁切后 256×256 PNG）
+    sort        INTEGER NOT NULL DEFAULT 0,
+    created_by  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_pet_images_zone ON pet_images(zone, sort);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(username);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);

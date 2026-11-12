@@ -115,6 +115,10 @@ button{font-family:inherit}
   touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
 /* 头像裁切：裁切框为圆形（与最终展示的圆形头像一致） */
 .crop-stage.crop-round{border-radius:50%}
+/* 小精灵分区 tab 的 ✕ 删除钮（T-0177）：默认淡色，hover 变红提示可删 */
+.pet-tab-del{width:14px;height:14px;line-height:12px;text-align:center;font-size:10px;
+  color:var(--text3);border-radius:50%;cursor:pointer;margin-left:2px}
+.pet-tab-del:hover{color:#c0392b;background:rgba(192,57,43,.12)}
 .crop-stage.dragging{cursor:grabbing}
 .crop-stage canvas{display:block;max-width:100%}
 .crop-bar{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2)}
@@ -2416,23 +2420,46 @@ function goLogin(){
   </div>
 </div>
 
-<!-- 登录页小精灵设置弹窗（仅超级管理员，T-0175）：配置全局生效于所有用户登录界面 -->
+<!-- 登录页小精灵设置弹窗（仅超级管理员，T-0175/T-0177）：配置全局生效于所有用户登录界面。
+     T-0177：分区管理（内置 + 自定义分区）、单/批量上传（裁切确认后入库）、拖拽排序/置顶、
+     随机范围按分区隔离（服务端随机）。 -->
 <div class="modal-overlay" id="petSettingModal" style="display:none">
-  <div class="modal" style="width:min(560px,94vw)">
+  <div class="modal" style="width:min(640px,94vw)">
     <div class="modal-header"><h2>🐾 登录页小精灵设置</h2><button class="modal-close" onclick="closeModal('petSettingModal')">✕</button></div>
-    <div style="padding:16px 20px">
-      <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center">
+    <div style="padding:14px 20px 16px">
+      <div style="display:flex;gap:14px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px">
-          <input type="radio" name="petMode" value="random" onchange="renderPetGrid()">随机出现小精灵
-          <span style="color:var(--text3);font-size:11.5px">每次登录随机展示不同形象</span>
+          <input type="radio" name="petMode" value="random" onchange="petOnModeChange()">随机出现
+          <span id="petRandZoneWrap" style="display:inline-flex;align-items:center;gap:4px">
+            <select id="petRandZone" onchange="PET_RAND_ZONE=this.value" title="随机范围（仅在该分区范围内随机选取）"
+              style="font-size:12px;padding:2px 6px;border:1px solid var(--border);border-radius:6px;background:#fff"></select>
+            <span style="color:var(--text3);font-size:11.5px">范围内随机</span>
+          </span>
         </label>
         <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px">
-          <input type="radio" name="petMode" value="fixed" onchange="renderPetGrid()">固定形象
-          <span style="color:var(--text3);font-size:11.5px">从下方列表选择，登录界面固定显示</span>
+          <input type="radio" name="petMode" value="fixed" onchange="petOnModeChange()">固定形象
+          <span style="color:var(--text3);font-size:11.5px">在下方列表点选，登录界面固定显示</span>
         </label>
       </div>
-      <div id="petGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;
-        max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px"></div>
+      <!-- 分区 tab（内置 + 自定义），自定义分区带 ✕ 删除（仅空分区可删，后端校验） -->
+      <div id="petZoneTabs" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;
+        border-bottom:1px solid var(--border);padding-bottom:8px"></div>
+      <!-- 内置分区：386 张懒加载网格（原 T-0175 交互不变） -->
+      <div id="petBuiltinWrap">
+        <div id="petGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:6px;
+          max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px"></div>
+      </div>
+      <!-- 自定义分区：上传 + 图片卡片列表（拖拽排序 / 置顶 / 删除 / 点选固定） -->
+      <div id="petUpWrap" style="display:none">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <button type="button" class="btn-primary" style="padding:5px 14px;font-size:12.5px" onclick="petUploadClick()">📤 上传图片（可多选）</button>
+          <input type="file" id="petFileInput" multiple accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="petFilesChosen(this)">
+          <span id="petUploadProgress" style="font-size:12px;color:var(--text2)"></span>
+          <span style="font-size:11.5px;color:var(--text3);margin-left:auto">拖动卡片排序 · 「⤒」置顶 · 点选卡片设为固定形象</span>
+        </div>
+        <div id="petUpList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px;
+          max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px;min-height:120px;align-content:start"></div>
+      </div>
       <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
         <button class="btn-secondary" onclick="closeModal('petSettingModal')">取消</button>
         <button class="btn-primary" id="petSaveBtn" onclick="savePetSetting()">保存设置</button>
@@ -3776,10 +3803,11 @@ var DEFAULT_PHOTO_URL='/static/default-photo.jpg';
 // 裁切规格：比例 + 最小输出尺寸
 var CROP_SPEC={
   avatar:{ratio:1,  outW:512, outH:512,  label:'头像',     box:420},
-  photo: {ratio:0.75,outW:720, outH:960,  label:'个人照片', box:440}   // 3:4 竖版（box=长边）
+  photo: {ratio:0.75,outW:720, outH:960,  label:'个人照片', box:440},  // 3:4 竖版（box=长边）
+  pet:   {ratio:1,  outW:256, outH:256,  label:'小精灵',   box:300}   // T-0177：方图 PNG 保透明
 };
 var CROP={img:null, zoom:1, ox:0, oy:0, base:1, dispW:0, dispH:0,
-          target:'avatar', spec:null, src:''};
+          target:'avatar', spec:null, src:'', onConfirm:null};
 var cropBound=false;      // 裁切器事件是否已绑定（避免重复绑定）
 
 // 读取图片文件为 Image 对象
@@ -3791,10 +3819,10 @@ function loadCropImage(dataUrl, onOk, onErr){
 }
 
 // 打开裁切器：target='avatar' | 'photo'
-function openCropper(target, dataUrl){
+function openCropper(target, dataUrl, onConfirm){
   const spec=CROP_SPEC[target];
   if(!spec)return;
-  CROP.target=target; CROP.spec=spec; CROP.src=dataUrl;
+  CROP.target=target; CROP.spec=spec; CROP.src=dataUrl; CROP.onConfirm=onConfirm||null;
   CROP.zoom=1; CROP.ox=0; CROP.oy=0;
   const cv=document.getElementById('cropCanvas');
   // 画布按比例设置（头像 1:1 正方形；照片 3:4 竖版），box 为长边尺寸
@@ -3880,8 +3908,18 @@ function confirmCrop(){
   const out=document.createElement('canvas');
   out.width=spec.outW; out.height=spec.outH;
   const ctx=out.getContext('2d');
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,spec.outW,spec.outH);
   const k=spec.outW/cv.width;
+  if(CROP.target==='pet'){
+    // T-0177 小精灵：PNG 保留透明（不填白底），结果交给 onConfirm 回调（上传管线）
+    ctx.drawImage(CROP.img, CROP.ox*k, CROP.oy*k, CROP.dispW*k, CROP.dispH*k);
+    const dataUrl=out.toDataURL('image/png');
+    const cb=CROP.onConfirm;
+    closeModal('cropModal');
+    CROP.img=null; CROP.src=''; CROP_DRAG=null; CROP.onConfirm=null;
+    if(cb)cb(dataUrl);
+    return;
+  }
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,spec.outW,spec.outH);
   if(CROP.target==='avatar'){
     // 头像按圆形裁剪：圆外保持白底（展示时圆形容器会再裁一次）
     ctx.save();
@@ -3909,7 +3947,8 @@ function confirmCrop(){
 // 取消裁切：丢弃本次调整，保留原状态
 function cancelCrop(){
   closeModal('cropModal');
-  CROP.img=null; CROP.src=''; CROP_DRAG=null;
+  CROP.img=null; CROP.src=''; CROP_DRAG=null; CROP.onConfirm=null;
+  if(CROP.target==='pet')petUploadCancel();  // T-0177：终止批量上传队列
 }
 
 // ============================================================
@@ -5835,6 +5874,8 @@ MODAL_CLOSE_HOOKS.wgModal=function(){releaseEditLock(ORG_LOCK_KEY);ORG_LOCK_KEY=
 MODAL_CLOSE_HOOKS.teamModal=function(){releaseEditLock(TEAM_LOCK_KEY);TEAM_LOCK_KEY='';};
 MODAL_CLOSE_HOOKS.noticeModal=function(){releaseEditLock(NOTICE_LOCK_KEY);NOTICE_LOCK_KEY='';};
 MODAL_CLOSE_HOOKS.boardConfigModal=function(){bcReleaseLock();};
+// 小精灵设置弹窗关闭：若批量上传队列仍在裁切中 → 终止队列（防在弹窗外继续弹裁切框）
+MODAL_CLOSE_HOOKS.petSettingModal=function(){PET_Q=[];PET_UPLOADING=false;};
 function renderPickers(){
   // 人员选择层级约束（2026-11-04）：事项的负责人/参与人只能从**所属板块**的
   // 负责人与参与人中选（池由 openEdit/openNew 预先算好放入 _cardPickPool）；
@@ -8666,8 +8707,17 @@ async function openOnlineModal(){
   openModal('onlineModal');
   await loadOnlineList();
 }
-// ---------- 登录页小精灵设置（T-0175，仅超级管理员，全局生效） ----------
-var PET_PICK=null;   // 当前选中的固定编号（null=未选）
+// ---------- 登录页小精灵设置（T-0175/T-0177，仅超级管理员，全局生效） ----------
+// T-0177：分区（内置 __builtin__ + 自定义）、单/批量上传（裁切确认后即时入库）、
+// 拖拽排序/置顶（PUT order 持久化）、随机范围按分区隔离（服务端随机）。
+var PET_PICK=null;          // 固定形象选中：{kind:'builtin',no:N} | {kind:'upload',image_id:N}（null=未选）
+var PET_RAND_ZONE='__builtin__';  // 随机范围分区（随机模式下生效）
+var PET_ZONES=[];           // 分区清单 [{id,name,count,builtin,label}]
+var PET_ZONE='__builtin__'; // 当前查看的分区
+var PET_UP=[];              // 当前自定义分区图片 [{id,name,url}]
+var PET_Q=[];               // 批量上传队列（裁切前的 dataURL）
+var PET_Q_TOTAL=0;          // 队列总数（进度展示用）
+var PET_UPLOADING=false;    // 队列处理中（防并发开新队列）
 function openPetSettingModal(){
   if(!ME||!ME.is_super){toast('仅超级管理员可访问');return}
   openModal('petSettingModal');
@@ -8682,33 +8732,302 @@ function openPetSettingModal(){
     grid.addEventListener('click',function(e){
       const b=e.target.closest('button[data-no]');
       if(!b)return;
-      PET_PICK=Number(b.dataset.no);
+      PET_PICK={kind:'builtin',no:Number(b.dataset.no)};
       document.querySelector('input[name=petMode][value=fixed]').checked=true;
       renderPetGrid();
     });
   }
-  api('/api/admin/pet').then(function(d){
-    PET_PICK=(d&&d.mode==='fixed')?d.no:null;
-    document.querySelector('input[name=petMode][value="'+((d&&d.mode==='fixed')?'fixed':'random')+'"]').checked=true;
-    renderPetGrid();
-  }).catch(function(e){toast('读取设置失败：'+e.message)});
+  (async function(){
+    try{
+      const [zs,d]=await Promise.all([api('/api/admin/pet/zones'),api('/api/admin/pet')]);
+      PET_ZONES=zs.zones||[];
+      if(d&&d.mode==='fixed'){
+        PET_PICK=d.kind==='upload'?{kind:'upload',image_id:d.image_id}:{kind:'builtin',no:d.no};
+        PET_RAND_ZONE='__builtin__';
+      }else{
+        PET_PICK=null;PET_RAND_ZONE=(d&&d.zone)||'__builtin__';
+      }
+      document.querySelector('input[name=petMode][value="'+((d&&d.mode==='fixed')?'fixed':'random')+'"]').checked=true;
+      renderPetRandZone();
+      renderPetZoneTabs();
+      await switchPetZone((d&&d.kind==='upload')?null:PET_ZONE,true); // 上传图固定时找不到所属分区，留在当前分区
+    }catch(e){toast('读取设置失败：'+e.message)}
+  })();
 }
+function petZoneLabel(z){
+  const it=PET_ZONES.find(function(x){return x.name===z});
+  return it?it.label:(z==='__builtin__'?'内置精灵':z);
+}
+function renderPetRandZone(){
+  const sel=document.getElementById('petRandZone');
+  sel.innerHTML=PET_ZONES.map(function(z){
+    return '<option value="'+esc(z.name)+'">'+esc(z.label)+'（'+z.count+'张）</option>';
+  }).join('');
+  sel.value=PET_RAND_ZONE;
+  if(sel.value!==PET_RAND_ZONE){PET_RAND_ZONE='__builtin__';sel.value='__builtin__';} // 范围分区已被删 → 回退内置
+}
+function renderPetZoneTabs(){
+  const box=document.getElementById('petZoneTabs');
+  box.innerHTML=PET_ZONES.map(function(z){
+    const act=z.name===PET_ZONE;
+    const del=z.builtin?'':'<span class="pet-tab-del" data-delzone="'+esc(z.name)+'" title="删除该分区（仅空分区可删）">✕</span>';
+    return '<span class="pet-tab'+(act?' pet-tab-act':'')+'" data-zone="'+esc(z.name)+'" '
+      +'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid '
+      +(act?'var(--primary)':'var(--border)')+';border-radius:16px;cursor:pointer;font-size:12.5px;'
+      +'background:'+(act?'rgba(0,45,116,.08)':'#fff')+';user-select:none">'
+      +esc(z.label)+'<b style="font-weight:400;color:var(--text3)">'+z.count+'</b>'+del+'</span>';
+  }).join('')
+  +'<button type="button" class="icon-btn" style="padding:2px 10px;font-size:12px" onclick="petNewZone()">＋ 新增分区</button>';
+  // 内置分区显示网格，自定义分区显示上传列表
+  const isB=PET_ZONE==='__builtin__';
+  document.getElementById('petBuiltinWrap').style.display=isB?'':'none';
+  document.getElementById('petUpWrap').style.display=isB?'none':'';
+}
+// tab 事件委托（分区名为用户输入，不拼 inline onclick —— 单引号会截断 JS）
+(function(){
+  const box=document.getElementById('petZoneTabs');
+  box.addEventListener('click',function(e){
+    const del=e.target.closest('.pet-tab-del');
+    if(del){petDelZone(del.dataset.delzone);return}
+    const tab=e.target.closest('.pet-tab');
+    if(tab)switchPetZone(tab.dataset.zone);
+  });
+})();
+async function switchPetZone(z,keepPick){
+  if(!z)z=PET_ZONE;
+  PET_ZONE=z;
+  renderPetZoneTabs();
+  renderPetGrid();
+  if(z==='__builtin__')return;      // 内置网格无远端数据
+  const list=document.getElementById('petUpList');
+  list.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text3);font-size:12px;padding:24px 0">加载中…</div>';
+  try{
+    const d=await api('/api/admin/pet/images?zone='+encodeURIComponent(z));
+    PET_UP=d.images||[];
+    renderPetUpList();
+  }catch(e){
+    PET_UP=[];list.innerHTML='<div style="grid-column:1/-1;text-align:center;color:#c0392b;font-size:12px;padding:24px 0">'
+      +esc(e.message||'加载失败')+'</div>';
+  }
+}
+function petOnModeChange(){renderPetGrid();renderPetUpList();}
 function renderPetGrid(){
   const mode=document.querySelector('input[name=petMode]:checked').value;
   document.querySelectorAll('#petGrid button[data-no]').forEach(function(b){
     const no=Number(b.dataset.no);
-    const sel=(mode==='fixed'&&PET_PICK===no);
+    const sel=(mode==='fixed'&&PET_PICK&&PET_PICK.kind==='builtin'&&PET_PICK.no===no);
     b.style.borderColor=sel?'var(--primary)':'var(--border)';
     b.style.background=sel?'rgba(0,45,116,.08)':'#fff';
     b.style.boxShadow=sel?'0 0 0 2px rgba(0,45,116,.25)':'none';
   });
 }
+async function petNewZone(){
+  const name=(prompt('请输入新分区名称（1~20 字）：')||'').trim();
+  if(!name)return;
+  try{
+    await api('/api/admin/pet/zones',{method:'POST',body:JSON.stringify({name:name})});
+    toast('分区「'+name+'」已创建');
+    const zs=await api('/api/admin/pet/zones');PET_ZONES=zs.zones||[];
+    renderPetRandZone();
+    await switchPetZone(name);
+  }catch(e){toast(e.message)}
+}
+async function petDelZone(z){
+  if(!confirm('确定删除分区「'+petZoneLabel(z)+'」吗？（仅空分区可删除）'))return;
+  try{
+    await api('/api/admin/pet/zones/'+encodeURIComponent(z),{method:'DELETE'});
+    toast('分区已删除');
+    const zs=await api('/api/admin/pet/zones');PET_ZONES=zs.zones||[];
+    renderPetRandZone();
+    if(PET_ZONE===z)await switchPetZone('__builtin__');else renderPetZoneTabs();
+  }catch(e){toast(e.message)}
+}
+// ---------- 上传：文件选择 → 逐张裁切确认 → 即时入库（T-0177） ----------
+function petUploadClick(){
+  if(PET_ZONE==='__builtin__')return;
+  if(PET_UPLOADING){toast('正在处理上传队列，请等待完成或取消裁切');return}
+  document.getElementById('petFileInput').click();
+}
+function petFilesChosen(inp){
+  const files=Array.prototype.slice.call(inp.files||[]);
+  inp.value='';                       // 允许重选同一文件
+  if(!files.length)return;
+  // 客户端预检：类型 + 原图大小（≤5MB，裁切产物另有 2MB 服务端上限）
+  const ok=[],bad=[];
+  files.forEach(function(f){
+    if(!/^image\//.test(f.type)){bad.push(f.name+'（格式不支持）');return}
+    if(f.size>5*1024*1024){bad.push(f.name+'（超过 5MB）');return}
+    ok.push(f);
+  });
+  if(bad.length)toast('已跳过 '+bad.length+' 个文件：'+bad.slice(0,3).join('、')+(bad.length>3?' 等':''));
+  if(!ok.length)return;
+  PET_Q=ok.map(function(f){return {file:f}});
+  PET_Q_TOTAL=PET_Q.length;
+  petUploadNext();
+}
+function petUploadNext(){
+  if(!PET_Q.length){petUploadDone();return}
+  PET_UPLOADING=true;
+  const item=PET_Q[0];
+  document.getElementById('petUploadProgress').textContent=
+    '正在处理第 '+(PET_Q_TOTAL-PET_Q.length+1)+'/'+PET_Q_TOTAL+' 张：'+item.file.name;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    openCropper('pet',String(fr.result||''),function(dataUrl){
+      // 裁切确认回调：即时上传该张（失败终止队列，不产生脏数据——后端校验先行）
+      petUploadOne(dataUrl,item.file.name).then(function(){
+        PET_Q.shift();
+        petUploadNext();
+      }).catch(function(){PET_Q=[];petUploadDone(true)});
+    });
+  };
+  fr.onerror=()=>{
+    toast('读取「'+item.file.name+'」失败，已终止上传');
+    PET_Q.shift();
+    petUploadNext();
+  };
+  fr.readAsDataURL(item.file);
+}
+async function petUploadOne(dataUrl,fileName){
+  try{
+    await api('/api/admin/pet/images',{method:'POST',
+      body:JSON.stringify({zone:PET_ZONE,name:fileName,data:dataUrl})});
+    const d=await api('/api/admin/pet/images?zone='+encodeURIComponent(PET_ZONE));
+    PET_UP=d.images||[];
+    renderPetUpList();               // 上传成功实时刷新列表
+    const zs=await api('/api/admin/pet/zones');PET_ZONES=zs.zones||[];
+    renderPetRandZone();renderPetZoneTabs();
+    return true;
+  }catch(e){toast('上传失败：'+(e.message||'未知错误'));return false}
+}
+function petUploadCancel(){          // 裁切阶段取消 / 上传失败 → 终止队列
+  PET_Q=[];PET_UPLOADING=false;
+  document.getElementById('petUploadProgress').textContent='已取消（未上传的文件被跳过）';
+}
+function petUploadDone(failed){
+  PET_UPLOADING=false;
+  document.getElementById('petUploadProgress').textContent=
+    failed?'上传未完成':'全部完成（'+PET_Q_TOTAL+' 张）';
+  if(!failed)setTimeout(function(){
+    const el=document.getElementById('petUploadProgress');
+    if(el.textContent.indexOf('全部完成')===0)el.textContent='';
+  },4000);
+}
+// ---------- 上传图片列表：渲染 / 点选固定 / 删除 / 拖拽排序 / 置顶 ----------
+function renderPetUpList(){
+  const list=document.getElementById('petUpList');
+  if(!PET_UP.length){
+    list.innerHTML='<div style="grid-column:1/-1;text-align:center;color:var(--text3);font-size:12px;padding:24px 0">'
+      +'该分区还没有图片，点上方「上传图片」添加（支持批量）</div>';
+    return;
+  }
+  const mode=document.querySelector('input[name=petMode]:checked').value;
+  list.innerHTML=PET_UP.map(function(m,i){
+    const sel=(mode==='fixed'&&PET_PICK&&PET_PICK.kind==='upload'&&PET_PICK.image_id===m.id);
+    return '<div class="pet-up-card" draggable="true" data-idx="'+i+'" data-id="'+m.id+'" '
+      +'title="'+esc(m.name||('图片 #'+m.id))+'（拖动排序）" style="position:relative;aspect-ratio:1;'
+      +'border:2px solid '+(sel?'var(--primary)':'var(--border)')+';border-radius:8px;background:#fff;'
+      +'cursor:grab;overflow:hidden;box-shadow:'+(sel?'0 0 0 2px rgba(0,45,116,.25)':'none')+'">'
+      +'<img src="'+m.url+'" loading="lazy" alt="" draggable="false" '
+      +'style="width:100%;height:100%;object-fit:contain;image-rendering:pixelated;pointer-events:none">'
+      +'<button type="button" title="移到列表头部" onclick="event.stopPropagation();petUpTop('+m.id+')" '
+      +'style="position:absolute;left:3px;top:3px;width:18px;height:18px;line-height:16px;padding:0;'
+      +'font-size:11px;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,.92);cursor:pointer">⤒</button>'
+      +'<button type="button" title="删除该图片" onclick="event.stopPropagation();petUpDelete('+m.id+')" '
+      +'style="position:absolute;right:3px;top:3px;width:18px;height:18px;line-height:16px;padding:0;'
+      +'font-size:11px;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,.92);cursor:pointer">✕</button>'
+      +(sel?'<span style="position:absolute;right:3px;bottom:3px;font-size:10px;color:#fff;background:var(--primary);'
+        +'border-radius:4px;padding:1px 5px;pointer-events:none">固定</span>':'')
+      +'</div>';
+  }).join('');
+}
+// 事件委托：点选固定 / 拖拽排序
+(function(){
+  const list=document.getElementById('petUpList');
+  list.addEventListener('click',function(e){
+    const card=e.target.closest('.pet-up-card');
+    if(!card||e.target.closest('button'))return;
+    PET_PICK={kind:'upload',image_id:Number(card.dataset.id)};
+    document.querySelector('input[name=petMode][value=fixed]').checked=true;
+    renderPetUpList();
+  });
+  let dragIdx=-1;
+  list.addEventListener('dragstart',function(e){
+    const card=e.target.closest('.pet-up-card');
+    if(!card)return;
+    dragIdx=Number(card.dataset.idx);
+    card.style.opacity='.45';
+    e.dataTransfer.effectAllowed='move';
+    try{e.dataTransfer.setData('text/plain',String(dragIdx))}catch(_){}
+  });
+  list.addEventListener('dragend',function(){
+    dragIdx=-1;
+    list.querySelectorAll('.pet-up-card').forEach(function(c){c.style.opacity='';});
+  });
+  list.addEventListener('dragover',function(e){
+    e.preventDefault();
+    e.dataTransfer.dropEffect='move';
+    const card=e.target.closest('.pet-up-card');
+    list.querySelectorAll('.pet-up-card').forEach(function(c){c.style.borderColor=c===card&&Number(c.dataset.idx)!==dragIdx?'var(--primary)':'';});
+  });
+  list.addEventListener('drop',async function(e){
+    e.preventDefault();
+    const card=e.target.closest('.pet-up-card');
+    if(!card||dragIdx<0)return;
+    const to=Number(card.dataset.idx);
+    if(to===dragIdx)return;
+    const moved=PET_UP.splice(dragIdx,1)[0];
+    PET_UP.splice(to,0,moved);
+    renderPetUpList();
+    await petSaveOrder();            // 拖一次即持久化
+  });
+})();
+async function petSaveOrder(){
+  try{
+    await api('/api/admin/pet/images/order',{method:'PUT',
+      body:JSON.stringify({zone:PET_ZONE,ids:PET_UP.map(function(m){return m.id})})});
+  }catch(e){
+    toast('排序保存失败：'+(e.message||'未知错误'));
+    try{const d=await api('/api/admin/pet/images?zone='+encodeURIComponent(PET_ZONE));PET_UP=d.images||[];renderPetUpList();}catch(_){}
+  }
+}
+async function petUpTop(id){
+  const i=PET_UP.findIndex(function(m){return m.id===id});
+  if(i<=0)return;
+  const m=PET_UP.splice(i,1)[0];
+  PET_UP.unshift(m);
+  renderPetUpList();
+  await petSaveOrder();
+}
+async function petUpDelete(id){
+  if(!confirm('确定删除该图片吗？'))return;
+  try{
+    await api('/api/admin/pet/images/'+id,{method:'DELETE'});
+    if(PET_PICK&&PET_PICK.kind==='upload'&&PET_PICK.image_id===id)PET_PICK=null;
+    const d=await api('/api/admin/pet/images?zone='+encodeURIComponent(PET_ZONE));
+    PET_UP=d.images||[];
+    renderPetUpList();
+    const zs=await api('/api/admin/pet/zones');PET_ZONES=zs.zones||[];
+    renderPetRandZone();renderPetZoneTabs();
+    toast('已删除');
+  }catch(e){toast(e.message)}
+}
 async function savePetSetting(){
   const mode=document.querySelector('input[name=petMode]:checked').value;
-  if(mode==='fixed'&&!PET_PICK){toast('请先在列表中选择一个固定形象');return}
   try{
-    await api('/api/admin/pet',{method:'POST',body:JSON.stringify({mode:mode,no:PET_PICK})});
-    toast(mode==='fixed'?('已固定登录页小精灵为编号 '+PET_PICK+'（所有用户生效）'):'已设为随机出现小精灵（所有用户生效）');
+    if(mode==='fixed'){
+      if(!PET_PICK){toast('请先在内置网格或分区列表中点选一个固定形象');return}
+      const body=PET_PICK.kind==='upload'?{mode:'fixed',image_id:PET_PICK.image_id}
+                                          :{mode:'fixed',no:PET_PICK.no};
+      await api('/api/admin/pet',{method:'POST',body:JSON.stringify(body)});
+      toast(PET_PICK.kind==='upload'
+        ?('已固定登录页小精灵为上传图片 #'+PET_PICK.image_id+'（所有用户生效）')
+        :('已固定登录页小精灵为编号 '+PET_PICK.no+'（所有用户生效）'));
+    }else{
+      await api('/api/admin/pet',{method:'POST',
+        body:JSON.stringify({mode:'random',zone:PET_RAND_ZONE})});
+      toast('已设为随机出现小精灵（范围：'+petZoneLabel(PET_RAND_ZONE)+'，所有用户生效）');
+    }
     closeModal('petSettingModal');
   }catch(e){toast(e.message)}
 }
