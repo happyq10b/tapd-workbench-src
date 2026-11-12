@@ -2017,7 +2017,7 @@ function goLogin(){
           <div class="pg-item"><label>籍贯市</label><input type="text" class="form-input" id="pf_native_city" maxlength="20" placeholder="如：杭州"></div>
           <div class="pg-item"><label>政治面貌</label>
             <input type="text" class="form-input" id="pf_political" maxlength="20" list="pf_political_list" placeholder="选择或输入">
-            <datalist id="pf_political_list"><option>群众</option><option>中共党员</option><option>中共预备党员</option><option>共青团员</option><option>民主党派成员</option><option>无党派人士</option></datalist>
+            <datalist id="pf_political_list"><option>群众</option><option>中共党员</option><option>中共预备党员</option><option>民主党派成员</option></datalist>
           </div>
           <div class="pg-item"><label>部门</label>
             <button type="button" class="form-input pf-dept-btn" id="pf_departments" style="cursor:pointer;text-align:left"
@@ -2761,10 +2761,13 @@ function openModal(id){
   el.classList.remove('closing');
   el.style.display='flex';
 }
+const MODAL_CLOSE_HOOKS={};   // 弹窗关闭时的清理钩子（2026-11-12：释放编辑锁等）
 function closeModal(id){
   // #115：淡出后再隐藏——直接 display:none 会让遮罩「一闪而过」很生硬
   const el=document.getElementById(id);
   if(!el||el.classList.contains('closing'))return;
+  // 关闭钩子（编辑锁释放等）：在淡出开始时执行，重复关闭会被上面的 closing 守卫拦住
+  try{if(MODAL_CLOSE_HOOKS[id])MODAL_CLOSE_HOOKS[id]();}catch(e){}
   el.classList.add('closing');
   setTimeout(function(){el.classList.remove('closing');el.style.display='none';},170);
 }
@@ -4554,9 +4557,17 @@ async function addNotice(){
   }catch(e){setNoticeStatus('发布失败：'+(e.message||''),'fail')}
 }
 // 编辑公告：把内容回填到表单（复用新增区）
+var NOTICE_LOCK_KEY='';   // 公告编辑锁 key（notice:<nid>）
 async function editNotice(id){
   const n=NOTICE_LIST.find(x=>x.id===id);
   if(!n)return;
+  // 编辑锁（2026-11-12）：公告编辑按单条加锁；换编辑目标时切换持有者
+  const _lk='notice:'+id;
+  if(_lk!==NOTICE_LOCK_KEY){
+    releaseEditLock(NOTICE_LOCK_KEY);
+    if(!await acquireEditLock(_lk,'公告'))return;
+    NOTICE_LOCK_KEY=_lk;
+  }
   document.getElementById('nt_scope').value=n.scope||'all';
   document.getElementById('nt_title').value=n.title||'';
   document.getElementById('nt_content').value=n.content||'';
@@ -5510,8 +5521,10 @@ function fieldMeta(o){
 }
 function cardItem(c,seq){
   const locked=c.locked_by;
+  // 显示口径（2026-11-12）：锁定提示统一显示**姓名**（后端 locked_by_name），姓名为空回退账号
+  const lockedDisp=c.locked_by_name||locked||'';
   const lockedByOther=locked&&locked!==ME.username;
-  const lockHtml=lockedByOther?`<span class="lock-tag">🔒 ${esc(locked)} 已锁定</span>`:'';
+  const lockHtml=lockedByOther?`<span class="lock-tag">🔒 ${esc(lockedDisp)} 已锁定</span>`:'';
   const overdue=c.due && c.status!=='done' && c.due < new Date().toISOString().slice(0,10);
   // 「添加子事项」是行内唯一的子事项入口：原来的「子事项 N」按钮已移除 ——
   // 已有子事项时左侧展开箭头就能看到目录，计数再单独占一个操作位属于重复
@@ -5797,6 +5810,31 @@ async function lockCard(id){
   return true;
 }
 async function unlockCard(id){clearInterval(editLockTimer);try{await api('/api/cards/'+id+'/unlock',{method:'POST'})}catch(e){}}
+
+// ---------- 通用编辑锁（2026-11-12：一个可编辑事项一把锁）----------
+// key 与后端资源 key 表一致：board:<id> / column:<col_key> / org:<nid>
+//   / team:<id|roster> / notice:<nid>。事项（card）沿用既有 /api/cards/{id}/lock 系列端点。
+const EDIT_LOCKS={};   // key -> heartbeat 定时器
+async function acquireEditLock(key,what){
+  try{await api('/api/locks/'+encodeURIComponent(key)+'/acquire',{method:'POST'})}
+  // 409 时 e.message 已含后端拼好的「已被 <姓名> 编辑中」（姓名优先显示）
+  catch(e){toast(e.message||((what||'该事项')+'已被他人编辑中，请稍后再试'));return false}
+  if(EDIT_LOCKS[key])clearInterval(EDIT_LOCKS[key]);   // 重复认领（同 key）只保留一个心跳
+  EDIT_LOCKS[key]=setInterval(()=>{api('/api/locks/'+encodeURIComponent(key)+'/heartbeat',{method:'POST'}).catch(()=>{})},30000);
+  return true;
+}
+async function releaseEditLock(key){
+  const t=EDIT_LOCKS[key];
+  if(!t)return;
+  clearInterval(t);delete EDIT_LOCKS[key];
+  try{await api('/api/locks/'+encodeURIComponent(key)+'/release',{method:'POST'})}catch(e){}
+}
+// 弹窗关闭 → 释放对应编辑锁（兜底：✕ / 取消 / 保存后关闭统一走 closeModal）
+MODAL_CLOSE_HOOKS.columnModal=function(){releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';};
+MODAL_CLOSE_HOOKS.wgModal=function(){releaseEditLock(ORG_LOCK_KEY);ORG_LOCK_KEY='';};
+MODAL_CLOSE_HOOKS.teamModal=function(){releaseEditLock(TEAM_LOCK_KEY);TEAM_LOCK_KEY='';};
+MODAL_CLOSE_HOOKS.noticeModal=function(){releaseEditLock(NOTICE_LOCK_KEY);NOTICE_LOCK_KEY='';};
+MODAL_CLOSE_HOOKS.boardConfigModal=function(){bcReleaseLock();};
 function renderPickers(){
   // 人员选择层级约束（2026-11-04）：事项的负责人/参与人只能从**所属板块**的
   // 负责人与参与人中选（池由 openEdit/openNew 预先算好放入 _cardPickPool）；
@@ -5845,7 +5883,7 @@ async function openEdit(id,preloaded){
     c=d.cards.find(x=>x.card_id===id);
   }
   if(!c){toast('卡片不存在');closeModal('editModal');return}
-  if(c.locked_by&&c.locked_by!==ME.username){toast(`已被 ${c.locked_by} 锁定`);closeModal('editModal');return}
+  if(c.locked_by&&c.locked_by!==ME.username){toast(`已被 ${c.locked_by_name||c.locked_by} 锁定`);closeModal('editModal');return}
   if(!await lockCard(id)){closeModal('editModal');return}
   editing=id;
   EDIT_IS_SUB=!!c.parent_id;
@@ -6344,6 +6382,7 @@ function colClearOwner(){
   colRenderOwner();
 }
 function openColumnModal(){
+  releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 新建模式无编辑锁
   COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
   COL_PARTS=[];          // 新建板块：无参与人
   // ⚠️ 必须重绘参与人控件（2026-11-04 用户反馈）：否则「✕ 清空」按钮沿用
@@ -6378,9 +6417,15 @@ function openColumnModal(){
 }
 // 编辑板块：从板块标题点击进入。数据取自标题元素上的 data-*，
 // 避免在 onclick 里拼字符串（名称里的引号/括号会把属性截断）
-function openColumnEdit(el){
+var COLUMN_LOCK_KEY='';   // 板块编辑锁 key（column:<col_key>；create 模式为空）
+async function openColumnEdit(el){
   if(!ME||!ME.can_edit){toast('无编辑权限');return}
   const d=(el&&el.dataset)||{};
+  // 编辑锁（2026-11-12）：板块编辑弹窗打开即认领 column:<col_key>；他人持有 → 409 姓名 toast
+  const _lk='column:'+(d.colkey||'');
+  if(!await acquireEditLock(_lk,'板块'))return;
+  if(COLUMN_LOCK_KEY&&COLUMN_LOCK_KEY!==_lk)releaseEditLock(COLUMN_LOCK_KEY);
+  COLUMN_LOCK_KEY=_lk;
   COLUMN_MODE='edit';
   COLUMN_EDIT_KEY=d.colkey||'';
   COLUMN_EDIT_BOARD=d.bid||'';
@@ -6435,6 +6480,7 @@ async function saveColumn(){
       const descPayload={description:document.getElementById('c_desc').value.trim()};
       await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload))});
       toast('板块已保存：'+column_name);
+      releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 保存成功释放板块编辑锁
       closeModal('columnModal');
       reload(1);renderProgress();
     }else{
@@ -7706,8 +7752,10 @@ function renderDetailOps(c){
   const box=document.getElementById('d_ops');
   if(!box)return;
   const lockedByOther=c.locked_by&&c.locked_by!==ME.username;
+  // 显示口径（2026-11-12）：锁定提示统一显示姓名，姓名为空回退账号
+  const lockedDisp=c.locked_by_name||c.locked_by||'';
   const parts=[];
-  if(lockedByOther)parts.push(`<span class="lock-tag">🔒 ${esc(c.locked_by)} 已锁定</span>`);
+  if(lockedByOther)parts.push(`<span class="lock-tag">🔒 ${esc(lockedDisp)} 已锁定</span>`);
   // 状态按钮：弹窗里状态的唯一呈现，也是唯一的状态设置入口
   parts.push(statusPickerHtml(c.status,'d'));
   parts.push(`<button class="btn-primary" style="padding:4px 12px;font-size:12px" onclick="openDetailEdit()" title="打开编辑弹窗">✏️ 编辑</button>`);
@@ -7912,9 +7960,13 @@ var TM_ALL=[];  // [{id,name,workgroups:[...]}]
 var TM_VISIBLE_IDS=new Set();  // 当前表格可见的成员 id（筛选后的结果集）
 var TM_DEPT_DRAFT={};          // #165 部门编辑草稿：mid -> [部门名]（选择器确定后暂存，「保存全部」统一提交）
 var TM_FILTER={name:'',dept:[],role:[]};  // 成员表格筛选条件（dept/role 为多选数组；role 空数组 = 全部角色；dept 含哨兵 __NO_DEPT__=未选部门）
+var TEAM_LOCK_KEY='';   // 成员名单编辑锁 key（team:roster，整表一把锁）
 async function openTeamModal(){
   if(!ME||!ME.is_admin){toast('仅管理员可访问');return}
   const isAdmin=ME.is_admin, isSuperUser=ME.username==='admin';
+  // 编辑锁（2026-11-12）：成员名单是整表编辑会话，整表一把锁（team:roster）
+  if(!await acquireEditLock('team:roster','成员名单'))return;
+  TEAM_LOCK_KEY='team:roster';
   const [team, groupsRes]=await Promise.all([api('/api/team'), api('/api/workgroups')]);
   WG_ALL=groupsRes.groups||[];  // 树形工作组选择器使用架构树
   WG_FLAT=wgFlat(WG_ALL);
@@ -9312,6 +9364,7 @@ function newWgNode(){
   resetWgForm();
 }
 function resetWgForm(){
+  releaseEditLock(ORG_LOCK_KEY);ORG_LOCK_KEY='';   // 退出编辑态释放节点锁
   WG_EDIT_ID=0;
   WG_NEW_CHILD=0;   // 退出「+子节点」预览态
   ORG_SELECTED=0;
@@ -9521,9 +9574,16 @@ function lockParentTo(pid){
   sel.innerHTML=`<option value="${pid}" selected>${st?st.icon+' ':''}${esc(n?n.name:String(pid))}</option>`;
   sel.disabled=true;
 }
+var ORG_LOCK_KEY='';   // 架构节点编辑锁 key（org:<nid>；新增模式为空）
 function editWg(gid){
   const g=ORG_FLAT.find(x=>x.id===gid); if(!g)return;
   const isRoot=g.node_type==='center';
+  // 编辑锁（2026-11-12）：节点编辑认领 org:<nid>；他人持有 → 409 姓名 toast
+  const _orglk='org:'+gid;
+  if(_orglk!==ORG_LOCK_KEY){
+    releaseEditLock(ORG_LOCK_KEY);
+    acquireEditLock(_orglk,'节点').then(function(ok){if(ok)ORG_LOCK_KEY=_orglk;});
+  }
   WG_EDIT_ID=gid;
   WG_NEW_CHILD=0;   // 进入编辑态 = 预览态结束
   ORG_SELECTED=gid;
@@ -9604,6 +9664,7 @@ async function submitWgForm(){
         }
       }
       toast('已更新');
+      releaseEditLock(ORG_LOCK_KEY);ORG_LOCK_KEY='';   // 保存成功释放节点编辑锁
     }else{
       const r=await api('/api/org/nodes',{method:'POST',body:JSON.stringify(body)});  // 后端 _check_add_parent 分级授权
       const nid=r&&r.id;
@@ -10148,6 +10209,43 @@ function bcDeptNodeId(name){
   const d=BC_DEPTS.find(x=>x.name===name);
   return d?d.id:0;
 }
+// 看板负责人/参与人的部门约束（2026-11-12）：
+//   归属部门 = 财务中心（中心级）→ 候选 = 全部成员；未配置归属 → 不限；
+//   其他部门 → 候选 = 该部门成员（team_members.departments 单一来源，#165 口径）。
+// 返回 null = 不限；否则为允许的账号 Set。
+function bcDeptPoolAccounts(dept){
+  if(!dept||bcIsCenterDept(dept))return null;
+  const pool=new Set();
+  BC_ACL_MEMBERS.forEach(function(m){
+    if((m.depts||[]).indexOf(dept)>=0)pool.add(m.account);
+  });
+  return pool;
+}
+// 部门约束池的成员姓名清单（合成单节点树 poolTree 用）
+function bcDeptPoolNames(dept){
+  const pool=bcDeptPoolAccounts(dept);
+  if(pool===null)return null;
+  return BC_ACL_MEMBERS.filter(function(m){return pool.has(m.account);})
+    .map(function(m){return m.name;});
+}
+// 按当前归属部门过滤已选负责人/参与人：不符合条件的人员移除并 toast 提示。
+// 场景：① 切换归属部门联动；② 打开存量看板时历史数据不符合新约束。
+function bcFilterAclByDept(){
+  const pool=bcDeptPoolAccounts(BC_FORM.dept||'');
+  if(pool===null)return;
+  const bad=[];
+  if(BC_FORM.owner&&!pool.has(BC_FORM.owner)){
+    bad.push(bcMemberName(BC_FORM.owner));BC_FORM.owner='';
+  }
+  const keep=[];
+  (BC_FORM.participants||[]).forEach(function(a){
+    if(pool.has(a))keep.push(a);else bad.push(bcMemberName(a));
+  });
+  if(bad.length){
+    BC_FORM.participants=keep;
+    toast('已移除不属于归属部门「'+(BC_FORM.dept||'')+'」的人员：'+bad.join('、'));
+  }
+}
 function initBcListEvents(){
   const box=document.getElementById('bcList');
   if(!box||box._bcEvtBound)return;
@@ -10260,6 +10358,7 @@ var BC_FROM_CARD=false;
 async function openBoardConfigModalFor(bid){
   if(!(await bcPrepModal()))return;
   BC_FROM_CARD=true;
+  bcReleaseLock();   // 2026-11-12：进入看板管理先清残留编辑锁
   BC_SEL=new Set();
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
   // ⚠️ 先显示弹窗再渲染（同 openBoardConfigModal 的首开尺寸教训）：
@@ -10278,6 +10377,7 @@ async function openBoardConfigModalFor(bid){
 async function openBoardConfigModal(){
   if(!(await bcPrepModal()))return;
   BC_FROM_CARD=false;
+  bcReleaseLock();   // 2026-11-12：进入看板管理先清残留编辑锁
   BC_SELECTED=null; BC_EDIT_ID=0;
   BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
             owner:'',participants:[],collab_depts:[]};
@@ -10596,14 +10696,27 @@ function bcFilterChange(dim,val){
   BC_SEL=new Set();
   renderBoardList();
 }
+var BC_LOCK_KEY='';   // 看板编辑锁 key（board:<bid>；未配置/新建看板为空）
+function bcReleaseLock(){releaseEditLock(BC_LOCK_KEY);BC_LOCK_KEY='';}
+// 换选看板时切换编辑锁：已配置看板认领 board:<bid>（2026-11-12）
+function bcSwitchLock(b){
+  const key=(b&&b.config_id)?('board:'+b.board_id):'';
+  if(key===BC_LOCK_KEY)return;
+  releaseEditLock(BC_LOCK_KEY);BC_LOCK_KEY='';
+  if(!key)return;
+  acquireEditLock(key,'看板').then(function(ok){if(ok)BC_LOCK_KEY=key;});
+}
 function bcSelect(bid){
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
   if(!b)return;
   BC_SELECTED=b;
   BC_EDIT_ID=b.config_id||0;
+  bcSwitchLock(b);   // 编辑锁：换选看板即切换持有者
   BC_FORM={board_name:b.board_name||'',dept:b.dept||'',dept_node_id:b.dept_node_id||bcDeptNodeId(b.dept||''),attr:b.attr||'日常',status:b.status||'启用',remark:b.remark||'',
           owner:b.owner||'',participants:(b.participants||'').split(',').filter(Boolean),
           collab_depts:(b.collab_depts||'').split(',').filter(Boolean)};   // T-013d
+  // 部门约束（2026-11-12）：存量数据不符合归属部门约束的负责人/参与人 → 过滤+提示
+  bcFilterAclByDept();
   renderBoardList();
   renderEditArea();
 }
@@ -10612,6 +10725,7 @@ function configBoard(){
   if(!unconf.length){toast('所有看板均已配置');return;}
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
+  bcSwitchLock(unconf[0]);   // 未配置看板：无编辑锁，换选即释放上一把
   BC_FORM={board_name:unconf[0].board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[],collab_depts:[]};
   renderBoardList();
   renderEditArea();
@@ -10620,6 +10734,7 @@ function bcChangeBoard(bid){
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
   if(b){
     BC_SELECTED=b;BC_EDIT_ID=0;
+    bcSwitchLock(b);   // 编辑锁随选切换（未配置 = 释放）
     BC_FORM={board_name:b.board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
     renderBoardList();
     renderEditArea();
@@ -10631,6 +10746,8 @@ function bcSetDept(name){
   BC_FORM.dept_node_id=bcDeptNodeId(name||'');
   // T-013d：归属切离中心 → 协作部门清空（仅中心级归属可配）
   if(!bcIsCenterDept(BC_FORM.dept))BC_FORM.collab_depts=[];
+  // 部门约束（2026-11-12）：切换归属部门后，已选负责人/参与人不符合新部门 → 过滤+提示
+  bcFilterAclByDept();
   const h=document.getElementById('bc_dept_hint');
   if(h)h.textContent=bcDeptHint(BC_FORM.dept);
   if(typeof renderEditArea==='function')renderEditArea();   // 协作部门控件随中心/部门切换显隐
@@ -10758,7 +10875,8 @@ async function bcLoadAclMembers(){
         const acc=m.account||'';
         if(!acc)return null;                  // 没有登录账号的成员不能作为负责人
         return {account:acc,name:m.name||acc,label:(m.name||acc)+(m.name&&m.name!==acc?'('+acc+')':''),
-                status:m.status||''};        // T-013c：离岗标记（label 映射保留完整，选人池过滤）
+                status:m.status||'',         // T-013c：离岗标记（label 映射保留完整，选人池过滤）
+                depts:m.departments||[]};    // #165 部门（数组）：看板选人部门约束用
       }).filter(function(x){return x});
       BC_ACL_LOADED=true;
     }catch(e){ BC_ACL_MEMBERS=[]; }
@@ -10803,14 +10921,14 @@ function renderAclSection(b){
     +'<div style="font-size:12px;font-weight:600;margin-bottom:6px">负责人</div>'
     +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
     +'<span id="bc_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px">'+ownerChip+'</span>'
-    +(canSetOwner?'<button type="button" class="icon-btn" onclick="bcPickOwner(this)" title="从归属架构子树中选择负责人（单选）">🌳 选择</button>':'')
+    +(canSetOwner?'<button type="button" class="icon-btn" onclick="bcPickOwner(this)" title="从归属部门成员中选择负责人（财务中心可选全员；单选）">🌳 选择</button>':'')
     +(owner&&canSetOwner?'<button type="button" class="icon-btn" onclick="bcClearOwner()" title="清除负责人">✕</button>':'')
     +'</div></div>'
     +'<div style="flex:1;min-width:0;border:1px solid var(--border);border-radius:6px;padding:8px 10px;box-sizing:border-box">'
     +'<div style="font-size:12px;font-weight:600;margin-bottom:6px">参与人</div>'
     +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
     +'<span id="bc_parts_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px">'+partChips+'</span>'
-    +(canSetParts?'<button type="button" class="icon-btn" onclick="bcPickParticipants(this)" title="从归属架构子树中选择参与人（可多选）">🌳 选择</button>':'')
+    +(canSetParts?'<button type="button" class="icon-btn" onclick="bcPickParticipants(this)" title="从归属部门成员中选择参与人（财务中心可选全员；可多选）">🌳 选择</button>':'')
     +(parts.length&&canSetParts?'<button type="button" class="icon-btn" onclick="bcClearParticipants()" title="清空参与人">✕</button>':'')
     +'</div></div></div></div>';
 }
@@ -10832,7 +10950,13 @@ function bcOpenOwnerTree(anchor){
   // ⚠️ 树里选的是**姓名**（ORG_TREE 的 members 只有 name），
   //    而负责人字段存的是**账号** → 回填时按姓名反查账号。
   const cur=BC_FORM.owner?bcMemberName(BC_FORM.owner):'';
-  // 层级约束（2026-11-04）：负责人只能从**归属架构子树**中选（财务中心 = 顶层 → 全范围）
+  // 部门约束（2026-11-12）：财务中心（中心级）= 全部成员（原架构树全范围）；
+  // 其他部门 = 仅该部门成员（departments 单一来源）→ 合成单节点成员池。
+  const _dept=BC_FORM.dept||'';
+  const _pool=bcDeptPoolAccounts(_dept);
+  const _tree=_pool===null
+    ?orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(_dept))
+    :poolTree(bcDeptPoolNames(_dept),'可选人员（归属部门「'+_dept+'」成员）');
   openTreePick(anchor, cur?[ORG_PERSON_PREFIX+cur]:[], function(persons){
     if(!persons||!persons.length)return;
     const acc=bcAccountByName(persons[0]);
@@ -10841,7 +10965,7 @@ function bcOpenOwnerTree(anchor){
     // 2026-11-05：取消互斥 —— 负责人可同为参与人，不再自动移除
     renderEditArea();
   }, {mode:'filter', pickMode:'person', width:360, height:460,
-      tree:orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept||'')), keyword:'', requireAccount:true});
+      tree:_tree, keyword:'', requireAccount:true});
 }
 // 账号 → 姓名（负责人回显用）
 function bcMemberName(acc){
@@ -10872,8 +10996,13 @@ function bcPickParticipants(anchor){
   }).catch(function(){toast('架构数据加载失败');});
 }
 function bcOpenParticipantsTree(anchor){
-  // 选人范围 = 归属架构子树（与负责人同池）。2026-11-05：取消互斥 —— 不再排除当前负责人。
-  const tree=orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(BC_FORM.dept||''));
+  // 选人范围 = 归属部门成员池（2026-11-12 部门约束，与负责人同池）。
+  // 2026-11-05：取消互斥 —— 不再排除当前负责人。
+  const _dept=BC_FORM.dept||'';
+  const _pool=bcDeptPoolAccounts(_dept);
+  const tree=_pool===null
+    ?orgTreeForNode(BC_FORM.dept_node_id||bcDeptNodeId(_dept))
+    :poolTree(bcDeptPoolNames(_dept),'可选人员（归属部门「'+_dept+'」成员）');
   const cur=(BC_FORM.participants||[]).map(function(a){return bcMemberName(a);}).filter(Boolean);
   openTreePick(anchor, cur.map(function(n){return ORG_PERSON_PREFIX+n;}), function(persons){
     if(!persons||!persons.length){BC_FORM.participants=[];renderEditArea();return;}

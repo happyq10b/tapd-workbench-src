@@ -554,6 +554,48 @@ def _dept_options():
              'is_center': 1 if r['node_type'] == 'center' else 0} for r in _dept_nodes()]
 
 
+def _board_dept_pool_accounts(bid: str):
+    """看板负责人/参与人的部门约束（2026-11-12）。
+
+    口径（与看板管理前端 bcDeptPoolAccounts 一致）：
+      · 归属部门 = 中心级节点（如财务中心）或未配置归属 → None = 不限（全员可选）；
+      · 归属部门 = 部门级节点 → 候选 = 该部门成员
+        （team_members.departments 含该部门名，#165 部门单一来源口径）。
+    返回 None 或允许的账号集合（供 acl / participants 写端点做 400 校验，
+    防止绕过前端直调 API 写入不符合部门约束的人员）。
+    """
+    row = dbq('SELECT dept, dept_node_id FROM board_config WHERE board_id=? '
+              'ORDER BY id LIMIT 1', (bid,))
+    if not row:
+        return None
+    dept = (row[0]['dept'] or '').strip()
+    if not dept:
+        return None
+    node = None
+    nid = row[0]['dept_node_id'] or 0
+    if nid:
+        n = dbq('SELECT node_type FROM org_nodes WHERE id=?', (nid,))
+        node = n[0] if n else None
+    if not node:   # dept_node_id 未配置时按名称兜底解析
+        n = dbq("SELECT node_type FROM org_nodes WHERE name=? "
+                "AND node_type IN ('center','dept') ORDER BY sort, id LIMIT 1", (dept,))
+        node = n[0] if n else None
+    if node and node['node_type'] == 'center':
+        return None
+    accs = set()
+    for r in dbq('SELECT account, departments FROM team_members'):
+        depts = {x.strip() for x in (r['departments'] or '').split(',') if x.strip()}
+        if dept in depts and (r['account'] or '').strip():
+            accs.add(r['account'].strip())
+    return accs
+
+
+def _account_member_name(acc: str) -> str:
+    """账号 → 成员姓名（提示文案用；查不到回退账号本身）。"""
+    rows = dbq('SELECT name FROM team_members WHERE account=? LIMIT 1', (acc,))
+    return (rows[0]['name'] if rows else '') or acc
+
+
 def _dept_names():
     """架构中的部门名称集合（架构为空时回退到历史固定清单）。"""
     names = {r['name'] for r in _dept_nodes()}
@@ -1380,43 +1422,91 @@ def subtask_stats(card_ids) -> dict:
     return out
 
 # ---------------- 锁管理 ----------------
+# 通用编辑锁（2026-11-12）：一个可编辑事项对应一把锁，锁 key = 资源串 ——
+#   · 事项：card_id（原样，历史兼容，不加前缀）
+#   · 看板：'board:<board_id>'   板块：'column:<col_key>'
+#   · 架构节点：'org:<nid>'      成员：'team:<mid>'      账号：'user:<username>'
+#   · 通知：'notice:<nid>'       部门主页：'dept:<dept>'
+# 同一把 LockManager 承载全部资源（dict 按 key 隔离，天然互不干扰）。
 class LockManager:
     def __init__(self):
         self.locks = {}
         self.lock = threading.Lock()
 
-    def acquire(self, card_id, username):
+    def acquire(self, key, username):
+        """认领编辑锁。返回 (ok, holder, fresh)：
+        · ok=False          → 他人持有未过期，holder=持有者账号
+        · ok=True, fresh=True  → 本次**新认领**（原无主/已过期），写完一次性操作要释放
+        · ok=True, fresh=False → 调用方本来就持有（本次仅刷新心跳），保持不释放"""
         with self.lock:
-            cur = self.locks.get(card_id)
+            cur = self.locks.get(key)
             now = time.time()
             if cur and cur['user'] != username and now - cur['ts'] < LOCK_TIMEOUT:
-                return False, cur['user']
-            self.locks[card_id] = {'user': username, 'ts': now}
-            return True, username
+                return False, cur['user'], False
+            fresh = not (cur and cur['user'] == username)
+            self.locks[key] = {'user': username, 'ts': now}
+            return True, username, fresh
 
-    def release(self, card_id, username):
+    def release(self, key, username):
         with self.lock:
-            cur = self.locks.get(card_id)
+            cur = self.locks.get(key)
             if cur and cur['user'] == username:
-                del self.locks[card_id]
+                del self.locks[key]
                 return True
             return False
 
-    def heartbeat(self, card_id, username):
+    def heartbeat(self, key, username):
         with self.lock:
-            cur = self.locks.get(card_id)
+            cur = self.locks.get(key)
             if cur and cur['user'] == username:
                 cur['ts'] = time.time()
                 return True
             return False
 
-    def who(self, card_id):
-        cur = self.locks.get(card_id)
+    def who(self, key):
+        """锁持有者**账号**（比较用；返回 None=无锁/已过期）。"""
+        cur = self.locks.get(key)
         if cur and time.time() - cur['ts'] < LOCK_TIMEOUT:
             return cur['user']
         return None
 
+    def who_name(self, key):
+        """锁持有者**显示名**（姓名优先，空则回退账号；无锁返回 None）。"""
+        u = self.who(key)
+        return _lock_holder_name(u) if u else None
+
 lock_mgr = LockManager()
+
+
+def _lock_holder_name(account: str) -> str:
+    """锁持有者的显示名：优先成员姓名（team_members.name），姓名为空回退账号本身。
+    （2026-11-12 用户需求：编辑锁提示统一显示姓名；账号仅作兜底）"""
+    if not account:
+        return ''
+    try:
+        row = dbq('SELECT name FROM team_members WHERE account=? LIMIT 1', (account,))
+        nm = (row[0]['name'] or '').strip() if row else ''
+        return nm or account
+    except Exception:
+        return account
+
+
+def _lock_oneshot(key, username, what='该事项', action='保存'):
+    """一次性写操作的锁护栏（check→acquire，堵住「不开弹窗直接调 API」绕锁的口子）：
+    认领成功 → 返回 fresh（True=本次新认领，**调用方写完必须 _lock_release**；
+    False=本来就持有，保持锁交给弹窗生命周期）；他人持有 → 409（姓名提示）。"""
+    ok, holder, fresh = lock_mgr.acquire(key, username)
+    if not ok:
+        raise HTTPException(409, f'{what}已被 {_lock_holder_name(holder)} 编辑中，无法{action}')
+    return fresh
+
+
+def _lock_release(key, username):
+    """释放编辑锁（仅当自己是持有者才生效；一次性写操作的新认领用完即释放）。"""
+    try:
+        lock_mgr.release(key, username)
+    except Exception:
+        pass
 
 # ---------------- WebSocket 广播 ----------------
 def _ws_message_boards(msg: dict):
@@ -2221,6 +2311,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
     for r in page_rows:
         d = card_dict(r)
         d['locked_by'] = lock_mgr.who(r['card_id'])
+        d['locked_by_name'] = lock_mgr.who_name(r['card_id'])   # 显示用姓名（空回退账号）
         d['subtask_done'] = st.get(r['card_id'], {}).get('done', 0)
         d['subtask_total'] = st.get(r['card_id'], {}).get('total', 0)
         d['sub_count'] = sub_count.get(r['card_id'], 0)
@@ -2360,6 +2451,9 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     改名会同步该看板下该板块所有事项的 column_name —— col_key = board_id::column_name，
     改名等于换 key，事项的 column_name 不跟着改就会掉出板块。
     """
+    # 编辑锁（2026-11-12）：板块编辑弹窗开锁，key = column:<col_key>
+    _lk = 'column:' + (req.col_key or '')
+    _fresh = _lock_oneshot(_lk, username, '板块', '编辑')
     row = dbq('SELECT * FROM board_columns WHERE col_key=?', (req.col_key,))
     old = dict(row[0]) if row else None
     if old:
@@ -2447,6 +2541,8 @@ async def update_column(req: ColumnUpdate, username: str = Depends(require_write
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
               f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'col_key': new_key, 'column_name': name, 'year': year,
             'nature': nature, 'created_at': created,
             'owner': (new_owner if new_owner is not None else (old['owner'] if old else ''))}
@@ -2494,6 +2590,14 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
     boards, _cols = user_allowed(username)
     if boards is not None and bid not in boards:
         raise HTTPException(403, '无权删除该板块')
+    # 编辑锁（2026-11-12）：板块本身被编辑中 → 409
+    _lk = 'column:' + key
+    _fresh = _lock_oneshot(_lk, username, '板块', '删除')
+    # 板块下任意事项被他人编辑中 → 409（删板块连带删事项，事项锁同样要尊重）
+    for r0 in dbq('SELECT card_id FROM cards WHERE board_id=? AND column_name=? AND deleted=0', (bid, cname)):
+        h = lock_mgr.who(r0['card_id'])
+        if h and h != username:
+            raise HTTPException(409, f'板块下有事项正被 {_lock_holder_name(h)} 编辑中，无法删除板块')
     # 收集本板块全部主事项 id（子事项随主事项软删：parent_id 挂在主事项上）
     ids = [r['card_id'] for r in dbq('SELECT card_id FROM cards WHERE board_id=? AND column_name=? AND deleted=0',
                                      (bid, cname))]
@@ -2517,6 +2621,8 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
     audit_log(username, client_ip(request), 'delete', f'板块 {cname}',
               f'删除板块：{cname}（看板 {bid}，连带事项 {n_cards} 条，软删可恢复）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'col_key': key, 'deleted_cards': n_cards}
 
 
@@ -2562,10 +2668,9 @@ def log_action(card_id, username, action, detail=''):
 
 @app.put('/api/cards/{card_id}')
 async def update_card(card_id: str, req: CardUpdate, username: str = Depends(require_writer), request: Request = None):
-    # 锁检查
-    holder = lock_mgr.who(card_id)
-    if holder and holder != username:
-        raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法保存')
+    # 编辑锁（2026-11-12 check→acquire）：写路径即认领，堵住「不开弹窗直接调 API」绕锁的口子；
+    # 弹窗持锁人（fresh=False）不受影响，保存后仍走末尾的释放。
+    _lock_oneshot(card_id, username, '卡片', '保存')
     fields = req.fields
     if 'card_id' in fields: fields.pop('card_id')
     if 'version' in fields: fields.pop('version')
@@ -2956,11 +3061,20 @@ async def delete_board(board_id: str, username: str = Depends(require_writer),
     # 分级权限：删除看板 = 看板负责人及以上（min_level 显式给定，与能力位一致）
     perm_check(username, perm_chain(board_id=bid), OP_DELETE, LV_BOARD_OWNER,
                'board:' + bid, min_level=LV_BOARD_OWNER)
+    # 编辑锁（2026-11-12）：看板被编辑中 → 409；其下任意事项被他人编辑中同样拒绝
+    _lk = 'board:' + bid
+    _fresh = _lock_oneshot(_lk, username, '看板', '删除')
+    for r0 in dbq('SELECT card_id FROM cards WHERE board_id=? AND deleted=0', (bid,)):
+        h = lock_mgr.who(r0['card_id'])
+        if h and h != username:
+            raise HTTPException(409, f'看板下有事项正被 {_lock_holder_name(h)} 编辑中，无法删除看板')
     stat = _purge_board(bid)
     audit_log(username, client_ip(request), 'board_delete', f'看板 {bid}',
               f'删除看板「{name}」（连带板块 {stat["columns"]} 个、事项 {stat["cards"]} 条）',
               'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'board_id': bid, 'board_name': name,
             'deleted_columns': stat['columns'], 'deleted_cards': stat['cards']}
 
@@ -2985,15 +3099,28 @@ def bulk_delete_boards(req: BoardBulkDeleteReq, username: str = Depends(require_
         raise HTTPException(400, '未选择任何看板')
     deleted = 0
     n_cards = n_cols = 0
+    skipped = []
     for bid in ids:
+        # 编辑锁（2026-11-12）：看板或其下事项被他人编辑中 → 跳过并报告（管理员批量场景不打断整批）
+        if lock_mgr.who('board:' + bid):
+            holder = lock_mgr.who('board:' + bid)
+            if holder != username:
+                skipped.append(f'{bid}（被 {_lock_holder_name(holder)} 编辑中）')
+                continue
+        elif any(h and h != username for h in
+                 [lock_mgr.who(r['card_id']) for r in
+                  dbq('SELECT card_id FROM cards WHERE board_id=? AND deleted=0', (bid,))]):
+            skipped.append(f'{bid}（看板下事项正被编辑）')
+            continue
         stat = _purge_board(bid)
         deleted += 1
         n_cards += stat['cards']
         n_cols += stat['columns']
     audit_log(username, client_ip(request), 'board_bulk_delete', f'{len(ids)} 个看板',
-              f'删除 {deleted} 个看板（连带板块 {n_cols} 个、事项 {n_cards} 条）', 'success')
+              f'删除 {deleted} 个看板（连带板块 {n_cols} 个、事项 {n_cards} 条）'
+              + (f'；跳过 {len(skipped)} 个：{ "、".join(skipped) }' if skipped else ''), 'success')
     return {'ok': True, 'deleted': deleted, 'deleted_columns': n_cols,
-            'deleted_cards': n_cards}
+            'deleted_cards': n_cards, 'skipped': skipped}
 
 
 class CopyColumnReq(BaseModel):
@@ -3293,9 +3420,8 @@ def board_columns_list(board_id: str, username: str = Depends(require_auth)):
 def _delete_card_core(card_id: str, username: str, request=None) -> int:
     """删除单卡核心逻辑（校验 + 级联软删）。成功返回连带子事项数，失败抛 HTTPException。
     供单条删除（#161 批量删除复用同一套校验/级联）共用。"""
-    holder = lock_mgr.who(card_id)
-    if holder and holder != username:
-        raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法删除')
+    # 编辑锁（2026-11-12 check→acquire）：他人正编辑（弹窗持锁）→ 409
+    _lock_oneshot(card_id, username, '卡片', '删除')
     cur_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur_row:
         raise HTTPException(404, '卡片不存在或已删除')
@@ -3385,9 +3511,9 @@ async def batch_delete_cards(req: BatchDeleteReq, username: str = Depends(requir
 # ---------------- API：锁 ----------------
 @app.post('/api/cards/{card_id}/lock')
 async def lock_card(card_id: str, username: str = Depends(require_writer), request: Request = None):
-    ok, holder = lock_mgr.acquire(card_id, username)
+    ok, holder, _fresh = lock_mgr.acquire(card_id, username)
     if not ok:
-        raise HTTPException(409, f'卡片已被 {holder} 编辑中')
+        raise HTTPException(409, f'卡片已被 {_lock_holder_name(holder)} 编辑中')
     audit_log(username, client_ip(request), 'lock', f'卡片 {card_id}', '锁定编辑', 'success')
     await ws_mgr.broadcast({'type': 'lock', 'card_id': card_id, 'by': username})
     return {'ok': True}
@@ -3404,34 +3530,125 @@ def heartbeat(card_id: str, username: str = Depends(require_writer)):
     lock_mgr.heartbeat(card_id, username)
     return {'ok': True}
 
+# ---------------- 通用编辑锁端点（2026-11-12）----------------
+# 一个可编辑事项一把锁：板块/看板/架构/成员/账号/通知等资源的编辑弹窗
+# 用这套端点认领/续约/释放锁；key 见 LockManager 顶部注释的资源 key 表。
+import re as _re
+_LOCK_KEY_RE = _re.compile(
+    r'^(card:[\w\-]+|board:[\w\-]+|column:[\w\:\-]+|org:\d+|team:[\w\-]+'
+    r'|user:[\w\.\-\u4e00-\u9fa5]+|notice:\d+|dept:.{1,80})$')
+
+def _check_lock_key(key: str):
+    if not _LOCK_KEY_RE.match(key or ''):
+        raise HTTPException(400, '非法的锁资源标识')
+
+@app.get('/api/locks/{key}/holder')
+def lock_holder(key: str, username: str = Depends(require_auth)):
+    """查询某资源的锁持有者（显示名；None=无锁）。"""
+    _check_lock_key(key)
+    return {'ok': True, 'locked_by': lock_mgr.who(key), 'locked_by_name': lock_mgr.who_name(key)}
+
+@app.post('/api/locks/{key}/acquire')
+def acquire_lock(key: str, username: str = Depends(require_writer), request: Request = None):
+    """编辑弹窗打开时认领编辑锁；他人持有 → 409（姓名提示）。"""
+    _check_lock_key(key)
+    ok, holder, _fresh = lock_mgr.acquire(key, username)
+    if not ok:
+        raise HTTPException(409, f'已被 {_lock_holder_name(holder)} 编辑中，请稍后再试')
+    audit_log(username, client_ip(request), 'lock', key, '锁定编辑', 'success')
+    return {'ok': True, 'locked_by': username, 'locked_by_name': _lock_holder_name(username)}
+
+@app.post('/api/locks/{key}/heartbeat')
+def lock_beat(key: str, username: str = Depends(require_writer)):
+    _check_lock_key(key)
+    lock_mgr.heartbeat(key, username)
+    return {'ok': True}
+
+@app.post('/api/locks/{key}/release')
+def release_lock(key: str, username: str = Depends(require_writer), request: Request = None):
+    """编辑弹窗关闭/保存后释放编辑锁（仅持有者本人可释放）。"""
+    _check_lock_key(key)
+    if lock_mgr.release(key, username):
+        audit_log(username, client_ip(request), 'unlock', key, '解锁编辑', 'success')
+    return {'ok': True}
+
 # ---------------- API：评论 / 日志 ----------------
-@app.get('/api/cards/{card_id}/mention_pool')
-def mention_pool(card_id: str, username: str = Depends(require_auth)):
-    """评论 @ 候选池（2026-11-06 #77）：对该卡片所属看板**有架构内可见路径**的成员姓名。
+def _visible_member_accounts(viewer: str):
+    """成员级可见性（2026-11-12）：viewer 视角下「可见」的成员账号集合。
 
-    口径 = 可见性模型（user_allowed(arch_only=True)，唯一权威实现加显式开关，
-    不在外复制模型）：可见该看板的登录账号 → 映射回 team_members.name。
+    口径（评论 @ 权限过滤方案）：
+      ① 看板关系人：viewer 可见看板（user_allowed，管理员豁免=全部看板）中，
+         任一看板的负责人 / 参与人 —— 这些名单在界面上对 viewer 直接可见；
+      ② 部门同事：与 viewer 在 team_members.departments 有共同部门的成员
+         （#165 部门单一来源口径）。
+    管理员（is_admin）→ None = 不限（管理员权限独立于架构外，与 user_allowed 同规）。
+    """
+    if is_admin(viewer):
+        return None
+    boards, _cols = user_allowed(viewer)
+    accs = set()
+    if boards is None:
+        rows = dbq('SELECT owner, participants FROM boards')
+    elif boards:
+        marks = ','.join('?' * len(boards))
+        rows = dbq(f'SELECT owner, participants FROM boards WHERE board_id IN ({marks})',
+                   tuple(boards))
+    else:
+        rows = []
+    for r in rows:
+        for a in (((r['owner'] or '') + ',' + (r['participants'] or '')).split(',')):
+            a = a.strip()
+            if a:
+                accs.add(a)
+    # ② 部门同事
+    mine = dbq('SELECT departments FROM team_members WHERE account=? LIMIT 1', (viewer,))
+    my_depts = {x.strip() for x in ((mine[0]['departments'] if mine else '') or '').split(',')
+                if x.strip()}
+    if my_depts:
+        for r in dbq('SELECT account, departments FROM team_members'):
+            depts = {x.strip() for x in (r['departments'] or '').split(',') if x.strip()}
+            if depts & my_depts and (r['account'] or '').strip():
+                accs.add(r['account'].strip())
+    return accs
 
-    ⚠️ 管理员的**超管可见性不计入**（用户 2026-11-06 确认：管理员权限独立于
-    架构外，不能因为是管理员就谁都能 @ 到）——管理员只有同时具备架构内身份
-    （看板负责人/参与人/架构负责人/组员）才出现在候选池。
+
+def _mention_pool_names(card_id: str, username: str):
+    """评论 @ 候选池（双重口径，2026-11-12 修订）：
+
+      ① 目标对该卡片所属看板**有架构内可见路径**（user_allowed(arch_only=True)，
+         2026-11-06 #77 口径不变）—— 被 @ 的人得能打开该看板，提及消息才有意义；
+         ⚠️ 管理员的**超管可见性不计入**（用户 2026-11-06 确认：管理员权限独立于
+         架构外，不能因为是管理员就谁都能 @ 到）——管理员只有同时具备架构内身份
+         （看板负责人/参与人/架构负责人/组员）才出现在候选池；
+      ② 目标**对当前用户可见**（_visible_member_accounts：看板关系人 ∪ 部门同事，
+         管理员豁免）—— 组织权限上与当前用户没有可见交集的人不能被 @，
+         搜索与 @ 列表同样不展示。
     没有登录账号的成员无法登录也收不到提及消息（_mention_receiver 投递语义）→ 天然排除。
     """
-    check_card_access(card_id, username)
     row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not row:
         raise HTTPException(404, '事项不存在')
     bid = row[0]['board_id']
+    vis = _visible_member_accounts(username)
     names = set()
     for u in dbq('SELECT username FROM users'):
         acct = u['username']
         boards, _cols = user_allowed(acct, arch_only=True)
         if boards is not None and bid not in boards:
             continue
+        if vis is not None and acct not in vis:
+            continue
         for m in dbq('SELECT name FROM team_members WHERE account=?', (acct,)):
             if (m['name'] or '').strip():
                 names.add(m['name'].strip())
-    return {'names': sorted(names)}
+    return names
+
+
+@app.get('/api/cards/{card_id}/mention_pool')
+def mention_pool(card_id: str, username: str = Depends(require_auth)):
+    """评论 @ 候选池：对该看板有可见路径 **且** 对当前用户可见的成员姓名。"""
+    check_card_access(card_id, username)
+    return {'names': sorted(_mention_pool_names(card_id, username))}
 
 @app.get('/api/cards/{card_id}/comments')
 def get_comments(card_id: str, username: str = Depends(require_auth)):
@@ -3453,6 +3670,13 @@ async def add_comment(card_id: str, req: CommentReq, username: str = Depends(req
     for m in mentions:
         if m not in seen:
             seen.add(m); ms.append(m)
+    # @ 提及权限校验（2026-11-12）：候选池 = 看板可见 ∩ 对当前用户可见，
+    # 池外成员（含对当前用户不可见者）拒绝被 @ —— 防止绕过前端直调 API。
+    if ms:
+        _pool = _mention_pool_names(card_id, username)
+        _bad = [m for m in ms if m not in _pool]
+        if _bad:
+            raise HTTPException(403, '以下成员对您不可见，无法@：' + '、'.join(_bad))
     dbe('INSERT INTO comments (card_id, username, content, mentions) VALUES (?,?,?,?)',
         (card_id, username, req.content.strip(), ';'.join(ms)))
     log_action(card_id, username, 'comment', req.content.strip()[:200])
@@ -3616,6 +3840,7 @@ def get_card_children(card_id: str, username: str = Depends(require_auth)):
             d['children'] = build(r['card_id'], depth + 1) if depth < 6 else []
             d['child_count'] = len(by_parent.get(r['card_id'], []))
             d['locked_by'] = lock_mgr.who(r['card_id'])
+            d['locked_by_name'] = lock_mgr.who_name(r['card_id'])   # 显示用姓名（空回退账号）
             out.append(d)
         return out
 
@@ -3641,9 +3866,8 @@ def get_card_children(card_id: str, username: str = Depends(require_auth)):
 
 @app.post('/api/cards/{card_id}/subtasks')
 async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(require_writer), request: Request = None):
-    holder = lock_mgr.who(card_id)
-    if holder and holder != username:
-        raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
+    # 编辑锁（2026-11-12 check→acquire）：父事项被他人编辑中 → 409；新认领写完即释放
+    _fresh = _lock_oneshot(card_id, username, '卡片', '新增子事项')
     title = (req.title or '').strip()
     if not title:
         raise HTTPException(400, '子事项标题不能为空')
@@ -3680,14 +3904,15 @@ async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(req
               ('新增子事项：%s' % title) + (f'（上级 #{pid}）' if pid else ''), 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id,
         'by': username}, exclude=username)
+    if _fresh:
+        _lock_release(card_id, username)
     return {'ok': True}
 
 @app.put('/api/cards/{card_id}/subtasks/{sid}')
 async def update_subtask(card_id: str, sid: int, req: SubtaskReq,
                          username: str = Depends(require_writer), request: Request = None):
-    holder = lock_mgr.who(card_id)
-    if holder and holder != username:
-        raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
+    # 编辑锁（2026-11-12 check→acquire）：父事项被他人编辑中 → 409；新认领写完即释放
+    _fresh = _lock_oneshot(card_id, username, '卡片', '修改子事项')
     _cr = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if _cr:
         check_board_access(_cr[0]['board_id'], username)
@@ -3714,13 +3939,14 @@ async def update_subtask(card_id: str, sid: int, req: SubtaskReq,
     audit_log(username, client_ip(request), 'subtask_update', f'卡片 {card_id} 子事项#{sid}', '更新子事项（勾选/改名/排序）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id,
         'by': username}, exclude=username)
+    if _fresh:
+        _lock_release(card_id, username)
     return {'ok': True}
 
 @app.delete('/api/cards/{card_id}/subtasks/{sid}')
 async def delete_subtask(card_id: str, sid: int, username: str = Depends(require_writer), request: Request = None):
-    holder = lock_mgr.who(card_id)
-    if holder and holder != username:
-        raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法修改子事项')
+    # 编辑锁（2026-11-12 check→acquire）：父事项被他人编辑中 → 409；新认领写完即释放
+    _fresh = _lock_oneshot(card_id, username, '卡片', '删除子事项')
     _cr2 = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if _cr2:
         check_board_access(_cr2[0]['board_id'], username)
@@ -3746,6 +3972,8 @@ async def delete_subtask(card_id: str, sid: int, username: str = Depends(require
               ('删除子事项：%s' % ('含 %d 个下级' % extra if extra else '单条')), 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id,
         'by': username}, exclude=username)
+    if _fresh:
+        _lock_release(card_id, username)
     return {'ok': True}
 
 # ---------------- API：团队管理 ----------------
@@ -3896,6 +4124,11 @@ def add_team(req: TeamReq, username: str = Depends(require_admin), request: Requ
     # T-0169 部门（多选）：写单一来源列 + 强映射架构参与人（与 #165 同一套）
     if req.departments is not None:
         _set_member_departments(mid, _clean_dept_list(req.departments))
+    # 中心参与人补齐（2026-11-12）：新增成员（即使未带部门）也要进中心节点
+    # 参与人名单（恒=全员，只增不减、离岗不补）—— 否则新成员会缺席中心名单，
+    # #165 的「中心节点参与人=全员」不变量被打破（实测 tyl 缺失即此因）。
+    if acc:
+        _ensure_center_participants_all()
     audit_log(username, client_ip(request), 'member_create', f'成员 {name}', f'新增成员（id={mid}' + (f'，开通账号 {req.account.strip()}' if req.account and req.account.strip() else '，未开通账号') + '）', 'success')
     return {'ok': True}
 
@@ -3907,6 +4140,12 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
     cur = dbq('SELECT 1 FROM team_members WHERE id=?', (mid,))
     if not cur:
         raise HTTPException(404, '成员不存在')
+    # 编辑锁（2026-11-12）：双层 —— 成员名单整表会话锁（team:roster，成员编辑弹窗持有）
+    # + 单成员锁（team:<mid>，直调 API 场景）。他人持任一把 → 409。
+    _lk_r = 'team:roster'
+    _fresh_r = _lock_oneshot(_lk_r, username, '成员名单', '编辑')
+    _lk = 'team:' + str(mid)
+    _fresh = _lock_oneshot(_lk, username, '成员', '编辑')
     old = dbq('SELECT account FROM team_members WHERE id=?', (mid,))
     old_acc = old[0]['account'] if old else ''
     # 密码重置仅超级管理员；管理员可开通/变更账号（首次开通允许设置密码）
@@ -4034,6 +4273,10 @@ def update_team(mid: int, req: TeamUpdateReq, username: str = Depends(require_ad
     if status_changed:
         changes.append('状态→' + ('离岗' if req.status == 'departed' else '在岗'))
     audit_log(username, client_ip(request), 'member_update', f'成员 {name} (id={mid})', '，'.join(changes) or '资料更新', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
+    if _fresh_r:
+        _lock_release(_lk_r, username)
     return {'ok': True}
 
 @app.delete('/api/team/{mid}')
@@ -4042,6 +4285,11 @@ def del_team(mid: int, username: str = Depends(require_admin), request: Request 
     if not cur:
         raise HTTPException(404, '成员不存在')
     acc, mname = cur[0]['account'], cur[0]['name']
+    # 编辑锁（2026-11-12 补缺）：名单整表锁 + 单成员锁双层（同 update_team）
+    _lk_r = 'team:roster'
+    _fresh_r = _lock_oneshot(_lk_r, username, '成员名单', '删除成员')
+    _lk = 'team:' + str(mid)
+    _fresh = _lock_oneshot(_lk, username, '成员', '删除')
     if acc == SUPER_ADMIN:
         raise HTTPException(403, f'「{SUPER_ADMIN}」是内置超级管理员，不可删除')
     if acc == username:
@@ -4054,6 +4302,10 @@ def del_team(mid: int, username: str = Depends(require_admin), request: Request 
     _strip_member_rosters(mid, action='删除')
     dbe('DELETE FROM team_members WHERE id=?', (mid,))
     audit_log(username, client_ip(request), 'member_delete', f'成员 {mname} (id={mid})', f'删除成员' + (f'及关联账号 {acc}' if acc else '') + '，并从任命/负责人/参与人名单剔除', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
+    if _fresh_r:
+        _lock_release(_lk_r, username)
     return {'ok': True}
 
 # ---------------- API：工作组管理（工作组树形架构） ----------------
@@ -5009,6 +5261,9 @@ def reorder_org_node(node_id: int, req: OrgReorderReq, username: str = Depends(r
     row = dbq('SELECT id, parent_id FROM org_nodes WHERE id=?', (node_id,))
     if not row:
         raise HTTPException(404, '节点不存在')
+    # 编辑锁（2026-11-12 补缺）：排序以被移动节点为锁粒度（新认领写完即释放）
+    _lk = 'org:' + str(node_id)
+    _fresh = _lock_oneshot(_lk, username, '节点', '排序')
     parent_id = row[0]['parent_id']
     ids = [r['id'] for r in dbq(
         'SELECT id FROM org_nodes WHERE parent_id=? ORDER BY sort, id', (parent_id,))]
@@ -5017,6 +5272,8 @@ def reorder_org_node(node_id: int, req: OrgReorderReq, username: str = Depends(r
     i = ids.index(node_id)
     j = i - 1 if req.direction == 'up' else i + 1
     if j < 0 or j >= len(ids):
+        if _fresh:
+            _lock_release(_lk, username)
         return {'ok': True, 'moved': False, 'reason': 'already_at_edge'}
     for idx, nid in enumerate(ids):
         dbe('UPDATE org_nodes SET sort=? WHERE id=?', (idx, nid))
@@ -5024,6 +5281,8 @@ def reorder_org_node(node_id: int, req: OrgReorderReq, username: str = Depends(r
     dbe('UPDATE org_nodes SET sort=? WHERE id=?', (i, ids[j]))
     audit_log(username, client_ip(request), 'update', '架构排序',
               f'节点 {node_id} 手动排序（{req.direction}，同级交换）', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'moved': True}
 
 
@@ -5184,6 +5443,9 @@ def update_org_node(nid: int, req: OrgNodeReq, username: str = Depends(require_a
     node = _org_node(nid)
     if not node:
         raise HTTPException(404, '节点不存在')
+    # 编辑锁（2026-11-12）：架构节点编辑弹窗开锁，key = org:<nid>
+    _lk = 'org:' + str(nid)
+    _fresh = _lock_oneshot(_lk, username, '节点', '编辑')
     name = (req.name or '').strip()
     if not name:
         raise HTTPException(400, '节点名称不能为空')
@@ -5208,6 +5470,8 @@ def update_org_node(nid: int, req: OrgNodeReq, username: str = Depends(require_a
         dbe('UPDATE workgroups SET name=?, parent_id=? WHERE id=?', (name, parent_wg, node['wg_id']))
     audit_log(username, client_ip(request), 'org_node_update',
               f'节点 {name} (id={nid})', '更新架构节点', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 class NodeBoardsReq(BaseModel):
@@ -5232,6 +5496,9 @@ def update_node_boards(nid: int, req: NodeBoardsReq, username: str = Depends(req
         raise HTTPException(404, '节点不存在')
     if node['node_type'] == 'center':
         raise HTTPException(403, '中心节点锁定全部看板，不可在此调整绑定')
+    # 编辑锁（2026-11-12 补缺）：看板绑定纳入节点锁
+    _lk = 'org:' + str(nid)
+    _fresh = _lock_oneshot(_lk, username, '节点', '调整看板绑定')
     if not node.get('wg_id'):
         raise HTTPException(400, '该节点没有可存储绑定的载体（缺少工作组映射）')
     arch_owner = set() if is_admin(username) else _arch_owner_nodes(username)
@@ -5260,6 +5527,8 @@ def update_node_boards(nid: int, req: NodeBoardsReq, username: str = Depends(req
     audit_log(username, client_ip(request), 'org_node_bind', f'节点 {node["name"]} (id={nid})',
               '修改看板绑定 → [' + boards + ']' + (f'；级联调整 {len(cascade)} 个子级' if cascade else ''),
               'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'boards': boards, 'cascade': cascade}
 
 
@@ -5271,6 +5540,9 @@ def delete_org_node(nid: int, username: str = Depends(require_admin), request: R
         raise HTTPException(404, '节点不存在')
     if node['node_type'] == 'center':
         raise HTTPException(403, '中心节点不可删除')
+    # 编辑锁（2026-11-12）：节点被编辑中 → 409
+    _lk = 'org:' + str(nid)
+    _fresh = _lock_oneshot(_lk, username, '节点', '删除')
     # 有看板绑定时拒绝（避免成员突然失去访问权限）
     if node.get('wg_id'):
         w = dbq('SELECT boards FROM workgroups WHERE id=?', (node['wg_id'],))
@@ -5302,6 +5574,8 @@ def delete_org_node(nid: int, username: str = Depends(require_admin), request: R
     audit_log(username, client_ip(request), 'org_node_delete',
               f'节点 {node["name"]} (id={nid})',
               f'删除架构节点，级联清理 {len(desc)} 个子节点、{appt_cnt} 条任职关系', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'removed_children': len(desc), 'removed_appointments': appt_cnt}
 
 class OrgMoveNodeReq(BaseModel):
@@ -5317,6 +5591,9 @@ def move_org_node(nid: int, req: OrgMoveNodeReq, username: str = Depends(require
         raise HTTPException(404, '节点不存在')
     if node['node_type'] == 'center':
         raise HTTPException(403, '中心节点不可移动')
+    # 编辑锁（2026-11-12 补缺）：节点移动纳入节点锁
+    _lk = 'org:' + str(nid)
+    _fresh = _lock_oneshot(_lk, username, '节点', '移动')
     new_parent = req.parent_id
     _check_parent_ok(node['node_type'], new_parent, self_id=nid)
     kids = dbq('SELECT id, name, node_type FROM org_nodes WHERE parent_id=?', (nid,))
@@ -5331,6 +5608,8 @@ def move_org_node(nid: int, req: OrgMoveNodeReq, username: str = Depends(require
         dbe('UPDATE workgroups SET parent_id=? WHERE id=?', (parent_wg, node['wg_id']))
     audit_log(username, client_ip(request), 'org_node_move',
               f'节点 {node["name"]} (id={nid})', f'移动到上级 id={new_parent}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.post('/api/org/appointments')
@@ -5342,6 +5621,9 @@ def create_org_appointment(req: OrgAppointmentReq, username: str = Depends(requi
     node = _org_node(req.node_id)
     if not node:
         raise HTTPException(404, '节点不存在')
+    # 编辑锁（2026-11-12 补缺）：任命纳入节点锁（新认领写完即释放）
+    _lk = 'org:' + str(req.node_id)
+    _fresh = _lock_oneshot(_lk, username, '节点', '新增任命')
     m = dbq('SELECT id, name, account FROM team_members WHERE id=?', (req.member_id,))
     if not m:
         raise HTTPException(404, '成员不存在')
@@ -5373,6 +5655,8 @@ def create_org_appointment(req: OrgAppointmentReq, username: str = Depends(requi
               f'{m[0]["name"]} @ {node["name"]}',
               f'新增任职，岗位 {role_key}' + ('（已同步架构参与人）' if role_key in ('group_leader', 'member') else ''),
               'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.delete('/api/org/appointments/{aid}')
@@ -5385,12 +5669,17 @@ def delete_org_appointment(aid: int, username: str = Depends(require_auth), requ
     node = _org_node(row[0]['node_id'])
     if not node:
         raise HTTPException(404, '节点不存在')
+    # 编辑锁（2026-11-12 补缺）：罢免纳入节点锁（新认领写完即释放）
+    _lk = 'org:' + str(row[0]['node_id'])
+    _fresh = _lock_oneshot(_lk, username, '节点', '移除任命')
     _check_appoint_perm(username, node, row[0]['role_key'])
     dbe('DELETE FROM org_appointments WHERE id=?', (aid,))
     _org_sync_legacy(row[0]['node_id'])
     _org_sync_member_legacy(row[0]['member_id'])
     audit_log(username, client_ip(request), 'org_appointment_delete',
               f'{row[0]["member_name"]}', '删除任职关系', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.get('/api/org/members/{member_id}/appointments')
@@ -5430,6 +5719,9 @@ def move_org_appointment(req: OrgMoveApptReq, username: str = Depends(require_ad
     node = _org_node(new_node)
     if not node:
         raise HTTPException(404, '目标节点不存在')
+    # 编辑锁（2026-11-12 补缺）：任职调整纳入目标节点锁（新认领写完即释放）
+    _lk = 'org:' + str(new_node)
+    _fresh = _lock_oneshot(_lk, username, '节点', '调整任命')
     _check_role_allowed(node['node_type'], new_role)
     _check_unique_slot(new_node, new_role, row[0]['member_id'], exclude_id=req.appt_id)
     try:
@@ -5443,6 +5735,8 @@ def move_org_appointment(req: OrgMoveApptReq, username: str = Depends(require_ad
     audit_log(username, client_ip(request), 'org_appointment_move',
               f'{row[0]["member_name"]}',
               f'任职调整：节点 {old_node} → {new_node}，岗位 {row[0]["role_key"]} → {new_role}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 
@@ -5787,9 +6081,18 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
         raise HTTPException(404, '看板不存在')
     # 分级权限（2026-11-02）：指派看板负责人 = 架构负责人及以上
+    # ⚠️ 权限校验必须在认锁之前 —— 否则 403 后锁泄漏（持有到超时，挡住真正在编辑的人）
     perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_OWNER, LV_BOARD_OWNER,
                'board:' + bid, min_level=LV_ARCH_OWNER)
+    # 编辑锁（2026-11-12）：看板编辑弹窗开锁，key = board:<board_id>
+    _lk = 'board:' + bid
+    _fresh = _lock_oneshot(_lk, username, '看板', '设置负责人')
     owner = _norm_acl_owner(req.owner)
+    # 部门约束（2026-11-12）：归属部门为部门级节点时，负责人必须是该部门成员
+    _pool = _board_dept_pool_accounts(bid)
+    if _pool is not None and owner and owner not in _pool:
+        raise HTTPException(400, f'负责人「{_account_member_name(owner)}」不属于该看板的'
+                               f'归属部门，无法指派（归属部门成员方可担任负责人）')
     # 2026-11-04 恢复：参与人字段重新启用（人员选择层级约束 —— 板块的选人池
     # 来自所属看板的负责人与参与人），不再随负责人保存清空。
     # 2026-11-05 用户修订：**取消负责人/参与人互斥** —— 负责人可同为参与人，
@@ -5800,6 +6103,8 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     audit_log(username, client_ip(request), 'board_acl', f'看板 {bid}',
               f'设置看板负责人：{owner or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': parts}
 
 
@@ -5812,13 +6117,26 @@ async def set_board_participants(board_id: str, req: AclReq, username: str = Dep
     bid = (board_id or '').strip()
     if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
         raise HTTPException(404, '看板不存在')
+    # 权限校验先于认锁（同 set_board_acl：403 后不得泄漏锁）
     perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_PARTICIPANT,
                LV_BOARD_OWNER, 'board:' + bid, min_level=LV_BOARD_OWNER)
+    # 编辑锁（2026-11-12 补缺）：看板配置纳入看板锁
+    _lk = 'board:' + bid
+    _fresh = _lock_oneshot(_lk, username, '看板', '设置参与人')
     parts = _norm_acl_participants(req.participants)
+    # 部门约束（2026-11-12）：归属部门为部门级节点时，参与人必须是该部门成员
+    _pool = _board_dept_pool_accounts(bid)
+    if _pool is not None:
+        _bad = [a for a in parts.split(',') if a and a not in _pool]
+        if _bad:
+            raise HTTPException(400, '以下参与人不属于该看板的归属部门：'
+                               + '、'.join(_account_member_name(a) for a in _bad))
     # 2026-11-05 用户修订：取消负责人/参与人互斥 —— 参与人名单不再剔除当前负责人。
     dbe('UPDATE boards SET participants=? WHERE board_id=?', (parts, bid))
     audit_log(username, client_ip(request), 'board_participants', f'看板 {bid}',
               f'设置看板参与人：{parts or "(无)"}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'board_id': bid, 'participants': parts}
 
 
@@ -5842,10 +6160,15 @@ async def rename_board(board_id: str, req: BoardRenameReq, username: str = Depen
         raise HTTPException(400, '看板名称过长（≤100 字）')
     if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
         raise HTTPException(404, '看板不存在')
+    # 编辑锁（2026-11-12 补缺）：看板改名纳入看板锁
+    _lk = 'board:' + bid
+    _fresh = _lock_oneshot(_lk, username, '看板', '改名')
     perm_check(username, perm_chain(board_id=bid), OP_UPDATE, LV_BOARD_OWNER, 'board:' + bid)
     old = dbq('SELECT board_name FROM boards WHERE board_id=?', (bid,))
     old_name = old[0]['board_name'] if old else ''
     if name == old_name:
+        if _fresh:
+            _lock_release(_lk, username)
         return {'ok': True, 'board_id': bid, 'board_name': name, 'changed': False}
     dbe('UPDATE boards SET board_name=? WHERE board_id=?', (name, bid))
     # cards 冗余的 board_name 一并同步（新建事项时后端会按 boards 表回填新名，
@@ -5854,6 +6177,8 @@ async def rename_board(board_id: str, req: BoardRenameReq, username: str = Depen
     audit_log(username, client_ip(request), 'board_rename', f'看板 {bid}',
               f'看板改名：「{old_name}」→「{name}」', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'board_id': bid, 'board_name': name, 'changed': True}
 
 
@@ -5865,12 +6190,17 @@ async def set_column_participants(col_key: str, req: AclReq, username: str = Dep
     row = dbq('SELECT board_id, column_id FROM board_columns WHERE col_key=? LIMIT 1', (key,))
     if not row:
         raise HTTPException(404, '板块不存在')
+    # 编辑锁（2026-11-12 补缺）：板块配置纳入板块锁
+    _lk = 'column:' + key
+    _fresh = _lock_oneshot(_lk, username, '板块', '设置参与人')
     perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
                OP_ASSIGN_PARTICIPANT, LV_COLUMN_OWNER, 'column:' + key, min_level=LV_COLUMN_OWNER)
     parts = _norm_acl_participants(req.participants)
     dbe('UPDATE board_columns SET participants=? WHERE col_key=?', (parts, key))
     audit_log(username, client_ip(request), 'column_participants', f'板块 {key}',
               f'设置板块参与人：{parts or "(无)"}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'col_key': key, 'participants': parts}
 
 
@@ -5882,6 +6212,8 @@ async def set_card_participants(card_id: str, req: AclReq, username: str = Depen
     row = dbq('SELECT board_id, column_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not row:
         raise HTTPException(404, '事项不存在或已删除')
+    # 编辑锁（2026-11-12 补缺）：参与人是事项的可编辑内容，纳入事项锁
+    _fresh = _lock_oneshot(card_id, username, '卡片', '设置参与人')
     perm_check(username, perm_chain(card_id=card_id),
                OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'card:' + card_id)
     parts = _norm_acl_participants(req.participants)
@@ -5889,6 +6221,8 @@ async def set_card_participants(card_id: str, req: AclReq, username: str = Depen
     audit_log(username, client_ip(request), 'card_participants', f'事项 {card_id}',
               f'设置事项参与人：{parts or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id, 'by': username})
+    if _fresh:
+        _lock_release(card_id, username)
     return {'ok': True, 'card_id': card_id, 'participants': parts}
 
 
@@ -5904,6 +6238,9 @@ async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(requ
     row = dbq('SELECT board_id, column_id FROM board_columns WHERE col_key=? LIMIT 1', (key,))
     if not row:
         raise HTTPException(404, '板块不存在')
+    # 编辑锁（2026-11-12 补缺）：板块配置纳入板块锁
+    _lk = 'column:' + key
+    _fresh = _lock_oneshot(_lk, username, '板块', '设置负责人')
     # 分级权限（2026-11-02）：指派板块负责人 = 看板负责人及以上
     perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
                OP_ASSIGN_OWNER, LV_COLUMN_OWNER, 'column:' + key, min_level=LV_BOARD_OWNER)
@@ -5915,6 +6252,8 @@ async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(requ
     audit_log(username, client_ip(request), 'column_acl', f'板块 {key}',
               f'设置板块负责人：{owner or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True, 'col_key': key, 'owner': owner, 'participants': ''}
 
 
@@ -5934,6 +6273,9 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     row = dbq('SELECT board_id FROM board_config WHERE id=?', (cid,))
     if not row:
         raise HTTPException(404, '配置不存在')
+    # 编辑锁（2026-11-12）：看板基本信息与看板编辑弹窗同锁（board:<board_id>）
+    _lk = 'board:' + row[0]['board_id']
+    _fresh = _lock_oneshot(_lk, username, '看板', '保存配置')
     # 分级权限（2026-11-02）：修改看板基本信息 = 看板负责人及以上
     perm_check(username, perm_chain(board_id=row[0]['board_id']),
                OP_UPDATE, LV_BOARD_OWNER, 'board:' + row[0]['board_id'])
@@ -5953,6 +6295,8 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     audit_log(username, client_ip(request), 'board_config_update', f'id={cid}',
               f'{dept}/{attr} 状态={status}' + (f' 协作部门={collab_str or "无"}' if collab_str is not None else ''),
               'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.delete('/api/board-config/{cid}')
@@ -5961,6 +6305,9 @@ def delete_board_config(cid: int, username: str = Depends(require_auth), request
     r = dbq('SELECT board_id, dept, attr FROM board_config WHERE id=?', (cid,))
     if not r:
         raise HTTPException(404, '配置不存在')
+    # 编辑锁（2026-11-12 补缺）：与看板编辑弹窗同锁（board:<board_id>）
+    _lk = 'board:' + r[0]['board_id']
+    _fresh = _lock_oneshot(_lk, username, '看板', '删除配置')
     # 分级权限（2026-11-02）：删除看板配置 = 看板负责人及以上
     perm_check(username, perm_chain(board_id=r[0]['board_id']),
                OP_DELETE, LV_BOARD_OWNER, 'board:' + r[0]['board_id'])
@@ -5968,6 +6315,8 @@ def delete_board_config(cid: int, username: str = Depends(require_auth), request
     row = r[0]
     audit_log(username, client_ip(request), 'board_config_delete',
               f'{row["dept"]}/{row["attr"]}', f'id={cid}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 # ---------------- API：部门主页（文化展示区 / 标杆部门 / 模范个人 / 部门介绍） ----------------
@@ -6218,6 +6567,9 @@ def update_dept_profile(dept: str, req: DeptProfileReq, username: str = Depends(
     """保存部门文化资料（仅管理员可编辑）"""
     if dept not in _dept_names():
         raise HTTPException(404, '部门不存在')
+    # 编辑锁（2026-11-12 补缺）：部门文化资料按部门加锁（新认领写完即释放）
+    _lk = 'dept:' + dept
+    _fresh = _lock_oneshot(_lk, username, '部门主页', '保存文化资料')
     photo = _check_image_data_url(req.photo)
     slogan = (req.slogan or '').strip()[:200]
     intro = (req.intro or '').strip()[:4000]
@@ -6229,6 +6581,8 @@ def update_dept_profile(dept: str, req: DeptProfileReq, username: str = Depends(
         (dept, slogan, intro, photo))
     audit_log(username, client_ip(request), 'dept_profile_update', dept,
               f'更新部门文化资料（标语 {len(slogan)} 字）', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.post('/api/dept/{dept}/honors')
@@ -6256,12 +6610,17 @@ def update_dept_honor(hid: int, req: DeptHonorReq, username: str = Depends(requi
     cur = dbq('SELECT id, dept, target_name FROM dept_honors WHERE id=?', (hid,))
     if not cur:
         raise HTTPException(404, '记录不存在')
+    # 编辑锁（2026-11-12）：部门主页内容按部门加锁，key = dept:<dept>（新认领写完即释放）
+    _lk = 'dept:' + cur[0]['dept']
+    _fresh = _lock_oneshot(_lk, username, '部门主页', '编辑荣誉')
     photo = _check_image_data_url(req.photo)
     dbe('''UPDATE dept_honors SET kind=?, target_name=?, photo=?, remark=?, sort=? WHERE id=?''',
         (req.kind, (req.target_name or '').strip()[:60], photo,
          (req.remark or '').strip()[:200], req.sort, hid))
     audit_log(username, client_ip(request), 'dept_honor_update', cur[0]['dept'],
               f'更新 id={hid}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.delete('/api/dept/honors/{hid}')
@@ -6269,9 +6628,14 @@ def delete_dept_honor(hid: int, username: str = Depends(require_admin), request:
     cur = dbq('SELECT id, dept FROM dept_honors WHERE id=?', (hid,))
     if not cur:
         raise HTTPException(404, '记录不存在')
+    # 编辑锁（2026-11-12 补缺）：按部门加锁（新认领写完即释放）
+    _lk = 'dept:' + cur[0]['dept']
+    _fresh = _lock_oneshot(_lk, username, '部门主页', '删除荣誉')
     dbe('DELETE FROM dept_honors WHERE id=?', (hid,))
     audit_log(username, client_ip(request), 'dept_honor_delete', cur[0]['dept'],
               f'删除 id={hid}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.get('/api/dept/{dept}/posts')
@@ -6311,9 +6675,14 @@ def delete_dept_post(pid: int, username: str = Depends(require_admin), request: 
     cur = dbq('SELECT id, dept FROM dept_posts WHERE id=?', (pid,))
     if not cur:
         raise HTTPException(404, '文章不存在')
+    # 编辑锁（2026-11-12 补缺）：按部门加锁（新认领写完即释放）
+    _lk = 'dept:' + cur[0]['dept']
+    _fresh = _lock_oneshot(_lk, username, '部门主页', '删除发文')
     dbe('DELETE FROM dept_posts WHERE id=?', (pid,))
     audit_log(username, client_ip(request), 'dept_post_delete', cur[0]['dept'],
               f'删除文章 id={pid}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 # ---------------- API：公告栏 ----------------
@@ -6351,6 +6720,9 @@ def update_notice(nid: int, req: NoticeReq, username: str = Depends(require_admi
     cur = dbq('SELECT id, scope FROM notices WHERE id=?', (nid,))
     if not cur:
         raise HTTPException(404, '公告不存在')
+    # 编辑锁（2026-11-12）：公告编辑按单条加锁，key = notice:<nid>（新认领写完即释放）
+    _lk = 'notice:' + str(nid)
+    _fresh = _lock_oneshot(_lk, username, '公告', '编辑')
     scope = (req.scope or 'all').strip() or 'all'
     if scope != 'all' and scope not in _dept_names():
         raise HTTPException(400, '公告范围必须是 all 或 ' + '/'.join(sorted(_dept_names())))
@@ -6358,6 +6730,8 @@ def update_notice(nid: int, req: NoticeReq, username: str = Depends(require_admi
         (scope, (req.title or '').strip()[:100], (req.content or '').strip()[:2000],
          1 if req.enabled else 0, req.sort, nid))
     audit_log(username, client_ip(request), 'notice_update', scope, f'id={nid}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.delete('/api/notices/{nid}')
@@ -6365,8 +6739,13 @@ def delete_notice(nid: int, username: str = Depends(require_admin), request: Req
     cur = dbq('SELECT id, scope FROM notices WHERE id=?', (nid,))
     if not cur:
         raise HTTPException(404, '公告不存在')
+    # 编辑锁（2026-11-12 补缺）：按单条加锁（新认领写完即释放）
+    _lk = 'notice:' + str(nid)
+    _fresh = _lock_oneshot(_lk, username, '公告', '删除')
     dbe('DELETE FROM notices WHERE id=?', (nid,))
     audit_log(username, client_ip(request), 'notice_delete', cur[0]['scope'], f'id={nid}', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 # ---------------- API：管理员账号管理 ----------------
@@ -6441,6 +6820,9 @@ def admin_update_user(name: str, req: UserUpdateReq, username: str = Depends(req
     u = get_user(name)
     if not u:
         raise HTTPException(404, '账号不存在')
+    # 编辑锁（2026-11-12）：账号编辑纳入账号锁，key = user:<username>（新认领写完即释放）
+    _lk = 'user:' + name
+    _fresh = _lock_oneshot(_lk, username, '账号', '编辑')
     if req.role is not None and req.role not in ('viewer', 'editor', 'admin'):
         raise HTTPException(400, '角色必须是 viewer/editor/admin')
     # 分级权限（2026-11-02）：**变更「管理员」权限仅超级管理员可为**。
@@ -6468,17 +6850,24 @@ def admin_update_user(name: str, req: UserUpdateReq, username: str = Depends(req
         dbe(f'UPDATE users SET {", ".join(sets)} WHERE username=?', vals)
         log_action('__user__', username, 'user_update', name)
         audit_log(username, client_ip(request), 'user_update', f'账号 {name}', '更新账号（角色/权限' + ('/密码' if req.password else '') + '）', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 @app.delete('/api/admin/users/{name}')
 def admin_delete_user(name: str, username: str = Depends(require_admin), request: Request = None):
     if name == username:
         raise HTTPException(400, '不能删除当前登录的管理员账号')
+    # 编辑锁（2026-11-12 补缺）：账号被编辑中 → 409（新认领写完即释放）
+    _lk = 'user:' + name
+    _fresh = _lock_oneshot(_lk, username, '账号', '删除')
     res = dbe('DELETE FROM users WHERE username=?', (name,))
     if res.rowcount == 0:
         raise HTTPException(404, '账号不存在')
     log_action('__user__', username, 'user_delete', name)
     audit_log(username, client_ip(request), 'user_delete', f'账号 {name}', '删除登录账号', 'success')
+    if _fresh:
+        _lock_release(_lk, username)
     return {'ok': True}
 
 # ---------------- API：跨看板移动 ----------------
@@ -6489,9 +6878,8 @@ class MoveReq(BaseModel):
 
 @app.put('/api/cards/{card_id}/move')
 async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_writer), request: Request = None):
-    holder = lock_mgr.who(card_id)
-    if holder and holder != username:
-        raise HTTPException(409, f'卡片已被 {holder} 编辑中，无法移动')
+    # 编辑锁（2026-11-12 check→acquire）：被他人编辑中 → 409；新认领写完即释放
+    _fresh = _lock_oneshot(card_id, username, '卡片', '移动')
     src_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if src_row:
         check_board_access(src_row[0]['board_id'], username)
@@ -6516,6 +6904,8 @@ async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_
     log_action(card_id, username, 'move', f'→ {tgt[0]["board_name"]}')
     audit_log(username, client_ip(request), 'move', f'卡片 {card_id}', f'移动到看板「{tgt[0]["board_name"]}」', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id, 'by': username}, exclude=username)
+    if _fresh:
+        _lock_release(card_id, username)
     return {'ok': True}
 
 # ---------------- API：导出 / 导入 ----------------
