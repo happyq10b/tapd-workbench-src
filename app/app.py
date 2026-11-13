@@ -3021,20 +3021,17 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     if nature not in COLUMN_NATURES:
         raise HTTPException(400, '性质只能是「日常」或「专项」')
     # ---- 板块「完成情况」（2026-11-04 需求3）----
-    # 语义：由**板块负责人本人**（board_columns.owner == 当前账号）或管理员手动声明，
-    #      其他成员**不可修改**（403）。None = 不改。
+    # 2026-11-13（用户裁决「按体系来，不搞特殊」）：完成情况跟随板块编辑权限
+    # —— 入口上方 perm_check(OP_UPDATE, LV_COLUMN_OWNER) 已把关（板块负责人及以上，
+    #    看板/架构负责人经继承放行），不再单独收窄到「板块负责人本人」。
+    # T-191i 状态联动：板块设为「已完成」的前置条件 = 板块下**所有事项**（含子事项）均已完成。
+    # 放在改名/搬移之前判定（此时 cards 还挂在旧 column_name 下）。
     new_completion = None
     if req.completion is not None:
         cv = (req.completion or '').strip() or 'open'
         if cv not in COLUMN_COMPLETIONS:
             raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
-        _col_owner = (old['owner'] if old else '') or ''
-        _is_col_owner = bool(_col_owner) and (_col_owner == username)
-        if not (_is_col_owner or is_admin(username)):
-            raise HTTPException(403, '仅板块负责人可设置完成情况')
         new_completion = cv
-        # T-191i 状态联动：板块设为「已完成」的前置条件 = 板块下**所有事项**（含子事项）均已完成。
-        # 放在改名/搬移之前判定（此时 cards 还挂在旧 column_name 下）。
         if new_completion == 'done' and old:
             _bid = old['board_id'] if 'board_id' in old.keys() else (req.board_id or '')
             _undone = dbq("SELECT COUNT(*) AS c FROM cards WHERE board_id=? AND column_name=?"

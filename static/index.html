@@ -5941,7 +5941,7 @@ function renderBoard(cards,cols,q,colHits){
       +'</span>';
     // 板块完成情况标签（与事项的状态标签同一形态，只读展示）
     const _comp=meta?(meta.completion||'open'):'open';
-    const _compTag=`<span class="status-tag ${statusCls(_comp)}" title="板块完成情况（由板块负责人在编辑板块时手动选择；与左侧进度条的自动统计相互独立）">${statusText(_comp)}</span>`;
+    const _compTag=`<span class="status-tag ${statusCls(_comp)}" title="板块完成情况（由板块负责人及以上在编辑板块时手动选择；与左侧进度条的自动统计相互独立）">${statusText(_comp)}</span>`;
     // 置顶 / 复制合并为「操作 ▾」（tail 槽位与事项行同构 → 纵向对齐）
     // 「折叠/展开子事项」已上收到工具栏【操作 ▾】（2026-11-13 用户需求）：
     // 单个板块不再提供该选项，全局按钮一键操作当前所有可见板块
@@ -7301,15 +7301,15 @@ function colPaintPickerPerm(){
 // T-191j：控件从编辑表单的下拉收敛到**弹窗头部状态按钮**（与事项状态按钮完全同款），
 // 预览（ctx=c）与编辑（ctx=ce）共用；COL_COMPLETION 为当前选中值（保存时随表单提交）。
 var COL_COMPLETION='open';
-function colCanEditCompletionOf(colKey){
-  if(ME&&ME.is_admin)return true;
-  const m=(window.COLS_META||[]).find(function(x){return x.col_key===colKey});
-  const owner=m?(m.owner||''):'';
-  return !!owner && owner===ME.username;
+// 2026-11-13（用户裁决「按体系来，不搞特殊」）：完成情况跟随板块编辑权限 =
+// **板块负责人及以上**（继承链），与板块待办/勾选共用 chkColOwnerOf 口径；
+// 后端入口 perm_check(OP_UPDATE, LV_COLUMN_OWNER) 同门槛把关。
+function colCanEditCompletionOf(colKey,boardId){
+  return chkColOwnerOf(colKey,boardId);
 }
 function colCanEditCompletion(){
   if(COLUMN_MODE!=='edit')return true;          // 新建：创建者定初始值
-  return colCanEditCompletionOf(COLUMN_EDIT_KEY||'');
+  return colCanEditCompletionOf(COLUMN_EDIT_KEY||'',COLUMN_EDIT_BOARD||'');
 }
 function colCanAssignParticipants(){
   if(ME&&ME.is_admin)return true;
@@ -9370,7 +9370,8 @@ async function setColumnCompletionStatus(st,ctx){
   }
   const colKey=(ctx==='ce')?COLUMN_EDIT_KEY:((COLUMN_DETAIL||{}).colkey||'');
   if(!colKey)return;
-  if(!colCanEditCompletionOf(colKey)){toast('仅板块负责人可修改完成情况');return}
+  const _bid=(ctx==='ce')?(COLUMN_EDIT_BOARD||''):((COLUMN_DETAIL||{}).bid||'');
+  if(!colCanEditCompletionOf(colKey,_bid)){toast('仅板块负责人及以上可修改完成情况');return}
   try{
     await api('/api/columns',{method:'PUT',body:JSON.stringify({col_key:colKey,completion:st})});
     toast('完成情况已更新为「'+statusText(st)+'」');
