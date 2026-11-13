@@ -55,7 +55,7 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
 .pwd-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);
   width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
   border:none;background:transparent;color:#7a88a0;cursor:pointer;
-  font-size:15px;font-weight:normal;line-height:1;padding:0;opacity:.75;user-select:none}
+  font-size:15px;font-weight:normal;line-height:1;padding:0;opacity:.75;-webkit-user-select:none;user-select:none}
 .pwd-eye:hover{opacity:1;color:#002D74}
 .pwd-eye.on{opacity:1;color:#002D74}
 /* 锁定提示 */
@@ -84,6 +84,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
 :where(button,input):focus-visible{outline:2px solid #002D74;outline-offset:2px}
 .field input:focus-visible{outline:2px solid #002D74;outline-offset:1px}
 button:focus-visible{border-radius:8px}
+/* 兼容性兜底（2026-11-13 浏览器适配 P1）：Safari < 15.4 不支持 :focus-visible →
+   退化为 :focus（代价：鼠标点击也显示焦点环，可接受）。 */
+@supports not selector(:focus-visible){
+  :where(button,input):focus{outline:2px solid #002D74;outline-offset:2px}
+  .field input:focus{outline:2px solid #002D74;outline-offset:1px}
+}
 </style>
 </head>
 <body>

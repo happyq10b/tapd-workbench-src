@@ -114,7 +114,7 @@ button{font-family:inherit}
 .hint-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 /* ---------------- 裁切编辑器 ---------------- */
 .crop-stage{position:relative;margin:0 auto;background:#1a1d21;border-radius:6px;overflow:hidden;
-  touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+  touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
 /* 头像裁切：裁切框为圆形（与最终展示的圆形头像一致） */
 .crop-stage.crop-round{border-radius:50%}
 /* 裁切弹窗必须盖在其它弹窗（如精灵设置）之上 —— 同为 modal-overlay，
@@ -188,7 +188,7 @@ button{font-family:inherit}
    实测列轨被顶到 98px 导致日历横向溢出（T-191e）；minmax(0,1fr) 显式钳到 0 */
 .due-cell{position:relative;height:46px;min-width:0;border:1px solid var(--border);border-radius:8px;
   display:flex;align-items:center;justify-content:center;font-size:13.5px;cursor:pointer;
-  background:#fff;user-select:none;-webkit-user-select:none;transition:border-color .12s,box-shadow .12s}
+  background:#fff;-webkit-user-select:none;user-select:none;transition:border-color .12s,box-shadow .12s}
 .due-cell:hover{border-color:var(--primary)}
 .due-cell.empty{visibility:hidden;cursor:default}
 .due-cell.empty:hover{border-color:var(--border)}
@@ -356,23 +356,13 @@ button{font-family:inherit}
 .tb-stat-band{grid-column:auto;flex-shrink:0;width:100%}
 .tb-stat-band .progress-overview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0}
 .tb-stat-band .progress-cards{display:contents}
-@media(max-width:1180px){
-  .topbar{grid-template-columns:minmax(0,1fr) minmax(260px,320px)}
-  .tb-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .tb-stat-band .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
-}
-@media(max-width:900px){
-  /* 窄屏：公告区移到左半下方（上下堆叠），左半保持双列 */
-  .topbar{grid-template-columns:minmax(0,1fr);gap:10px}
-  .topbar-aside{order:2}
-  .tb-stat-band .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
-}
-@media(max-width:640px){
-  .topbar{padding:10px 12px 0}
-  .tb-grid{grid-template-columns:minmax(0,1fr)}
-  .tb-stat-band .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .tb-stat-band .stat-value{font-size:16px}
-}
+/* 兼容性收尾（2026-11-13 浏览器适配 P1-3）：删除旧的 1180/900/640 断点块 ——
+   逐条核实其属性或被下方 ≤1199 收敛块（T-005）覆盖、或与基础规则同值（冗余）：
+   · .topbar columns/gap/padding、.tb-grid 列数、.topbar-aside order → ≤1199 块覆盖；
+   · .tb-stat-band .progress-overview 4col、.tb-stat-band .stat-value 16px → 与基础规则同值。
+   此前旧块靠「源码顺序晚于收敛块」被压制，任何人调整顺序都会让窄窗布局变形复发 —— 现根除。
+   ⚠️ 仍有意保留：@media(max-width:1440px)（1200-1440 视口的窄桌面适配，不在收敛块射程内）、
+      @media(max-width:900px) 的统计卡 2 列（部门页 .progress-overview，L1309）。 */
 .board-tabs{display:flex;flex-direction:column;gap:0;padding:12px 24px 0;max-width:1440px;margin:0 auto}
 /* ---- 目录树：按归属部门分组折叠 ---- */
 /* 部门层：所有部门节点排在同一行（紧凑），空部门同样占位不隐藏 */
@@ -392,7 +382,7 @@ button{font-family:inherit}
    字体样式与筛选明细行（.filter-hint）同款 —— 12px 灰字；
    跟在标题右侧吃满剩余宽度，已选过多时单行省略，全量看悬停提示 */
 .band-sel-hint{flex:1;min-width:0;margin-left:10px;font-size:12px;color:var(--text2);line-height:1.5;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:text}
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;-webkit-user-select:text;user-select:text}
 .band-sel-hint:empty{display:none}
 /* 当前打开的部门页（进入部门主页后，该节点高亮） */
 .tree-dept.cur{border-color:var(--primary);box-shadow:0 0 0 2px rgba(22,119,255,.10)}
@@ -544,7 +534,7 @@ button{font-family:inherit}
 .date-filter.active{border-style:solid;border-color:var(--primary);background:#f2f7fc}
 .filter-date{box-sizing:border-box;height:31px;padding:0 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;outline:none;background:#fff;color:var(--text);font-family:inherit;width:122px}
 .filter-date:focus{border-color:var(--primary);box-shadow:var(--ring)}
-.date-sep{color:var(--text2);font-size:12px;user-select:none}
+.date-sep{color:var(--text2);font-size:12px;-webkit-user-select:none;user-select:none}
 .filter-clear{width:24px;height:24px;border:1px solid var(--border);background:#fff;color:var(--text2);border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .filter-clear:hover{border-color:var(--danger);color:var(--danger)}
 /* [hidden] 的浏览器默认 display:none 会被上面的 inline-flex 覆盖，必须显式兜底 */
@@ -589,9 +579,8 @@ button{font-family:inherit}
 .notice-item-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--text)}
 .notice-item-text{font-size:12.5px;color:var(--text2);line-height:1.7;margin-top:5px;white-space:pre-wrap}
 .notice-item-meta{font-size:11.5px;color:var(--text3);margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-@media(max-width:1024px){
-  .progress-overview{grid-template-columns:repeat(4,minmax(0,1fr))}
-}
+/* 兼容性收尾（2026-11-13）：删除 @media(max-width:1024px) 的 .progress-overview 4col ——
+   与基础规则（.progress-overview{grid-template-columns:repeat(4,...)}）同值，纯冗余。 */
 /* ===== 需求5：窗口缩小后的布局稳定性 =====
    实测（headless Chrome，2026-11-02）：
      1600px → 横向溢出 0
@@ -725,7 +714,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .dept-stat .ds-value.blue{color:var(--primary)}.dept-stat .ds-value.green{color:var(--success)}
 .dept-stat .ds-value.orange{color:var(--warning)}.dept-stat .ds-value.red{color:var(--danger)}
 /* 「更多」折叠区 */
-.dept-more-toggle{margin-top:10px;font-size:12.5px;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;user-select:none}
+.dept-more-toggle{margin-top:10px;font-size:12.5px;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;-webkit-user-select:none;user-select:none}
 .dept-more-toggle:hover{text-decoration:underline}
 .dept-more{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin-top:10px}
 .dept-more[hidden]{display:none}
@@ -790,7 +779,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 板块卡片之间间距（2026-11-10 #129 用户反馈「各行事项间间距略大」）：12 → 8px */
 .board-content{display:flex;flex-direction:column;gap:8px}
 .week-group{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
-.week-header{display:flex;align-items:center;gap:12px;padding:12px 22px;cursor:default;user-select:none;transition:background .15s}
+.week-header{display:flex;align-items:center;gap:12px;padding:12px 22px;cursor:default;-webkit-user-select:none;user-select:none;transition:background .15s}
 /* 板块勾选框（#158）：位于 ▶ 三角与标题之间 —— 各自独立不重叠；勾选状态按用户隔离 */
 .week-header .col-chk{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--primary);margin:0}
 /* 勾选模式（#159）：事项/子事项勾选框；开关按钮两态 */
@@ -920,7 +909,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .item-seq{width:20px;height:20px;border-radius:50%;background:#eef2f7;color:var(--text2);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums}
 .item-seq.pin{background:#fff7e6;color:#d46b08;border:1px solid #ffd591}
 /* 事项行左侧的子事项目录展开箭头 */
-.item-chev{display:inline-flex;align-items:center;justify-content:center;width:16px;flex-shrink:0;cursor:pointer;color:var(--text3);font-size:11px;transition:transform .2s;user-select:none;position:relative}
+.item-chev{display:inline-flex;align-items:center;justify-content:center;width:16px;flex-shrink:0;cursor:pointer;color:var(--text3);font-size:11px;transition:transform .2s;-webkit-user-select:none;user-select:none;position:relative}
 /* 子事项展开箭头：字号 10px→11px（10px 在 1080p 上已明显吃力，与项目内其它小字对齐）。
    同样用伪元素扩热区，视觉尺寸不变 */
 .item-chev::after{content:'';position:absolute;left:50%;top:50%;width:24px;height:24px;transform:translate(-50%,-50%)}
@@ -1010,7 +999,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .status-tag.progressing{background:#e6f7ff;color:var(--primary);border:1px solid #91d5ff}
 .status-tag.pending{background:#fff1f0;color:#cb3939;border:1px solid #ffa39e}
 /* 状态标签同时是行内唯一的状态切换入口：可点击，带按压态与涟漪反馈 */
-.status-tag-act{cursor:pointer;user-select:none;transition:transform .12s,box-shadow .15s,filter .15s}
+.status-tag-act{cursor:pointer;-webkit-user-select:none;user-select:none;transition:transform .12s,box-shadow .15s,filter .15s}
 .status-tag-act:hover{box-shadow:0 0 0 2px rgba(22,119,255,.16);filter:brightness(.97)}
 .status-tag-act:active{transform:scale(.93)}
 /* 详情弹窗的状态按钮：当前状态的唯一呈现，也是本弹窗里唯一的状态设置入口。
@@ -1068,13 +1057,13 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .modal-wide .modal-body{gap:14px}
 .modal-wide .comment-form input{padding:9px 12px}
 .modal-wide .comment-item{padding:7px 0;font-size:13px}
-.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;cursor:move;user-select:none}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;cursor:move;-webkit-user-select:none;user-select:none}
 .modal-header h2{font-size:16px;font-weight:600}
 .modal-close{border:none;background:none;font-size:18px;color:var(--text2);cursor:pointer;line-height:1}
 .modal-close:hover{color:var(--danger)}
 .modal-header:active{cursor:grabbing}
 .modal-footer{cursor:move}
-.modal-dragging{cursor:grabbing;user-select:none}
+.modal-dragging{cursor:grabbing;-webkit-user-select:none;user-select:none}
 .modal-body{display:flex;flex-direction:column;gap:12px}
 /* 导出字段选择（2026-11-06 #79）：字段行 + 勾选顺序序号徽标 */
 .exp-field{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:13px}
@@ -1089,7 +1078,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .form-textarea{min-height:100px;resize:vertical}
 /* ---- 单选组（新建板块的「性质」）---- */
 .radio-group{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
-.radio-item{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;user-select:none}
+.radio-item{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;-webkit-user-select:none;user-select:none}
 .radio-item input{width:15px;height:15px;margin:0;accent-color:var(--primary);cursor:pointer}
 /* 只读字段（创建人）：锁定不可修改 */
 .form-input[readonly]{background:#f5f7fa;color:var(--text2);cursor:not-allowed}
@@ -1176,7 +1165,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .tp-box-na{opacity:.35;cursor:default}
 /* person 模式的节点框：可点击（级联勾选下属人员），用「半选」表达部分选中 */
 .tp-box-node{cursor:pointer;border-color:#b7d4f7}
-.tp-box{display:inline-block;width:14px;height:14px;border:1.5px solid #d9d9d9;border-radius:3px;background:#fff;cursor:pointer;position:relative;flex-shrink:0;vertical-align:middle;transition:border-color .15s;user-select:none;pointer-events:none}
+.tp-box{display:inline-block;width:14px;height:14px;border:1.5px solid #d9d9d9;border-radius:3px;background:#fff;cursor:pointer;position:relative;flex-shrink:0;vertical-align:middle;transition:border-color .15s;-webkit-user-select:none;user-select:none;pointer-events:none}
 .tp-box.on,.tp-box.half{background:var(--primary);border-color:var(--primary)}
 .tp-box .tp-tick{position:absolute;left:3px;top:0;width:4px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
 .tp-box .tp-bar{position:absolute;left:2px;right:2px;top:50%;height:2px;background:#fff;transform:translateY(-50%);border-radius:1px}
@@ -1411,9 +1400,12 @@ body{
 .pcard{box-shadow:var(--shadow-sm);border-radius:12px}
 
 /* Team modal - group chips (replace inline labels) */
-.tm-grp-opt{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px 3px;border-radius:5px;cursor:pointer;font-size:12.5px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;user-select:none;border:1px solid transparent}
+.tm-grp-opt{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px 3px;border-radius:5px;cursor:pointer;font-size:12.5px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;-webkit-user-select:none;user-select:none;border:1px solid transparent}
 .tm-grp-opt:hover{background:rgba(0,45,116,.06);border-color:rgba(0,45,116,.16)}
-.tm-grp-opt:has(input:checked){background:rgba(0,45,116,.10);border-color:rgba(0,45,116,.30);color:var(--primary);font-weight:500}
+.tm-grp-opt:has(input:checked),.tm-grp-opt.on{background:rgba(0,45,116,.10);border-color:rgba(0,45,116,.30);color:var(--primary);font-weight:500}
+/* 兼容性兜底（2026-11-13 浏览器适配 P0）：:has() 需 Firefox 121+/Safari 15.4+/Chrome 105+，
+   更老浏览器用 .on 类承担同样的选中高亮 —— JS 渲染与 change 事件同步切类（见脚本区
+   「:has() 类名同步」）。双选择器并写：现代浏览器走 :has，老浏览器走 .on。 */
 .tm-grp-opt input[type=checkbox]{margin:0;cursor:pointer;accent-color:var(--primary)}
 #teamList{max-height:min(520px,calc(100vh - 180px));overflow:auto;border:1px solid var(--border);border-radius:8px}
 #teamList table{table-layout:fixed;width:100%}
@@ -1451,6 +1443,12 @@ body{
   outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
 .btn-primary:focus-visible,.btn-default:focus-visible,.header-btn:focus-visible,.tab-btn:focus-visible,.icon-btn:focus-visible{outline:none;box-shadow:var(--ring)}
 .search-input:focus-visible,.form-input:focus-visible,.form-select:focus-visible,.form-textarea:focus-visible{outline:none}
+/* 兼容性兜底（2026-11-13 浏览器适配 P1）：Safari < 15.4 不支持 :focus-visible →
+   该选择器整条失效、键盘焦点环消失。退化为 :focus（代价：鼠标点击也显示焦点环，可接受）。 */
+@supports not selector(:focus-visible){
+  :where(button,a[href],input,select,textarea,[tabindex],[onclick]):focus{
+    outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+}
 /* chip 上的 × 移除按钮：可聚焦，给它焦点样式（上面通用兜底已覆盖，此处仅微调外观） */
 .cf-chip i:focus-visible{outline:2px solid var(--primary);outline-offset:1px;border-radius:50%}
 /* 树弹窗的节点标签：已有 box-shadow 焦点样式，保持 */
@@ -1477,7 +1475,7 @@ padding:32px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,"Seg
 #fileGuard p{margin:0 0 8px;font-size:14px;color:#5c6b7f;line-height:1.8}
 #fileGuard .fg-code{display:block;background:#f4f6f9;border:1px solid #e2e8f0;border-radius:6px;
 padding:10px 12px;margin:10px 0;font-family:Consolas,Monaco,monospace;font-size:13px;color:#002D74;
-word-break:break-all;user-select:all;text-align:left}
+word-break:break-all;-webkit-user-select:all;user-select:all;text-align:left}
 #fileGuard .fg-tip{font-size:13px;color:#8c9bb0;margin-top:14px;line-height:1.7}
 #fileGuard .fg-btn{display:inline-block;margin-top:16px;background:#002D74;color:#fff;
 padding:10px 22px;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;cursor:pointer}
@@ -2579,7 +2577,7 @@ function goLogin(){
 .bc-section > .lab{font-size:12.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
 .bc-section > .lab .req{color:var(--danger);font-size:12px}
 .bc-pills{display:flex;flex-wrap:wrap;gap:8px}
-.bc-pill{border:1px solid var(--border);background:var(--card);color:var(--text);padding:7px 16px;border-radius:20px;font-size:13px;cursor:pointer;transition:all .15s;user-select:none}
+.bc-pill{border:1px solid var(--border);background:var(--card);color:var(--text);padding:7px 16px;border-radius:20px;font-size:13px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
 .bc-pill:hover{border-color:var(--primary);color:var(--primary)}
 .bc-pill.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(0,45,116,.25)}
 .bc-pill.on.warn{background:var(--warning);border-color:var(--warning);box-shadow:0 2px 8px rgba(250,173,20,.3)}
@@ -2613,7 +2611,7 @@ function goLogin(){
   flex:0 1 auto;min-width:0}
 .combo-filter.active{border-color:var(--primary);background:#f2f7fc}
 .combo-filter:focus-within{border-color:var(--primary);box-shadow:var(--ring)}
-.cf-label{font-size:12.5px;color:var(--text2);white-space:nowrap;padding-top:4px;user-select:none;flex-shrink:0}
+.cf-label{font-size:12.5px;color:var(--text2);white-space:nowrap;padding-top:4px;-webkit-user-select:none;user-select:none;flex-shrink:0}
 .combo-filter.active .cf-label{color:var(--primary)}
 /* 输入区：窄一点（人员/周数两个控件都要给同行其它控件让位），
    已选 chips 增多时可临时撑宽，但整体不超过 220px。
@@ -2643,11 +2641,13 @@ function goLogin(){
    → 有 chips 时把 placeholder 设为透明（不占视觉空间、输入框自然收窄给 chips 让位）。
    → 用 :has() 检测**同容器内是否有 chip**，纯 CSS，不改 JS 渲染逻辑。
    ⚠️ :has() 需要 Chrome 105+ / Safari 15.4+ / Firefox 121+；
+   2026-11-13 兼容性兜底：每个选择器并写等价类名版（.has-chips / .has-count），
+   由脚本区 MutationObserver 在 chips/计数渲染时同步切类（见「:has() 类名同步」）。
       本项目验证环境为 Chrome 155，支持无碍。
       若需兼容更老浏览器，替代方案是给 .combo-filter 加 .has-chip 类（需改 JS）。 */
-.cf-field:has(.cf-chip) .cf-input::placeholder{color:transparent}
+.cf-field:has(.cf-chip) .cf-input::placeholder,.cf-field.has-chips .cf-input::placeholder{color:transparent}
 /* 有选中项时输入框只保留最小宽度，把空间让给 chips */
-.cf-field:has(.cf-chip) .cf-input{flex:0 1 24px;min-width:24px}
+.cf-field:has(.cf-chip) .cf-input,.cf-field.has-chips .cf-input{flex:0 1 24px;min-width:24px}
 .cf-chips{display:flex;flex-wrap:nowrap;gap:4px;min-width:0;flex:1 1 auto;
   overflow:hidden;position:relative;
   /* 右缘渐隐：提示内容被裁切，暗示可悬停查看 */
@@ -2667,11 +2667,11 @@ function goLogin(){
   background:#e6f1fb;color:#185fa5;border:1px solid #b5d4f4;
   font-size:11.5px;line-height:1;white-space:nowrap;flex-shrink:0;
   font-variant-numeric:tabular-nums;letter-spacing:.2px}
-.cf-field:has(.cf-count:not(:empty)) .cf-count{display:inline-flex}
+.cf-field:has(.cf-count:not(:empty)) .cf-count,.cf-field.has-count .cf-count{display:inline-flex}
 /* 有计数徽标时，输入框不再显示 placeholder（避免与徽标语义重复、也免得挤占宽度） */
-.cf-field:has(.cf-count:not(:empty)) .cf-input::placeholder{color:transparent}
+.cf-field:has(.cf-count:not(:empty)) .cf-input::placeholder,.cf-field.has-count .cf-input::placeholder{color:transparent}
 /* 输入框收窄到最小宽度，把空间让给计数徽标（宽度固定，field 总宽不变） */
-.cf-field:has(.cf-count:not(:empty)) .cf-input{flex:0 1 24px;min-width:24px}
+.cf-field:has(.cf-count:not(:empty)) .cf-input,.cf-field.has-count .cf-input{flex:0 1 24px;min-width:24px}
 /* 计数徽标可点击 → 打开对应的选择器（树/下拉），与输入框行为一致 */
 .cf-count{cursor:pointer}
 .cf-count:hover{background:#d6e9fb;border-color:#8fc2ef}
@@ -10046,7 +10046,7 @@ function initTeamFilterBar(){
     <div class="tm-table-scroll">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--bg)">
-          <th style="padding:6px 10px;text-align:left;width:122px;cursor:pointer;user-select:none" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
+          <th style="padding:6px 10px;text-align:left;width:122px;cursor:pointer;-webkit-user-select:none;user-select:none" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
           <th style="padding:6px 10px;text-align:left;width:130px">姓名</th>
           <th style="padding:6px 10px;text-align:left;width:230px">部门</th>
           <th style="padding:6px 10px;text-align:left;width:150px">账号</th>
@@ -10319,7 +10319,7 @@ function renderPetZoneTabs(){
     return '<span class="pet-tab'+(act?' pet-tab-act':'')+'" data-zone="'+esc(z.name)+'" '
       +'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid '
       +(act?'var(--primary)':'var(--border)')+';border-radius:16px;cursor:pointer;font-size:12.5px;'
-      +'background:'+(act?'rgba(0,45,116,.08)':'#fff')+';user-select:none">'
+      +'background:'+(act?'rgba(0,45,116,.08)':'#fff')+';-webkit-user-select:none;user-select:none">'
       +esc(z.label)+'<b style="font-weight:400;color:var(--text3)">'+z.count+'</b>'+ops+'</span>';
   }).join('')
   +'<button type="button" class="icon-btn" style="padding:2px 10px;font-size:12px" onclick="petNewZone()">＋ 新增分区</button>';
@@ -11294,7 +11294,7 @@ function renderBoardChecks(boards, limit, searchTerm, readonly){
   if(mineIds) pool=pool.filter(b=>mineIds.includes(b.board_id)||sel.includes(b.board_id));
   const totalPool=pool.length;
   if(search) pool=pool.filter(b=>((b.board_name||'').toLowerCase().includes(search))||((b.board_id||'').toLowerCase().includes(search)));
-  const chk=pool.map(b=>`<label class="tm-grp-opt" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}${readonly?' disabled':''}><span style="font-size:12.5px">${esc(b.board_name)}</span>${(!mineIds||mineIds.includes(b.board_id))?'':'<span style="font-size:10px;color:var(--text3);flex-shrink:0">已绑定</span>'}</label>`).join('');
+  const chk=pool.map(b=>`<label class="tm-grp-opt${sel.includes(b.board_id)?' on':''}" style="display:flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 8px;background:var(--bg)"><input type="checkbox" class="g_brd_chk" value="${esc(b.board_id)}" ${sel.includes(b.board_id)?'checked':''}${readonly?' disabled':''}><span style="font-size:12.5px">${esc(b.board_name)}</span>${(!mineIds||mineIds.includes(b.board_id))?'':'<span style="font-size:10px;color:var(--text3);flex-shrink:0">已绑定</span>'}</label>`).join('');
   wrap.innerHTML=(chk||'<span style="color:var(--text3);font-size:12px">'+(search?'无匹配板块':(limit?'上级部门未绑定看板，暂无可用选项':'暂无看板数据'))+'</span>');
   if(!bindAllowed){
     hint.textContent='⚠ 该节点不在你的管辖范围内，看板绑定为只读，不可修改。';
@@ -13241,6 +13241,41 @@ async function bcAfterDelete(deletedIds){
       sgFinish();
       return r;
     };
+  });
+})();
+
+// ========== 兼容性兜底（2026-11-13 浏览器适配 P0/P1）==========
+// :has() 需 Firefox 121+ / Safari 15.4+ / Chrome 105+；更老浏览器用等价类名承担：
+//   · .cf-field 的 chips/计数渲染 → MutationObserver 同步 .has-chips / .has-count
+//   · .tm-grp-opt 的勾选态 → 渲染时写 .on（见 tmBindPool 渲染行）+ change 事件委托切换
+// CSS 侧双选择器并写（:has 版 + 类名版），现代浏览器两路等价、老浏览器走类名路。
+(function(){
+  function syncCf(field){
+    if(!field)return;
+    field.classList.toggle('has-chips', !!field.querySelector('.cf-chip'));
+    const cnt=field.querySelector('.cf-count');
+    field.classList.toggle('has-count', !!cnt && (cnt.textContent||'').trim()!=='');
+  }
+  ['personFilterChips','ccFilterChips','weekFilterChips','yearFilterChips','colStatusChips',
+   'personFilterCount','ccFilterCount','weekFilterCount','yearFilterCount','colStatusCount'
+  ].forEach(function(id){
+    const el=document.getElementById(id);
+    if(!el)return;
+    const field=el.closest('.cf-field');
+    if(!field)return;
+    syncCf(field);
+    try{
+      new MutationObserver(function(){syncCf(field);})
+        .observe(el,{childList:true,subtree:true,characterData:true});
+    }catch(e){/* MutationObserver 不可用时 :has() 仍可覆盖现代浏览器 */}
+  });
+  // 架构绑定弹窗的看板勾选态（老浏览器无 :has() → change 时同步 .on）
+  document.addEventListener('change',function(e){
+    const t=e.target;
+    if(t&&t.classList&&t.classList.contains('g_brd_chk')){
+      const l=t.closest('.tm-grp-opt');
+      if(l)l.classList.toggle('on',!!t.checked);
+    }
   });
 })();
 </script>
