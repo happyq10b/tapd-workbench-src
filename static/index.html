@@ -7499,10 +7499,8 @@ async function openColumnDetail(el){
   MENTION_CTXS.cd.pool=null;
   api('/api/columns/mention_pool?col_key='+encodeURIComponent(d.colkey||''))
     .then(function(p){MENTION_CTXS.cd.pool=(p&&p.names)||[];}).catch(function(){});
-  // 元信息/描述/待办/评论同步渲染（与事项详情打开路径同构）
+  // 元信息/描述/待办/评论/操作记录同步渲染（与事项详情打开路径同构）
   renderColumnDetail(d);
-  // 操作记录（2026-11-13）：复刻事项详情 —— 与评论互不依赖，并行拉取
-  cdLoadActions(d.colkey||'');
   // 编辑锁状态（与事项详情的 🔒 标签同款显示）：他人持锁时浏览界面头部展示
   try{
     const h=await api('/api/locks/holder?key='+encodeURIComponent('column:'+(d.colkey||'')));
@@ -7533,9 +7531,13 @@ function renderColumnDetail(d){
     +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>　截止日期：<b>${esc(_due||'—')}</b>　倒计时：${_cdHtml}`;
   const dd=document.getElementById('cd_desc');
   if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
-  // 待办 + 评论（T-0188）：两者互不依赖 → 并行拉取（与事项详情 #98 同款提速）
+  // 待办 + 评论 + 操作记录（T-0188/T-204b）：三者互不依赖 → 并行拉取；
+  // ⚠️ 操作记录必须挂在 renderColumnDetail 里（而不是只在 openColumnDetail）——
+  // 「编辑 → 保存 → 回到预览」走 backToColumnDetail → renderColumnDetail，
+  // 若不在此刷新，刚保存的记录不会出现（T-204b 用户报告「操作记录没有生效」根因）
   cdLoadTodos(d.colkey||'');
   cdLoadComments(d.colkey||'');
+  cdLoadActions(d.colkey||'');
 }
 // ---------- 板块待办（T-0188）：结构与事项「代办任务」一致 ----------
 var CD_TODOS=[];   // 当前浏览板块的待办清单
