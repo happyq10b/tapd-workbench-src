@@ -3098,6 +3098,10 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
               f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    # 板块变更实时信号（2026-11-13）：开着板块预览的客户端据此刷新评论/待办/操作记录；
+    # 改名换 key 时带 prev_col_key → 预览跟随新 key（否则旧 key 查询失联）
+    await _ws_column_change(new_key, username,
+                            prev_col_key=(req.col_key if (old and req.col_key != new_key) else ''))
     return {'ok': True, 'col_key': new_key, 'column_name': name, 'year': year,
             'nature': nature, 'created_at': created,
             'owner': (new_owner if new_owner is not None else (old['owner'] if old else ''))}
@@ -3158,6 +3162,16 @@ def log_column_action(col_key, username, action, detail=''):
         pass
 
 
+async def _ws_column_change(col_key: str, username: str, prev_col_key: str = ''):
+    """板块变更实时信号（2026-11-13）：评论/待办/板块编辑后广播给**可见该看板**的在线用户，
+    开着板块预览的客户端据此刷新评论/待办/操作记录（T-204d「操作记录更新不及时」修复）。
+    本机操作前端会显式刷新，再收到广播亦只是幂等重拉；板块已删除时 board_id 为空 → 不过滤。"""
+    row = dbq('SELECT board_id FROM board_columns WHERE col_key=?', (col_key,))
+    await ws_mgr.broadcast({'type': 'column_change', 'col_key': col_key,
+                            'board_id': row[0]['board_id'] if row else '',
+                            'prev_col_key': prev_col_key or '', 'by': username})
+
+
 class ColumnCommentReq(BaseModel):
     col_key: str
     content: str
@@ -3178,7 +3192,7 @@ class ColumnTodoToggleReq(BaseModel):
 def column_comments_list(col_key: str, username: str = Depends(require_auth)):
     _column_for_access(col_key, username)
     rows = dbq('SELECT id, col_key, username, content, mentions, created_at FROM column_comments'
-               ' WHERE col_key=? ORDER BY id LIMIT 200', (col_key,))
+               ' WHERE col_key=? ORDER BY id DESC LIMIT 200', (col_key,))
     return {'comments': [dict(r) for r in rows]}
 
 
@@ -3239,6 +3253,9 @@ async def add_column_comment(req: ColumnCommentReq, username: str = Depends(requ
                  f'在板块「{cname}」的评论中提及了你：{content[:160]}'))
     await ws_mgr.broadcast({'type': 'comment', 'card_id': 'column:' + req.col_key,
         'by': username}, exclude=username)
+    # 板块变更信号（2026-11-13）：开着预览的客户端刷新评论/待办/操作记录（含广播者自身——
+    # 前端显式刷新 + 广播重拉幂等，双保险）
+    await _ws_column_change(req.col_key, username)
     return {'ok': True}
 
 
@@ -3269,8 +3286,8 @@ def _todo_guard(col_key: str, username: str):
 
 
 @app.post('/api/columns/todos')
-def add_column_todo(req: ColumnTodoReq, username: str = Depends(require_writer),
-                    request: Request = None):
+async def add_column_todo(req: ColumnTodoReq, username: str = Depends(require_writer),
+                          request: Request = None):
     _todo_guard(req.col_key, username)
     # 2026-11-13（用户口径）：板块待办只能由**板块负责人及以上**追加 ——
     # 板块负责人 / 看板负责人 / 架构负责人 / 管理员放行（has_role = effective_level
@@ -3294,12 +3311,13 @@ def add_column_todo(req: ColumnTodoReq, username: str = Depends(require_writer),
     log_column_action(req.col_key, username, 'todo_add', name)
     audit_log(username, client_ip(request), 'subtask_add', f'板块 {req.col_key}',
               '新增板块待办', 'success')
+    await _ws_column_change(req.col_key, username)
     return {'ok': True}
 
 
 @app.put('/api/columns/todos/{tid}')
-def update_column_todo(tid: int, req: ColumnTodoToggleReq, username: str = Depends(require_writer),
-                       request: Request = None):
+async def update_column_todo(tid: int, req: ColumnTodoToggleReq, username: str = Depends(require_writer),
+                             request: Request = None):
     row = dbq('SELECT col_key FROM column_todos WHERE id=?', (tid,))
     if not row:
         raise HTTPException(404, '待办不存在')
@@ -3311,12 +3329,13 @@ def update_column_todo(tid: int, req: ColumnTodoToggleReq, username: str = Depen
         dbe('UPDATE column_todos SET done=? WHERE id=?', (1 if req.done else 0, tid))
     log_column_action(row[0]['col_key'], username, 'todo_update',
                       f'{req.name.strip()[:120]}（{"完成" if req.done else "取消完成"}）')
+    await _ws_column_change(row[0]['col_key'], username)
     return {'ok': True}
 
 
 @app.delete('/api/columns/todos/{tid}')
-def delete_column_todo(tid: int, username: str = Depends(require_writer),
-                       request: Request = None):
+async def delete_column_todo(tid: int, username: str = Depends(require_writer),
+                             request: Request = None):
     row = dbq('SELECT col_key, name FROM column_todos WHERE id=?', (tid,))
     if not row:
         raise HTTPException(404, '待办不存在')
@@ -3325,6 +3344,7 @@ def delete_column_todo(tid: int, username: str = Depends(require_writer),
     log_column_action(row[0]['col_key'], username, 'todo_delete', row[0]['name'])
     audit_log(username, client_ip(request), 'subtask_delete', f'板块 {row[0]["col_key"]}',
               '删除板块待办', 'success')
+    await _ws_column_change(row[0]['col_key'], username)
     return {'ok': True}
 
 
@@ -4483,7 +4503,7 @@ def get_comments(card_id: str, username: str = Depends(require_auth)):
     # 可见性校验：该卡片所属看板对当前账号不可见 → 403（此前只做登录校验，
     # 不可见看板的评论可被直接调 API 读取 → 越权读）
     check_card_access(card_id, username)
-    rows = dbq('SELECT id, card_id, username, content, mentions, created_at FROM comments WHERE card_id=? ORDER BY id', (card_id,))
+    rows = dbq('SELECT id, card_id, username, content, mentions, created_at FROM comments WHERE card_id=? ORDER BY id DESC', (card_id,))
     return {'comments': [dict(r) for r in rows]}
 
 @app.post('/api/cards/{card_id}/comments')
