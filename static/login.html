@@ -26,9 +26,9 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
      实测 15px/700 时文字只占 32px（方块 56px，左右各余 12px）→ 偏小、不够饱满。
      改为 **18px/800** → 文字占 41px（左右各余 7.5px）→ 饱满且留得住边距。
      ⚠️ 再大（19~20px）会只剩 6~5px 边距 → 显得挤、且不同字体渲染差异可能导致溢出。 */
-.logo .icon{width:56px;height:56px;border-radius:10px;background:#1890ff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;
+.logo .icon{width:56px;height:56px;border-radius:10px;background:#002D74;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;
   color:#fff;font-size:18px;font-weight:800;letter-spacing:.5px;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-  box-shadow:0 2px 6px rgba(24,144,255,.28)}
+  box-shadow:0 2px 6px rgba(0,45,116,.28)}
 /* 标题：加字重 + 微字距 → 更有商务的稳重感（原来是常规字重的 20px） */
 .logo h1{font-size:20px;color:#1f1f1f;font-weight:600;letter-spacing:.6px}
 /* 品牌缩写徽标：~~跟在中文全名后面，小号浅色~~ 
@@ -37,13 +37,15 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
    → 登录页标识区现在的分工：图标=FISP 缩写 / 标题=中文全称 / 英文行=英文全称。
    → 本条样式规则在登录页已无对应元素，保留供主界面 index.html 的同名写法参考
      （index.html 的标题旁仍有徽标，那里没有图标块，不重复）。 */
-/* 英文全称行：加大字距 + 略提字号 → 全大写式的商务排版感 */
-.logo .en{font-size:10.5px;color:#a3adc0;margin-top:6px;letter-spacing:1.1px;font-weight:500;text-transform:uppercase}
-.logo p{font-size:12px;color:#7a88a0;margin-top:5px;letter-spacing:.4px}
+/* 英文全称行：加大字距 + 略提字号 → 全大写式的商务排版感
+   （UI审查 B2：#a3adc0 对比度 2.6:1 不达小字 AA → 加深至 4.5:1 以上） */
+.logo .en{font-size:10.5px;color:#6e7891;margin-top:6px;letter-spacing:1.1px;font-weight:500;text-transform:uppercase}
+.logo p{font-size:12px;color:#566275;margin-top:5px;letter-spacing:.4px}
 .field{margin-bottom:16px}
-.field label{display:block;font-size:13px;color:#8c8c8c;margin-bottom:6px;font-weight:500}
+/* UI审查 B2：标签是关键交互文案，#8c8c8c 仅 3.4:1 → #595959（约 7:1） */
+.field label{display:block;font-size:13px;color:#595959;margin-bottom:6px;font-weight:500}
 .field input{width:100%;padding:11px 14px;border:1px solid #d5dce6;border-radius:8px;font-size:14px;outline:none;transition:border-color .15s}
-.field input:focus{border-color:#1890ff}
+.field input:focus{border-color:#002D74}
 /* 密码框小眼睛 */
 .pwd-wrap{position:relative}
 .pwd-wrap input{padding-right:40px}
@@ -54,14 +56,14 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
   width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
   border:none;background:transparent;color:#7a88a0;cursor:pointer;
   font-size:15px;font-weight:normal;line-height:1;padding:0;opacity:.75;user-select:none}
-.pwd-eye:hover{opacity:1;color:#1890ff}
-.pwd-eye.on{opacity:1;color:#1890ff}
+.pwd-eye:hover{opacity:1;color:#002D74}
+.pwd-eye.on{opacity:1;color:#002D74}
 /* 锁定提示 */
 .lock-box{margin-top:14px;padding:9px 12px;border-radius:8px;font-size:12.5px;line-height:1.6;
   background:#fff7e6;border:1px solid #ffd591;color:#ad6800}
 .lock-box.err{background:#fff1f0;border-color:#ffa39e;color:#cf1322}
 .lock-box b{font-variant-numeric:tabular-nums}
-button{padding:12px;border:none;border-radius:8px;background:#1890ff;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s;
+button{padding:12px;border:none;border-radius:8px;background:#002D74;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s;
   letter-spacing:2px;font-family:inherit}
 /* 登录按钮撑满；其他按钮（如小眼睛）由各自规则控制尺寸 */
 #btn{width:100%}
@@ -74,7 +76,14 @@ button:disabled{opacity:.5;cursor:not-allowed}
 /* 通知栏（T-013b）：超管「登入通知」配置内容；文字左对齐（紧随精灵之后
    固定间距起排，不居中）、允许换行；padding-left 与精灵（30+56=86px）
    保持 10px 固定间距 → 文本区从 96px 起 */
-.hint{margin-top:18px;font-size:11.5px;color:#7a88a0;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word}
+.hint{margin-top:18px;font-size:11.5px;color:#566275;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word}
+/* ===== 键盘可达 + 焦点可见（UI审查 E1/B2）=====
+   登录是安全关键路径：主界面有 :focus-visible 通用兜底，登录页此前完全没有
+   → Tab 时焦点不可见。⚠️ .field input 基础规则自带 outline:none（特异性高于
+   :where 兜底），必须显式写 input 的 focus-visible 才能生效。 */
+:where(button,input):focus-visible{outline:2px solid #002D74;outline-offset:2px}
+.field input:focus-visible{outline:2px solid #002D74;outline-offset:1px}
+button:focus-visible{border-radius:8px}
 </style>
 </head>
 <body>
@@ -95,12 +104,16 @@ button:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <button id="btn">登 录</button>
   <div class="msg" id="msg"></div>
+  <!-- 单点登录冲突提示（UI审查 E2）：原生 alert 与整体视觉断裂且阻塞主线程
+       → 复用锁定提示（lock-box.err）的内嵌卡片形态；逻辑不变，仅改展示载体 -->
+  <div class="lock-box err" id="conflictBox" hidden></div>
   <div class="lock-box" id="lockBox" hidden></div>
   <div class="hint" id="noticeBar">账号由管理员分配，权限范围以账号配置为准</div>
 </div>
 <script>
 const u=document.getElementById('u'),p=document.getElementById('p'),btn=document.getElementById('btn'),
-      msg=document.getElementById('msg'),lockBox=document.getElementById('lockBox'),eye=document.getElementById('pwdEye');
+      msg=document.getElementById('msg'),lockBox=document.getElementById('lockBox'),eye=document.getElementById('pwdEye'),
+      conflictBox=document.getElementById('conflictBox');
 function show(m,ok){msg.textContent=m;msg.style.color=ok?'#0f9d6e':'#d63c3c'}
 
 // —— 密码小眼睛：切换显示 / 隐藏 ——
@@ -178,15 +191,15 @@ u.addEventListener('input',()=>{
 
 async function doLogin(){
   if(!u.value.trim()||!p.value){show('请输入账号和密码');return}
-  btn.disabled=true;btn.textContent='登录中...';msg.textContent='';
+  btn.disabled=true;btn.textContent='登录中...';msg.textContent='';conflictBox.hidden=true;
   try{
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({username:u.value.trim(),password:p.value})});
     const d=await r.json();
     if(!r.ok){
       show(d.detail||'登录失败');
-      // 单点登录（#113）：账号已在线 → 弹出提示框（用户要求文案）
-      if(r.status===409){alert(d.detail||'该账号当前已在线。如非本人操作，请联系超级管理员将该用户强制下线后再试');}
+      // 单点登录（#113）：账号已在线 → 内嵌提示卡（原 alert 改版，UI审查 E2）
+      if(r.status===409){conflictBox.textContent=d.detail||'该账号当前已在线。如非本人操作，请联系超级管理员将该用户强制下线后再试';conflictBox.hidden=false;}
       // 失败后刷新锁定状态（可能进入冷却或被锁定）
       try{
         const s2=await fetch('/api/login/lock-status?username='+encodeURIComponent(u.value.trim()));
@@ -195,6 +208,7 @@ async function doLogin(){
       return;
     }
     renderLock({blocked:false});
+    conflictBox.hidden=true;
     // #114：写会话级 cookie（不带过期时间）——浏览器关闭即失效，重开必重登
     document.cookie='tk='+encodeURIComponent(d.token)+'; path=/; SameSite=Lax';
     localStorage.removeItem('tk');

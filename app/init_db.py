@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS cards (
     parent_id      TEXT NOT NULL DEFAULT '',
     version        INTEGER NOT NULL DEFAULT 1,
     deleted        INTEGER NOT NULL DEFAULT 0,
+    -- 逾期天数（T-191j 结算）：状态变为「已完成」时结算一次 ——
+    --   完成日 - 截止日：逾期完成=正数 / 提前完成=负数 / 当天完成=0；无截止日期=NULL。
+    --   只在转入 done 时写（含 done 状态下修改截止日期时重算），离开 done 不清空（留档）。
+    overdue_days   INTEGER,
     week_no        TEXT NOT NULL DEFAULT '',   -- 周数维度，如「2026年第41周」（自然周：周一~周日）
     copy_from      TEXT NOT NULL DEFAULT ''    -- 复制来源 card_id（空 = 非副本）
 );
@@ -301,7 +305,9 @@ CREATE TABLE IF NOT EXISTS board_columns (
     -- 板块描述（2026-11-09 #93）：编辑/新建板块弹窗的可选说明文字，板块标题 tooltip 展示
     description TEXT NOT NULL DEFAULT '',
     -- 板块截止日期（T-0188 倒计时）：YYYY-MM-DD，空 = 未设置
-    due_date    TEXT NOT NULL DEFAULT ''
+    due_date    TEXT NOT NULL DEFAULT '',
+    -- 逾期天数（T-191j 结算）：completion 变为「已完成」时结算一次，口径与 cards 同
+    overdue_days INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id);
 CREATE INDEX IF NOT EXISTS idx_board_columns_name ON board_columns(column_name);
@@ -431,6 +437,29 @@ CREATE TABLE IF NOT EXISTS user_pref_snapshots (
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_user_pref_snap_user ON user_pref_snapshots(username);
+-- 人员媒体历史（T-0191）：用户头像 / 个人照片的每次变更留档（旧值+新值+操作人），
+-- 管理端可按条回滚 —— 误操作后一键恢复上一版本。数据本体仍在 users.avatar / users.photo
+-- （data URL 入库，单文件部署无需额外资产目录）。
+CREATE TABLE IF NOT EXISTS user_media_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    username    TEXT NOT NULL,                 -- 归属账号（users.username）
+    field       TEXT NOT NULL,                 -- 'avatar' 头像 / 'photo' 个人照片
+    old_value   TEXT NOT NULL DEFAULT '',      -- 变更前 data URL（空 = 原本没有）
+    new_value   TEXT NOT NULL DEFAULT '',      -- 变更后 data URL（空 = 本次是清除）
+    changed_by  TEXT NOT NULL DEFAULT '',      -- 操作人账号（本人上传或管理员代管）
+    changed_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_media_hist ON user_media_history(username, field, id);
+-- 人员媒体快照（T-0191）：全量备份当前所有账号的头像+照片
+-- （data 为 {username:{avatar,photo}}，含空值 —— 回滚 = 整包忠实还原）；
+-- 参照 user_pref_snapshots 范式：创建快照为显式手动动作，回滚不自动产生新快照。
+CREATE TABLE IF NOT EXISTS user_media_snapshots (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    data        TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    created_by  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 -- 登录页小精灵分区（T-0177）：上传图片按分区管理，随机仅在指定分区范围内选取。
 -- 内置 386 张宝可梦精灵不入库（静态资源），以保留名 __builtin__ 虚拟分区参与选择。
 CREATE TABLE IF NOT EXISTS pet_zones (
@@ -568,6 +597,15 @@ def _migrate_schema(conn):
     if bcols and 'description' not in bcols:
         conn.execute('ALTER TABLE board_columns ADD COLUMN description TEXT NOT NULL DEFAULT \'\'')
         conn.execute("UPDATE board_columns SET description='' WHERE description IS NULL")
+
+    # ---- 逾期天数（T-191j 结算）：旧库幂等加列 ----
+    # ⚠️ 不回填存量已完成行：系统未记录历史完成时间（completed 恒为空），
+    #    按今天硬算会得到错误的「逾期 N 天」→ 存量 done 且有截止日的行保持 NULL（前端显示停用）。
+    _ccols = [r[1] for r in conn.execute('PRAGMA table_info(cards)').fetchall()]
+    if _ccols and 'overdue_days' not in _ccols:
+        conn.execute('ALTER TABLE cards ADD COLUMN overdue_days INTEGER')
+    if bcols and 'overdue_days' not in bcols:
+        conn.execute('ALTER TABLE board_columns ADD COLUMN overdue_days INTEGER')
 
     # ---- 看板协作部门（T-013d）：逗号分隔的 org_nodes.id（dept 型）----
     #   仅中心级归属的看板可配；被选部门的负责人自动获得该看板可见权
@@ -856,9 +894,23 @@ def init_db(force_import=False):
         col_key     TEXT NOT NULL,
         username    TEXT NOT NULL,
         content     TEXT NOT NULL,
+        mentions    TEXT NOT NULL DEFAULT '',
         created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_col_cmt ON column_comments(col_key, id)')
+    # @ 提及（2026-11-13）：存量库补列（与 comments.mentions 同款迁移）
+    _ccols = [r[1] for r in conn.execute('PRAGMA table_info(column_comments)').fetchall()]
+    if 'mentions' not in _ccols:
+        conn.execute("ALTER TABLE column_comments ADD COLUMN mentions TEXT NOT NULL DEFAULT ''")
+    conn.execute('''CREATE TABLE IF NOT EXISTS column_actions (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        col_key     TEXT NOT NULL,
+        username    TEXT NOT NULL,
+        action      TEXT NOT NULL,        -- create/update/delete/pin/comment/todo_add/...
+        detail      TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_col_act ON column_actions(col_key, id)')
     conn.execute('''CREATE TABLE IF NOT EXISTS column_todos (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         col_key     TEXT NOT NULL,

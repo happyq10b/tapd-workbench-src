@@ -14,6 +14,8 @@
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
 button{font-family:inherit}
 .app-header{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;z-index:50}
+/* UI审查 D2：顶栏内容锁 1440 居中（背景仍由 .app-header 全宽承载） */
+.app-header-inner{width:100%;max-width:1440px;margin:0 auto;display:flex;align-items:center;gap:16px;min-width:0}
 /* 头部布局：左侧（标题 + 年份筛选）与右侧（操作按钮）各自成组。
    约束说明（踩过的坑）：
    - .header-left 必须 flex-shrink:0，否则右侧按钮一多，标题会被挤成竖排单字
@@ -130,6 +132,88 @@ button{font-family:inherit}
 .crop-tip{font-size:11.5px;color:var(--text3);margin-top:8px;text-align:center;line-height:1.7;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crop-tip kbd{background:#f2f4f7;border:1px solid var(--border);border-radius:3px;padding:0 4px;font-size:11px}
+/* ---------------- 人员管理弹窗（T-191） ---------------- */
+.staff-tabs{display:flex;gap:6px;margin-bottom:10px}
+.staff-tab{border:1px solid var(--border);background:#fff;padding:6px 14px;border-radius:8px;font-size:13px;cursor:pointer;color:var(--text)}
+.staff-tab.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.staff-table-wrap{max-height:58vh;overflow:auto;border:1px solid var(--border);border-radius:8px}
+.staff-table{border-collapse:collapse;width:100%;font-size:12.5px}
+.staff-table th{position:sticky;top:0;background:#f5f7fa;padding:7px 9px;border-bottom:1px solid var(--border);
+  white-space:nowrap;z-index:1;text-align:left;font-weight:600}
+.staff-table td{padding:6px 9px;border-bottom:1px solid #f0f2f5;white-space:nowrap}
+.staff-table tr:hover td{background:#fafcff}
+.staff-table tr.departed td{color:#a0a6ad}
+.staff-av{width:30px;height:30px;border-radius:50%;object-fit:cover;display:block;cursor:zoom-in;background:#eef2f7}
+.staff-av-ph{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  background:#eef2f7;color:#9aa7b8;font-size:15px}
+.staff-photo-thumb{width:30px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--border);
+  display:block;cursor:zoom-in;background:#f6f8fb}
+.staff-photo-ph{color:var(--text3);font-size:12px}
+.staff-dept-tag{display:inline-block;background:#f0f5ff;color:var(--primary);border-radius:3px;
+  padding:0 5px;font-size:11px;line-height:18px;margin-right:3px}
+.staff-media-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(225px,1fr));gap:10px;
+  max-height:56vh;overflow:auto;padding:2px}
+.staff-media-card{border:1px solid var(--border);border-radius:10px;padding:10px;background:#fff}
+.staff-media-name{font-weight:600;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.staff-media-row{display:flex;gap:10px}
+.staff-media-thumb{position:relative;width:76px;height:100px;border:1px solid var(--border);border-radius:6px;
+  overflow:hidden;background:#f6f8fb;cursor:zoom-in;display:flex;align-items:center;justify-content:center;
+  color:var(--text3);font-size:11.5px;flex-shrink:0}
+.staff-media-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.staff-media-thumb .smt-label{position:absolute;left:0;bottom:0;right:0;background:rgba(0,0,0,.45);
+  color:#fff;font-size:10px;text-align:center;line-height:16px;pointer-events:none}
+.staff-media-ops{display:flex;flex-direction:column;gap:6px;justify-content:center}
+.staff-media-ops button{font-size:11.5px;padding:3px 10px}
+.staff-hist-row{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #f0f2f5;font-size:12.5px}
+.staff-hist-act{margin-left:auto;flex-shrink:0}
+/* ---------------- 到期筛选日历（T-191；T-191e 精细化改版） ---------------- */
+/* 设计规范对齐【架构管理】弹窗：蓝色说明横幅 + 分区留白 + 大格热力日历 + 已选 chips */
+.due-info-banner{background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;
+  padding:8px 12px;font-size:12.5px;color:#0050b3;line-height:1.7}
+.due-cal-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.due-cal-title{font-weight:600;font-size:15px;min-width:104px;text-align:center;
+  font-variant-numeric:tabular-nums}
+.due-legend{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text3);
+  margin-bottom:6px;flex-wrap:nowrap;overflow:hidden;white-space:nowrap}
+.dl-box{display:inline-block;width:14px;height:14px;border-radius:3px;flex-shrink:0;
+  border:1px solid rgba(0,0,0,.08);vertical-align:-3px}
+.due-legend .hint-text{flex-shrink:1;min-width:0;text-align:right}
+.due-cal-week{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:12px;
+  color:var(--text3);margin-bottom:4px;font-weight:600}
+.due-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:46px;
+  gap:4px;align-content:start;width:100%;min-width:0}
+/* hidden 属性会被同元素的 display:flex 覆盖 → 必须显式补回（否则空 chips 区占位） */
+.due-sel-wrap[hidden]{display:none}
+/* ⚠️ 1fr 的自动最小尺寸（minmax(auto,1fr)）会被内容最小宽度撑爆——
+   实测列轨被顶到 98px 导致日历横向溢出（T-191e）；minmax(0,1fr) 显式钳到 0 */
+.due-cell{position:relative;height:46px;min-width:0;border:1px solid var(--border);border-radius:8px;
+  display:flex;align-items:center;justify-content:center;font-size:13.5px;cursor:pointer;
+  background:#fff;user-select:none;-webkit-user-select:none;transition:border-color .12s,box-shadow .12s}
+.due-cell:hover{border-color:var(--primary)}
+.due-cell.empty{visibility:hidden;cursor:default}
+.due-cell.empty:hover{border-color:var(--border)}
+.due-cell.sel{border-color:var(--primary);box-shadow:inset 0 0 0 2px var(--primary);font-weight:700}
+.due-cell.today::after{content:'';position:absolute;top:3px;right:3px;width:6px;height:6px;
+  border-radius:50%;background:var(--primary)}
+.due-cell .dc-n{position:absolute;bottom:2px;right:5px;font-size:10px;color:#8c1616;
+  font-weight:700;font-variant-numeric:tabular-nums;pointer-events:none}
+/* 已选日期 chips：可视化当前筛选集，点 × 单独移除 */
+.due-sel-wrap{display:flex;gap:8px;align-items:flex-start;margin-top:2px;
+  padding-top:10px;border-top:1px dashed var(--border)}
+.due-sel-label{font-size:12px;color:var(--text3);flex-shrink:0;padding-top:3px}
+.due-sel-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:68px;overflow:auto;flex:1;min-width:0}
+.due-chip{display:inline-flex;align-items:center;gap:4px;background:#eef4ff;color:var(--primary);
+  border:1px solid #c6dcff;border-radius:12px;font-size:12px;padding:1px 8px;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.due-chip i{cursor:pointer;font-style:normal;opacity:.55;font-weight:700}
+.due-chip i:hover{opacity:1}
+#dueFilterBadge{display:inline-block;min-width:16px;margin-left:4px;background:var(--primary);color:#fff;
+  border-radius:8px;font-size:10.5px;line-height:15px;padding:0 4px;text-align:center;font-weight:700}
+/* ⚠️ display:inline-block 会覆盖 hidden 属性的 UA 隐藏规则（ID 选择器优先级更高），
+   无计数时徽标常驻占宽 → 按钮比【清空筛选】宽约 20px（T-191g）；必须显式补回隐藏 */
+#dueFilterBadge[hidden]{display:none}
+/* 大图预览弹窗要盖过人员管理弹窗（同为 modal-overlay，靠 DOM 序与 z-index 双保险） */
+#imgPreviewModal{z-index:130}
 .header-btn{border:1px solid var(--border);background:#fff;padding:6px 12px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;color:var(--text);transition:all .15s}
 /* 头部「更多」下拉：低频操作收在这里，避免按钮平铺把标题挤扁 */
 .header-more{position:relative}
@@ -321,7 +405,8 @@ button{font-family:inherit}
 .tree-dept .chev::after{content:'';position:absolute;left:50%;top:50%;
   width:24px;height:24px;transform:translate(-50%,-50%)}
 .tree-dept.open .chev{transform:rotate(90deg)}
-.tree-dept .dept-count{background:var(--border);color:var(--text2);font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
+/* UI审查 B3：#646a73 on var(--border) 仅约 4.2:1 → #444b54（小字 AA）；仅本规则收口，不动全局 token */
+.tree-dept .dept-count{background:var(--border);color:#444b54;font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
 .tree-dept.open .dept-count{background:var(--primary);color:#fff}
 /* 空部门：仍展示节点，虚线+弱化配色，视觉上可辨识但明显区别于有内容的部门 */
 .tree-dept.empty{border-style:dashed;color:var(--text2);background:#fafafa}
@@ -391,7 +476,7 @@ button{font-family:inherit}
 /* ===== 板块筛选标题行（T-0189）=====
    与【看板】带标题（.tb-band-head / .tb-band-title）同款形态：
    标题居左，筛选明细（#filterHint，band-sel-hint 同款）紧随其右，
-   三个勾选类按钮（全选当前/启用关闭勾选/清空筛选）恒定贴行尾。
+   勾选类按钮（全选当前/启用关闭勾选/负责/参与事项/清空筛选）恒定贴行尾。
    占独行（flex:1 0 100%）+ 底部分隔线，与顶部导航带的分带视觉呼应。 */
 .toolbar-title-row{order:-1;flex:1 0 100%;display:flex;align-items:center;gap:12px;min-width:0;
   padding-bottom:9px;border-bottom:1px solid var(--border);margin-bottom:11px}
@@ -473,6 +558,16 @@ button{font-family:inherit}
   padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;
   font-weight:500;transition:all .15s;white-space:nowrap;font-family:inherit}
 .btn-clear:hover{opacity:.9;filter:brightness(1.06)}
+/* ===== 标题行按钮降噪（UI审查 A1）=====
+   「全选当前/启用勾选/负责事项/参与事项/到期筛选/清空筛选」同排并列（#196 分类钮带彩色描边）。
+   保守方案：**类名/padding/字号全部不变**（显隐逻辑与既有等宽校验不受影响），
+   仅在 .toolbar-title-btns 作用域内把前三颗降为描边次级钮，
+   行尾「清空筛选」（#clearFilterBtn）保持实心主按钮。
+   ⚠️ #dueFilterBadge 原为白底蓝字（配实心蓝底），按钮改描边白底后必须换蓝底白字。 */
+.toolbar-title-btns .btn-clear{background:#fff;color:var(--text);border-color:var(--border)}
+.toolbar-title-btns .btn-clear:hover{opacity:1;filter:none;color:var(--primary);border-color:var(--primary);background:#fff}
+#clearFilterBtn{background:var(--primary);color:#fff;border-color:var(--primary)}
+#clearFilterBtn:hover{opacity:.9;filter:brightness(1.06);color:#fff;background:var(--primary);border-color:var(--primary)}
 .btn-secondary{border:1px solid var(--border);background:#fff;color:var(--text);padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;font-weight:500;transition:all .15s}
 .btn-secondary:hover{border-color:var(--primary);color:var(--primary)}
 /* 统计带：顶部栏左半第三行，3 张核心指标卡横排（总事项 / 已完成 / 未完成）。
@@ -483,7 +578,7 @@ button{font-family:inherit}
 .notice-bar{background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:10px 14px;display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden;position:relative}
 /* 空态「暂无公告」覆盖整条公告栏绝对居中（普通流内会受左侧标题占位偏移） */
 .notice-bar .notice-empty{position:absolute;left:0;right:0;top:0;bottom:0;justify-content:center}
-.notice-tag{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 9px;border-radius:11px;background:#fff7e6;color:#d46b08;font-size:11.5px;font-weight:600}
+.notice-tag{flex-shrink:0;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 9px;border-radius:11px;background:#fff7e6;color:#874d00;font-size:11.5px;font-weight:600}
 .notice-body{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:1px}
 .notice-title{font-size:12.5px;font-weight:600;color:var(--text);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .notice-text{font-size:11.5px;color:var(--text2);line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -704,6 +799,12 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .col-chk:disabled,.item-chk:disabled,.sub-chk:disabled{opacity:.35;cursor:not-allowed;accent-color:var(--text3)}
 .chk-mode-btn{transition:all .15s}
 .chk-mode-btn.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+/* ===== 勾选类按钮形态（#196，#201 统一）=====
+   全选当前 / 负责事项 / 参与事项 三颗同款蓝描边（视觉一致）；
+   选择器带 .btn-cat 提高特异性，压过标题行降噪规则（A1）的统一灰描边。 */
+.toolbar-title-btns .btn-clear.btn-cat{border-width:1.5px;font-weight:600}
+.toolbar-title-btns .btn-clear.btn-cat-all{color:var(--primary);border-color:var(--primary)}
+.toolbar-title-btns .btn-clear.btn-cat-all:hover{color:var(--primary);border-color:var(--primary);background:rgba(0,45,116,.08)}
 .week-header:hover{background:#fafafa}
 .week-header .chev{transition:transform .2s;color:var(--text2);font-size:12px;cursor:pointer;flex-shrink:0}
 .week-group.open .chev{transform:rotate(90deg)}
@@ -790,10 +891,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .copy-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:3px 9px;
   font-size:11.5px;border-radius:12px;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
 .copy-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
-/* 行尾固定槽位：可选元素（逾期 / 代办 / 状态 / 置顶 / 子事项）无论有无都占同样宽度，
+/* 行尾固定槽位：可选元素（代办 / 状态 / 置顶 / 子事项）无论有无都占同样宽度，
    行内结构恒定 → 字段列的起始位置在所有行上完全一致（纵向对齐）。
-   display:inline-block + 定宽，空内容时也保留占位宽度。 */
-.slot-overdue{width:46px;flex-shrink:0;display:inline-block}
+   display:inline-block + 定宽，空内容时也保留占位宽度。
+   （「逾期」槽位已于 2026-11-13 移除 —— 空间让给标题列，标题 flex:1 自动吸收） */
 .slot-subtask{width:118px;flex-shrink:0;display:inline-block;text-align:center}
 .slot-status{width:58px;flex-shrink:0;display:inline-block;text-align:center}
 .slot-ops{width:64px;flex-shrink:0;display:inline-block;text-align:center}
@@ -859,7 +960,6 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    保证父子两行的「右对齐锚点」相同 → 字段列起点才能对齐。
    「＋子事项」那格（.slot-sub）留空即可。 */
 .sub-node .sub-tail{gap:10px}
-.sub-node .slot-overdue{width:46px}
 .sub-node .slot-subtask{width:118px}
 .sub-node .slot-status{width:58px}
 .sub-node .slot-ops{width:64px}
@@ -941,10 +1041,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .status-menu button.cur{background:#e6f1fb;color:var(--primary);font-weight:600}
 .status-menu .status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .lock-tag{font-size:11px;color:#a16704;background:#fffbe6;border:1px solid #ffe58f;padding:2px 8px;border-radius:var(--radius-sm);flex-shrink:0}
-/* 「逾期」标签：原先用行内 style 指定 color/background，
-   行内样式优先级最高 → CSS 里的深色字被压掉，实测对比度只有 3.42（AA 需 4.5）。
-   → 改为独立类，行内样式移除，颜色统一由 CSS 控制（实测 #cb3939 on #fff1f0 = 4.56 ✓）。 */
-.lock-tag-overdue{color:#cb3939;background:#fff1f0;border-color:#ffa39e}
+/* 「逾期」标签类已随「逾期」列移除而废止（2026-11-13，空间让给标题列） */
 /* 「已暂停」：行内色值改为类，语义色统一走 --text3（实测 #73757a on #fff = 4.61 ✓） */
 .lock-tag-paused{color:#73757a;background:#f4f6fa;border-color:#e6e8eb}
 .icon-btn{border:none;background:none;cursor:pointer;font-size:13px;color:var(--text2);padding:4px 8px;border-radius:var(--radius-sm);transition:all .15s}
@@ -997,6 +1094,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 只读字段（创建人）：锁定不可修改 */
 .form-input[readonly]{background:#f5f7fa;color:var(--text2);cursor:not-allowed}
 .member-picker{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;min-height:40px}
+/* 只读模式（T-191l）：无指派权的用户只展示当前值 —— 隐藏输入行与标签删除叉 */
+.pp-readonly .pp-ip{display:none}
+.pp-readonly .pp-tag i{display:none}
 /* 2026-11-05：pp 作为 member-picker 的 flex 子项原本按内容收缩宽度（内外两套框不匹配、
    提示文字被截断）→ 撑满外框并去掉自身重复的边框/背景，外框即唯一边框 */
 .member-picker .pp{flex:1 1 auto;min-width:0;border:none;background:transparent;padding:0;min-height:32px}
@@ -1023,7 +1123,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* #165：「已选工作组」只读层级树已随该列下线移除（.wgt*）*/
 .pp-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
 .pp-tag{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:12px;padding:2px 6px 2px 9px;border-radius:10px;border:1px solid #b5d4f4}
-.pp-tag i{font-style:normal;cursor:pointer;color:#85b7eb;font-size:13px;line-height:1}
+.pp-tag i{font-style:normal;cursor:pointer;color:#4a7db5;font-size:13px;line-height:1}
 .pp-tag i:hover{color:var(--danger)}
 .pp-ip{position:relative}
 .pp-in{width:100%;border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;box-sizing:border-box}
@@ -1085,6 +1185,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .comment-box h4{font-size:13px;color:var(--text2);margin-bottom:8px}
 /* 操作记录框限高（2026-11-09 #103）：默认展示 4 行，超出走独立滚动条，禁止无限拉长 */
 #d_actions{max-height:140px;overflow-y:auto;padding-right:4px}
+#cd_actions{max-height:140px;overflow-y:auto;padding-right:4px}
+/* 评论预览区限高（2026-11-13）：默认展示约 4 条，其余走滚动条；
+   清单只渲染最近 10 条，完整历史走【全部评论】弹窗（#allCommentsModal） */
+.comment-list{max-height:140px;overflow-y:auto;padding-right:4px}
 .comment-item{font-size:12.5px;padding:5px 0;border-bottom:1px dashed var(--border)}
 .comment-item .who{color:var(--primary);font-weight:500}
 .comment-item .when{color:var(--text2);font-size:11px;margin-left:6px}
@@ -1420,11 +1524,18 @@ function goLogin(){
   </div>
 </div>
 <header class="app-header">
+  <!-- 大屏对齐（UI审查 D2）：顶栏**背景保持全宽**（白带 + 品牌色条 + 阴影不受影响），
+       内容锁 max-width:1440 居中 —— 与 .topbar/.wrap/.status-bar 同口径，
+       消除 >1440px 屏幕上「标题贴屏幕左缘、下方内容整体缩进」的错位。
+       header-actions 自带 margin-left:auto → 右对齐行为原样保留 -->
+  <div class="app-header-inner">
   <div class="header-left">
     <h1>财务综合事务平台<span class="abbr">FISP</span></h1>
   </div>
   <div class="header-actions">
-    <span class="header-user" id="headerUser" onclick="openProfileModal()" title="个人界面（头像 / 状态 / 修改密码）">
+    <span class="header-user" id="headerUser" role="button" tabindex="0"
+          onclick="openProfileModal()" title="个人界面（头像 / 状态 / 修改密码）"
+          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProfileModal()}">
       <img class="header-avatar" id="headerAvatar" alt="" hidden><span id="userName"></span><span class="role-tag" id="roleTag"></span>
     </span>
     <button class="header-btn msg-btn" id="msgBtn" onclick="openMsgPanel()" title="消息中心">🔔<span class="msg-badge" id="msgBadge" hidden>0</span></button>
@@ -1450,6 +1561,11 @@ function goLogin(){
              id 保持 wgBtn → renderPermissionEntries() 的权限显隐逻辑零改动。 -->
         <button id="wgBtn" onclick="openWgModal()" title="架构管理（按权限显示）">🏗️ 架构管理</button>
         <button id="teamBtn" onclick="openTeamModal()" title="账号管理（仅管理员）">👥 账号管理</button>
+        <!-- 人员管理（T-191）：全字段人员信息表 + 头像/照片统一管理。
+             ⚠️ 权限（T-191d）：部门负责人及以上（本部门）；总经理/中心负责人/管理员 → 全部；
+             显隐由 applyPermissionUI 按 ME.can_manage_staff 控制（后端能力位，前端不推断）。
+             图标只用一个人头 👤 —— 🧑‍💼 是复合 emoji，部分字体渲染成两个图形 -->
+        <button id="staffBtn" onclick="openStaffModal()" title="人员管理：人员信息全字段清单 + 头像/照片统一管理（部门负责人及以上）">👤 人员管理</button>
         <button id="onlineBtn" onclick="openOnlineModal()" title="在线用户管理（仅超级管理员）">🟢 在线用户</button>
         <button id="petBtn" onclick="openPetSettingModal()" title="登录页小精灵设置（仅超级管理员，全局生效）">🐾 精灵设置</button>
         <button id="prefSnapBtn" onclick="openPrefSnapModal()" title="个人配置的备份与回滚（置顶项、偏好设置等）">💾 偏好备份</button>
@@ -1462,6 +1578,7 @@ function goLogin(){
     </div>
     <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="impFilePicked(event)">
     <button class="header-btn" onclick="logout()">退出</button>
+  </div>
   </div>
 </header>
 <!-- 个人状态栏：显示当前登录用户的个人状态（无状态则隐藏） -->
@@ -1582,9 +1699,18 @@ function goLogin(){
       <div class="tb-band-title">板块</div>
       <span id="filterHint" class="band-sel-hint" title="当前生效的筛选条件汇总"></span>
       <span class="toolbar-title-btns">
-        <button id="chkAllBtn" class="btn-clear" style="display:none" onclick="selectAllCurrent()" title="一键勾选当前筛选结果中的全部事项（板块随之全选/半选）">全选当前</button>
+        <button id="chkAllBtn" class="btn-clear btn-cat btn-cat-all" style="display:none" onclick="selectAllCurrent()" title="一键勾选当前筛选结果中的全部事项（板块随之全选/半选）">全选当前</button>
+        <!-- 分类快速勾选（#196，#201 样式统一）：与【全选当前】同款蓝描边形态，顺序排在
+             全选当前与启用勾选之间。仅勾选模式启用后出现（同显隐）；按数据归属匹配
+            （负责人/参与人含我），勾选时仍受 #163 权限约束（无权勾的事项跳过）。 -->
+        <button id="chkMineOwnerBtn" class="btn-clear btn-cat btn-cat-all" style="display:none" onclick="selectCategoryCards('owner')" title="一键勾选当前筛选结果中我负责的事项（再点一次取消该类勾选）">负责事项</button>
+        <button id="chkMineCcBtn" class="btn-clear btn-cat btn-cat-all" style="display:none" onclick="selectCategoryCards('cc')" title="一键勾选当前筛选结果中我参与的事项（再点一次取消该类勾选）">参与事项</button>
         <button id="chkModeBtn" class="btn-clear chk-mode-btn" onclick="toggleChkMode()" title="点击开启勾选模式（板块/事项/子事项前显示勾选框）">启用勾选</button>
-        <button class="btn-clear" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/负责人/参与人/年份/周数）">清空筛选</button>
+        <!-- 到期筛选（T-191）：日历多选事项截止日期 + 热力图。
+             ⚠️ 与【清空筛选】【启用勾选】同为 .btn-clear 同规格按钮，不带 emoji（T-191e）
+             顺序（2026-11-13 用户需求）：到期筛选在前，清空筛选固定尾部 -->
+        <button id="dueFilterBtn" class="btn-clear" onclick="openDueCalModal()" title="按事项截止日期筛选：日历多选，热力展示各日到期事项数">到期筛选<span id="dueFilterBadge" hidden></span></button>
+        <button id="clearFilterBtn" class="btn-clear" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/负责人/参与人/年份/周数/到期）">清空筛选</button>
       </span>
     </div>
     <div class="toolbar-left">
@@ -1618,8 +1744,9 @@ function goLogin(){
                  placeholder="" onclick="openPersonFilterPicker(this)"
                  onfocus="openPersonFilterPicker(this)" title="打开组织架构树：搜索人员、勾选「无负责人」"
                  aria-label="负责人筛选，点击从组织架构树选择人员">
-          <span class="cf-count" id="personFilterCount" title="已选负责人（点击打开架构树）"
-                onclick="openPersonFilterPicker(document.getElementById('personFilterInput'))"></span>
+          <span class="cf-count" id="personFilterCount" role="button" tabindex="0" title="已选负责人（点击打开架构树）"
+                onclick="openPersonFilterPicker(document.getElementById('personFilterInput'))"
+                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPersonFilterPicker(document.getElementById('personFilterInput'))}"></span>
           <span class="cf-chips" id="personFilterChips"></span>
         </span>
       </span>
@@ -1632,8 +1759,9 @@ function goLogin(){
                  placeholder="" onclick="openCcFilterPicker(this)"
                  onfocus="openCcFilterPicker(this)" title="打开组织架构树：搜索并勾选参与人"
                  aria-label="参与人筛选，点击从组织架构树选择人员">
-          <span class="cf-count" id="ccFilterCount" title="已选参与人（点击打开架构树）"
-                onclick="openCcFilterPicker(document.getElementById('ccFilterInput'))"></span>
+          <span class="cf-count" id="ccFilterCount" role="button" tabindex="0" title="已选参与人（点击打开架构树）"
+                onclick="openCcFilterPicker(document.getElementById('ccFilterInput'))"
+                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCcFilterPicker(document.getElementById('ccFilterInput'))}"></span>
           <span class="cf-chips" id="ccFilterChips"></span>
         </span>
       </span>
@@ -1667,8 +1795,9 @@ function goLogin(){
                  placeholder="" onfocus="openFilterCombo('week')" onclick="openFilterCombo('week')"
                  oninput="onFilterComboInput('week',this.value)" onkeydown="onFilterComboKey('week',event)"
                  aria-label="周数筛选，可输入数字或周标签，多选">
-          <span class="cf-count" id="weekFilterCount" title="已选周数（点击选择）"
-                onclick="openFilterCombo('week')"></span>
+          <span class="cf-count" id="weekFilterCount" role="button" tabindex="0" title="已选周数（点击选择）"
+                onclick="openFilterCombo('week')"
+                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openFilterCombo('week')}"></span>
           <span class="cf-chips" id="weekFilterChips"></span>
         </span>
         <div class="cf-drop" id="weekFilterDrop" hidden></div>
@@ -1744,8 +1873,9 @@ function goLogin(){
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
       <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" class="parent-box"></div></div>
       <div class="form-row" id="e_meta_row">
-        <div class="form-group" id="e_board_wrap"><label>所属看板</label><select class="form-select" id="e_board"></select></div>
-        <div class="form-group" id="e_week_group"><label>周数</label>
+        <!-- 所属看板选择框已移除（T-191l 用户口径）：权限控制下不该在编辑界面改归属；
+             事项保存时 board_id 保持原值不变 -->
+        <div class="form-group" id="e_week_group" style="grid-column:span 2"><label>周数</label>
           <div style="position:relative">
             <input type="text" class="form-input" id="e_week" autocomplete="off"
                    placeholder="" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉选择或直接输入" onfocus="openWeekCombo('e')" onclick="openWeekCombo('e')" oninput="paintWeekCombo('e')">
@@ -1777,7 +1907,7 @@ function goLogin(){
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn-default" id="e_copy_btn" style="color:var(--primary);border-color:var(--primary)" onclick="copyCurrentCard()" title="复制该事项（副本需重新选择板块 / 看板归属）">📋 复制</button>
+      <!-- 复制按钮已移除（T-191k 用户口径）：目录行「操作 ▾」已有复制入口，编辑界面不再重复 -->
       <button class="btn-default" style="color:var(--danger);border-color:var(--danger)" onclick="deleteCard()">删除</button>
       <button class="btn-default" onclick="closeEdit()">取消</button>
       <button class="btn-primary" onclick="saveEdit()">保存</button>
@@ -1825,8 +1955,16 @@ function goLogin(){
 
 <!-- 板块弹窗：新建 / 编辑共用 -->
 <div class="modal-overlay" id="columnModal" style="display:none">
-  <div class="modal" style="width:min(520px,94vw)">
-    <div class="modal-header"><h2 id="c_modal_title">🗂️ 新建板块</h2><button class="modal-close" onclick="closeModal('columnModal')">✕</button></div>
+  <!-- T-191l：尺寸/布局对齐编辑事项弹窗（同为默认 .modal 640px，不再单独收窄） -->
+  <div class="modal">
+    <div class="modal-header"><h2 id="c_modal_title">🗂️ 新建板块</h2>
+      <!-- 完成情况按钮（T-191j 界面统一）：与事项编辑弹窗的 e_status_ops 同位同款，
+           状态/完成情况的设置统一收敛到弹窗头部，表单区内不再出现下拉 -->
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <span id="c_status_ops" style="display:flex;gap:6px;align-items:center"></span>
+        <button class="modal-close" onclick="closeModal('columnModal')">✕</button>
+      </div>
+    </div>
     <div class="modal-body">
       <div class="form-group" id="c_board_wrap"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
       <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
@@ -1836,61 +1974,42 @@ function goLogin(){
         <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="c_due" title="板块截止日期（选填）；目录【倒计时】列按此日期与今天自动计算"></div>
       </div>
-      <div class="form-group"><label>创建人</label><input type="text" class="form-input" id="c_creator" readonly title="创建人默认为当前登录用户，不可修改"></div>
-      <!-- 负责人/参与人：并排两框（2026-11-04 用户反馈：加外框、删大段说明、并成一排） -->
-      <div class="form-group" style="display:flex;gap:10px;align-items:stretch">
-        <div id="c_owner_wrap" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:6px;padding:8px 10px;box-sizing:border-box">
-          <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">板块负责人</label>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <span id="c_owner_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
-            <button type="button" class="icon-btn" id="c_owner_pick_btn" onclick="colPickOwner(this)" title="从所属看板的负责人与参与人中选择（单选）">👤 选择</button>
-            <button type="button" class="icon-btn" id="c_owner_clear_btn" onclick="colClearOwner()" title="清除负责人">✕</button>
-          </div>
-        </div>
-        <div id="c_parts_wrap" style="flex:1;min-width:0;border:1px solid var(--border);border-radius:6px;padding:8px 10px;box-sizing:border-box">
-          <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">板块参与人</label>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <span id="c_parts_box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px"></span>
-            <button type="button" class="icon-btn" id="c_parts_pick_btn" onclick="colPickParticipants(this)" title="从所属看板的负责人与参与人中选择（可多选）">👤 选择</button>
-            <button type="button" class="icon-btn" id="c_parts_clear_btn" onclick="colClearParticipants()" title="清空参与人">✕</button>
-          </div>
-        </div>
+      <!-- 创建人字段已移除（T-191l）：编辑界面不展示/不可改（创建人由系统按登录账号锁定），
+           仅在板块浏览界面的元信息中展示 -->
+      <!-- 负责人/参与人（T-191l）：与事项编辑弹窗同款 member-picker（form-row 两列） -->
+      <div class="form-row">
+        <div class="form-group" id="c_owner_wrap"><label>板块负责人<span id="c_owner_opt" style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="c_owner"></div></div>
+        <div class="form-group" id="c_parts_wrap"><label>板块参与人</label><div class="member-picker" id="c_parts"></div></div>
       </div>
-      <!-- 板块「完成情况」（2026-11-04 需求3）：由板块负责人手动选择，其他成员不可修改 -->
-      <div class="form-group" id="c_completion_group"><label>完成情况</label>
-        <select class="form-select" id="c_completion">
-          <option value="open">未完成</option>
-          <option value="progressing">进行中</option>
-          <option value="done">已完成</option>
-        </select>
-        <div id="c_completion_tip" style="font-size:11.5px;color:var(--text3);margin-top:4px"></div>
-      </div>
+      <!-- 板块「完成情况」（2026-11-04 需求3）→ T-191j 移出表单：与事项状态一致，
+           设置入口统一收敛到弹窗头部状态按钮（#c_status_ops），表单区内不再有下拉 -->
       <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
         <div class="radio-group">
           <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
           <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
         </div>
       </div>
-      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="c_desc" style="min-height:72px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
+      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="c_desc" style="min-height:147px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
       <!-- 待办管理（T-0190）：待办的**设置入口只在编辑板块弹窗**（浏览界面只展示和勾选）；
            勾选/增/删即时落库（板块锁由编辑弹窗持有，待办写校验放行本人） -->
       <div class="form-group" id="c_todos_group" style="display:none"><label>待办</label>
         <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
           <div id="c_todos_list" class="subtask-list" style="max-height:160px;overflow:auto"></div>
-          <div style="display:flex;gap:8px;margin-top:8px">
+          <!-- 添加行（2026-11-13）：仅板块负责人及以上可见（chkColOwnerOf，与后端同口径） -->
+          <div style="display:flex;gap:8px;margin-top:8px" id="c_todo_add_row">
             <input type="text" class="form-input" id="c_todo_new" placeholder="添加待办，回车确认…" style="flex:1"
                    onkeydown="if(event.key==='Enter'){event.preventDefault();colAddTodo()}">
             <button class="btn-default" onclick="colAddTodo()" style="flex-shrink:0">添加</button>
           </div>
         </div>
       </div>
-      <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。</div>
+      <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项。</div>
     </div>
     <div class="modal-footer" style="display:flex;align-items:center">
-      <!-- 删除板块（T-0190）：仅编辑态且**板块负责人及以上**可见（chkColOwnerOf 口径，
-           与后端 DELETE /api/columns 的 LV_COLUMN_OWNER 门槛一致）；确认后删除 -->
-      <button class="btn-clear" id="c_delete_btn" style="display:none;margin-right:auto;color:var(--danger);border-color:var(--danger)"
-              onclick="colDeleteFromEdit()" title="删除该板块（其下事项与子事项一并删除，可用全局备份找回）">🗑 删除板块</button>
+      <!-- 删除板块（T-0190；T-191k 样式对齐编辑事项的「删除」按钮）：仅编辑态且**板块负责人及以上**可见
+           （chkColOwnerOf 口径，与后端 DELETE /api/columns 的 LV_COLUMN_OWNER 门槛一致）；确认后删除 -->
+      <button class="btn-default" id="c_delete_btn" style="display:none;color:var(--danger);border-color:var(--danger)"
+              onclick="colDeleteFromEdit()" title="删除该板块（其下事项与子事项一并删除，可用全局备份找回）">删除</button>
       <button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" id="c_submit" onclick="saveColumn()">创建板块</button></div>
   </div>
 </div>
@@ -1915,14 +2034,20 @@ function goLogin(){
         <div class="subtask-head"><span class="subtask-title">待办</span><span class="subtask-count" id="cd_todo_count"></span></div>
         <div id="cd_todos" class="subtask-list"></div>
       </div>
-      </div>
-      <!-- 评论（T-0188）：板块级讨论，可见即可评（与事项评论同款布局/样式） -->
-      <div class="comment-box"><h4>评论</h4><div id="cd_comments"></div>
+      <!-- 评论（T-0188 → 2026-11-13 复刻事项评论）：可见即可评；
+           @ 提及 / 全部评论按钮 / 预览限最近 10 条，与事项评论同一套交互 -->
+      <div class="comment-box"><h4>评论</h4><div id="cd_comments" class="comment-list"></div>
         <div class="comment-form">
-          <input id="cd_new_comment" placeholder="写评论…" autocomplete="off" onkeydown="if(event.key==='Enter')cdAddComment()">
+          <input id="cd_new_comment" placeholder="写评论…（输入 @ 可提及成员）" autocomplete="off" oninput="onCommentInput(this,'cd')" onkeydown="if(event.key==='Enter')cdAddComment()">
+          <button class="btn-default" onclick="toggleMentionMenu('cd')" title="提及成员">@</button>
           <button class="btn-default" onclick="cdAddComment()">发送</button>
+          <button class="btn-default" onclick="openAllComments('column')" title="查看本板块的全部评论">全部评论</button>
         </div>
+        <div class="mention-bar" id="cd_mention_bar"></div>
+        <div class="mention-drop" id="cd_mention_drop" hidden></div>
       </div>
+      <!-- 操作记录（2026-11-13）：复刻事项详情「操作记录」（最近 12 条 + 提示） -->
+      <div class="comment-box"><h4>操作记录</h4><div id="cd_actions"></div></div>
     </div>
   </div>
 </div>
@@ -2052,7 +2177,8 @@ function goLogin(){
       </div>
       <div id="imp_file" style="display:none;align-items:center;gap:8px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:7px 12px;font-size:12.5px">
         <span>📄</span><span id="imp_file_name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-        <i class="imp-x" onclick="impClearFile()" title="移除文件" style="cursor:pointer;color:var(--text2);font-style:normal">✕</i>
+        <i class="imp-x" role="button" tabindex="0" onclick="impClearFile()" title="移除文件" style="cursor:pointer;color:var(--text2);font-style:normal"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();impClearFile()}">✕</i>
       </div>
       <div id="imp_result" style="display:none"></div>
       <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
@@ -2078,17 +2204,28 @@ function goLogin(){
         <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count" id="d_subtask_count"></span></div>
         <div id="d_subtask_list" class="subtask-list"></div>
       </div>
-      <div class="comment-box"><h4>评论</h4><div id="d_comments"></div>
+      <div class="comment-box"><h4>评论</h4><div id="d_comments" class="comment-list"></div>
         <div class="comment-form">
           <input id="d_new_comment" placeholder="写评论…（输入 @ 可提及成员）" oninput="onCommentInput(this)" autocomplete="off">
           <button class="btn-default" onclick="toggleMentionMenu()" title="提及成员">@</button>
           <button class="btn-default" onclick="addComment()">发送</button>
+          <!-- 全部评论（2026-11-13）：预览区只保留最近 10 条，完整清单在此弹窗查看 -->
+          <button class="btn-default" onclick="openAllComments('card')" title="查看本事项的全部评论">全部评论</button>
         </div>
         <div class="mention-bar" id="d_mention_bar"></div>
         <div class="mention-drop" id="d_mention_drop" hidden></div>
       </div>
       <div class="comment-box"><h4>操作记录</h4><div id="d_actions"></div></div>
     </div>
+  </div>
+</div>
+
+<!-- 全部评论弹窗（2026-11-13）：事项 / 板块共用一个容器 ——
+     预览区只显示最近 10 条，完整清单在此查看（评论量级小，一次全量渲染） -->
+<div class="modal-overlay" id="allCommentsModal" style="display:none">
+  <div class="modal" style="width:min(640px,94vw)">
+    <div class="modal-header"><h2 id="ac_title">全部评论</h2><button class="modal-close" onclick="closeModal('allCommentsModal')">✕</button></div>
+    <div class="modal-body" style="max-height:60vh;overflow-y:auto"><div id="ac_list"></div></div>
   </div>
 </div>
 
@@ -2164,6 +2301,111 @@ function goLogin(){
       <button class="btn-secondary" onclick="closeModal('profileModal')">取消</button>
       <button class="btn-primary" onclick="saveProfile()">保存资料</button>
       <button class="btn-primary" style="background:var(--warning,#d48806);border-color:var(--warning,#d48806)" onclick="submitChangePassword()">修改密码</button>
+    </div>
+  </div>
+</div>
+
+<!-- 人员管理弹窗（T-191，仅管理员）：
+     页签1 = 人员信息全字段表格（头像小图直显、照片点击预览大图）；
+     页签2 = 头像/照片统一管理（参照小精灵图模块：网格 + 替换/清除 + 历史按条恢复；
+             快照级整包备份/回滚由 bat 脚本承担，不在界面提供——T-191b）。 -->
+<div class="modal-overlay" id="staffModal" style="display:none">
+  <div class="modal modal-wide" style="width:1120px;max-width:96vw">
+    <div class="modal-header"><h2>👤 人员管理</h2><button class="modal-close" onclick="closeModal('staffModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="staff-tabs">
+        <button id="staffTabInfoBtn" class="staff-tab on" onclick="staffShowTab('info')">人员信息</button>
+        <button id="staffTabMediaBtn" class="staff-tab" onclick="staffShowTab('media')">头像/照片管理</button>
+        <!-- 可见范围提示（T-191d）：总经理/中心负责人/管理员=全部部门；部门负责人=本部门及下属 -->
+        <span class="hint-text" id="staffScopeHint" style="margin-left:8px;align-self:center"></span>
+      </div>
+      <div id="staffViewInfo">
+        <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+          <input type="text" class="form-input" id="staffSearch" style="width:240px"
+                 placeholder="搜索姓名 / 账号 / 工号" oninput="renderStaffTable()">
+          <span class="hint-text" id="staffCount"></span>
+          <span class="hint-text" style="margin-left:auto">头像直接展示，点击照片列缩略图可预览大图</span>
+        </div>
+        <div class="staff-table-wrap" id="staffTableWrap"></div>
+      </div>
+      <div id="staffViewMedia" hidden>
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+          <input type="text" class="form-input" id="staffMediaSearch" style="width:220px"
+                 placeholder="搜索姓名 / 账号 / 工号" oninput="renderStaffMediaGrid()">
+          <button class="btn-default" onclick="staffMediaHist()" title="查看头像/照片每次变更并可按条恢复">🗒 变更历史</button>
+          <span class="hint-text">数据持久化于数据库；误操作可通过变更历史按条恢复（快照级整包备份/回滚由 bat 脚本统一承担，不在界面提供）</span>
+        </div>
+        <div class="staff-media-grid" id="staffMediaGrid"></div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('staffModal')">关闭</button></div>
+  </div>
+</div>
+<!-- 人员管理子弹窗：变更历史（T-191） -->
+<div class="modal-overlay" id="staffSubModal" style="display:none;z-index:125">
+  <div class="modal" style="width:560px;max-width:94vw">
+    <div class="modal-header"><h2 id="staffSubTitle">变更历史</h2><button class="modal-close" onclick="closeModal('staffSubModal')">✕</button></div>
+    <div class="modal-body" id="staffSubBody" style="max-height:60vh;overflow:auto"></div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('staffSubModal')">关闭</button></div>
+  </div>
+</div>
+<!-- 大图预览（T-191）：照片/头像点击放大查看；z-index:130 盖过人员管理与其子弹窗 -->
+<div class="modal-overlay" id="imgPreviewModal" style="display:none;z-index:130">
+  <div style="position:relative;max-width:92vw;max-height:92vh">
+    <img id="imgPreviewSrc" alt="预览大图"
+         style="max-width:92vw;max-height:86vh;display:block;border-radius:8px;background:#fff;box-shadow:0 8px 40px rgba(0,0,0,.4)">
+    <div id="imgPreviewCap" style="text-align:center;color:#fff;margin-top:8px;font-size:13px;text-shadow:0 1px 3px rgba(0,0,0,.7)"></div>
+    <button class="modal-close" style="position:absolute;top:-16px;right:-16px;background:#fff"
+            onclick="closeModal('imgPreviewModal')">✕</button>
+  </div>
+</div>
+<!-- 人员管理：管理员代管头像/照片的隐藏文件选择器（替换入口） -->
+<input type="file" id="staffMediaFile" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none"
+       onchange="staffMediaPicked(event)">
+
+<!-- 到期筛选日历弹窗（T-191；T-191e 精细化改版）：
+     月视图多选 + 热力图。已选日期存 DUE_SEL（跨月保留）；取消 = 还原打开时快照；
+     确定 = 应用到期筛选。设计规范对齐【架构管理】弹窗（说明横幅 / 分区 / 大格日历）。 -->
+<div class="modal-overlay" id="dueCalModal" style="display:none;z-index:110">
+  <div class="modal" style="width:480px;max-width:94vw">
+    <div class="modal-header"><h2>📅 到期筛选</h2><button class="modal-close" onclick="dueCalCancel()">✕</button></div>
+    <div class="modal-body" style="padding:12px 16px;gap:10px">
+      <!-- 使用说明横幅（架构管理弹窗同款设计语言） -->
+      <div class="due-info-banner">
+        点击日期<strong>多选</strong>（再点取消）；<strong>热力颜色 = 当日到期事项数</strong>（越红越多，右下角标为数量）。
+        切换月份已选日期保留；「取消」还原打开时的选择，「确定」应用筛选。
+      </div>
+      <!-- 月份导航 + 回到本月 -->
+      <div class="due-cal-head">
+        <button class="icon-btn" onclick="dueCalShift(-1)" title="上一月（已选日期保留）">◀</button>
+        <span id="dueCalTitle" class="due-cal-title"></span>
+        <button class="icon-btn" onclick="dueCalShift(1)" title="下一月（已选日期保留）">▶</button>
+        <span style="flex:1"></span>
+        <button class="btn-default" style="padding:3px 12px;font-size:12px" onclick="dueCalToday()" title="日历回到当前月">本月</button>
+      </div>
+      <!-- 热力图例 + 已选计数 -->
+      <div class="due-legend">
+        <span>热力图例：</span>
+        <span class="dl-box" style="background:#fff"></span>无到期
+        <span class="dl-box" style="background:rgba(229,57,53,.25)"></span>较少
+        <span class="dl-box" style="background:rgba(229,57,53,.55)"></span>中等
+        <span class="dl-box" style="background:rgba(229,57,53,.8)"></span>密集
+        <span class="hint-text" id="dueCalHint"></span>
+      </div>
+      <div class="due-cal-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+      <div class="due-cal-grid" id="dueCalGrid"></div>
+      <!-- 已选日期 chips（有选择时出现，点 × 单独移除） -->
+      <div class="due-sel-wrap" id="dueSelWrap" hidden>
+        <span class="due-sel-label">已选</span>
+        <div class="due-sel-chips" id="dueSelChips"></div>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;align-items:center">
+      <button class="btn-default" id="dueCalAllBtn" onclick="dueCalToggleAll()" title="一键选中本展示月的全部日期；再按一次取消全选">全选本月</button>
+      <button class="btn-default" onclick="dueCalClear()" title="清空全部已选日期（所有月份）">清空</button>
+      <span style="flex:1"></span>
+      <button class="btn-secondary" onclick="dueCalCancel()">取消</button>
+      <button class="btn-primary" onclick="dueCalApply()">确定</button>
     </div>
   </div>
 </div>
@@ -2457,7 +2699,7 @@ function goLogin(){
 .cf-chip{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:11.5px;
   padding:1px 5px 1px 8px;border-radius:10px;border:1px solid #b5d4f4;white-space:nowrap;max-width:160px;flex-shrink:0}
 .cf-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cf-chip i{font-style:normal;cursor:pointer;color:#85b7eb;font-size:13px;line-height:1;flex-shrink:0}
+.cf-chip i{font-style:normal;cursor:pointer;color:#4a7db5;font-size:13px;line-height:1;flex-shrink:0}
 .cf-chip i:hover{color:var(--danger)}
 .cf-drop{position:absolute;top:calc(100% + 5px);left:0;z-index:70;min-width:220px;max-width:340px;max-height:280px;
   overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:var(--radius-sm);
@@ -3069,8 +3311,8 @@ function renderPermissionEntries(){
 function applyPermissionUI(){
   if(!ME)return;
   const isAdmin=!!ME.is_admin, canEdit=!!ME.can_edit;
-  // 管理员专属：成员与账号 / 操作日志
-  [['teamBtn',isAdmin],['auditBtn',isAdmin]]
+  // 管理员专属：成员与账号 / 操作日志；人员管理 = 部门负责人及以上（T-191d 能力位）
+  [['teamBtn',isAdmin],['auditBtn',isAdmin],['staffBtn',!!(ME&&ME.can_manage_staff)]]
     .forEach(function(p){const el=document.getElementById(p[0]);if(el)el.style.display=p[1]?'':'none';});
   // 架构管理 / 看板管理入口 → 由 renderPermissionEntries() 按权限动态渲染
   renderPermissionEntries();
@@ -3097,6 +3339,11 @@ function refreshToolbarOps(canEdit){
   items.push(
     {label:'展开板块',fn:function(){expandAll();}},
     {label:'折叠板块',fn:function(){collapseAll();}},
+    // 折叠/展开子事项（2026-11-13，用户需求）：从单个板块的「操作 ▾」上收到全局，
+    // 一键折叠/展开**当前所有可见板块**的子事项目录；状态按用户持久化
+    // （user_prefs.subtree_open），换浏览器/设备一致，不影响其他用户
+    {label:'展开子事项',fn:function(){foldAllItems(true);}},
+    {label:'折叠子事项',fn:function(){foldAllItems(false);}},
     {label:'— 数据导入导出 —',disabled:true},
     // 2026-11-06 #82：导入/导出全部弹窗化 —— 模板下载并入导入弹窗、
     // 模板管理并入导出弹窗（页签），外部不再单设按钮
@@ -4136,7 +4383,7 @@ function clearProfilePhoto(ev){
 // 压缩图片：最长边缩到 PROFILE_PHOTO_MAX_EDGE，输出 JPEG
 // 手机直出的照片常有 3~5MB，直接存 data URL 会把库撑大；
 // 统一压到长边 1200px / 质量 0.85，通常落在 100~300KB。
-function compressProfilePhoto(file){
+function compressProfilePhoto(file,maxEdge){
   return new Promise(resolve=>{
     const fr=new FileReader();
     fr.onload=()=>{
@@ -4144,7 +4391,7 @@ function compressProfilePhoto(file){
       img.onload=()=>{
         try{
           let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
-          const max=PROFILE_PHOTO_MAX_EDGE;
+          const max=maxEdge||PROFILE_PHOTO_MAX_EDGE;   // T-191：头像/照片统一管理复用（头像传 400）
           if(Math.max(w,h)>max){
             const k=max/Math.max(w,h);
             w=Math.round(w*k); h=Math.round(h*k);
@@ -4239,6 +4486,201 @@ async function submitChangePassword(){
     setTimeout(()=>{ logout(); }, 900);
   }catch(e){toast(e.message)}
 }
+
+// ============================================================
+// 人员管理（T-191；T-191d 权限：部门负责人及以上）：
+//   页签1 人员信息 —— 全字段表格（users + team_members 合并，服务端按范围过滤）；
+//     头像小图直接展示、照片缩略图点击弹出大图预览（imgPreviewModal）。
+//   页签2 头像/照片统一管理 —— 参照小精灵图模块：
+//     每人一卡（头像/照片两张缩略图）、替换（压缩后入库）/清除、
+//     变更历史按条恢复。数据全部持久化在数据库
+//     （users.avatar / users.photo + user_media_history），
+//     bat 整库快照链天然覆盖；快照级整包回滚由 bat 承担（无 UI 入口）。
+// ============================================================
+let STAFF_LIST=[];              // /api/staff/list 缓存
+let STAFF_TAB='info';           // 当前页签
+let STAFF_MEDIA_TARGET=null;    // 代管上传目标 {username, field}
+const STAFF_ROLE_CN={admin:'管理员',editor:'可编辑',viewer:'只读'};
+function openStaffModal(){
+  openModal('staffModal');updateScrollLock();
+  // 可见范围提示（T-191d）：口径以后端能力位为准，前端不推断
+  const hint=document.getElementById('staffScopeHint');
+  if(hint)hint.textContent=ME&&ME.staff_scope_all?'范围：全部部门':'范围：本部门及下属';
+  staffShowTab('info');
+  loadStaffList();
+}
+function staffShowTab(t){
+  STAFF_TAB=t;
+  const bi=document.getElementById('staffTabInfoBtn'),bm=document.getElementById('staffTabMediaBtn');
+  if(bi)bi.classList.toggle('on',t==='info');
+  if(bm)bm.classList.toggle('on',t==='media');
+  const vi=document.getElementById('staffViewInfo'),vm=document.getElementById('staffViewMedia');
+  if(vi)vi.hidden=(t!=='info');
+  if(vm)vm.hidden=(t!=='media');
+}
+async function loadStaffList(){
+  try{
+    const d=await api('/api/staff/list');
+    STAFF_LIST=d.staff||[];
+  }catch(e){ toast(e.message||'人员清单加载失败'); return; }
+  renderStaffTable();
+  renderStaffMediaGrid();
+}
+// ---- 页签1：人员信息全字段表格 ----
+function renderStaffTable(){
+  const wrap=document.getElementById('staffTableWrap');
+  if(!wrap)return;
+  const kw=(document.getElementById('staffSearch')||{value:''}).value.trim().toLowerCase();
+  const rows=STAFF_LIST.filter(r=>!kw
+    ||(r.name||'').toLowerCase().includes(kw)
+    ||(r.username||'').toLowerCase().includes(kw)
+    ||(r.emp_no||'').toLowerCase().includes(kw));
+  const cnt=document.getElementById('staffCount');
+  if(cnt)cnt.textContent='共 '+rows.length+' 人';
+  if(!rows.length){wrap.innerHTML='<div class="empty">没有匹配的人员</div>';return}
+  const deptTags=s=>(s||'').split(',').filter(Boolean).map(d=>`<span class="staff-dept-tag">${esc(d)}</span>`).join('')||'<span class="staff-photo-ph">—</span>';
+  wrap.innerHTML=`<table class="staff-table"><thead><tr>
+    <th>头像</th><th>照片</th><th>姓名</th><th>账号</th><th>工号</th><th>部门</th><th>角色</th>
+    <th>性别</th><th>出生年月</th><th>政治面貌</th><th>籍贯</th><th>手机</th><th>入司时间</th>
+    <th>个人状态</th><th>最后登录</th><th>建号时间</th></tr></thead><tbody>`+
+    rows.map(r=>{
+      const acc=r.username||'';
+      const av=acc&&r.has_avatar
+        ?`<img class="staff-av" src="/api/staff/img/${encodeURIComponent(acc)}/avatar" alt="" loading="lazy" onclick="previewStaffImg('${esc(acc)}','avatar','${esc(r.name||acc)} 的头像')">`
+        :`<img class="staff-av" src="${DEFAULT_PHOTO_URL}" alt="" title="默认占位图（未上传头像）" style="cursor:default">`;
+      const ph=acc&&r.has_photo
+        ?`<img class="staff-photo-thumb" src="/api/staff/img/${encodeURIComponent(acc)}/photo" alt="" loading="lazy" onclick="previewStaffImg('${esc(acc)}','photo','${esc(r.name||acc)} 的个人照片')">`
+        :`<span class="staff-photo-ph">—</span>`;
+      const native=[r.native_province,r.native_city].filter(Boolean).join(' · ')||'—';
+      const last=r.last_login_at?esc(String(r.last_login_at).slice(0,16)):'—';
+      const role=r.role?`<span class="role-tag">${STAFF_ROLE_CN[r.role]||esc(r.role)}</span>`:'—';
+      return `<tr${r.departed?' class="departed"':''}>
+        <td>${av}</td><td>${ph}</td>
+        <td>${esc(r.name||'—')}${r.departed?' <span class="default-photo-tag">离岗</span>':''}</td>
+        <td>${acc?esc(acc):'<span class="staff-photo-ph">未绑定</span>'}</td>
+        <td>${r.emp_no?esc(r.emp_no):'—'}</td>
+        <td>${deptTags(r.departments)}</td>
+        <td>${role}</td>
+        <td>${r.gender?esc(r.gender):'—'}</td>
+        <td>${r.birth_date?esc(r.birth_date):'—'}</td>
+        <td>${r.political_status?esc(r.political_status):'—'}</td>
+        <td>${esc(native)}</td>
+        <td>${r.phone?esc(r.phone):'—'}</td>
+        <td>${r.hire_date?esc(r.hire_date):'—'}</td>
+        <td>${r.status_text?esc(r.status_text):'—'}</td>
+        <td>${last}</td>
+        <td>${r.created_at?esc(String(r.created_at).slice(0,10)):'—'}</td></tr>`;
+    }).join('')+'</tbody></table>';
+}
+// ---- 大图预览（头像/照片共用） ----
+function previewStaffImg(acc,field,label){
+  const img=document.getElementById('imgPreviewSrc'),cap=document.getElementById('imgPreviewCap');
+  if(!img)return;
+  img.onerror=()=>{ cap.textContent=label+'（图片加载失败）'; };
+  img.src='/api/staff/img/'+encodeURIComponent(acc)+'/'+field;
+  cap.textContent=label||'';
+  openModal('imgPreviewModal');updateScrollLock();
+}
+// ---- 页签2：头像/照片统一管理 ----
+function renderStaffMediaGrid(){
+  const g=document.getElementById('staffMediaGrid');
+  if(!g)return;
+  // 人名/账号/工号搜索（T-191c）：与管理页签共用同一过滤口径，空词 = 全量
+  const kw=((document.getElementById('staffMediaSearch')||{value:''}).value||'').trim().toLowerCase();
+  const rows=STAFF_LIST.filter(r=>r.username&&(!kw
+    ||(r.name||'').toLowerCase().includes(kw)
+    ||(r.username||'').toLowerCase().includes(kw)
+    ||(r.emp_no||'').toLowerCase().includes(kw)));
+  if(!rows.length){g.innerHTML='<div class="empty">'+(kw?'没有匹配的人员':'暂无可管理的账号（成员需先绑定登录账号）')+'</div>';return}
+  g.innerHTML=rows.map(r=>{
+    const acc=r.username;
+    const thumb=(field,label,has)=>{
+      const body=has
+        ?`<img src="/api/staff/img/${encodeURIComponent(acc)}/${field}" alt="" loading="lazy" onclick="previewStaffImg('${esc(acc)}','${field}','${esc(r.name||acc)} 的${label}')">`
+        :`<span onclick="toast('尚未上传${label}')">未上传</span>`;
+      return `<div class="staff-media-thumb" title="点击预览大图">${body}<span class="smt-label">${label}</span></div>`;
+    };
+    const ops=(field,label,has)=>`<button class="btn-default" onclick="staffMediaPick('${esc(acc)}','${field}','${esc(r.name||acc)}')">${has?'替换':'上传'}${label}</button>
+      <button class="btn-default" onclick="staffMediaClear('${esc(acc)}','${field}','${esc(r.name||acc)}')"${has?'':' disabled style="opacity:.45"'}>清除${label}</button>`;
+    return `<div class="staff-media-card">
+      <div class="staff-media-name"><span>${esc(r.name||acc)}</span>${r.departed?'<span class="default-photo-tag">离岗</span>':''}</div>
+      <div class="staff-media-row">
+        ${thumb('avatar','头像',r.has_avatar)}
+        ${thumb('photo','照片',r.has_photo)}
+        <div class="staff-media-ops">
+          ${ops('avatar','头像',r.has_avatar)}
+          ${ops('photo','照片',r.has_photo)}
+        </div>
+      </div></div>`;
+  }).join('');
+}
+// 管理页签的搜索没有输入框，随人员信息页签的搜索词过滤即可：让渲染入口统一
+function staffMediaPick(acc,field,label){
+  STAFF_MEDIA_TARGET={username:acc,field:field,label:label};
+  document.getElementById('staffMediaFile').click();
+}
+async function staffMediaPicked(ev){
+  const f=ev.target&&ev.target.files&&ev.target.files[0];
+  ev.target.value='';
+  const tgt=STAFF_MEDIA_TARGET; STAFF_MEDIA_TARGET=null;
+  if(!f||!tgt)return;
+  if(PROFILE_AVATAR_TYPES.indexOf(f.type)<0){toast('仅支持 JPG / PNG / GIF / WebP 格式');return}
+  const isAvatar=(tgt.field==='avatar');
+  const limit=isAvatar?512*1024:PROFILE_MAX_PHOTO_BYTES;
+  if(f.size>limit){toast(`图片过大（${Math.round(f.size/1024)}KB），上限 ${limit/1024}KB`);return}
+  // 头像压到长边 400（圆形小图足够），照片沿用 1200
+  const dataUrl=await compressProfilePhoto(f,isAvatar?400:undefined);
+  if(!dataUrl){toast('图片读取失败，请重新选择');return}
+  const approx=Math.round(dataUrl.length*3/4);
+  if(approx>limit){toast(`压缩后仍过大（${Math.round(approx/1024)}KB），请换一张更小的图片`);return}
+  try{
+    await api('/api/staff/media',{method:'POST',
+      body:JSON.stringify({username:tgt.username,field:tgt.field,data:dataUrl})});
+    toast(`已更新 ${tgt.label} 的${isAvatar?'头像':'个人照片'}`);
+  }catch(e){toast(e.message||'保存失败');return}
+  await loadStaffList();
+}
+async function staffMediaClear(acc,field,label){
+  const what=(field==='avatar')?'头像':'个人照片';
+  if(!confirm(`确定清除 ${label} 的${what}？（可通过「变更历史」恢复）`))return;
+  try{
+    await api('/api/staff/media',{method:'POST',
+      body:JSON.stringify({username:acc,field:field,data:''})});
+    toast(`已清除 ${label} 的${what}`);
+  }catch(e){toast(e.message||'清除失败');return}
+  await loadStaffList();
+}
+// ---- 变更历史（按条回滚） ----
+async function staffMediaHist(){
+  document.getElementById('staffSubTitle').textContent='🗒 头像/照片变更历史';
+  document.getElementById('staffSubBody').innerHTML='<div class="empty">加载中…</div>';
+  openModal('staffSubModal');updateScrollLock();
+  let list=[];
+  try{ const d=await api('/api/staff/media/history?limit=200'); list=d.history||[]; }
+  catch(e){ document.getElementById('staffSubBody').innerHTML='<div class="empty">'+esc(e.message||'加载失败')+'</div>'; return; }
+  const body=document.getElementById('staffSubBody');
+  if(!list.length){body.innerHTML='<div class="empty">暂无变更记录</div>';return}
+  const FL={avatar:'头像',photo:'照片'};
+  body.innerHTML=list.map(h=>
+    `<div class="staff-hist-row">
+      <span style="min-width:150px">${esc(h.username)}</span>
+      <span style="min-width:36px">${FL[h.field]||esc(h.field)}</span>
+      <span style="color:var(--text3)">${esc(h.changed_at||'')}</span>
+      <span style="color:var(--text3)">${esc(h.changed_by||'')}${h.has_new?(' · 改为'+(h.new_kb||0)+'KB'):' · 清除'}</span>
+      <button class="btn-default staff-hist-act" onclick="staffMediaHistRestore(${h.id})"${h.has_old?'':' disabled style="opacity:.45" title="旧值为空（原本没有图片），回滚等同清除"'}>恢复此版本</button>
+    </div>`).join('');
+}
+async function staffMediaHistRestore(id){
+  if(!confirm('确定恢复该版本？（当前值会先留档，可再次回滚找回）'))return;
+  try{ await api('/api/staff/media/history/'+id+'/restore',{method:'POST'}); }
+  catch(e){toast(e.message||'回滚失败');return}
+  toast('已恢复');
+  closeModal('staffSubModal');
+  await loadStaffList();
+}
+// ---- 全量快照（T-191b 按用户决定移除 UI 入口）：快照级整包备份/回滚后续由
+//      bat 脚本统一承担（后端 /api/staff/media/snapshots* 端点保留不暴露入口，
+//      与 /api/import「端点保留、无前端入口」的先例一致），bat 届时可直接对接。
 
 function openDeptEditModal(){
   if(!CUR_DEPT){toast('请先进入部门主页');return}
@@ -4798,6 +5240,8 @@ function buildFilterParams(extra){
   if(curBoards.size)ps.set('board_ids',[...curBoards].join(','));
   if(st)ps.set('status',st);if(q)ps.set('q',q);
   if(cc)ps.set('cc',cc);
+  // 到期筛选（T-191）：已选截止日期逗号串 → 后端 due 参数任一命中
+  if(window._dueFilter)ps.set('due_dates',window._dueFilter);
   if(ds)ps.set('created_start',ds);
   if(de)ps.set('created_end',de);
   // 周数多选（任一命中）
@@ -5036,6 +5480,7 @@ function clearAllRowFilters(){
   WEEK_SEL=new Set();
   curYears=new Set();
   COL_STATUS_SEL=new Set();
+  DUE_SEL=new Set();window._dueFilter='';syncDueBtn();   // T-191 到期筛选一并清空
   syncDateFilterUI();     // 日期元素已移除 → 函数内部判空直接跳过（保留防外部引用）
   paintFilterCombos();
   paintYearChips();
@@ -5110,6 +5555,11 @@ function syncFilterHint(){
     parts.push('年份：'+[...curYears].map(y=>y+' 年').join('、'));
   if(WEEK_SEL.size)parts.push('周数：'+[...WEEK_SEL].map(weekLabelOf).join('、'));
   if(window._ccFilter)parts.push('参与人：'+window._ccFilter.split(',').join('、'));
+  // 到期筛选（T-191）：超 3 天折叠展示，完整清单在日历弹窗
+  if(typeof DUE_SEL!=='undefined'&&DUE_SEL.size){
+    const ds=[...DUE_SEL].sort();
+    parts.push('到期：'+(ds.length>3?ds.slice(0,3).join('、')+' 等 '+ds.length+' 天':ds.join('、')));
+  }
   box.textContent=parts.length?parts.join('  |  '):'';
 }
 function renderWeekFilter(weeks){
@@ -5175,7 +5625,153 @@ function applyPersonFilter(kind, persons){
   reload(1);
 }
 
-// ---------- 创建日期区间筛选 ----------
+// ---------- 到期筛选（T-191）：日历多选事项截止日期 + 热力图 ----------
+// 交互口径：
+//  ① 已选日期存 DUE_SEL（跨月保留）——切月只改视图不清选择；
+//  ② 「全选本月」一键选中当前展示月全部日期，再按一次 = 取消全选（仅针对当前展示月）；
+//  ③ 取消 = 还原打开弹窗时的快照（DUE_BACKUP），确定 = 应用（window._dueFilter → due_dates）；
+//  ④ 热力图：/api/due_counts 按当前筛选范围返回各日到期事项数，
+//     0 → 无色，越多越红（透明渐变至红，本月峰值封顶）。
+let DUE_SEL=new Set();          // 已选到期日期（'YYYY-MM-DD'，跨月保留）
+let DUE_CAL_Y=0,DUE_CAL_M=0;    // 日历当前展示年月（M: 0-11）
+let DUE_COUNTS={};              // 日期→到期事项数（打开弹窗时按当前筛选范围拉取）
+let DUE_BACKUP=null;            // 打开弹窗时的已选快照（取消还原）
+function _dueIso(y,m,d){return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0')}
+async function openDueCalModal(){
+  DUE_BACKUP=new Set(DUE_SEL);
+  // 初始展示月：已选日期取最早一个月，否则当前月
+  if(DUE_SEL.size){
+    const f=[...DUE_SEL].sort()[0].split('-').map(Number);
+    DUE_CAL_Y=f[0];DUE_CAL_M=f[1]-1;
+  }else{
+    const t=new Date();DUE_CAL_Y=t.getFullYear();DUE_CAL_M=t.getMonth();
+  }
+  openModal('dueCalModal');updateScrollLock();
+  renderDueCal();
+  // 热力数据：与列表同一筛选范围（去掉到期筛选自身），权限口径同 /api/cards
+  try{
+    const ps=buildFilterParams();ps.delete('due_dates');
+    const d=await api('/api/due_counts?'+ps.toString());
+    DUE_COUNTS=d.counts||{};
+  }catch(e){DUE_COUNTS={};}
+  // 请求在途时可能已切换月份/关闭弹窗：确认仍在展示才重绘着色
+  const grid=document.getElementById('dueCalGrid');
+  if(grid&&document.getElementById('dueCalModal').style.display==='flex')renderDueCal();
+}
+function dueCalShift(d){
+  let m=DUE_CAL_M+d,y=DUE_CAL_Y;
+  if(m<0){m=11;y--}else if(m>11){m=0;y++}
+  DUE_CAL_Y=y;DUE_CAL_M=m;
+  renderDueCal();
+}
+function renderDueCal(){
+  const title=document.getElementById('dueCalTitle'),grid=document.getElementById('dueCalGrid');
+  if(!title||!grid)return;
+  const y=DUE_CAL_Y,m=DUE_CAL_M;
+  title.textContent=y+'年'+(m+1)+'月';
+  const days=new Date(y,m+1,0).getDate();
+  const lead=(new Date(y,m,1).getDay()+6)%7;   // 周一为首列（表头 一~日）
+  const td=new Date();const tIso=_dueIso(td.getFullYear(),td.getMonth(),td.getDate());
+  // 本月热力峰值（渐变基准；全月无数据时用 1 兜底避免除零）
+  let maxN=1;
+  for(let d=1;d<=days;d++){const n=DUE_COUNTS[_dueIso(y,m,d)]||0;if(n>maxN)maxN=n}
+  let html='';
+  for(let i=0;i<lead;i++)html+='<div class="due-cell empty"></div>';
+  for(let d=1;d<=days;d++){
+    const iso=_dueIso(y,m,d);
+    const n=DUE_COUNTS[iso]||0;
+    const sel=DUE_SEL.has(iso);
+    // 热力：0 → 无色；n>0 → 透明渐变至红（0.12~0.80，按本月峰值归一）
+    const bg=n?('background:rgba(229,57,53,'+(0.12+0.68*n/maxN).toFixed(3)+');'):'';
+    html+=`<div class="due-cell${sel?' sel':''}${iso===tIso?' today':''}" style="${bg}" data-due="${iso}" onclick="dueCalPick('${iso}')" title="${iso}${n?(' · 到期 '+n+' 项'):''}">${d}${n?('<span class="dc-n">'+n+'</span>'):''}</div>`;
+  }
+  grid.innerHTML=html;
+  // 「全选本月」双态：当前展示月全部日期都已选中 → 显示「取消全选」
+  let all=true;
+  for(let d=1;d<=days;d++){if(!DUE_SEL.has(_dueIso(y,m,d))){all=false;break}}
+  const ab=document.getElementById('dueCalAllBtn');
+  if(ab)ab.textContent=all?'取消全选':'全选本月';
+  const hint=document.getElementById('dueCalHint');
+  if(hint)hint.textContent=DUE_SEL.size
+    ?('已选 '+DUE_SEL.size+' 天：'+[...DUE_SEL].sort().join('、'))
+    :'点击日期多选（再点取消）；切换月份已选日期保留；深红 = 到期事项多';
+}
+function dueCalPick(iso){
+  if(DUE_SEL.has(iso))DUE_SEL.delete(iso);else DUE_SEL.add(iso);
+  renderDueCal();
+}
+function dueCalToday(){
+  const t=new Date();DUE_CAL_Y=t.getFullYear();DUE_CAL_M=t.getMonth();
+  renderDueCal();
+}
+function renderDueCal(){
+  const title=document.getElementById('dueCalTitle'),grid=document.getElementById('dueCalGrid');
+  if(!title||!grid)return;
+  const y=DUE_CAL_Y,m=DUE_CAL_M;
+  title.textContent=y+'年'+(m+1)+'月';
+  const days=new Date(y,m+1,0).getDate();
+  const lead=(new Date(y,m,1).getDay()+6)%7;   // 周一为首列（表头 一~日）
+  const td=new Date();const tIso=_dueIso(td.getFullYear(),td.getMonth(),td.getDate());
+  // 本月热力峰值（渐变基准；全月无数据时用 1 兜底避免除零）
+  let maxN=1;
+  for(let d=1;d<=days;d++){const n=DUE_COUNTS[_dueIso(y,m,d)]||0;if(n>maxN)maxN=n}
+  let html='';
+  for(let i=0;i<lead;i++)html+='<div class="due-cell empty"></div>';
+  for(let d=1;d<=days;d++){
+    const iso=_dueIso(y,m,d);
+    const n=DUE_COUNTS[iso]||0;
+    const sel=DUE_SEL.has(iso);
+    // 热力：0 → 无色；n>0 → 透明渐变至红（0.12~0.80，按本月峰值归一）
+    const bg=n?('background:rgba(229,57,53,'+(0.12+0.68*n/maxN).toFixed(3)+');'):'';
+    html+=`<div class="due-cell${sel?' sel':''}${iso===tIso?' today':''}" style="${bg}" data-due="${iso}" onclick="dueCalPick('${iso}')" title="${iso}${n?(' · 到期 '+n+' 项'):''}">${d}${n?('<span class="dc-n">'+n+'</span>'):''}</div>`;
+  }
+  grid.innerHTML=html;
+  // 「全选本月」双态：当前展示月全部日期都已选中 → 显示「取消全选」
+  let all=true;
+  for(let d=1;d<=days;d++){if(!DUE_SEL.has(_dueIso(y,m,d))){all=false;break}}
+  const ab=document.getElementById('dueCalAllBtn');
+  if(ab)ab.textContent=all?'取消全选':'全选本月';
+  // 已选 chips（T-191e）：可视化当前筛选集，点 × 单独移除（复用 dueCalPick 的 toggle 语义）
+  const wrap=document.getElementById('dueSelWrap'),chips=document.getElementById('dueSelChips');
+  if(wrap&&chips){
+    const ds=[...DUE_SEL].sort();
+    wrap.hidden=!ds.length;
+    chips.innerHTML=ds.map(d=>
+      `<span class="due-chip">${d}<i title="移除该日期" onclick="dueCalPick('${d}')">×</i></span>`).join('');
+  }
+  // 计数提示放图例行尾（原独立 hint 行并入图例区）
+  const hint=document.getElementById('dueCalHint');
+  if(hint)hint.textContent=DUE_SEL.size?('已选 '+DUE_SEL.size+' 天'):'';
+}
+function dueCalToggleAll(){
+  const days=new Date(DUE_CAL_Y,DUE_CAL_M+1,0).getDate();
+  let all=true;
+  for(let d=1;d<=days;d++){if(!DUE_SEL.has(_dueIso(DUE_CAL_Y,DUE_CAL_M,d))){all=false;break}}
+  for(let d=1;d<=days;d++){
+    const iso=_dueIso(DUE_CAL_Y,DUE_CAL_M,d);
+    if(all)DUE_SEL.delete(iso);else DUE_SEL.add(iso);
+  }
+  renderDueCal();
+}
+function dueCalClear(){DUE_SEL.clear();renderDueCal()}
+function dueCalCancel(){
+  DUE_SEL=DUE_BACKUP?new Set(DUE_BACKUP):new Set();
+  DUE_BACKUP=null;
+  closeModal('dueCalModal');updateScrollLock();
+}
+function dueCalApply(){
+  DUE_BACKUP=null;
+  window._dueFilter=[...DUE_SEL].sort().join(',');
+  syncDueBtn();
+  closeModal('dueCalModal');updateScrollLock();
+  reload(1);
+}
+function syncDueBtn(){
+  const badge=document.getElementById('dueFilterBadge');
+  if(!badge)return;
+  if(DUE_SEL.size){badge.hidden=false;badge.textContent=String(DUE_SEL.size);}
+  else badge.hidden=true;
+}
 // 起止颠倒时自动交换，避免查出空结果；空值与非法值一律忽略（后端也会再兜一层）
 function onDateFilterChange(){
   const s=document.getElementById('createdStart'),e=document.getElementById('createdEnd');
@@ -5214,6 +5810,7 @@ function filtersActive(q){
   if(PERSON_SEL&&PERSON_SEL.size)return true;
   if(typeof curYears!=='undefined'&&curYears&&curYears.size)return true;   // 归属年份筛选
   if(typeof COL_STATUS_SEL!=='undefined'&&COL_STATUS_SEL&&COL_STATUS_SEL.size)return true;   // 板块状态筛选（#81）
+  if(typeof DUE_SEL!=='undefined'&&DUE_SEL&&DUE_SEL.size)return true;   // 到期筛选（T-191）
   return false;
 }
 function renderBoard(cards,cols,q,colHits){
@@ -5229,7 +5826,7 @@ function renderBoard(cards,cols,q,colHits){
   CHK_COL_CARDS={};            // #159：板块→主事项映射随每次重绘重建
   CHK_CURRENT_CARDS=(cards||[]).map(x=>x.card_id);   // #161：全选当前的本轮卡片清单
   CHK_CURRENT_CARDS_META={};                          // #161/#163：card_id→{name,owner}
-  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]={name:x.card_name,owner:x.owner};});
+  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]={name:x.card_name,owner:x.owner,cc:x.cc};});
   // 没有事项但有板块（如刚建的空板块）时仍要展示板块列表
   if(!(cards||[]).length && !(cols||[]).length){
     // 空状态文案要区分两种情形（需求2）：
@@ -5310,12 +5907,20 @@ function renderBoard(cards,cols,q,colHits){
     const titleHtml=titleEditable
       ?`<span class="week-title edit" ${titleAttrs} onclick="openColumnDetail(this)" title="${esc(titleTip)}">${esc(k)}</span>`
       :`<span class="week-title" title="${esc(colDesc?('【板块描述】'+colDesc):'')}">${esc(k)}</span>`;
+    // T-202 板块编辑锁标识（用户需求）：被他人编辑锁定 → 标题后方 🔒 已锁定
+    //（与事项行同款 .lock-tag，实现复用事项锁定标识；锁定者信息由 /api/cards
+    //  的板块元信息下发 locked_by/locked_by_name，实时变化走 WS edit_lock 广播）
+    const _lockBy=meta?(meta.locked_by||''):'';
+    const _lockDisp=meta?(meta.locked_by_name||meta.locked_by||''):'';
+    const _lockTag=(_lockBy&&_lockBy!==ME.username)
+      ?`<span class="lock-tag col-lock-tag" title="${esc(_lockDisp)} 正在编辑该板块">🔒 ${esc(_lockDisp)} 已锁定</span>`
+      :'';
     // ── 板块行布局（2026-11-04 #55）：与事项行同构 → 字段列纵向对齐 ──
     // 字段：负责人 / 创建 / 截止 / 倒计时（板块无周数 → 周数列复用为进度条位）
     // 截止日期（T-0188）：板块编辑弹窗可配置；倒计时按截止日期与今天自动计算
     const _ownerName=bcMemberName(meta?(meta.owner||''):'');
     const _colDue=meta?(meta.due_date||''):'';
-    // 2026-11-04 需求2/3：
+    const _cdStop=(meta?(meta.completion||''):'')==='done';   // T-191i：板块已完成 → 倒计时停用
     //  ① 第一格 = **固定宽度进度条**（192px ≈ 两个周数列），右端与负责人列起点对齐
     //  ② 板块「完成情况」= 负责人手动声明的独立字段（completion），
     //     与进度条（done/total 自动统计）**并存且互不覆盖**
@@ -5327,21 +5932,24 @@ function renderBoard(cards,cols,q,colHits){
       +`<span class="fcol fcol-created" title="板块创建日期">创建 ${esc(created||'—')}</span>`
       +(_colDue?`<span class="fcol fcol-due" title="板块截止日期">截止 ${esc(_colDue)}</span>`
             :'<span class="fcol fcol-due fcol-empty" title="未设置板块截止日期">截止 —</span>')
-      +(cdText(_colDue)?`<span class="fcol fcol-cd${cdOver(_colDue)?' fcol-cd-over':''}" title="${cdOver(_colDue)?('已逾期 '+(-cdDays(_colDue))+' 天'):(cdDays(_colDue)===0?'截止日期就是今天':('距截止日期还有 '+cdDays(_colDue)+' 天'))}">倒计时 ${esc(cdText(_colDue))}</span>`
-                      :'<span class="fcol fcol-cd fcol-empty" title="未设置截止日期，无倒计时">倒计时 —</span>')
+      // T-191j 结算展示：板块已完成 → 倒计时列改为显示结算结果（逾期n天/提前n天/按时完成）；
+      // 已完成但未结算（无截止日期/历史存量）→ 「倒计时 —」占位（停用）
+      +(_cdStop?(settleHtml(meta?meta.overdue_days:undefined)
+                ||`<span class="fcol fcol-cd fcol-empty" title="板块已完成，倒计时停用">倒计时 —</span>`)
+       :(cdText(_colDue)?`<span class="fcol fcol-cd${cdOver(_colDue)?' fcol-cd-over':''}" title="${cdOver(_colDue)?('已逾期 '+(-cdDays(_colDue))+' 天'):(cdDays(_colDue)===0?'截止日期就是今天':('距截止日期还有 '+cdDays(_colDue)+' 天'))}">倒计时 ${esc(cdText(_colDue))}</span>`
+                      :'<span class="fcol fcol-cd fcol-empty" title="未设置截止日期，无倒计时">倒计时 —</span>'))
       +'</span>';
     // 板块完成情况标签（与事项的状态标签同一形态，只读展示）
     const _comp=meta?(meta.completion||'open'):'open';
     const _compTag=`<span class="status-tag ${statusCls(_comp)}" title="板块完成情况（由板块负责人在编辑板块时手动选择；与左侧进度条的自动统计相互独立）">${statusText(_comp)}</span>`;
-    // 置顶 / 复制 / 折叠 / 展开合并为「操作 ▾」（tail 槽位与事项行同构 → 纵向对齐）
+    // 置顶 / 复制合并为「操作 ▾」（tail 槽位与事项行同构 → 纵向对齐）
+    // 「折叠/展开子事项」已上收到工具栏【操作 ▾】（2026-11-13 用户需求）：
+    // 单个板块不再提供该选项，全局按钮一键操作当前所有可见板块
     const _copyPayload=JSON.stringify({col_key:colKey,column_name:k,board_id:boardId,column_id:meta?(meta.column_id||''):'',nature:meta?(meta.nature||'日常'):'日常',year:year,created_at:meta?(meta.created_at||''):''});
-    const _wg='wg_'+i;
     const _colOps=[
       {label:'＋ 新建事项',fn:function(){openNewModal(boardId,colKey);}},
       {label:pinned?'📌 取消置顶':'📌 置顶',fn:function(){toggleColumnPin(colKey,pinned?0:1);}},
-      {label:'📋 复制',fn:function(){openCopyModal('column',JSON.parse(_copyPayload));}},
-      {label:'折叠子事项',fn:function(){foldItems(_wg,false);}},
-      {label:'展开子事项',fn:function(){foldItems(_wg,true);}}
+      {label:'📋 复制',fn:function(){openCopyModal('column',JSON.parse(_copyPayload));}}
     ];
     const _colOpsId=rowOpsRegister(_colOps);
     return `<div class="week-group open" id="wg_${i}">
@@ -5351,14 +5959,14 @@ function renderBoard(cards,cols,q,colHits){
           ondblclick="event.stopPropagation()" ${chkColOwnerOf(colKey,boardId)?'':'disabled'}
           title="${chkColOwnerOf(colKey,boardId)?'勾选板块（= 全选其下事项与子事项；部分勾选呈半选态；勾选仅本人可见）':CHK_DISABLED_TIP}">`:''}
         ${titleHtml}
+        ${_lockTag}
         ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
         <span class="week-meta">${done}/${total} 完成</span>
         ${_colFcols}
         <span class="item-tail">
-          <span class="slot-overdue"></span>
           <span class="slot-subtask">${(meta?meta.todo_total:0)>0?`<span class="st-mini ${meta.todo_done===meta.todo_total?'all':''}" title="板块待办完成进度（勾选在板块编辑界面或浏览界面进行）">【待办：${meta.todo_done}/${meta.todo_total}】</span>`:''}</span>
           <span class="slot-status">${_compTag}</span>
-          <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_colOpsId}')" title="新建事项 / 置顶 / 复制 / 折叠 / 展开">操作 ▾</button></span>
+          <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_colOpsId}')" title="新建事项 / 置顶 / 复制">操作 ▾</button></span>
         </span>
       </div>
       <div class="week-body">${list.map((c,i)=>cardItem(c,i+1)).join('')}</div>
@@ -5599,7 +6207,7 @@ function renderSearchResults(container,cards,cols,q,colHits){
   // #161 搜索视图同样支持「全选当前」：注册本轮命中的事项清单
   CHK_CURRENT_CARDS=(cards||[]).map(x=>x.card_id);
   CHK_CURRENT_CARDS_META={};
-  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]={name:x.card_name,owner:x.owner};});
+  (cards||[]).forEach(x=>{CHK_CURRENT_CARDS_META[x.card_id]={name:x.card_name,owner:x.owner,cc:x.cc};});
   const hitByKey={};
   (colHits||[]).forEach(h=>{hitByKey[h.col_key]=h});
   // 年份筛选在搜索视图同样生效：只保留归属年份匹配的板块与其事项
@@ -5647,7 +6255,7 @@ function srItemHtml(x){
   return `<div class="sr-item">
     <span class="sr-name" onclick="openDetail('${x.card_id}')" title="${esc(x.card_name)}">${esc(x.card_name)}</span>
     <span class="sr-badge" title="所属板块 / 看板">${esc(badge)}</span>
-    <span class="fcols">${fieldCols({owner:x.owner,created:x.created,due:x.due})}</span>
+    <span class="fcols">${fieldCols({owner:x.owner,created:x.created,due:x.due,status:x.status,overdue_days:x.overdue_days})}</span>
     <span class="slot-status"><span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':'pending'}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':'未完成'}</span></span>
   </div>`;
 }
@@ -5718,6 +6326,27 @@ function cdText(due){
   return n===null?'':String(n);
 }
 function cdOver(due){const n=cdDays(due);return n!==null&&n<0;}
+// ---------- 结算结果（T-191j）----------
+// 状态变为「已完成」时后端结算一次（完成日-截止日，落库 cards/board_columns.overdue_days）：
+//   逾期完成=正数 / 提前完成=负数 / 当天准时完成=0 / 未结算（无截止日期或历史存量）= null。
+// 结算后倒计时列不再显示天数，改为显示结算结果（自描述语义，无需「倒计时」前缀）。
+function settleText(od){
+  if(od===null||od===undefined||od==='')return '';
+  const n=Number(od);
+  if(isNaN(n))return '';
+  if(n>0)return '逾期'+n+'天';
+  if(n<0)return '提前'+(-n)+'天';
+  return '按时完成';
+}
+// 结算态的展示片段（加 class 与悬停提示）：done 且已结算 → 结果文本；
+// done 未结算（无截止日期/历史存量）→ null（由调用方回落到「倒计时停用」占位）。
+// 带 fcol 前缀类，可直接嵌入板块行/事项行的 fcols 字段列（与其它字段同排版）。
+function settleHtml(od){
+  const t=settleText(od);
+  if(!t)return null;
+  const cls=Number(od)>0?' fcol-cd-over':'';   // 逾期完成沿用逾期红色；提前/按时默认色
+  return `<span class="fcol fcol-cd${cls}" title="已完成结算（完成日−截止日）：${esc(t)}">${esc(t)}</span>`;
+}
 // ---------- 字段列：负责人 / 周数 / 创建日期 / 截止日期 / 倒计时 ----------
 // 单一数据源：父事项与子事项共用 fieldItems()，
 // 字段集合与顺序由这里定义，渲染器只负责排版 → 两者必然一致，不会各写一份而漂移。
@@ -5731,7 +6360,8 @@ function fieldItems(o){
     {key:'owner',   label:'负责人',   value:String(o.owner||'').trim()},
     {key:'created', label:'创建',     value:fmtDate(o.created)},
     {key:'due',     label:'截止',     value:fmtDate(o.due)},
-    {key:'cd',      label:'倒计时',   value:cdText(o.due)},
+    // T-191j：事项已完成 → 倒计时列改为显示结算结果（逾期n天/提前n天/按时完成）；未完成 → 倒计时数字
+    {key:'cd',      label:'倒计时',   value:(o.status==='done')?(settleText(o.overdue_days)):cdText(o.due)},
   ];
 }
 // 周数压缩显示（#55）：「2026年第32周」→「2026·W32」，全称放悬停提示
@@ -5753,10 +6383,22 @@ function fieldCols(o){
     // 周数在网格里用压缩形态（#55），全称进悬停提示
     const v=f.key==='week_no'?weekCompact(f.value):f.value;
     let tip=f.value?(f.label+'：'+esc(f.value)):('未设置'+f.label);
+    if(f.key==='cd'){
+      if(o.status==='done'){
+        // T-191j：已完成 → 结算结果展示（自描述语义，不再加「倒计时」前缀）
+        tip=f.value?('已完成结算（完成日−截止日）：'+f.value):'事项已完成，倒计时停用';
+      }else{
+        tip=f.value?(f.value==='今天'?'截止日期就是今天':(cdOver(o.due)?('已逾期 '+(-cdDays(o.due))+' 天'):('距截止日期还有 '+cdDays(o.due)+' 天'))):'未设置截止日期，无倒计时';
+      }
+    }
     if(f.key==='week_no'&&f.value&&cy)tip+='（所属板块年份：'+esc(cy)+'年）';
-    if(f.key==='cd'&&f.value)tip=f.value==='今天'?'截止日期就是今天':(cdOver(o.due)?('已逾期 '+(-cdDays(o.due))+' 天'):('距截止日期还有 '+cdDays(o.due)+' 天'));
     // 倒计时逾期红色高亮（与「逾期」标签同色系）；未设置则灰色占位
-    const extra=(f.key==='cd'&&f.value&&cdOver(o.due))?' fcol-cd-over':'';
+    const extra=(f.key==='cd'&&f.value&&((o.status==='done')?Number(o.overdue_days)>0:cdOver(o.due)))?' fcol-cd-over':'';
+    // T-191h 回滚（用户口径）：倒计时未结算时保持「倒计时 N / 倒计时 —」前缀形态；
+    // T-191j：已完成且已结算 → 内容为结算结果（自描述，无前缀）
+    if(f.key==='cd'&&o.status==='done'){
+      return `<span class="fcol fcol-cd${extra}${f.value?'':' fcol-empty'}" title="${tip}">${f.value?esc(f.value):'倒计时 —'}</span>`;
+    }
     return `<span class="fcol fcol-${f.key}${f.value?'':' fcol-empty'}${extra}" title="${tip}">${f.label} ${v?esc(v):'—'}</span>`;
   }).join('');
 }
@@ -5770,7 +6412,7 @@ function cardItem(c,seq){
   const lockedDisp=c.locked_by_name||locked||'';
   const lockedByOther=locked&&locked!==ME.username;
   const lockHtml=lockedByOther?`<span class="lock-tag">🔒 ${esc(lockedDisp)} 已锁定</span>`:'';
-  const overdue=c.due && c.status!=='done' && c.due < new Date().toISOString().slice(0,10);
+  // 「逾期」标识列已移除（2026-11-13）：释放的 46px 槽位让给标题列（标题 flex:1 自动吸收）
   // 「添加子事项」是行内唯一的子事项入口：原来的「子事项 N」按钮已移除 ——
   // 已有子事项时左侧展开箭头就能看到目录，计数再单独占一个操作位属于重复
   // 点击直接打开「新建子事项」弹窗完成输入与保存（不再经过右侧抽屉）
@@ -5795,7 +6437,7 @@ function cardItem(c,seq){
   const seqHtml=seq?`<span class="item-seq ${pinned?'pin':''}" title="本板块第 ${seq} 项">${seq}</span>`:'';
   // 负责人 / 周数 / 创建日期 / 截止日期 —— 四列固定网格，跨行纵向对齐。
   // 负责人与子事项**各自独立取值**，不做父子关联或继承。
-  const colsHtml=fieldCols({owner:c.owner,week_no:c.week_no,created:c.created,due:c.due,column_name:c.column_name});
+  const colsHtml=fieldCols({owner:c.owner,week_no:c.week_no,created:c.created,due:c.due,column_name:c.column_name,status:c.status,overdue_days:c.overdue_days});
   // #163 勾选权限：板块负责人及以上可勾板块内全部事项；否则仅事项负责人可勾自己的
   const _colKey=(c.board_id||curBoard)+'::'+(c.column_name||'');
   const _boardId=c.board_id||curBoard;
@@ -5808,10 +6450,12 @@ function cardItem(c,seq){
     ${CHK_MODE?`<input type="checkbox" class="item-chk" data-ck="${c.card_id}" onclick="toggleItemChk(this.dataset.ck,this);event.stopPropagation()"
       ondblclick="event.stopPropagation()" ${_canChk?'':'disabled'}
       title="${_canChk?'勾选事项（= 勾选其下全部子事项；部分子事项勾选时呈半选态）':CHK_DISABLED_TIP}">`:''}
-    <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)} ${lockHtml}</span>
+    <!-- T-203：锁标识必须是 .item-title 的**兄弟节点**（标题是省略号容器，
+         标识放内部会被长标题的 ellipsis 连带截断；移出后 flex-shrink:0 保证
+         省略号之后始终完整显示） -->
+    <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)}</span>${lockHtml}
     <span class="fcols">${colsHtml}</span>
     <span class="item-tail">
-      <span class="slot-overdue">${overdue?'<span class="lock-tag lock-tag-overdue">逾期</span>':''}</span>
       <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">【代办：${c.subtask_done}/${c.subtask_total}】</span>`:''}</span>
       <span class="slot-status">${statusTag(c.card_id,c.status)}</span>
       <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${opsId}')" title="置顶 / 复制 / 子事项">操作 ▾</button></span>
@@ -5831,8 +6475,10 @@ async function toggleSubTree(cardId,force){
   const want=(force===undefined)?!isOpen:!!force;
   if(want===isOpen)return;
   // 记忆父卡子树展开状态（2026-11-09 #99）：reload 重绘后按此恢复展开，
-  // 让「点子事项一次即弹窗」在保存/刷新之后仍成立
+  // 让「点子事项一次即弹窗」在保存/刷新之后仍成立。
+  // 2026-11-13：状态升级为**按用户持久化**（user_prefs.subtree_open，防抖上传）
   SUBTREE_OPEN[cardId]=want;
+  persistSubtreeOpen();
   if(!want){
     box.style.display='none';
     if(arrow)arrow.classList.remove('open');
@@ -5851,6 +6497,18 @@ async function toggleSubTree(cardId,force){
     }
   }
   renderSubTree(box,SUBTREE_CACHE[cardId]);
+}
+// 子事项展开状态按用户持久化（2026-11-13）：存 user_prefs.subtree_open ——
+// 只存「展开」的 card_id 集合（未记录 = 折叠），换浏览器/设备一致、按账号隔离；
+// 防抖上传（_prefPush 800ms），失败静默（内存态已生效）。
+function persistSubtreeOpen(){
+  const keys=Object.keys(SUBTREE_OPEN);
+  if(keys.length>600){   // 防膨胀：超过阈值时清掉 DOM 中已不存在的历史键
+    keys.forEach(function(k){if(!document.getElementById('subtree_'+k))delete SUBTREE_OPEN[k];});
+  }
+  const out={};
+  Object.keys(SUBTREE_OPEN).forEach(function(k){if(SUBTREE_OPEN[k])out[k]=1;});
+  _prefPush('subtree_open',out);
 }
 function renderSubTree(box,nodes,level){
   level=level||0;
@@ -5873,14 +6531,20 @@ function subNodeHtml(n,level,parentId){
   const _pColKey=CHK_CARD_COL[parentId]||'';
   const _pBoard=CHK_COL_BOARD[_pColKey]||'';
   const _subCanChk=chkCanCheckCard(n.owner,_pColKey,_pBoard);
+  // T-203 子事项锁定标识（与主事项行同款）：数据由 /api/cards/{id}/children 下发
+  // （locked_by/locked_by_name），插在 .s-title 兄弟位——不进省略号容器
+  const _subLocked=n.locked_by;
+  const _subLockDisp=n.locked_by_name||_subLocked||'';
+  const _subLockHtml=(_subLocked&&_subLocked!==ME.username)
+    ?`<span class="lock-tag" title="${esc(_subLockDisp)} 正在编辑该事项">🔒 ${esc(_subLockDisp)} 已锁定</span>`:'';
   // 本期只支持「主事项 → 子事项」两层：子事项不再渲染自己的子节点（也不给展开箭头）
   const kids=[];
   const open=!!SUBTREE_OPEN[n.card_id];
-  const od=n.due&&n.status!=='done'&&n.due<todayStr();
-  // 子事项行与主事项行同构：圆点 → 标题 → 逾期 → 字段列 → 状态标签 → 置顶
+  // 子事项行与主事项行同构：圆点 → 标题 → 字段列 → 状态标签 → 置顶
+  //（「逾期」标识列已移除 2026-11-13，空间让给标题列）
   // 字段列复用父事项的 fieldCols() → 字段集合与顺序天然一致（含周数列）
   // 负责人与父事项**各自独立取值**，子事项不会继承父事项负责人
-  const colsHtml=fieldCols({owner:n.owner,week_no:n.week_no,created:n.created,due:n.due,column_name:n.column_name});
+  const colsHtml=fieldCols({owner:n.owner,week_no:n.week_no,created:n.created,due:n.due,column_name:n.column_name,status:n.status,overdue_days:n.overdue_days});
   // 置顶/复制合并为「操作 ▾」（#55，与主事项行同构）
   const _sid=n.card_id;
   const _spinned=isPinned('card',_sid);
@@ -5893,10 +6557,9 @@ function subNodeHtml(n,level,parentId){
     ${CHK_MODE?`<input type="checkbox" class="sub-chk" data-ck="${n.card_id}" onclick="toggleSubChk(this.dataset.ck,this);event.stopPropagation()"
       ondblclick="event.stopPropagation()" ${_subCanChk?'':'disabled'}
       title="${_subCanChk?'勾选子事项（父事项随子事项聚合：全部勾选=全选、部分=半选）':CHK_DISABLED_TIP}">`:''}
-    <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>
+    <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>${_subLockHtml}
     <span class="fcols">${colsHtml}</span>
     <span class="sub-tail">
-      <span class="slot-overdue">${od?'<span class="lock-tag lock-tag-overdue">逾期</span>':''}</span>
       <span class="slot-subtask">${n.subtask_total>0?`<span class="st-mini ${n.subtask_total===n.subtask_done?'all':''}">【代办：${n.subtask_done}/${n.subtask_total}】</span>`:''}</span>
       <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
       <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_opsId}')" title="置顶 / 复制">操作 ▾</button></span>
@@ -5913,22 +6576,20 @@ function toggleSubNode(cardId){
   const chev=prev?prev.querySelector('.s-chev'):null;
   if(chev)chev.classList.toggle('open',open);
 }
-// 板块内的「折叠事项 / 展开事项」：批量收起/展开该板块所有主事项的子事项目录
-async function foldItems(gid,expand){
-  const g=document.getElementById(gid);
-  if(!g)return;
-  const arrows=g.querySelectorAll('.item-chev');
+// 全局「折叠 / 展开子事项」（2026-11-13，用户需求）：
+// 一键折叠/展开**当前所有可见板块**的主事项目录（gid 省略 = 全局；传板块 id 可限定范围）。
+// 状态按用户持久化：toggleSubTree 内部写 user_prefs.subtree_open（防抖），
+// 换浏览器/设备一致，不影响其他用户。
+async function foldAllItems(expand,gid){
+  const root=gid?document.getElementById(gid):document.getElementById('boardContent');
+  if(!root)return;
+  const arrows=root.querySelectorAll('.item-chev');
   for(let i=0;i<arrows.length;i++){
     const cid=arrows[i].getAttribute('data-cid');
-    if(expand){
-      await toggleSubTree(cid,true);
-    }else{
-      const box=document.getElementById('subtree_'+cid);
-      if(box)box.style.display='none';
-      arrows[i].classList.remove('open');
-    }
+    // 统一走 toggleSubTree：展开 = 记忆并拉取目录；折叠 = 收起并清记忆
+    await toggleSubTree(cid,!!expand);
   }
-  toast(expand?'已展开该板块的事项目录':'已折叠该板块的事项目录');
+  toast(expand?'已展开子事项目录':'已折叠子事项目录');
 }
 // ---------- 个人级「置顶」设置 ----------
 // 置顶是**个人偏好**：只对当前登录账号生效，不影响其他人。
@@ -5975,6 +6636,12 @@ async function loadUserPrefs(){
       const local=(function(){try{const raw=localStorage.getItem('tapd.deptOpen');return raw?JSON.parse(raw):null}catch(e){return null}})();
       const mv=_migrateLocalPref('dept_open',local,!!p.dept_open);
       if(mv){DEPT_OPEN=mv;renderCurrentViewForPrefs();}
+    }
+    // 子事项展开状态（2026-11-13）：按用户持久化 —— 合并进内存（SUBTREE_OPEN 是
+    // const 容器，只做键合并）后重绘当前视图，renderBoard 恢复循环会按它自动展开
+    if(p.subtree_open&&typeof p.subtree_open==='object'){
+      Object.keys(p.subtree_open).forEach(function(k){if(p.subtree_open[k])SUBTREE_OPEN[k]=1;});
+      renderCurrentViewForPrefs();
     }
   }catch(e){}
 }
@@ -6238,7 +6905,7 @@ async function openEdit(id,preloaded){
   if(!await lockCard(id)){closeModal('editModal');return}
   editing=id;
   EDIT_IS_SUB=!!c.parent_id;
-  window._editCard=c;          // 复制入口要用的当前事项快照
+  window._editCard=c;          // 当前编辑事项快照（负责人校验等状态操作复用）
   window._editOwner=(c.owner||'').split(';').filter(Boolean);
   // 子事项同样有参与人（与主事项对标）：cc 是 cards 表的标准字段，父子共用一张表
   window._editCc=(c.cc||'').split(';').filter(Boolean);
@@ -6251,11 +6918,9 @@ async function openEdit(id,preloaded){
   document.getElementById('e_due').value=c.due||'';
   document.getElementById('e_desc').value=c.description||'';
   document.getElementById('e_week').value=c.week_no||'';
-  document.getElementById('e_board').innerHTML=ME.boards.map(b=>`<option value="${b.board_id}" ${b.board_id===c.board_id?'selected':''}>${esc(b.board_name)}</option>`).join('');
-  // 子事项模式：只隐藏「所属看板」（子事项继承父看板）；「参与人」与主事项一样保留
-  document.getElementById('e_board_wrap').style.display=EDIT_IS_SUB?'none':'';
-  // 周数与所属看板同行（2026-11-09 #93）：子事项隐藏看板后，周数占满整行
-  document.getElementById('e_week_group').style.flex=EDIT_IS_SUB?'1 1 100%':'';
+  // 所属看板选择框已移除（T-191l）：编辑界面不再提供归属修改，board_id 保持原值
+  // 周数独占整行（原与所属看板同行）
+  document.getElementById('e_week_group').style.flex='1 1 100%';
   document.getElementById('editTitle').textContent=EDIT_IS_SUB?'编辑子事项':'编辑事项';
   applyOwnerSlot(EDIT_IS_SUB);
   // 父事项上下文与选人池互不依赖 → 并行（2026-11-09 #98：编辑弹窗填充提速）
@@ -6324,7 +6989,6 @@ async function applySubContext(c){
 }
 async function saveEdit(){
   const id=editing;
-  const isSub=EDIT_IS_SUB;
   // 状态不在这里提交 —— 状态由弹窗头部的状态按钮单独设置。
   // 后端 PUT 只更新传入的字段（fields 里没有 status 就不会动状态），避免两处入口互相覆盖。
   const fields={
@@ -6342,15 +7006,7 @@ async function saveEdit(){
   // 参与人：主事项与子事项都有（对标主事项，cc 是 cards 表的标准字段）
   fields.cc=(window._editCc||[]).join(';');
   try{
-    // 跨看板移动：只有主事项可以，子事项始终跟随父事项所在看板
-    if(!isSub){
-      const nb=document.getElementById('e_board').value;
-      const cur=await api('/api/cards?size=2000');
-      const c=cur.cards.find(x=>x.card_id===id);
-      if(c&&nb!==c.board_id){
-        await api('/api/cards/'+id+'/move',{method:'PUT',body:JSON.stringify({board_id:nb,column_id:'',column_name:''})});
-      }
-    }
+    // T-191l：所属看板选择框已移除 → 不再支持跨看板移动，board_id 保持原值
     await api('/api/cards/'+id,{method:'PUT',body:JSON.stringify({fields})});
     toast('已保存');closeEdit();reload(1);renderProgress();
   }catch(e){toast(e.message)}
@@ -6586,21 +7242,9 @@ function colOwnerLabel(acc){
   return m?m.label:acc;
 }
 function colRenderOwner(){
-  const box=document.getElementById('c_owner_box');
-  if(box){
-    box.innerHTML=COL_OWNER
-      ? '<span class="cf-chip" title="'+esc(colOwnerLabel(COL_OWNER))+'">'+esc(colOwnerLabel(COL_OWNER))+'</span>'
-      : '<span style="font-size:12px;color:var(--text3)">未指定</span>';
-  }
-  const pb=document.getElementById('c_owner_pick_btn');
-  const cb=document.getElementById('c_owner_clear_btn');
-  // 指定板块负责人 = 上级权 → **架构负责人及以上**（2026-11-04 修订：
-  // 原写死 ME.is_admin，与后端 min_level=LV_ARCH_OWNER 脱节 —— #43 同款问题第四次）。
-  const canSet=colCanAssignOwner();
-  if(pb)pb.style.display=canSet?'':'none';
-  if(cb)cb.style.display=(canSet&&COL_OWNER)?'':'none';
-  const wrap=document.getElementById('c_owner_wrap');
-  if(wrap)wrap.style.display='';   // 区块始终显示（无指派权时只读展示现任负责人）
+  // T-191l：渲染入口改为 colInitPickers（member-picker 与事项同款）——旧盒子渲染已移除。
+  // 保留本函数作为兼容入口（切换看板等场景仍会调用）。
+  colInitPickers();
 }
 // 当前编辑上下文能否指定板块负责人（架构负责人及以上 —— 与后端 min_level 同口径）
 function colCanAssignOwner(){
@@ -6616,47 +7260,56 @@ function colPartsLabel(acc){
   return m?m.label:acc;
 }
 function colRenderParticipants(){
-  const box=document.getElementById('c_parts_box');
-  if(box){
-    box.innerHTML=COL_PARTS.length
-      ? COL_PARTS.map(function(a){return '<span class="cf-chip" title="'+esc(colPartsLabel(a))+'">'+esc(colPartsLabel(a))+'</span>';}).join('')
-      : '<span style="font-size:12px;color:var(--text3)">未指定</span>';
-  }
-  // 指派参与人是**上级权限**（板块负责人及以上）→ 无权的人只读展示
-  const canSet=colCanAssignParticipants();
-  const pb=document.getElementById('c_parts_pick_btn');
-  const cb=document.getElementById('c_parts_clear_btn');
-  const wrap=document.getElementById('c_parts_wrap');
-  if(pb)pb.style.display=canSet?'':'none';
-  if(cb)cb.style.display=(canSet&&COL_PARTS.length)?'':'none';
-  if(wrap)wrap.style.display='';
+  colInitPickers();
+}
+// ---------- 板块负责人/参与人选择（T-191l：与事项编辑同款 member-picker）----------
+// 复用 initPersonPicker（tag 标签 + 搜索下拉）；池 = BC_ACL_MEMBERS 全量（所属看板
+// 负责人/参与人约束由上级配置保证，与事项层级链同思路）。
+// COL_OWNER/COL_PARTS 仍是**账号**（提交口径不变）；window._colOwnerArr/_colPartsArr
+// 是 picker 直接操作的**姓名**数组，保存时经 colNamesToAccounts 反查回账号。
+// 权限：无指派权（colCanAssignOwner / colCanAssignParticipants）时容器加 pp-readonly
+// → 隐藏输入行与标签删除叉（只读展示）；服务端 403 兜底不变。
+function colNamesToAccounts(names){
+  return (names||[]).map(function(n){
+    const m=BC_ACL_MEMBERS.filter(function(x){return x.label===n})[0];
+    return m?m.account:n;
+  }).filter(Boolean);
+}
+function colOwnerAccounts(){return colNamesToAccounts(window._colOwnerArr);}
+function colPartsAccounts(){return colNamesToAccounts(window._colPartsArr);}
+function colInitPickers(){
+  const pool=BC_ACL_MEMBERS.map(function(x){return x.label;});
+  window._colOwnerArr=(COL_OWNER?[colOwnerLabel(COL_OWNER)]:[]);
+  window._colPartsArr=COL_PARTS.map(colPartsLabel);
+  initPersonPicker('c_owner',window._colOwnerArr,pool,'c_parts',true);
+  initPersonPicker('c_parts',window._colPartsArr,pool,'c_owner',false);
+  colPaintPickerPerm();
+}
+function colPaintPickerPerm(){
+  const ow=document.getElementById('c_owner');
+  const pw=document.getElementById('c_parts');
+  if(ow)ow.classList.toggle('pp-readonly',!colCanAssignOwner());
+  if(pw)pw.classList.toggle('pp-readonly',!colCanAssignParticipants());
 }
 // 当前板块上，我是否有权指定参与人（板块负责人及以上，2026-11-04 对齐后端口径）：
 // 管理员 / 看板 can_edit（看板负责人、架构负责人继承）/ 本板块负责人
-// ---------- 板块「完成情况」（2026-11-04 需求3）----------
+// ---------- 板块「完成情况」（2026-11-04 需求3；T-191j 起改为头部 picker）----------
 // 语义：由**该板块负责人本人**（board_columns.owner === 当前账号）设置；
 //      管理员也可设置（超管不受限）。其他成员**只读**，改动会被服务端 403 拒绝。
 // ⚠️ 与进度条（done/total 自动统计）**相互独立**：进度条统计事项完成数，
 //    completion 是负责人对板块整体完成度的**声明**；两者并存，互不覆盖。
-function colCanEditCompletion(){
+// T-191j：控件从编辑表单的下拉收敛到**弹窗头部状态按钮**（与事项状态按钮完全同款），
+// 预览（ctx=c）与编辑（ctx=ce）共用；COL_COMPLETION 为当前选中值（保存时随表单提交）。
+var COL_COMPLETION='open';
+function colCanEditCompletionOf(colKey){
   if(ME&&ME.is_admin)return true;
-  if(COLUMN_MODE!=='edit')return true;          // 新建：创建者定初始值
-  const colKey=COLUMN_EDIT_KEY||'';
   const m=(window.COLS_META||[]).find(function(x){return x.col_key===colKey});
   const owner=m?(m.owner||''):'';
   return !!owner && owner===ME.username;
 }
-function colRenderCompletion(){
-  const sel=document.getElementById('c_completion');
-  const tip=document.getElementById('c_completion_tip');
-  if(!sel)return;
-  const can=colCanEditCompletion();
-  sel.disabled=!can;
-  if(tip){
-    tip.textContent=can
-      ?'由板块负责人手动标记板块整体完成情况（与左侧进度条的自动统计相互独立）'
-      :'仅板块负责人可修改完成情况，其他成员为只读';
-  }
+function colCanEditCompletion(){
+  if(COLUMN_MODE!=='edit')return true;          // 新建：创建者定初始值
+  return colCanEditCompletionOf(COLUMN_EDIT_KEY||'');
 }
 function colCanAssignParticipants(){
   if(ME&&ME.is_admin)return true;
@@ -6668,22 +7321,7 @@ function colCanAssignParticipants(){
   const me=(ME&&ME.managed_columns)||[];
   return me.indexOf(colKey)>=0;
 }
-// 板块选人池（2026-11-04 层级约束）：所属看板的负责人与参与人（账号 → 姓名）。
-// 看板负责人/参与人本身在【看板管理】里从归属架构子树中选出 → 层级链闭合：
-// 架构 → 看板 → 板块 → 事项，每层只能从上一层的名单里选。
-async function colAclPool(boardId){
-  await bcLoadAclMembers();
-  const b=(ME.boards||[]).find(function(x){return x.board_id===boardId;});
-  const accs=[];
-  if(b){
-    if(b.owner)accs.push(b.owner);
-    (b.participants||'').split(',').forEach(function(a){if(a)accs.push(a);});
-  }
-  const names=accs.filter(Boolean).map(function(a){
-    const m=BC_ACL_MEMBERS.filter(function(x){return x.account===a;})[0];
-    return m?(m.name||a):a;});
-  return [...new Set(names)];
-}
+// T-191l：colAclPool 已删除（原为 colPick* 弹窗选人池；member-picker 直接用 BC_ACL_MEMBERS 全量池）
 // 合成单节点树：把候选池塞进 openTreePick 的 person 模式（复用搜索/全选/清空）
 function poolTree(names,label){
   TREE_EXPANDED.add(-99);   // 合成节点默认展开（否则池被折叠隐藏）
@@ -6746,66 +7384,17 @@ function bcDeptShapeTree(dept){
   (function ex(ns){(ns||[]).forEach(function(n){ TREE_EXPANDED.add(n.id); ex(n.children||[]); });})(shaped);
   return shaped;
 }
-async function colPickParticipants(anchor){
-  // 人员选择层级约束（2026-11-04）：板块参与人从**所属看板**的负责人与参与人中选
-  // → 移除架构选人入口，改用看板选人池。
-  const bid=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:document.getElementById('c_board').value;
-  const pool=await colAclPool(bid);
-  if(!pool.length){toast('所属看板尚未配置负责人与参与人，请先在【看板管理】中配置');return;}
-  // 2026-11-05 用户修订：取消负责人/参与人互斥 —— 参与人候选**包含**当前负责人。
-  const cand=pool;
-  const cur=COL_PARTS.map(function(a){return colMemberName(a);}).filter(Boolean);
-  const preselect=cur.map(function(n){return ORG_PERSON_PREFIX+n;});
-  openTreePick(anchor, preselect, function(persons){
-    if(!persons||!persons.length){COL_PARTS=[];colRenderParticipants();return;}
-    const accs=[];
-    persons.forEach(function(n){
-      const acc=bcAccountByName(n);
-      if(!acc){toast('成员「'+n+'」没有登录账号，无法设为参与人');return;}
-      if(accs.indexOf(acc)<0)accs.push(acc);
-    });
-    COL_PARTS=accs;
-    colRenderParticipants();
-  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(cand,'可选人员（所属看板的负责人与参与人）'), keyword:'', requireAccount:true, clearable:true});
-}
-function colClearParticipants(){
-  COL_PARTS=[];
-  colRenderParticipants();
-}
-async function colPickOwner(anchor){
-  // 人员选择层级约束（2026-11-04）：板块负责人从**所属看板**的负责人与参与人中选
-  const bid=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:document.getElementById('c_board').value;
-  const pool=await colAclPool(bid);
-  if(!pool.length){toast('所属看板尚未配置负责人与参与人，请先在【看板管理】中配置');return;}
-  const cur=COL_OWNER?colMemberName(COL_OWNER):'';
-  openTreePick(anchor, cur?[ORG_PERSON_PREFIX+cur]:[], function(persons){
-    if(!persons||!persons.length)return;
-    const acc=bcAccountByName(persons[0]);
-    if(!acc){toast('该成员没有登录账号，无法设为负责人');return;}
-    COL_OWNER=acc;
-    // 2026-11-05：取消互斥 —— 负责人可同为参与人，不再自动移除
-    colRenderOwner();
-  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(pool,'可选人员（所属看板的负责人与参与人）'), keyword:'', requireAccount:true, clearable:true});
-}
-// 账号 → 姓名（板块负责人回显）
-function colMemberName(acc){
-  const m=BC_ACL_MEMBERS.filter(function(x){return x.account===acc})[0];
-  return m?m.name:acc;
-}
-function colClearOwner(){
-  COL_OWNER='';
-  colRenderOwner();
-}
+// T-191l：colPickOwner/colClearOwner/colPickParticipants/colClearParticipants 已删除 ——
+// 负责人/参与人改用与事项编辑同款的 member-picker（initPersonPicker：tag + 搜索下拉），
+// 选中值经 colOwnerAccounts()/colPartsAccounts() 反查账号后随 saveColumn 提交。
 function openColumnModal(){
   releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 新建模式无编辑锁
   COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
   COL_PARTS=[];          // 新建板块：无参与人
-  // ⚠️ 必须重绘参与人控件（2026-11-04 用户反馈）：否则「✕ 清空」按钮沿用
-  //    上次编辑会话的显隐状态 → 新建板块里凭空多出一个叉叉。
   const boards=ME.boards;
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
-  // 切换所属看板 → 负责人/参与人的指派权随看板能力位变化（2026-11-04）
-  document.getElementById('c_board').onchange=function(){colRenderOwner();colRenderParticipants();};
+  // 切换所属看板 → 负责人/参与人的指派权随看板能力位变化（2026-11-04）；picker 随之重建
+  document.getElementById('c_board').onchange=function(){colInitPickers();};
   document.getElementById('c_board_wrap').style.display='';
   document.getElementById('c_name').value='';
   // 创建日期：必填，默认当天（不限制可选范围）
@@ -6814,22 +7403,22 @@ function openColumnModal(){
   document.getElementById('c_created').value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   // 归属年份：默认取创建年份
   document.getElementById('c_year').value=String(d.getFullYear());
-  // 创建人：取当前登录用户并锁定
-  document.getElementById('c_creator').value=ME.username||'';
+  // T-191l：创建人字段已移除（创建人由系统按登录账号锁定，仅浏览界面展示）
   // 截止日期：新建时默认空（T-0188 倒计时）
   document.getElementById('c_due').value='';
   const nat=document.querySelector('input[name="c_nature"]:checked');
   if(nat)nat.checked=true;
   COL_OWNER='';
-  colRenderOwner();
-  colRenderParticipants();
+  bcLoadAclMembers().then(colInitPickers);   // T-191l：member-picker 初始化（池加载后）
   // 板块描述（2026-11-09 #93）：新建时清空
   document.getElementById('c_desc').value='';
-  // 板块完成情况（2026-11-04 需求3）：新建时默认「未完成」，由创建者定初始值
-  document.getElementById('c_completion').value='open';
-  colRenderCompletion();
+  // 板块完成情况（2026-11-04 需求3）→ T-191j：新建时默认「未完成」，头部按钮承载
+  COL_COMPLETION='open';
+  const cnOps=document.getElementById('c_status_ops');
+  if(cnOps)cnOps.innerHTML=statusPickerHtml('open','ce');
   document.getElementById('c_submit').textContent='创建板块';
-  document.getElementById('c_tip').textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项；创建人由系统按当前登录账号锁定。';
+  const _tipNew=document.getElementById('c_tip');
+  if(_tipNew){_tipNew.style.display='';_tipNew.textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项。';}
   // 新建模式：无板块可删、无既有待办（T-0190：待办要在板块创建后才有归属）
   const delBtn=document.getElementById('c_delete_btn');
   if(delBtn)delBtn.style.display='none';
@@ -6863,24 +7452,24 @@ async function openColumnEdit(d,fromDetail){
   document.getElementById('c_created').value=(d.created||'').slice(0,10);
   // 截止日期回填（T-0188 倒计时）
   document.getElementById('c_due').value=(d.due||'').slice(0,10);
-  document.getElementById('c_creator').value=d.creator||ME.username||'';
   const nat=document.querySelector(`input[name="c_nature"][value="${d.nature||'日常'}"]`);
   if(nat)nat.checked=true;
-  // 板块完成情况回填（2026-11-04 需求3）
-  document.getElementById('c_completion').value=d.completion||'open';
-  colRenderCompletion();
+  // 板块完成情况回填（2026-11-04 需求3）→ T-191j：头部按钮承载（与事项编辑一致）
+  COL_COMPLETION=d.completion||'open';
+  const csOps=document.getElementById('c_status_ops');
+  if(csOps)csOps.innerHTML=statusPickerHtml(COL_COMPLETION,'ce');
   // 板块描述回填（2026-11-09 #93）
   document.getElementById('c_desc').value=d.desc||'';
-  // 板块负责人回填（账号）；映射（账号 → 姓名）可能尚未加载 → 先拉再渲染
+  // 板块负责人回填（账号）；映射（账号 → 姓名）可能尚未加载 → 先拉再初始化 picker
   COL_OWNER=d.owner||'';
   // 板块参与人回填（账号数组）
   COL_PARTS=(d.parts||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
-  bcLoadAclMembers().then(function(){colRenderOwner();colRenderParticipants();});
-  colRenderOwner();
-  colRenderParticipants();
+  bcLoadAclMembers().then(colInitPickers);   // T-191l：member-picker 初始化
   document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
   document.getElementById('c_submit').textContent='保存';
-  document.getElementById('c_tip').innerHTML='保存后板块名称、归属年份等立即生效。<b>修改板块名称会同步更新该板块下所有事项的所属板块</b>。';
+  // T-191l：编辑态不再显示「保存后板块名称…」提示文案（对齐事项编辑弹窗：无底部 tip）
+  const _tip=document.getElementById('c_tip');
+  if(_tip){_tip.style.display='none';_tip.textContent='';}
   // 删除按钮（T-0190）：仅**板块负责人及以上**可见可用。
   // 口径与后端 DELETE /api/columns（min_level=LV_COLUMN_OWNER）一致：
   //   板块负责人（managed_columns）∪ 看板负责人及以上（managed_boards /
@@ -6905,8 +7494,15 @@ async function openColumnDetail(el){
   const d=(el&&el.dataset)||{};
   COLUMN_DETAIL=d;
   openModal('columnDetailModal');
+  // 评论 @ 候选池随板块切换重置（2026-11-13）：与事项评论同口径，
+  // 池 = 对所属看板有可见路径 ∩ 对当前用户可见的成员姓名
+  MENTION_CTXS.cd.pool=null;
+  api('/api/columns/mention_pool?col_key='+encodeURIComponent(d.colkey||''))
+    .then(function(p){MENTION_CTXS.cd.pool=(p&&p.names)||[];}).catch(function(){});
   // 元信息/描述/待办/评论同步渲染（与事项详情打开路径同构）
   renderColumnDetail(d);
+  // 操作记录（2026-11-13）：复刻事项详情 —— 与评论互不依赖，并行拉取
+  cdLoadActions(d.colkey||'');
   // 编辑锁状态（与事项详情的 🔒 标签同款显示）：他人持锁时浏览界面头部展示
   try{
     const h=await api('/api/locks/holder?key='+encodeURIComponent('column:'+(d.colkey||'')));
@@ -6920,14 +7516,20 @@ function renderColumnDetail(d){
   const ownerName=d.owner?bcMemberName(d.owner):'';
   const parts=(d.parts||'').split(',').map(x=>x.trim()).filter(Boolean).map(bcMemberName).filter(Boolean);
   const _comp=d.completion||'open';
-  // 截止日期 + 倒计时（T-0188）：倒计时随当前日期自动计算
+  // 截止日期 + 倒计时（T-0188）→ T-191j：已完成且已结算 → 显示结算结果；
+  // 已完成未结算（无截止日期/历史存量）→ 「已完成 · 倒计时停用」；未完成 → 倒计时数字
   const _due=(d.due||'').slice(0,10);
-  const _cd=cdText(_due);
-  const _cdHtml=_cd?`<b><span class="fcol-cd${cdOver(_due)?' fcol-cd-over':''}">${esc(_cd)}</span></b>`
-                  :'<b>—</b>';
+  const _cdStop=_comp==='done';
+  const _settle=_cdStop?settleHtml(d.overdue_days):null;
+  const _cd=_cdStop?'':cdText(_due);
+  const _cdHtml=_settle?`<b>${_settle}</b>`
+                  :(_cdStop?'<b>已完成 · 倒计时停用</b>'
+                  :(_cd?`<b><span class="fcol-cd${cdOver(_due)?' fcol-cd-over':''}">${esc(_cd)}</span></b>`
+                  :'<b>—</b>'));
   document.getElementById('cd_meta').innerHTML=
     `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
-    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<b>${esc(parts.length?parts.join('、'):'—')}</b>　完成情况：<b><span class="status-tag ${statusCls(_comp)}">${statusText(_comp)}</span></b><br>`
+    // T-191j 界面统一：完成情况不再在元信息里重复呈现 —— 由头部完成情况按钮统一承载（与事项状态同范式）
+    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<b>${esc(parts.length?parts.join('、'):'—')}</b><br>`
     +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>　截止日期：<b>${esc(_due||'—')}</b>　倒计时：${_cdHtml}`;
   const dd=document.getElementById('cd_desc');
   if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
@@ -7010,13 +7612,20 @@ async function colLoadTodos(colkey){
     const res=await api('/api/columns/todos?col_key='+encodeURIComponent(colkey));
     COL_TODOS=res.todos||[];
   }catch(e){COL_TODOS=[]}
+  // 添加入口按权限显隐（2026-11-13）：仅板块负责人及以上可追加板块待办
+  //（与后端 add_column_todo 的 LV_COLUMN_OWNER 门槛同口径），其他成员只读浏览
+  const _addRow=document.getElementById('c_todo_add_row');
+  if(_addRow)_addRow.style.display=chkColOwnerOf(colkey,COLUMN_EDIT_BOARD||'')?'':'none';
   colRenderTodos();
 }
 function colRenderTodos(){
   const list=document.getElementById('c_todos_list');
   if(!list)return;
+  const _canAdd=chkColOwnerOf(COLUMN_EDIT_KEY||'',COLUMN_EDIT_BOARD||'');
   if(!COL_TODOS.length){
-    list.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px 2px">暂无待办，在下方输入后回车添加</div>';
+    list.innerHTML=_canAdd
+      ?'<div style="color:var(--text2);font-size:12px;padding:4px 2px">暂无待办，在下方输入后回车添加</div>'
+      :'<div style="color:var(--text2);font-size:12px;padding:4px 2px">暂无待办</div>';
     return;
   }
   list.innerHTML=COL_TODOS.map(function(t){
@@ -7024,8 +7633,8 @@ function colRenderTodos(){
       +`<input type="checkbox" ${t.done?'checked':''}`
       +` onclick="colToggleTodo(${t.id},this.checked);event.stopPropagation()" title="勾选/取消待办">`
       +`<span class="subtask-name ${t.done?'done':''}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.name||'')}</span>`
-      +`<button class="subtask-del" title="删除该待办" onclick="colDeleteTodo(${t.id});event.stopPropagation()" `
-      +`style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;line-height:17px;padding:0;font-size:11px;cursor:pointer;color:var(--text2);flex-shrink:0">✕</button>`
+      +(_canAdd?`<button class="subtask-del" title="删除该待办" onclick="colDeleteTodo(${t.id});event.stopPropagation()"`
+      +` style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;line-height:17px;padding:0;font-size:11px;cursor:pointer;color:var(--text2);flex-shrink:0">✕</button>`:'')
       +`</div>`;
   }).join('');
 }
@@ -7034,6 +7643,8 @@ async function colAddTodo(){
   const inp=document.getElementById('c_todo_new');
   const name=((inp||{}).value||'').trim();
   if(!name){toast('请输入待办内容');return}
+  // 板块待办仅板块负责人及以上可追加（2026-11-13；后端 LV_COLUMN_OWNER 同口径兜底）
+  if(!chkColOwnerOf(key,COLUMN_EDIT_BOARD||'')){toast('仅板块负责人及以上可添加板块待办，如需新增请联系板块负责人或管理员');return}
   try{
     await api('/api/columns/todos',{method:'POST',body:JSON.stringify({col_key:key,name:name})});
     if(inp)inp.value='';
@@ -7072,15 +7683,19 @@ async function colDeleteFromEdit(){
     reload(1);renderProgress();
   }catch(e){toast(e.message||'删除失败')}
 }
-// ---------- 板块评论（T-0188）：可见即可评，布局/样式与事项评论一致 ----------
+// ---------- 板块评论（T-0188 → 2026-11-13 复刻事项评论）：可见即可评，@ 提及同款 ----------
 async function cdLoadComments(colkey){
   const box=document.getElementById('cd_comments');
   if(!box)return;
   box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
   try{
     const res=await api('/api/columns/comments?col_key='+encodeURIComponent(colkey));
-    const cs=res.comments||[];
-    box.innerHTML=cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')
+    const _all=res.comments||[];
+    // 预览区只保留最近 10 条（容器限高约 4 条可见、超出滚动），完整清单走【全部评论】
+    const cs=_all.slice(-10);
+    const hint=_all.length>10
+      ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">共 ${_all.length} 条，仅显示最近 10 条，点击【全部评论】查看全部</div>`:'';
+    box.innerHTML=(cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')+hint)
       ||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
   }catch(e){
     box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">评论加载失败：'+esc(e.message||'')+'</div>';
@@ -7089,13 +7704,72 @@ async function cdLoadComments(colkey){
 async function cdAddComment(){
   const d=COLUMN_DETAIL||{};
   const inp=document.getElementById('cd_new_comment');
-  const content=(inp.value||'').trim();
-  if(!content){toast('请输入评论内容');return}
+  const v=(inp.value||'').trim();
+  const _arr=MENTION_CTXS.cd.arr;
+  if(!v&&!_arr.length){toast('请输入评论内容');return}
+  // 提交时把已插入的提及拼到正文末尾（与事项评论 addComment 同款）
+  const mentions=_arr.slice();
+  const text=mentions.length?(v?(v+' '):'')+mentions.map(m=>'@'+m).join(' '):v;
+  if(!text.trim())return;
   try{
-    await api('/api/columns/comments',{method:'POST',body:JSON.stringify({col_key:d.colkey||'',content:content})});
+    await api('/api/columns/comments',{method:'POST',body:JSON.stringify({col_key:d.colkey||'',content:text,mentions:mentions})});
     inp.value='';
+    MENTION_CTXS.cd.arr=[];
+    renderMentionBar('cd');
     await cdLoadComments(d.colkey||'');
   }catch(e){toast(e.message||'评论失败')}
+}
+// ---------- 板块操作记录（2026-11-13）：复刻事项详情「操作记录」 ----------
+// 动作 → 中文（与事项侧 ACT_CN 同款口径；板块侧动作码由 log_column_action 打点）
+const COL_ACT_CN={create:'新建板块',update:'修改板块',copy:'复制板块',delete:'删除板块',
+  pin:'置顶 / 取消置顶',comment:'发表评论',
+  todo_add:'新增板块待办',todo_update:'更新板块待办',todo_delete:'删除板块待办'};
+function colActCn(a){return COL_ACT_CN[a]||a;}
+async function cdLoadActions(colkey){
+  const box=document.getElementById('cd_actions');
+  if(!box)return;
+  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
+  try{
+    const res=await api('/api/columns/actions?col_key='+encodeURIComponent(colkey));
+    const _acts=(res.actions||[]).slice(0,12);
+    // 操作记录仅显示最近 12 条（与事项详情 #116 同款口径）
+    const _more=(res.actions||[]).length>12
+      ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">仅显示最近 12 条，更早的完整操作日志请通过【更多 → 操作日志】查询（管理员权限）</div>`:'';
+    box.innerHTML=_acts.map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(colActCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')+_more
+      ||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
+  }catch(e){
+    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">操作记录加载失败：'+esc(e.message||'')+'</div>';
+  }
+}
+// ---------- 全部评论弹窗（2026-11-13）：事项 / 板块共用 ----------
+// 预览区只保留最近 10 条；完整清单在此查看。
+async function openAllComments(type){
+  const list=document.getElementById('ac_list');
+  const title=document.getElementById('ac_title');
+  if(!list)return;
+  const isCard=type==='card';
+  const _t=document.getElementById(isCard?'d_title':'cd_title');
+  title.textContent='全部评论'+(_t&&_t.textContent?(' · '+_t.textContent):'');
+  list.innerHTML='<div style="color:var(--text3);font-size:12px;padding:6px 4px">加载中…</div>';
+  openModal('allCommentsModal');
+  try{
+    let cs=[];
+    if(isCard){
+      if(!DETAIL_ID)throw new Error('未打开任何事项');
+      const res=await api('/api/cards/'+DETAIL_ID+'/comments');
+      cs=res.comments||[];
+    }else{
+      const ck=(COLUMN_DETAIL||{}).colkey||'';
+      if(!ck)throw new Error('未打开任何板块');
+      const res=await api('/api/columns/comments?col_key='+encodeURIComponent(ck));
+      cs=res.comments||[];
+    }
+    list.innerHTML=cs.length
+      ?cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')
+      :'<div style="color:var(--text2);font-size:12px;padding:6px 4px">暂无评论</div>';
+  }catch(e){
+    list.innerHTML='<div style="color:var(--danger);font-size:12px;padding:6px 4px">评论加载失败：'+esc(e.message||'')+'</div>';
+  }
 }
 // 浏览界面头部：锁标签（他人持锁）+「✏️ 编辑」按钮 —— 与事项详情 renderDetailOps 同款
 function renderColumnDetailOps(lockInfo){
@@ -7106,6 +7780,11 @@ function renderColumnDetailOps(lockInfo){
     // 显示口径（2026-11-12）：锁定提示统一显示姓名，姓名为空回退账号
     parts.push(`<span class="lock-tag">🔒 ${esc(lockInfo.locked_by_name||lockInfo.locked_by)} 已锁定</span>`);
   }
+  // 完成情况按钮（T-191j 界面统一）：与事项预览头部的状态按钮同位同款 ——
+  // 弹窗里完成情况的唯一呈现与唯一设置入口（元信息行不再重复展示）。
+  // 权限：仅板块负责人/管理员可改（点击时校验，其他成员为只读 toast 提示）。
+  const comp=(COLUMN_DETAIL&&COLUMN_DETAIL.completion)||'open';
+  parts.push(statusPickerHtml(comp,'c'));
   parts.push(`<button class="btn-primary" style="padding:4px 12px;font-size:12px" onclick="openColumnDetailEdit()" title="打开板块编辑弹窗">✏️ 编辑</button>`);
   box.innerHTML=parts.join('');
 }
@@ -7150,13 +7829,15 @@ async function saveColumn(){
   if(!/^\d{4}$/.test(year)){toast('归属年份应为 4 位数字，如 2026');return}
   try{
     if(COLUMN_MODE==='edit'){
+      // T-191l：负责人/参与人来自 member-picker（姓名数组）→ 反查账号后提交。
       // owner 仅在**有指派权**（架构负责人及以上，2026-11-04）时提交（清空用 __CLEAR__）；
       // 其他情况留空 = 不改
-      const ownerPayload=colCanAssignOwner()?{owner:(COL_OWNER||'__CLEAR__')}:{};
+      const ownerPayload=colCanAssignOwner()?{owner:(colOwnerAccounts()[0]||'__CLEAR__')}:{};
       // 参与人：仅在有权指定时提交（传值 = 覆盖；不传 = 不改）
-      const partsPayload=colCanAssignParticipants()?{participants:COL_PARTS.join(',')}:{};
+      const partsPayload=colCanAssignParticipants()?{participants:colPartsAccounts().join(',')}:{};
       // 完成情况：仅板块负责人/管理员可提交（其他成员不传 = 不改，服务端也会 403 兜底）
-      const compPayload=colCanEditCompletion()?{completion:document.getElementById('c_completion').value}:{};
+      // T-191j：值来自头部 picker（COL_COMPLETION），表单区下拉已移除
+      const compPayload=colCanEditCompletion()?{completion:COL_COMPLETION}:{};
       const descPayload={description:document.getElementById('c_desc').value.trim()};
       const duePayload={due_date:due_date};   // T-0188：截止日期随编辑整包提交（空 = 清空）
       await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload,duePayload))});
@@ -7170,7 +7851,7 @@ async function saveColumn(){
         COLUMN_DETAIL={colkey:COLUMN_EDIT_KEY,bid:board_id,cname:column_name,year:year,
           nature:nature,created:created_at,creator:COLUMN_DETAIL?COLUMN_DETAIL.creator:'',
           owner:(ownerPayload.owner!==undefined&&ownerPayload.owner!=='__CLEAR__')?ownerPayload.owner:(COLUMN_DETAIL?COLUMN_DETAIL.owner:''),
-          parts:(partsPayload.participants||COL_PARTS||[]).join(','),
+          parts:(partsPayload.participants||COL_PARTS.join(',')),
           completion:compPayload.completion||((COLUMN_DETAIL&&COLUMN_DETAIL.completion)||'open'),
           desc:descPayload.description,
           due:due_date};
@@ -7179,10 +7860,10 @@ async function saveColumn(){
       reload(1);renderProgress();
     }else{
       // 新建板块：有指派权时带上负责人（2026-11-04 —— 此前新建根本没有负责人入口）
-      const ownerCreate=colCanAssignOwner()?{owner:COL_OWNER||''}:{};
-      const compCreate=colCanEditCompletion()?{completion:document.getElementById('c_completion').value}:{};
+      const ownerCreate=colCanAssignOwner()?{owner:colOwnerAccounts()[0]||''}:{};
+      const compCreate=colCanEditCompletion()?{completion:COL_COMPLETION}:{};
       const descCreate={description:document.getElementById('c_desc').value.trim()};
-      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:COL_PARTS.join(','),due_date:due_date},ownerCreate,compCreate,descCreate))});
+      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:colPartsAccounts().join(','),due_date:due_date},ownerCreate,compCreate,descCreate))});
       toast('板块已创建：'+column_name);
       closeModal('columnModal');
       // ⚠️ curBoards 是内容区的**权威选择**（#51 多看板语义）——
@@ -7191,17 +7872,6 @@ async function saveColumn(){
       reload(1);renderProgress();
     }
   }catch(e){toast(e.message)}
-}
-// 复制当前编辑中的事项（主事项 / 子事项）：归属重选在复制弹窗里做
-function copyCurrentCard(){
-  const c=window._editCard;
-  if(!c){toast('请先打开事项');return}
-  const kind=c.parent_id?'sub':'card';
-  openCopyModal(kind,{
-    card_id:c.card_id, card_name:c.card_name||'', week_no:c.week_no||'',
-    board_id:c.board_id, column_id:c.column_id||'', column_name:c.column_name||'',
-    parent_id:c.parent_id||''
-  });
 }
 // ---------- 事项行内复制（2026-11-03）----------
 // 复用复制弹窗（归属重选）：按 card_id 拉一次事项详情 → 打开复制弹窗。
@@ -7458,12 +8128,22 @@ function renderSubtasks(list,listEl,countEl,editable,cardId){
 async function loadEditSubtasks(cardId){
   const d=await api('/api/cards/'+cardId+'/subtasks');
   EDIT_SUBTASKS=d.subtasks;
-  // 待办区可编辑性 = 是否事项负责人（2026-11-10 #130）：非负责人隐藏「新增/勾选/删除」
-  // 入口（后端同口径兜底），只读浏览
-  const canManage=isCardOwnerOf((window._editCard||{}).owner);
+  // 待办区可编辑性 = **事项负责人及以上**（2026-11-10 #130；2026-11-13 修订）：
+  // 「及以上」= 板块负责人 / 看板负责人 / 架构负责人 / 管理员（chkColOwnerOf 口径），
+  // 与后端 effective_level ≥ LV_CARD_OWNER 的继承语义对齐 —— 此前前端只比
+  // cards.owner，上级负责人被误拦；后端本就放行 → 前后端不一致。
+  const _ec=window._editCard||{};
+  const canManage=canManageCardTodos(_ec);
   var addRow=document.getElementById('e_subtask_add_row');
   if(addRow)addRow.style.display=canManage?'':'none';
   renderSubtasks(EDIT_SUBTASKS,document.getElementById('e_subtask_list'),document.getElementById('e_subtask_count'),canManage,cardId);
+}
+// 事项待办管理权判定（2026-11-13）：事项负责人 **或** 板块负责人及以上（继承链）
+function canManageCardTodos(c){
+  c=c||{};
+  if(isCardOwnerOf(c.owner))return true;
+  const _colKey=(c.board_id||curBoard)+'::'+(c.column_name||'');
+  return chkColOwnerOf(_colKey,c.board_id||curBoard);
 }
 // ---------- 事项负责人判定（2026-11-10 #130）----------
 // cards.owner 存**姓名**（分号分隔，可多人）；与后端 identity_names 的双口径对齐，
@@ -7475,12 +8155,12 @@ function isCardOwnerOf(ownerStr){
   const me=[ME&&ME.display_name,ME&&ME.username].filter(Boolean);
   return owners.some(function(o){return me.indexOf(o)>=0;});
 }
-const CARD_OWNER_TIP='仅事项负责人可操作，如需调整请联系负责人或管理员';
+const CARD_OWNER_TIP='仅事项负责人及以上可操作，如需调整请联系负责人或管理员';
 async function addSubtask(){
   const title=document.getElementById('e_subtask_new').value.trim();
   if(!title){toast('请输入代办任务内容');return}
-  // 待办任务仅事项负责人可发起（2026-11-10 #130；后端同口径兜底）
-  if(!isCardOwnerOf((window._editCard||{}).owner)){toast(CARD_OWNER_TIP.replace('可操作','可发起待办任务'));return}
+  // 待办任务仅事项负责人及以上可发起（2026-11-10 #130；2026-11-13 修订「及以上」；后端同口径兜底）
+  if(!canManageCardTodos(window._editCard||{})){toast(CARD_OWNER_TIP.replace('可操作','可发起待办任务'));return}
   try{
     await api('/api/cards/'+editing+'/subtasks',{method:'POST',body:JSON.stringify({title})});
     document.getElementById('e_subtask_new').value='';
@@ -7609,8 +8289,8 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
     drop.style.display='block';
     // #166：下拉底部溢出视口 → 向上弹（改锚定输入框上方）
     const _dr=drop.getBoundingClientRect();
-    if(_dr.bottom>window.innerHeight-8 && _dr.top-input.getBoundingClientRect().top>0){
-      const upSpace=input.getBoundingClientRect().top-8;
+    if(_dr.bottom>window.innerHeight-8 && _dr.top-inp.getBoundingClientRect().top>0){
+      const upSpace=inp.getBoundingClientRect().top-8;
       drop.classList.toggle('up', upSpace>_dr.height || upSpace>(window.innerHeight-_dr.top));
     }else drop.classList.remove('up');};
   PP[containerId].rd=rd;
@@ -8245,8 +8925,8 @@ function actCn(a){return ACT_CN[a]||a;}
 async function openDetail(id){
   DETAIL_ID=id;
   // 评论 @ 候选池随卡片切换重置（2026-11-06 #77）：不同看板可见成员不同
-  MENTION_POOL=null;
-  api('/api/cards/'+id+'/mention_pool').then(p=>{MENTION_POOL=(p&&p.names)||[];}).catch(()=>{});
+  MENTION_CTXS.d.pool=null;
+  api('/api/cards/'+id+'/mention_pool').then(p=>{MENTION_CTXS.d.pool=(p&&p.names)||[];}).catch(()=>{});
   // 用 card_id 精确取（默认列表只含顶层事项，取不到子事项）
   const d=await api('/api/cards?card_id='+id);
   const c=d.cards&&d.cards[0];
@@ -8273,12 +8953,21 @@ async function openDetail(id){
     }catch(e){}
   }
   // 状态不在元信息里重复呈现 —— 由头部的状态按钮统一承载，避免多处出现导致不一致
+  // T-191j：倒计时位 → 已完成且已结算显示结算结果（逾期n天/提前n天/按时完成）；
+  //          已完成未结算（无截止日期/历史存量）→ 已完成 · 倒计时停用；未完成 → 倒计时数字
+  const _dSettle=(c.status==='done')?settleHtml(c.overdue_days):null;
   document.getElementById('d_meta').innerHTML=
     `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b><br>`+
-    `负责人：<b>${esc(c.owner||'—')}</b>　周数：<b>${esc(c.week_no||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>　倒计时：<b><span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span></b>`;
+    `负责人：<b>${esc(c.owner||'—')}</b>　周数：<b>${esc(c.week_no||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>　倒计时：<b>${_dSettle?_dSettle:(c.status==='done'?'已完成 · 倒计时停用':`<span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span>`)}</b>`;
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
-  document.getElementById('d_comments').innerHTML=cs.comments.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
+  // 评论预览（2026-11-13）：只渲染最近 10 条（容器限高约 4 条可见、超出滚动），
+  // 完整清单走【全部评论】弹窗
+  const _allC=cs.comments||[];
+  const _cs=_allC.slice(-10);
+  const _chint=_allC.length>10
+    ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">共 ${_allC.length} 条，仅显示最近 10 条，点击【全部评论】查看全部</div>`:'';
+  document.getElementById('d_comments').innerHTML=(_cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')+_chint)||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
   // 操作记录仅显示最近 12 条（#116）；更早的完整日志走【更多→操作日志】（管理员权限）
   const _acts=acts.actions.slice(0,12);
   const _more=acts.actions.length>12
@@ -8286,8 +8975,8 @@ async function openDetail(id){
   document.getElementById('d_actions').innerHTML=_acts.map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(actCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')+_more||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
   document.getElementById('d_new_comment').value='';
   // 切换事项时清空上一次残留的提及（否则会把上一条评论的 @ 提到新事项上）
-  COMMENT_MENTIONS=[];
-  renderMentionBar();
+  MENTION_CTXS.d.arr=[];
+  renderMentionBar('d');
   // 详情弹窗子事项（只读展示；editor 可勾选）
   const st=await api('/api/cards/'+id+'/subtasks');
   const box=document.getElementById('d_subtask_box');
@@ -8300,15 +8989,16 @@ async function openDetail(id){
 async function addComment(){
   const inp=document.getElementById('d_new_comment');
   const v=inp.value.trim();
-  if(!v&&!COMMENT_MENTIONS.length)return;
+  const _arr=MENTION_CTXS.d.arr;
+  if(!v&&!_arr.length)return;
   if(!DETAIL_ID)return;
   // 提交时把已插入的提及拼到正文末尾（chip 是「已插入态」，正文里的 @姓名 是最终形态）
-  const mentions=COMMENT_MENTIONS.slice();
+  const mentions=_arr.slice();
   const text=mentions.length?(v?(v+' '):'')+mentions.map(m=>'@'+m).join(' '):v;
   if(!text.trim())return;
   try{
     await api('/api/cards/'+DETAIL_ID+'/comments',{method:'POST',body:JSON.stringify({content:text,mentions})});
-    COMMENT_MENTIONS=[];
+    MENTION_CTXS.d.arr=[];
     await openDetail(DETAIL_ID);
   }
   catch(e){toast(e.message)}
@@ -8318,57 +9008,75 @@ async function addComment(){
 //   「输入态」= 输入框里的纯文本（用户正在打字）
 //   「已插入态」= 从候选里选中的成员，以 chip 单独展示（可单独移除）
 // 提交时才把 chip 合并成正文里的 "@姓名"。
-let COMMENT_MENTIONS=[];      // 已插入的提及成员名
-let MENTION_QUERY='';         // 当前 @ 后的搜索词
+// 2026-11-13 泛化双上下文（板块评论复刻事项评论）：
+//   'd'  = 事项详情评论（#d_new_comment）
+//   'cd' = 板块浏览评论（#cd_new_comment）
+// 两个弹窗可同时叠开（板块浏览里点事项 → 事项详情盖在上层），
+// 各自维护独立的提及数组与候选池，互不串扰。
+const MENTION_CTXS={
+  d :{bar:'d_mention_bar', drop:'d_mention_drop', inp:'d_new_comment', arr:[], pool:null},
+  cd:{bar:'cd_mention_bar',drop:'cd_mention_drop',inp:'cd_new_comment',arr:[],pool:null}
+};
+let MENTION_QUERY='';         // 当前 @ 后的搜索词（同一时刻只有一个候选下拉在用）
 let MENTION_INDEX=0;          // 候选列表的键盘高亮位
-let MENTION_POOL=null;        // 评论 @ 候选池（2026-11-06 #77）：对当前卡片所属看板
-                              // 有可见权限的成员姓名（openDetail 时拉取）；
-                              // null = 尚未加载 → 兜底全员（与历史行为一致，避免拉取失败堵死评论）
+// 候选池语义（2026-11-06 #77，事项/板块同口径）：
+//   服务端下发「对当前看板有可见权限」的成员姓名（openDetail / openColumnDetail 时拉取）；
+//   null = 尚未加载 → 兜底全员（与历史行为一致，避免拉取失败堵死评论）
 // 渲染已插入的提及 chip（与输入态视觉上明确区分）
-function renderMentionBar(){
-  const bar=document.getElementById('d_mention_bar');
+function renderMentionBar(ctx){
+  ctx=ctx||'d';
+  const C=MENTION_CTXS[ctx];
+  const bar=document.getElementById(C.bar);
   if(!bar)return;
-  bar.innerHTML=COMMENT_MENTIONS.map((m,i)=>
-    `<span class="mention-chip">@${esc(m)}<i class="mc-x" data-i="${i}" title="移除该提及">✕</i></span>`).join('');
+  bar.innerHTML=C.arr.map((m,i)=>
+    `<span class="mention-chip">@${esc(m)}<i class="mc-x" data-ctx="${ctx}" data-i="${i}" title="移除该提及">✕</i></span>`).join('');
 }
 // 移除一个已插入的提及
-function removeMention(i){
-  if(i<0||i>=COMMENT_MENTIONS.length)return;
-  COMMENT_MENTIONS.splice(i,1);
-  renderMentionBar();
+function removeMention(i,ctx){
+  ctx=ctx||'d';
+  const C=MENTION_CTXS[ctx];
+  if(i<0||i>=C.arr.length)return;
+  C.arr.splice(i,1);
+  renderMentionBar(ctx);
 }
 // 候选成员（排除已提及的；2026-11-06 #77 起优先用服务端下发的
 // 「对该看板有可见权限」的成员池，未加载/拉取失败时兜底全员）
-function mentionCandidates(){
+function mentionCandidates(ctx){
+  ctx=ctx||'d';
+  const C=MENTION_CTXS[ctx];
   const q=(MENTION_QUERY||'').trim();
-  const all=Array.isArray(MENTION_POOL)?MENTION_POOL:ppMembers();
-  return all.filter(n=>!COMMENT_MENTIONS.includes(n)&&(!q||n.includes(q)));
+  const all=Array.isArray(C.pool)?C.pool:ppMembers();
+  return all.filter(n=>!C.arr.includes(n)&&(!q||n.includes(q)));
 }
 // 渲染 @ 候选下拉
-function renderMentionDrop(){
-  const drop=document.getElementById('d_mention_drop');
+function renderMentionDrop(ctx){
+  ctx=ctx||'d';
+  const C=MENTION_CTXS[ctx];
+  const drop=document.getElementById(C.drop);
   if(!drop)return;
-  const list=mentionCandidates();
+  const list=mentionCandidates(ctx);
   if(!list.length){
     drop.innerHTML='<div class="mention-empty">无匹配成员</div>';
     drop.hidden=false;
     MENTION_INDEX=0;
-    placeMentionDrop();
+    placeMentionDrop(ctx);
     return;
   }
   if(MENTION_INDEX>=list.length)MENTION_INDEX=0;
   drop.innerHTML=list.map((n,i)=>
     `<div class="mention-opt${i===MENTION_INDEX?' on':''}" data-name="${esc(n)}">@${esc(n)}</div>`).join('');
   drop.hidden=false;
-  placeMentionDrop();
+  placeMentionDrop(ctx);
 }
 // 候选下拉定位（2026-11-06 #75）：评论区贴着弹窗底部，下拉默认向下展开会被
 // modal-body 滚动容器截断（用户截图反馈「无法完全展示」）。
 // 策略：输入框下方空间足够 → 向下；不足 → 向上翻，并把 max-height 钳制到
 // 弹窗可视区内（至少 120px），保证候选始终完整可见。
-function placeMentionDrop(){
-  const drop=document.getElementById('d_mention_drop');
-  const inp=document.getElementById('d_new_comment');
+function placeMentionDrop(ctx){
+  ctx=ctx||'d';
+  const C=MENTION_CTXS[ctx];
+  const drop=document.getElementById(C.drop);
+  const inp=document.getElementById(C.inp);
   if(!drop||!inp||drop.hidden)return;
   const body=inp.closest('.modal-body');
   const cb=drop.parentElement;              // .comment-box = position:relative 锚点
@@ -8390,7 +9098,8 @@ function placeMentionDrop(){
   }
 }
 // 输入框内容变化：检测光标前的 "@词" 决定是否显示候选
-function onCommentInput(el){
+function onCommentInput(el,ctx){
+  ctx=ctx||'d';
   const pos=el.selectionStart==null?el.value.length:el.selectionStart;
   const before=el.value.slice(0,pos);
   // 找最后一个 @ 起始位置，且其后不允许出现空白（避免误判邮箱等）
@@ -8400,15 +9109,20 @@ function onCommentInput(el){
   if(/\s/.test(frag)){hideMentionDrop();return}
   MENTION_QUERY=frag;
   MENTION_INDEX=0;
-  renderMentionDrop();
+  renderMentionDrop(ctx);
 }
+// 收起候选下拉：两个上下文一起关（同一时刻最多一个候选在展开）
 function hideMentionDrop(){
-  const drop=document.getElementById('d_mention_drop');
-  if(drop)drop.hidden=true;
+  Object.keys(MENTION_CTXS).forEach(function(c){
+    const drop=document.getElementById(MENTION_CTXS[c].drop);
+    if(drop)drop.hidden=true;
+  });
 }
 // 点 @ 按钮：把 "@" 插入输入框并展开候选
-function toggleMentionMenu(){
-  const inp=document.getElementById('d_new_comment');
+function toggleMentionMenu(ctx){
+  ctx=ctx||'d';
+  const C=MENTION_CTXS[ctx];
+  const inp=document.getElementById(C.inp);
   if(!inp)return;
   const pos=inp.selectionStart==null?inp.value.length:inp.selectionStart;
   const v=inp.value;
@@ -8417,21 +9131,23 @@ function toggleMentionMenu(){
   const at=before.lastIndexOf('@');
   const frag=at>=0?before.slice(at+1):'';
   if(at>=0&&!/\s/.test(frag)){
-    MENTION_QUERY=frag;MENTION_INDEX=0;renderMentionDrop();inp.focus();return;
+    MENTION_QUERY=frag;MENTION_INDEX=0;renderMentionDrop(ctx);inp.focus();return;
   }
   inp.value=before+'@'+after;
   const np=pos+1;
   inp.setSelectionRange(np,np);
   inp.focus();
   MENTION_QUERY='';MENTION_INDEX=0;
-  renderMentionDrop();
+  renderMentionDrop(ctx);
 }
 // 选中一个候选 → 插入 chip（输入框内容保持为「输入态」，chip 是「已插入态」）
-function pickMention(name){
+function pickMention(name,ctx){
+  ctx=ctx||'d';
+  const C=MENTION_CTXS[ctx];
   if(!name)return;
-  if(!COMMENT_MENTIONS.includes(name))COMMENT_MENTIONS.push(name);
+  if(!C.arr.includes(name))C.arr.push(name);
   // 输入框里把刚输入的 "@词" 去掉（chip 已经承担了提及的展示）
-  const inp=document.getElementById('d_new_comment');
+  const inp=document.getElementById(C.inp);
   if(inp){
     const pos=inp.selectionStart==null?inp.value.length:inp.selectionStart;
     const before=inp.value.slice(0,pos);
@@ -8442,7 +9158,7 @@ function pickMention(name){
       inp.setSelectionRange(np,np);
     }
   }
-  renderMentionBar();
+  renderMentionBar(ctx);
   hideMentionDrop();
   if(inp)inp.focus();
 }
@@ -8483,8 +9199,8 @@ async function openDetailEdit(){
 // 编辑弹窗内部（表单区）不再有状态下拉 —— 状态设置统一收敛到弹窗主界面（头部）。
 // 详情 / 编辑 / 新建三个弹窗共用这套渲染与交互，仅菜单 id 不同（ctx='d' / 'e' / 'n'）。
 function statusDotColor(v){return v==='done'?'#52c41a':v==='progressing'?'#1890ff':'#ff4d4d'}
-function statusMenuId(ctx){return ctx==='e'?'e_status_menu':ctx==='n'?'n_status_menu':'d_status_menu'}
-function statusPickerId(ctx){return ctx==='e'?'e_status_picker':ctx==='n'?'n_status_picker':'d_status_picker'}
+function statusMenuId(ctx){return ctx==='e'?'e_status_menu':ctx==='n'?'n_status_menu':ctx==='c'?'c_status_menu':ctx==='ce'?'ce_status_menu':'d_status_menu'}
+function statusPickerId(ctx){return ctx==='e'?'e_status_picker':ctx==='n'?'n_status_picker':ctx==='c'?'c_status_picker':ctx==='ce'?'ce_status_picker':'d_status_picker'}
 function statusPickerHtml(status,ctx){
   const st=status==='done'?'done':status==='progressing'?'progressing':'open';
   const pid=statusPickerId(ctx);
@@ -8507,7 +9223,7 @@ function toggleStatusMenu(ev,ctx){
   m.hidden=!willOpen;
 }
 function closeStatusMenu(){
-  ['d_status_menu','e_status_menu','n_status_menu'].forEach(id=>{
+  ['d_status_menu','e_status_menu','n_status_menu','c_status_menu','ce_status_menu'].forEach(id=>{
     const m=document.getElementById(id);if(m)m.hidden=true;
   });
 }
@@ -8586,34 +9302,42 @@ document.addEventListener('click',e=>{
   if(t.closest('#weekFilterWrap'))return;
   closeFilterCombo();
 });
-// 评论 @ 提及：候选项点击 + 已插入 chip 的移除
+// 评论 @ 提及：候选项点击 + 已插入 chip 的移除（2026-11-13：事项 'd' / 板块 'cd' 双上下文）
 document.addEventListener('click',e=>{
   const t=e.target;
   if(!t||!t.closest)return;
-  // 点候选成员 → 插入提及
-  const opt=t.closest('#d_mention_drop .mention-opt');
-  if(opt){pickMention(opt.getAttribute('data-name'));return}
-  // 点 chip 的 ✕ → 移除该提及
-  const x=t.closest('#d_mention_bar .mc-x');
-  if(x){removeMention(parseInt(x.getAttribute('data-i'),10));return}
+  // 点候选成员 → 插入提及（按所在下拉判定上下文）
+  const opt=t.closest('.mention-opt');
+  if(opt){
+    const _drop=opt.closest('.mention-drop');
+    pickMention(opt.getAttribute('data-name'),_drop&&_drop.id.indexOf('cd_')===0?'cd':'d');
+    return;
+  }
+  // 点 chip 的 ✕ → 移除该提及（chip 自带 data-ctx）
+  const x=t.closest('.mention-bar .mc-x');
+  if(x){removeMention(parseInt(x.getAttribute('data-i'),10),x.getAttribute('data-ctx')||'d');return}
   // 其它位置点击 → 收起候选
-  if(!t.closest('#d_mention_drop')&&!t.closest('#d_new_comment')&&!t.closest('.comment-form'))hideMentionDrop();
+  if(!t.closest('.mention-drop')&&!t.closest('#d_new_comment')&&!t.closest('#cd_new_comment')&&!t.closest('.comment-form'))hideMentionDrop();
   // 点击消息条目 → 查看详情 + 跳转对应事项
   const mi=t.closest('#msgList .msg-item');
   if(mi)openMessage(parseInt(mi.getAttribute('data-id'),10));
 });
-// 评论输入框的键盘操作：↑↓ 切换候选，Enter 选中，Esc 收起
+// 评论输入框的键盘操作：↑↓ 切换候选，Enter 选中，Esc 收起（两个上下文通用）
 document.addEventListener('keydown',e=>{
-  const inp=document.getElementById('d_new_comment');
-  if(!inp||document.activeElement!==inp)return;
-  const drop=document.getElementById('d_mention_drop');
+  let _ctx=null;
+  for(const c of Object.keys(MENTION_CTXS)){
+    const _inp=document.getElementById(MENTION_CTXS[c].inp);
+    if(_inp&&document.activeElement===_inp){_ctx=c;break}
+  }
+  if(!_ctx)return;
+  const drop=document.getElementById(MENTION_CTXS[_ctx].drop);
   if(!drop||drop.hidden)return;
-  const list=mentionCandidates();
-  if(e.key==='ArrowDown'){e.preventDefault();MENTION_INDEX=Math.min(MENTION_INDEX+1,list.length-1);renderMentionDrop();return}
-  if(e.key==='ArrowUp'){e.preventDefault();MENTION_INDEX=Math.max(MENTION_INDEX-1,0);renderMentionDrop();return}
+  const list=mentionCandidates(_ctx);
+  if(e.key==='ArrowDown'){e.preventDefault();MENTION_INDEX=Math.min(MENTION_INDEX+1,list.length-1);renderMentionDrop(_ctx);return}
+  if(e.key==='ArrowUp'){e.preventDefault();MENTION_INDEX=Math.max(MENTION_INDEX-1,0);renderMentionDrop(_ctx);return}
   if(e.key==='Enter'){
     e.preventDefault();
-    if(list[MENTION_INDEX])pickMention(list[MENTION_INDEX]);
+    if(list[MENTION_INDEX])pickMention(list[MENTION_INDEX],_ctx);
     return;
   }
   if(e.key==='Escape'){hideMentionDrop();return}
@@ -8627,7 +9351,41 @@ document.addEventListener('scroll',e=>{
 // 状态选择的统一入口：新建弹窗只记录选择（事项还没创建），详情/编辑弹窗则立即写回
 function pickStatus(ctx,st){
   if(ctx==='n'){setNewCardStatus(st);return}
+  if(ctx==='c'||ctx==='ce'){setColumnCompletionStatus(st,ctx);return}   // T-191j：板块「完成情况」picker（预览 ctx=c / 编辑 ctx=ce）
   setCardStatus(ctx,st);
+}
+// ---------- 板块「完成情况」picker（T-191j 界面统一）----------
+// 与事项状态按钮同一交互范式：预览/编辑弹窗头部为唯一设置入口，
+// 菜单选择后立即提交（不经过表单），服务端 403/400 文案直接 toast。
+async function setColumnCompletionStatus(st,ctx){
+  closeStatusMenu();
+  // 新建板块（ctx=ce 且 create 模式）：事项尚不存在 → 只记录本地状态，随表单一并提交
+  if(ctx==='ce'&&COLUMN_MODE==='create'){
+    COL_COMPLETION=st;
+    const nb=document.getElementById('c_status_ops');
+    if(nb)nb.innerHTML=statusPickerHtml(st,'ce');
+    return;
+  }
+  const colKey=(ctx==='ce')?COLUMN_EDIT_KEY:((COLUMN_DETAIL||{}).colkey||'');
+  if(!colKey)return;
+  if(!colCanEditCompletionOf(colKey)){toast('仅板块负责人可修改完成情况');return}
+  try{
+    await api('/api/columns',{method:'PUT',body:JSON.stringify({col_key:colKey,completion:st})});
+    toast('完成情况已更新为「'+statusText(st)+'」');
+    COL_COMPLETION=st;
+    if(ctx==='ce'){
+      // 编辑弹窗内：只刷新按钮与列表，不关闭弹窗（与事项编辑同行为）
+      const box=document.getElementById('c_status_ops');
+      if(box)box.innerHTML=statusPickerHtml(st,'ce');
+    }else{
+      // 预览界面：更新缓存 dataset 并重渲染（倒计时区依赖 completion → 需联动刷新）
+      if(COLUMN_DETAIL)COLUMN_DETAIL.completion=st;
+      renderColumnDetailOps(null);
+      renderColumnDetail(COLUMN_DETAIL||{});
+    }
+    await reload(curPage);
+    renderProgress();
+  }catch(e){toast(e.message)}
 }
 // 新建弹窗里选状态：只记录，不写回（此时事项还不存在）
 function setNewCardStatus(st){
@@ -8748,18 +9506,14 @@ var CHK_COL_BOARD={};             // col_key -> board_id（#163 勾选权限判�
 var CHK_CARD_COL={};              // card_id -> col_key（#163 子事项权限判定）
 var CHK_CARD_SUBS={};             // 主事项 card_id -> [子事项 card_id]（子树渲染时注册）
 function itemChkStoreKey(){ return 'itemChk_'+((ME&&ME.username)||''); }
-function chkModeStoreKey(){ return 'chkMode_'+((ME&&ME.username)||''); }
 function loadItemChecked(){
   try{ ITEM_CHECKED=new Set(JSON.parse(sessionStorage.getItem(itemChkStoreKey())||'[]')); }
   catch(e){ ITEM_CHECKED=new Set(); }
-  try{ CHK_MODE=sessionStorage.getItem(chkModeStoreKey())==='1'; }
-  catch(e){ CHK_MODE=false; }
+  // #201（用户需求）：勾选模式**默认关闭** —— 不再从 sessionStorage 恢复开关状态，
+  //   每次进入页面都是「启用勾选」初始态；勾选记录本身仍按用户隔离保留。
 }
 function saveItemChecked(){
   try{ sessionStorage.setItem(itemChkStoreKey(), JSON.stringify([...ITEM_CHECKED])); }catch(e){}
-}
-function saveChkMode(){
-  try{ sessionStorage.setItem(chkModeStoreKey(), CHK_MODE?'1':'0'); }catch(e){}
 }
 // 子树注册：父卡 → 子事项清单（子树渲染时调用，供聚合计算）
 function registerCardSubs(parentId,ids){
@@ -8860,7 +9614,6 @@ function syncCheckStates(){
 // 开关切换：关 = 隐藏全部勾选框并清空勾选记录（板块+事项）；开 = 重绘显示
 function toggleChkMode(){
   CHK_MODE=!CHK_MODE;
-  saveChkMode();
   if(!CHK_MODE){
     ITEM_CHECKED.clear();saveItemChecked();
     COL_CHECKED.clear();saveColChecked();
@@ -8875,9 +9628,11 @@ function syncChkModeBtn(btn){
   btn.title=CHK_MODE?'勾选模式已启用，点击关闭并清空全部勾选'
                     :'点击开启勾选模式（板块/事项/子事项前显示勾选框）';
   btn.classList.toggle('on',CHK_MODE);
-  // #161 「全选当前」仅在勾选启用后出现
-  const ab=document.getElementById('chkAllBtn');
-  if(ab)ab.style.display=CHK_MODE?'':'none';
+  // #161/#196 「全选当前」「负责事项」「参与事项」仅在勾选启用后出现
+  ['chkAllBtn','chkMineOwnerBtn','chkMineCcBtn'].forEach(function(id){
+    const b=document.getElementById(id);
+    if(b)b.style.display=CHK_MODE?'':'none';
+  });
   syncChkAllBtn();   // T-0189：文案随勾选态刷新
 }
 // #161 一键勾选当前筛选结果：renderBoard 时注册的本轮卡片清单
@@ -8956,6 +9711,75 @@ function syncChkAllBtn(){
   ab.textContent=allOn?'取消全选':'全选当前';
   ab.title=allOn?'当前筛选结果已全部勾选，点击取消全选'
                 :'一键勾选当前筛选结果中的全部事项（板块随之全选/半选）';
+}
+// ── 分类快速勾选（#196）：负责事项 / 参与事项 ──
+// 按数据归属匹配（负责人/参与人含我），与权限判定（#163）相互独立：
+//   「负责事项」= 我在负责人名单里的事项 —— 管理员也只勾名义上由自己负责的，
+//     不复用 isCardOwnerOf（管理员恒真会导致「负责事项」= 全选，语义失真）。
+// 勾选动作仍受 #163 权限约束：无权勾的事项跳过并在 toast 里说明。
+// 双态切换：已全勾该类别 → 再点取消该类别（与「全选当前」同款交互）。
+var CAT_META={owner:{label:'负责',btn:'chkMineOwnerBtn',empty:'当前筛选结果中没有我负责的事项'},
+              cc:{label:'参与',btn:'chkMineCcBtn',empty:'当前筛选结果中没有我参与的事项'}};
+function cardMetaHit(kind,meta){
+  const names=((kind==='owner')?(meta.owner||''):(meta.cc||'')).split(';')
+    .map(function(s){return s.trim();}).filter(Boolean);
+  const me=[ME&&ME.display_name,ME&&ME.username].filter(Boolean);
+  return names.some(function(n){return me.indexOf(n)>=0;});
+}
+function selectCategoryCards(kind){
+  const mc=CAT_META[kind];
+  if(!CHK_MODE){toast('请先启用勾选模式');return}
+  const ids=CHK_CURRENT_CARDS||[];
+  if(!ids.length){toast('当前没有可勾选的事项');return}
+  const hit=ids.filter(function(id){return cardMetaHit(kind,(CHK_CURRENT_CARDS_META||{})[id]||{});});
+  if(!hit.length){toast(mc.empty);return}
+  // 权限过滤：仅勾有权勾选的（板块负责人及以上 或 事项负责人本人）
+  const canChk=hit.filter(function(id){
+    const meta=(CHK_CURRENT_CARDS_META||{})[id]||{};
+    return chkCanCheckCard(meta.owner,CHK_CARD_COL[id]||'',CHK_COL_BOARD[CHK_CARD_COL[id]||'']||'');
+  });
+  if(!canChk.length){
+    toast('命中的 '+hit.length+' 个'+mc.label+'事项均无勾选权限（仅事项负责人/板块负责人及以上可勾选）');
+    return;
+  }
+  const allOn=canChk.every(function(id){return ITEM_CHECKED.has(id);});
+  if(allOn){
+    // —— 取消该类别：仅清这类事项及其子事项；板块勾选只在「其可见事项已全部取消」时才解除 ——
+    canChk.forEach(function(id){
+      ITEM_CHECKED.delete(id);
+      (CHK_CARD_SUBS[id]||[]).forEach(function(s){ITEM_CHECKED.delete(s);});
+    });
+    let cols=0;
+    Object.keys(CHK_COL_CARDS).forEach(function(k){
+      const cards=CHK_COL_CARDS[k]||[];
+      if(!cards.length||!COL_CHECKED.has(k))return;
+      const allVisible=cards.every(function(id){return ids.indexOf(id)>=0;});
+      const noneLeft=cards.every(function(id){return !ITEM_CHECKED.has(id);});
+      if(allVisible&&noneLeft&&chkColOwnerOf(k,CHK_COL_BOARD[k]||'')){COL_CHECKED.delete(k);cols++;}
+    });
+    saveItemChecked();saveColChecked();
+    syncCheckStates();syncChkAllBtn();
+    toast('已取消 '+canChk.length+' 个'+mc.label+'事项'+(cols?('（'+cols+' 个板块勾选一并取消）'):''));
+    return;
+  }
+  // —— 勾选该类别 ——
+  let n=0;
+  canChk.forEach(function(id){
+    ITEM_CHECKED.add(id);n++;
+    (CHK_CARD_SUBS[id]||[]).forEach(function(s){ITEM_CHECKED.add(s);});
+  });
+  // 板块联动：板块内全部事项可见且**全部被勾选**（本类别只勾一部分时不误勾板块）
+  // 且用户有板块负责人及以上权限时才随勾选
+  Object.keys(CHK_COL_CARDS).forEach(function(k){
+    const cards=CHK_COL_CARDS[k]||[];
+    if(!cards.length||COL_CHECKED.has(k))return;
+    const allVisible=cards.every(function(id){return ids.indexOf(id)>=0;});
+    if(allVisible&&cards.every(function(id){return ITEM_CHECKED.has(id);})
+       &&chkColOwnerOf(k,CHK_COL_BOARD[k]||''))COL_CHECKED.add(k);
+  });
+  saveItemChecked();saveColChecked();
+  syncCheckStates();syncChkAllBtn();
+  toast('已勾选 '+n+' 个'+mc.label+'事项'+(n<hit.length?('（'+(hit.length-n)+' 个无权限未勾）'):''));
 }
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
@@ -10561,6 +11385,22 @@ async function ensureOrgTree(force){
   })();
   try{ return await _ORG_TREE_P; } finally { _ORG_TREE_P=null; }
 }
+// 小组节点的「自身板块绑定」存在 workgroups.boards（按 wg_id 关联）——
+// /api/org/tree **不下发该字段** → 每次树刷新（openWgModal / WS edit_lock 广播
+// 触发的 ensureOrgTree(true)）之后都必须重新同步（T-191f 修复）。
+// ❌ 不同步的后果：行内「板块：xxx」与编辑面板的绑定勾选全部丢失，
+//    用户此时点「保存修改」→ PUT boards 为空 → **绑定被清空（数据丢失）**。
+// 匹配优先 wg_id（org_nodes.wg_id ↔ workgroups.id，改名也不丢），名称匹配兜底。
+function syncWgBoards(){
+  (function sync(ns){
+    (ns||[]).forEach(n=>{
+      const w=(n.wg_id!=null?WG_FLAT.find(x=>x.id===n.wg_id):null)
+        ||WG_FLAT.find(x=>x.name===n.name);
+      n.wg_boards=w?(w.boards||''):'';
+      sync(n.children);
+    });
+  })(ORG_TREE);
+}
 async function openWgModal(){
   // 准入（2026-11-03）：管理员，或**架构负责人**（有管辖节点）。
   // 架构负责人进入后只能配置自己范围内的节点（见 renderWgList 的能力位）。
@@ -10584,14 +11424,8 @@ async function openWgModal(){
   ORG_MEMBERS=(td.members||[]).map(m=>({id:m.id,name:m.name,account:m.account||'',departments:m.departments||[],status:m.status||''}));
   ORG_MEMBER_BY_ID={};
   ORG_MEMBERS.forEach(m=>{ORG_MEMBER_BY_ID[m.id]=m});
-  // 板块绑定：新模型节点不存 boards，从旧 workgroups 视图补齐
-  (function sync(ns){
-    (ns||[]).forEach(n=>{
-      const w=WG_FLAT.find(x=>x.name===n.name);
-      n.wg_boards=w?(w.boards||''):'';
-      sync(n.children);
-    });
-  })(ORG_TREE);
+  // 板块绑定：新模型节点不存 boards，从旧 workgroups 视图补齐（T-191f 抽成公共函数）
+  syncWgBoards();
   TEAM_MEMBERS=(td.members||[]).map(m=>m.name);
   // 打开弹窗时清空选中（默认未选中）：避免上一次的高亮残留。
   // 但「任命/免职后刷新」要保持当前选中节点 —— 否则用户点节点 → 任命 →
@@ -11289,6 +12123,28 @@ async function downloadImportTemplate(){
     toast('模板已下载：'+fname);
   }catch(e){toast('下载失败：'+e.message)}
 }
+// T-202 板块编辑锁标识原位更新：找到 data-colkey 匹配的板块标题，增删其后的 🔒 标识
+//（样式复用事项行 .lock-tag；不整页刷新，避免打断用户当前操作）
+function syncColLockTag(colKey,info){
+  let title=null;
+  document.querySelectorAll('.week-title').forEach(function(t){
+    if(t.dataset.colkey===colKey)title=t;
+  });
+  if(!title)return;
+  const header=title.closest('.week-header');
+  if(!header)return;
+  const old=header.querySelector('.col-lock-tag');
+  if(old)old.remove();
+  const by=info&&info.locked_by;
+  if(by&&by!==ME.username){
+    const disp=info.locked_by_name||by;
+    const sp=document.createElement('span');
+    sp.className='lock-tag col-lock-tag';
+    sp.title=disp+' 正在编辑该板块';
+    sp.textContent='🔒 '+disp+' 已锁定';
+    title.after(sp);
+  }
+}
 // ---------- WebSocket ----------
 function connectWS(){
   const wsBase=window.__IS_FILE__?'ws://127.0.0.1:8000':((location.protocol==='https:'?'wss://':'ws://')+location.host);
@@ -11298,9 +12154,19 @@ function connectWS(){
     if(m.type==='edit_lock'&&m.key&&m.key.indexOf('org:')===0){
       // T-0184：架构节点编辑锁变化 → 架构管理弹窗开着时实时刷新行内 🔒 提示
       //（树数据里的 locked_by/locked_by_name 由 /api/org/tree 下发）
+      // T-191f：刷新后必须重同步 wg_boards —— 新拉的树节点没有该字段，
+      // 不补会导致小组行「板块：xxx」消失、编辑面板绑定勾选清空（保存即丢数据）。
       if(document.getElementById('wgModal').style.display==='flex'){
-        ensureOrgTree(true).then(()=>renderWgList()).catch(()=>{});
+        ensureOrgTree(true).then(()=>{syncWgBoards();renderWgList();}).catch(()=>{});
       }
+    }
+    if(m.type==='edit_lock'&&m.key&&m.key.indexOf('column:')===0){
+      // T-202：板块编辑锁变化 → 看板视图板块标题后方 🔒 标识实时增删。
+      // 持有者（含姓名）从 /api/locks/holder 现查（广播只带账号），原位更新不整页刷。
+      const _ck=m.key.slice('column:'.length);
+      api('/api/locks/holder?key='+encodeURIComponent(m.key)).then(function(h){
+        syncColLockTag(_ck,h&&h.locked_by?h:{locked_by:'',locked_by_name:''});
+      }).catch(function(){});
     }
     if(m.type==='lock'||m.type==='unlock'||m.type==='card_update'||m.type==='card_create'||m.type==='card_delete'){
       reload(curPage);renderProgress();

@@ -12,7 +12,7 @@ import json, os, time, hmac, hashlib, base64, secrets, sqlite3, threading, re, a
 from collections import defaultdict
 from datetime import datetime, date as _date
 from typing import Optional, List, Union
-from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket, WebSocketDisconnect, Request, Cookie
 from fastapi.responses import FileResponse, Response, JSONResponse
 from pydantic import BaseModel
 
@@ -53,6 +53,12 @@ LOGIN_FAIL_THRESHOLD = 5
 LOGIN_COOLDOWN = 180          # 3 分钟
 LOGIN_LOCK_THRESHOLD = 10
 SUPER_ADMIN = 'admin'   # 内置超级管理员（不可删/改密码/改角色/换绑）
+
+# T-194 建库期遗留测试账号（2026-08-18 与 admin 同批创建的空密码测试号：
+# 从未登录、无成员绑定、业务表零引用；docs/TAPD工作台迁移方案.md 有记载）。
+# 人员清单中仅超级管理员可见（本地库已于 2026-11-12 清除，此过滤保护
+# 尚存这些账号的开发/生产服务器，防止同步/恢复后再次出现在管理界面）。
+LEGACY_TEST_ACCOUNTS = ('zhangsan', 'lisi', 'testerB', 'accB', 'accC')
 # 「无负责人」筛选的哨兵值：前端下拉用它表示「负责人为空」。
 # 不能用空字符串（那是「全部负责人」），也不能与真实负责人重名（负责人是中文姓名）。
 OWNER_NONE = '__no_owner__'
@@ -1020,9 +1026,10 @@ def cleanup_empty_columns_and_boards() -> dict:
     deleted_cols = 0
     for c in dead_cols:
         dbe('DELETE FROM board_columns WHERE col_key=?', (c['col_key'],))
-        # 板块评论/待办随板块清除（T-0188）
+        # 板块评论/待办/操作记录随板块清除（T-0188；操作记录 2026-11-13）
         dbe('DELETE FROM column_comments WHERE col_key=?', (c['col_key'],))
         dbe('DELETE FROM column_todos WHERE col_key=?', (c['col_key'],))
+        dbe('DELETE FROM column_actions WHERE col_key=?', (c['col_key'],))
         deleted_cols += 1
 
     # 看板判定：剩余板块数为 0 且无未删事项 → 空看板
@@ -1042,6 +1049,7 @@ def cleanup_empty_columns_and_boards() -> dict:
     for bid, bname in dead_boards:
         dbe('DELETE FROM column_comments WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         dbe('DELETE FROM column_todos WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
+        dbe('DELETE FROM column_actions WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         dbe('DELETE FROM board_columns WHERE board_id=?', (bid,))
         dbe('DELETE FROM board_config WHERE board_id=?', (bid,))
         dbe('DELETE FROM boards WHERE board_id=?', (bid,))
@@ -1133,22 +1141,22 @@ def user_allowed(username: str, arch_only: bool = False):
     #    负责人 = 管理权（可改看板 / 板块基本信息），看板可见性完全由 ①~③ 决定。
     #    旧实现里 ACL 层会把「配了 owner/参与人」的看板对其他人藏起来，
     #    与【架构管理】的绑定规则互相打架 —— 现已移除该层。
-    # ⑤ 板块级可见性收紧（2026-11-12 用户确认「严格全量执行」）：
+    # ⑤ 板块级可见性收紧（2026-11-12 用户确认「严格全量执行」；#113 身份清单收敛）：
     #    可见板块 = 板块负责人 / 板块参与人
-    #             ∪ 对该看板权限 ≥ 看板负责人（LV_BOARD_OWNER）的用户：
-    #               · 看板负责人（boards.owner 命中）
-    #               · 架构负责人岗位任命（组长/部门长/中心负责人/总经理）负责范围
-    #                 覆盖该看板 —— 与 perm.py effective_level 的架构层映射一致
-    #    未配置负责人/参与人的板块，普通小组成员一律不可见（用户逐个配置 ACL）。
+    #             ∪ 上级看板负责人（boards.owner 命中）
+    #             ∪ 架构负责人岗位任命（组长/部门长/中心负责人/总经理）负责范围
+    #               覆盖该看板 —— 与 perm.py effective_level 的架构层映射一致
+    #    ⚠️ #113 身份清单严格化（用户确认「不做任何放宽或特例」）：**看板参与人 /
+    #       协作部门负责人不再自动全量可见板块** —— 他们不在板块可见身份清单内，
+    #       降级为按板块身份（板块负责人/参与人）过滤；看板壳仍在（看板层可见性
+    #       由 ①~③ 决定，本层不动），无板块身份的看板呈现为空壳。
     #    收口在单一出处：看板列 / 事项列表 / 导出 / 统计 / 事项详情全部经
     #    user_allowed 的 (boards, columns) 二元组过滤，本层改动自动全链路生效。
     if boards:
-        # 看板级明确授权名单命中 → 该看板**全部板块**可见（否则出现「看得到看板壳、
-        # 看不到任何内容」的悬挂态）：看板负责人 / 看板参与人 / 协作部门负责人（T-013d）
-        mgr = {r['board_id'] for r in dbq('SELECT board_id, owner, participants FROM boards')
-               if (r['owner'] or '').strip() == username
-               or username in {x.strip() for x in (r['participants'] or '').split(',') if x.strip()}}
-        mgr |= collab
+        # 看板级明确授权名单命中 → 该看板**全部板块**可见：仅「看板负责人」
+        #（#113：看板参与人/协作部门负责人移出全量可见名单）
+        mgr = {r['board_id'] for r in dbq('SELECT board_id, owner FROM boards')
+               if (r['owner'] or '').strip() == username}
         mgr |= _leader_scope_boards(username)          # 架构负责人及以上（岗位任命）
         vis = {}                                       # 非管理看板：命中 ACL 的板块
         for r in dbq('SELECT board_id, column_id, owner, participants FROM board_columns'):
@@ -1379,6 +1387,20 @@ COLUMN_NATURES = {'日常', '专项'}
 COLUMN_COMPLETIONS = ('open', 'progressing', 'done')
 
 
+def _settle_days(due):
+    """T-191j 结算：完成日（=结算当天）- 截止日。
+    逾期完成=正数 / 提前完成=负数 / 当天准时完成=0；无截止日期或日期非法 → None（未结算）。
+    只在状态转入「已完成」时调用一次（含 done 状态下修改截止日期时的重算）。"""
+    d = (due or '')[:10]
+    if not d:
+        return None
+    try:
+        dd = _date.fromisoformat(d)
+    except ValueError:
+        return None
+    return (_date.today() - dd).days
+
+
 def col_key(board_id, column_name):
     return '%s::%s' % (board_id or '', column_name or '')
 
@@ -1444,6 +1466,10 @@ def visible_columns(username, boards, columns, board_id=None, counts=None, board
         d['card_count'] = n
         d['done_count'] = dn
         d['pinned'] = int(d.get('pinned') or 0)
+        # T-202 板块编辑锁实时提示：标题后方 🔒 标识（与事项行同款 lock-tag）
+        # 锁 key = column:<col_key>（通用编辑锁，板块编辑弹窗认领）
+        d['locked_by'] = lock_mgr.who('column:' + d['col_key'])
+        d['locked_by_name'] = lock_mgr.who_name('column:' + d['col_key'])
         out.append(d)
     # 板块待办计数（T-0190）：目录板块行显示【待办：已完成/总数】（与事项行代办槽位对齐）
     if out:
@@ -2449,9 +2475,14 @@ def me(username: str = Depends(require_auth)):
             if perm_check_pass(username, perm_chain(board_id=b['board_id']),
                                OP_UPDATE, LV_BOARD_OWNER):
                 editable_boards.append(b['board_id'])
+    # 人员管理权限位（T-191d）：部门负责人及以上可见入口；
+    # staff_scope_all = True（总经理/中心负责人/管理员）→ 全部人员，False → 仅本部门。
+    _sp = _staff_perm(username)
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
+            'can_manage_staff': _sp[0],            # T-191d 人员管理入口显隐（部门负责人及以上）
+            'staff_scope_all': _sp[1],             # T-191d True=全部部门 / False=仅本部门
             'login_notice': _get_setting('login_notice', ''),  # T-013b：超管「登入通知」字段回显（个人状态不受影响）
             'avatar': avatar, 'photo': photo, 'status_text': status_text,
             'member_id': member_id,                # #152 个人界面展示：绑定的成员编号（未绑定=None）
@@ -2562,7 +2593,8 @@ def _completion_text(st):
 def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_ids=None,
                             status=None, owner=None, column=None, q=None,
                             created_start=None, created_end=None, cc=None, week=None,
-                            person=None, years=None, card_id=None, parent_id=None,
+                            person=None, years=None, due_dates=None,
+                            card_id=None, parent_id=None,
                             level='top', board_set=None):
     """按用户可见范围 + 页面筛选条件过滤事项（**列表与导出共用**）
 
@@ -2590,6 +2622,32 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
     else:
         pool = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
     mine = filter_rows(pool, boards, columns)
+    # 事项级身份过滤（#113 严格口径）：非管理员用户仅展示满足**任一**身份的事项
+    #   —— 事项负责人 / 事项参与人 / 上级板块负责人 / 上级看板负责人 / 架构负责人。
+    # 递归生效：板块层已先行过滤（filter_rows）—— 被过滤板块下的事项整体不展示，
+    # 不因「事项负责人/参与人」身份放行（对用户而言该板块不存在，事项无处挂载）。
+    # ⚠️ 身份按**数据归属**判定（负责人/参与人名单含我，分号分隔比对账号与姓名）；
+    #    管理员（boards=None 全量）不受此过滤。严格不放宽、无特例 ——
+    #    板块无负责人/参与人但事项有属数据问题，由数据修正解决（用户确认）。
+    if boards is not None:
+        _bowners = {r['board_id']: (r['owner'] or '').strip()
+                    for r in dbq('SELECT board_id, owner FROM boards')}
+        _cowners = {}
+        for r in dbq('SELECT board_id, column_id, owner FROM board_columns'):
+            _cowners[(r['board_id'], r['column_id'])] = (r['owner'] or '').strip()
+        _leader_b = _leader_scope_boards(username)
+        _me = {username, _account_member_name(username)} - {''}
+        def _me_hit(s):
+            return any(x.strip() in _me for x in (s or '').split(';') if x.strip())
+        def _card_ident_hit(r):
+            if _bowners.get(r['board_id']) == username:             # 上级看板负责人
+                return True
+            if r['board_id'] in _leader_b:                          # 架构负责人
+                return True
+            if _cowners.get((r['board_id'], r.get('column_id') or '')) == username:
+                return True                                         # 上级板块负责人
+            return _me_hit(r.get('owner')) or _me_hit(r.get('cc'))  # 事项负责人 / 事项参与人
+        mine = [r for r in mine if _card_ident_hit(r)]
     # 层级过滤：card_id 精确查询不受层级限制；parent_id → 该父项的子事项；
     # level='top' → 只看顶层；level='all' → 全部层级（导出用）
     if card_id:
@@ -2692,6 +2750,12 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
         wset = {x.strip() for x in week.split(',') if x.strip()}
         if wset:
             mine = [r for r in mine if (r.get('week_no') or '').strip() in wset]
+    # 到期日期多选（T-191 到期筛选）：事项截止日期（due 前 10 位）命中任一所选日期。
+    # 放在 week_options 统计之前 → 周数候选与到期筛选联动（同一口径）。
+    if due_dates:
+        _dset = {x.strip() for x in due_dates.split(',') if x.strip()}
+        if _dset:
+            mine = [r for r in mine if (r.get('due') or '').strip()[:10] in _dset]
     return mine, week_options, col_hit_keys
 
 
@@ -2703,6 +2767,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
           created_start: Optional[str] = None, created_end: Optional[str] = None,
           cc: Optional[str] = None, week: Optional[str] = None,
           person: Optional[str] = None, years: Optional[str] = None,
+          due_dates: Optional[str] = None,
           board_ids: Optional[str] = None,
           username: str = Depends(require_auth), request: Request = None):
     if card_id:
@@ -2724,7 +2789,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         username, boards, columns,
         board_id=board_id, board_ids=board_ids, status=status, owner=owner,
         column=column, q=q, created_start=created_start, created_end=created_end,
-        cc=cc, week=week, person=person, years=years,
+        cc=cc, week=week, person=person, years=years, due_dates=due_dates,
         card_id=card_id, parent_id=parent_id, level='top')
     total = len(mine)
     # 板块元信息 + 进度统计：基于**全量**过滤结果，不受分页影响，
@@ -2888,6 +2953,10 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
         ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?)',
         (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts, new_completion,
          (req.description or '').strip(), _norm_due_date(req.due_date)))
+    # T-191j 结算：新建板块即「已完成」且带截止日期 → 直接结算一次
+    if new_completion == 'done':
+        dbe('UPDATE board_columns SET overdue_days=? WHERE col_key=?',
+            (_settle_days(_norm_due_date(req.due_date)), key))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
               f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year}，创建日期 {created}）', 'success')
@@ -2964,6 +3033,15 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
         if not (_is_col_owner or is_admin(username)):
             raise HTTPException(403, '仅板块负责人可设置完成情况')
         new_completion = cv
+        # T-191i 状态联动：板块设为「已完成」的前置条件 = 板块下**所有事项**（含子事项）均已完成。
+        # 放在改名/搬移之前判定（此时 cards 还挂在旧 column_name 下）。
+        if new_completion == 'done' and old:
+            _bid = old['board_id'] if 'board_id' in old.keys() else (req.board_id or '')
+            _undone = dbq("SELECT COUNT(*) AS c FROM cards WHERE board_id=? AND column_name=?"
+                          " AND deleted=0 AND status<>'done'", (_bid, old['column_name']))
+            if _undone[0]['c'] > 0:
+                raise HTTPException(400, f'该板块下还有 {_undone[0]["c"]} 个事项未完成，无法设置为「已完成」；'
+                                         f'请先将全部事项（含子事项）完成后再调整板块完成情况')
     year = _norm_year(req.year)
     created = (req.created_at or '').strip() or (old['created_at'] if old else '')
     if not created:
@@ -2976,9 +3054,11 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     if old and name != old_name:
         dbe('UPDATE cards SET column_name=? WHERE board_id=? AND column_name=? AND deleted=0',
             (name, board_id, old_name))
-        # 板块评论/待办挂在 col_key 上（T-0188）—— 改名换 key 必须随迁，否则数据失联
+        # 板块评论/待办/操作记录挂在 col_key 上（T-0188；操作记录 2026-11-13）
+        # —— 改名换 key 必须随迁，否则数据失联
         dbe('UPDATE column_comments SET col_key=? WHERE col_key=?', (new_key, req.col_key))
         dbe('UPDATE column_todos SET col_key=? WHERE col_key=?', (new_key, req.col_key))
+        dbe('UPDATE column_actions SET col_key=? WHERE col_key=?', (new_key, req.col_key))
     if old:
         if new_owner is not None:
             dbe('UPDATE board_columns SET owner=? WHERE col_key=?', (new_owner, req.col_key))
@@ -2998,6 +3078,15 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
              (req.description if req.description is not None else (old['description'] if old and 'description' in old.keys() else '')) or '',
              _norm_due_date(req.due_date) if req.due_date is not None else ((old['due_date'] if old and 'due_date' in old.keys() else '') or ''),
              req.col_key))
+        # T-191j 结算：板块完成情况为「已完成」时结算逾期天数（转入 done、
+        # 或 done 状态下改截止日期 → 重算）。离开 done 不写（旧结算值留档）。
+        _final_comp = new_completion if new_completion is not None \
+            else ((old['completion'] if old and 'completion' in old.keys() else '') or 'open')
+        if _final_comp == 'done':
+            _final_due = _norm_due_date(req.due_date) if req.due_date is not None \
+                else ((old['due_date'] if old and 'due_date' in old.keys() else '') or '')
+            dbe('UPDATE board_columns SET overdue_days=? WHERE col_key=?',
+                (_settle_days(_final_due), new_key))
     else:
         new_cid = 'COL' + str(int(time.time() * 1000))
         parts = _norm_acl_participants(req.participants) if req.participants else ''
@@ -3006,6 +3095,9 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
             (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or '', parts,
              (req.description or '').strip()))
     log_action('__column__', username, 'update', f'编辑板块 {name}')
+    # 板块操作记录（2026-11-13）：创建 / 编辑都落 col_key 流水（板块浏览界面「操作记录」）
+    log_column_action(new_key, username, 'update' if old else 'create',
+                      f'{"编辑板块" if old else "新建板块"}：{name}')
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
               f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
@@ -3029,6 +3121,8 @@ async def pin_column(req: ColumnPinReq, username: str = Depends(require_writer),
     val = 1 if req.pinned else 0
     dbe('UPDATE board_columns SET pinned=? WHERE col_key=?', (val, req.col_key))
     log_action('__column__', username, 'pin', f'{"置顶" if val else "取消置顶"}板块 {row[0]["column_name"]}')
+    log_column_action(req.col_key, username, 'pin',
+                      f'{"置顶" if val else "取消置顶"}板块 {row[0]["column_name"]}')
     audit_log(username, client_ip(request), 'update', f'板块 {row[0]["column_name"]}',
               f'{"置顶" if val else "取消置顶"}板块：{row[0]["column_name"]}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
@@ -3056,9 +3150,21 @@ def _column_for_access(col_key: str, username: str):
     return row[0]
 
 
+def log_column_action(col_key, username, action, detail=''):
+    """板块操作记录（2026-11-13）：板块浏览界面「操作记录」的数据源，
+    口径与事项侧 log_action/actions 表一致（col_key 对应 card_id）。
+    板块刚被删除等场景下表仍可写（col_key 留档）；数据库异常静默跳过不堵主流程。"""
+    try:
+        dbe('INSERT INTO column_actions (col_key, username, action, detail) VALUES (?,?,?,?)',
+            (col_key or '', username, action, detail or ''))
+    except Exception:
+        pass
+
+
 class ColumnCommentReq(BaseModel):
     col_key: str
     content: str
+    mentions: list[str] = []      # 被 @ 的成员姓名列表（与事项评论同口径，2026-11-13）
 
 
 class ColumnTodoReq(BaseModel):
@@ -3074,24 +3180,79 @@ class ColumnTodoToggleReq(BaseModel):
 @app.get('/api/columns/comments')
 def column_comments_list(col_key: str, username: str = Depends(require_auth)):
     _column_for_access(col_key, username)
-    rows = dbq('SELECT id, username, content, created_at FROM column_comments'
-               ' WHERE col_key=? ORDER BY id DESC LIMIT 200', (col_key,))
+    rows = dbq('SELECT id, col_key, username, content, mentions, created_at FROM column_comments'
+               ' WHERE col_key=? ORDER BY id LIMIT 200', (col_key,))
     return {'comments': [dict(r) for r in rows]}
+
+
+def _column_mention_pool(col_key: str, username: str):
+    """板块评论 @ 候选池（2026-11-13）：与事项评论同口径 ——
+    ① 对板块所属看板有架构内可见路径（user_allowed(arch_only=True)，#77 口径）；
+    ② 对当前用户可见（_visible_member_accounts）。
+    管理员超管可见性不计入（与事项侧一致）。"""
+    row = _column_for_access(col_key, username)
+    return sorted(_mention_pool_names_for_board(row['board_id'], username))
+
+
+@app.get('/api/columns/mention_pool')
+def column_mention_pool(col_key: str, username: str = Depends(require_auth)):
+    """板块评论 @ 候选池：对所属看板有可见路径 **且** 对当前用户可见的成员姓名。"""
+    return {'names': _column_mention_pool(col_key, username)}
 
 
 @app.post('/api/columns/comments')
 async def add_column_comment(req: ColumnCommentReq, username: str = Depends(require_auth),
                              request: Request = None):
-    """板块评论：可见即可评（与 T-013d「可见即可评论」口径一致）。"""
+    """板块评论：可见即可评（与 T-013d「可见即可评论」口径一致）；
+    @ 提及（2026-11-13）：与事项评论同款 —— 候选池校验（防绕过前端直调 API）
+    + 为被提及成员投递消息。"""
     _column_for_access(req.col_key, username)
     content = (req.content or '').strip()[:2000]
     if not content:
         raise HTTPException(400, '评论内容不能为空')
-    dbe('INSERT INTO column_comments (col_key, username, content) VALUES (?,?,?)',
-        (req.col_key, username, content))
+    # @ 提及：mentions 是被提及的成员姓名列表（与 owner 字段同口径），去重且保序
+    seen = set(); ms = []
+    for m in (req.mentions or []):
+        m = (m or '').strip()
+        if m and m not in seen:
+            seen.add(m); ms.append(m)
+    # @ 提及权限校验：候选池 = 看板可见 ∩ 对当前用户可见，
+    # 池外成员（含对当前用户不可见者）拒绝被 @ —— 防止绕过前端直调 API。
+    if ms:
+        _pool = set(_column_mention_pool(req.col_key, username))
+        _bad = [m for m in ms if m not in _pool]
+        if _bad:
+            raise HTTPException(403, '以下成员对您不可见，无法@：' + '、'.join(_bad))
+    dbe('INSERT INTO column_comments (col_key, username, content, mentions) VALUES (?,?,?,?)',
+        (req.col_key, username, content, ';'.join(ms)))
+    log_column_action(req.col_key, username, 'comment', content[:200])
     audit_log(username, client_ip(request), 'comment', f'板块 {req.col_key}',
               '发表板块评论', 'success')
+    # 为每个被提及的成员投递一条消息（收件人 = 成员对应的登录账号；
+    # 板块没有事项跳转 → card_id 留空，消息正文自带板块名上下文）
+    if ms:
+        crow = dbq('SELECT column_name FROM board_columns WHERE col_key=?', (req.col_key,))
+        cname = crow[0]['column_name'] if crow else req.col_key
+        for m in ms:
+            recv = _mention_receiver(m)
+            if not recv or recv == username:
+                continue   # 不给自己发消息
+            dbe('INSERT INTO messages (receiver, sender, card_id, kind, content) VALUES (?,?,?,?,?)',
+                (recv, username, '', 'mention',
+                 f'在板块「{cname}」的评论中提及了你：{content[:160]}'))
+    await ws_mgr.broadcast({'type': 'comment', 'card_id': 'column:' + req.col_key,
+        'by': username}, exclude=username)
     return {'ok': True}
+
+
+@app.get('/api/columns/actions')
+def get_column_actions(col_key: str, username: str = Depends(require_auth)):
+    """板块操作记录（2026-11-13）：复刻事项 /api/cards/{card_id}/actions ——
+    可见即可查，按时间倒序返回最近 30 条。"""
+    _column_for_access(col_key, username)
+    rows = dbq('SELECT username, action, detail, created_at FROM column_actions'
+               ' WHERE col_key=? ORDER BY id DESC LIMIT 30', (col_key or '',))
+    return {'actions': [dict(r) for r in rows]}
 
 
 @app.get('/api/columns/todos')
@@ -3114,6 +3275,18 @@ def _todo_guard(col_key: str, username: str):
 def add_column_todo(req: ColumnTodoReq, username: str = Depends(require_writer),
                     request: Request = None):
     _todo_guard(req.col_key, username)
+    # 2026-11-13（用户口径）：板块待办只能由**板块负责人及以上**追加 ——
+    # 板块负责人 / 看板负责人 / 架构负责人 / 管理员放行（has_role = effective_level
+    # ≥ LV_COLUMN_OWNER，上级角色天然继承）；参与人与普通可见用户 403。
+    # 与事项待办 #130 的 LV_CARD_OWNER 门槛同构；此前只做 require_writer 粗闸门，
+    # 任何登录账号直调 API 都能加 → 越权口子，本处收紧。
+    if PERM_ENABLED and not (is_admin(username) or username == SUPER_ADMIN):
+        _crow = dbq('SELECT column_id FROM board_columns WHERE col_key=?', (req.col_key,))
+        if not _crow:
+            raise HTTPException(404, '板块不存在')
+        if not has_role(dbq, username,
+                        perm_chain(column_id=_crow[0]['column_id']), LV_COLUMN_OWNER):
+            raise HTTPException(403, '仅板块负责人及以上可添加板块待办，如需新增请联系板块负责人或管理员')
     name = (req.name or '').strip()[:200]
     if not name:
         raise HTTPException(400, '待办内容不能为空')
@@ -3121,6 +3294,7 @@ def add_column_todo(req: ColumnTodoReq, username: str = Depends(require_writer),
              (req.col_key,))[0]['m']
     dbe('INSERT INTO column_todos (col_key, name, sort, created_by) VALUES (?,?,?,?)',
         (req.col_key, name, mx + 1, username))
+    log_column_action(req.col_key, username, 'todo_add', name)
     audit_log(username, client_ip(request), 'subtask_add', f'板块 {req.col_key}',
               '新增板块待办', 'success')
     return {'ok': True}
@@ -3138,6 +3312,8 @@ def update_column_todo(tid: int, req: ColumnTodoToggleReq, username: str = Depen
             (1 if req.done else 0, req.name.strip()[:200], tid))
     else:
         dbe('UPDATE column_todos SET done=? WHERE id=?', (1 if req.done else 0, tid))
+    log_column_action(row[0]['col_key'], username, 'todo_update',
+                      f'{req.name.strip()[:120]}（{"完成" if req.done else "取消完成"}）')
     return {'ok': True}
 
 
@@ -3149,6 +3325,7 @@ def delete_column_todo(tid: int, username: str = Depends(require_writer),
         raise HTTPException(404, '待办不存在')
     _todo_guard(row[0]['col_key'], username)
     dbe('DELETE FROM column_todos WHERE id=?', (tid,))
+    log_column_action(row[0]['col_key'], username, 'todo_delete', row[0]['name'])
     audit_log(username, client_ip(request), 'subtask_delete', f'板块 {row[0]["col_key"]}',
               '删除板块待办', 'success')
     return {'ok': True}
@@ -3198,14 +3375,17 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
             conn.execute(f'DELETE FROM card_subtasks WHERE card_id IN ({ph})', ids)
         # ③ 板块元信息
         conn.execute('DELETE FROM board_columns WHERE col_key=?', (key,))
-        # ④ 板块评论/待办随板块删除（T-0188）
+        # ④ 板块评论/待办/操作记录随板块删除（T-0188；操作记录 2026-11-13）
         conn.execute('DELETE FROM column_comments WHERE col_key=?', (key,))
         conn.execute('DELETE FROM column_todos WHERE col_key=?', (key,))
+        conn.execute('DELETE FROM column_actions WHERE col_key=?', (key,))
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     log_action(bid, username, 'delete', f'删除板块 {cname}')
+    log_column_action(key, username, 'delete',
+                      f'删除板块：{cname}（连带事项 {n_cards} 条，软删可恢复）')
     audit_log(username, client_ip(request), 'delete', f'板块 {cname}',
               f'删除板块：{cname}（看板 {bid}，连带事项 {n_cards} 条，软删可恢复）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
@@ -3296,6 +3476,14 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
         if PERM_ENABLED and not (is_admin(username) or username == SUPER_ADMIN
                                  or has_role(dbq, username, _chain, LV_CARD_OWNER)):
             raise HTTPException(403, '仅事项负责人可变更事项状态（完成勾选/状态更新），如需调整请联系负责人或管理员')
+        # T-191i 状态联动：父事项设为「已完成」的前置条件 = 全部子事项均已完成。
+        # 子事项自身无下级，不受此约束。
+        if status_fields.get('status') == 'done':
+            _kids = dbq("SELECT COUNT(*) AS c FROM cards WHERE parent_id=? AND deleted=0"
+                        " AND status<>'done'", (card_id,))
+            if _kids[0]['c'] > 0:
+                raise HTTPException(400, f'该事项下还有 {_kids[0]["c"]} 个子事项未完成，无法设置为「已完成」；'
+                                         f'请先完成全部子事项')
         fields.update(status_fields)
     if assign_fields.get('owner'):
         perm_check(username, _chain, OP_ASSIGN_OWNER, LV_CARD_OWNER, 'card:' + card_id,
@@ -3342,6 +3530,13 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
               vals + [card_id, cur_ver])
     if res.rowcount == 0:
         raise HTTPException(409, '数据已被他人修改，请刷新后重试')
+    # T-191j 结算：事项处于「已完成」时结算逾期天数（转入 done、或 done 状态下改截止日 → 重算）。
+    # 离开 done 不写（旧结算值留档，前端仅在 done 态展示）。
+    if 'status' in fields or 'due' in fields:
+        _srow = dbq('SELECT status, due FROM cards WHERE card_id=?', (card_id,))
+        if _srow and _srow[0]['status'] == 'done':
+            dbe('UPDATE cards SET overdue_days=? WHERE card_id=?',
+                (_settle_days(_srow[0]['due']), card_id))
     log_action(card_id, username, 'update', json.dumps(fields, ensure_ascii=False)[:500])
     audit_log(username, client_ip(request), 'update', f'卡片 {card_id}', '更新字段：' + '、'.join(fields.keys()), 'success')
     # 释放锁 + 广播
@@ -3426,6 +3621,10 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
+    # T-191j 结算：新建即「已完成」且带截止日期 → 直接结算一次（口径与 update_card 一致）
+    if (vals.get('status') or '') == 'done':
+        dbe('UPDATE cards SET overdue_days=? WHERE card_id=?',
+            (_settle_days(vals.get('due')), new_id))
     # 事项带板块名时，确保板块元信息存在（否则该板块在板块列表里没有创建日期/性质/置顶位）
     cname = (vals.get('column_name') or '').strip()
     if cname and not req.parent_id:
@@ -3597,10 +3796,12 @@ def _purge_board(bid: str) -> dict:
         # ② 子事项清单（card_subtasks）与评论/操作记录随事项失效
         conn.execute('DELETE FROM card_subtasks WHERE card_id IN '
                      '(SELECT card_id FROM cards WHERE board_id=?)', (bid,))
-        # ③ 板块 / 配置 / 看板本体（板块评论/待办随板块一并清除，T-0188）
+        # ③ 板块 / 配置 / 看板本体（板块评论/待办/操作记录随板块一并清除，T-0188；操作记录 2026-11-13）
         conn.execute('DELETE FROM column_comments WHERE col_key IN '
                      '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         conn.execute('DELETE FROM column_todos WHERE col_key IN '
+                     '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
+        conn.execute('DELETE FROM column_actions WHERE col_key IN '
                      '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         conn.execute('DELETE FROM board_columns WHERE board_id=?', (bid,))
         conn.execute('DELETE FROM board_config WHERE board_id=?', (bid,))
@@ -4011,38 +4212,54 @@ def board_columns_list(board_id: str, username: str = Depends(require_auth)):
 
 def _delete_card_core(card_id: str, username: str, request=None) -> int:
     """删除单卡核心逻辑（校验 + 级联软删）。成功返回连带子事项数，失败抛 HTTPException。
-    供单条删除（#161 批量删除复用同一套校验/级联）共用。"""
-    # 编辑锁（2026-11-12 check→acquire）：他人正编辑（弹窗持锁）→ 409
-    _lock_oneshot(card_id, username, '卡片', '删除')
+    供单条删除（#161 批量删除复用同一套校验/级联）共用。
+
+    校验顺序（T-198）：① 存在性 → ② 身份（perm 内核 OP_DELETE ≥ 事项负责人：
+    事项负责人/上级板块负责人/上级看板负责人/架构负责人；参与人 403）
+    → ③ 可见性（仅能删除**自己可见**的事项——事项身份不豁免板块层过滤，
+    隐藏板块下的卡片即使负责人也 403）→ ④ 编辑锁。
+    ⚠️ 锁在全部校验通过后才认领，且失败路径必须释放 —— 否则一次 403 会把锁
+    泄漏到超时，阻塞包括管理员在内的后续删除（T-198 实测踩坑）。
+    """
     cur_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur_row:
         raise HTTPException(404, '卡片不存在或已删除')
-    # 分级权限（2026-11-02）：删除事项 = 事项负责人及以上
+    # ② 分级权限（2026-11-02）：删除事项 = 事项负责人及以上
     # ⚠️ 权限内核先于可见性校验（见 update_card 的同款说明）
     perm_check(username, perm_chain(card_id=card_id),
                OP_DELETE, LV_CARD_OWNER, 'card:' + card_id)
+    # ③ T-198 删除可见性约束：仅能删除**自己可见**的事项（列表展示过滤同口径）——
+    #   事项身份不豁免板块层过滤：事项负责人对其不可见板块下的卡片同样 403
+    #  （末级用户口径：必须是该事项的负责人**且**事项可见才能删）。
+    check_card_access(card_id, username)
     check_board_access(cur_row[0]['board_id'], username)
-    res = dbe('UPDATE cards SET deleted=1 WHERE card_id=? AND deleted=0', (card_id,))
-    if res.rowcount == 0:
-        raise HTTPException(404, '卡片不存在或已删除')
-    # 级联：删除子事项（递归，含孙级）及其代办任务
-    # ⚠️ 原查询带 parent_id!=card_id 条件，恰好把**直接子事项**排除在图之外，
-    #    导致级联永远传播不到子事项（历史 bug，#161 修复）：改为全量取图。
-    allsubs = dbq('SELECT card_id, parent_id FROM cards WHERE deleted=0')
-    byid = {r['card_id']: (r['parent_id'] or 0) for r in allsubs}
-    victims = {card_id}
-    changed = True
-    while changed:
-        changed = False
-        for cid, pid in byid.items():
-            if pid in victims and cid not in victims:
-                victims.add(cid)
-                changed = True
-    victims.discard(card_id)
-    for sid in victims:
-        dbe('UPDATE cards SET deleted=1 WHERE card_id=?', (sid,))
-        dbe('DELETE FROM card_subtasks WHERE card_id=?', (sid,))
-    dbe('DELETE FROM card_subtasks WHERE card_id=?', (card_id,))
+    # ④ 编辑锁（2026-11-12 check→acquire）：他人正编辑（弹窗持锁）→ 409
+    _lock_oneshot(card_id, username, '卡片', '删除')
+    try:
+        res = dbe('UPDATE cards SET deleted=1 WHERE card_id=? AND deleted=0', (card_id,))
+        if res.rowcount == 0:
+            raise HTTPException(404, '卡片不存在或已删除')
+        # 级联：删除子事项（递归，含孙级）及其代办任务
+        # ⚠️ 原查询带 parent_id!=card_id 条件，恰好把**直接子事项**排除在图之外，
+        #    导致级联永远传播不到子事项（历史 bug，#161 修复）：改为全量取图。
+        allsubs = dbq('SELECT card_id, parent_id FROM cards WHERE deleted=0')
+        byid = {r['card_id']: (r['parent_id'] or 0) for r in allsubs}
+        victims = {card_id}
+        changed = True
+        while changed:
+            changed = False
+            for cid, pid in byid.items():
+                if pid in victims and cid not in victims:
+                    victims.add(cid)
+                    changed = True
+        victims.discard(card_id)
+        for sid in victims:
+            dbe('UPDATE cards SET deleted=1 WHERE card_id=?', (sid,))
+            dbe('DELETE FROM card_subtasks WHERE card_id=?', (sid,))
+        dbe('DELETE FROM card_subtasks WHERE card_id=?', (card_id,))
+    except Exception:
+        _lock_release(card_id, username)   # 失败路径必须释放（T-198 实测：泄漏阻塞后续删除）
+        raise
     # ⚠️ #162 修订（用户明确）：删除事项**不再连带删除空板块** ——
     #    原这里调用 cleanup_empty_columns_and_boards()，把删空了的板块整个物理删掉，
     #    导致「批量删除勾选」误删板块 + 空板块无法显示。空板块按需求**保留展示**，
@@ -4221,10 +4438,11 @@ def _visible_member_accounts(viewer: str):
     return accs
 
 
-def _mention_pool_names(card_id: str, username: str):
-    """评论 @ 候选池（双重口径，2026-11-12 修订）：
+def _mention_pool_names_for_board(bid: str, username: str):
+    """评论 @ 候选池（双重口径，2026-11-12 修订；2026-11-13 抽出按看板复用 ——
+    板块评论与事项评论共用同一候选池口径）：
 
-      ① 目标对该卡片所属看板**有架构内可见路径**（user_allowed(arch_only=True)，
+      ① 目标对该**看板**有架构内可见路径（user_allowed(arch_only=True)，
          2026-11-06 #77 口径不变）—— 被 @ 的人得能打开该看板，提及消息才有意义；
          ⚠️ 管理员的**超管可见性不计入**（用户 2026-11-06 确认：管理员权限独立于
          架构外，不能因为是管理员就谁都能 @ 到）——管理员只有同时具备架构内身份
@@ -4234,10 +4452,6 @@ def _mention_pool_names(card_id: str, username: str):
          搜索与 @ 列表同样不展示。
     没有登录账号的成员无法登录也收不到提及消息（_mention_receiver 投递语义）→ 天然排除。
     """
-    row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
-    if not row:
-        raise HTTPException(404, '事项不存在')
-    bid = row[0]['board_id']
     vis = _visible_member_accounts(username)
     names = set()
     for u in dbq('SELECT username FROM users'):
@@ -4251,6 +4465,14 @@ def _mention_pool_names(card_id: str, username: str):
             if (m['name'] or '').strip():
                 names.add(m['name'].strip())
     return names
+
+
+def _mention_pool_names(card_id: str, username: str):
+    """事项评论 @ 候选池 = 该卡片所属看板的候选池（_mention_pool_names_for_board）。"""
+    row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if not row:
+        raise HTTPException(404, '事项不存在')
+    return _mention_pool_names_for_board(row[0]['board_id'], username)
 
 
 @app.get('/api/cards/{card_id}/mention_pool')
@@ -7073,6 +7295,13 @@ def update_profile(req: ProfileReq, username: str = Depends(require_auth), reque
             raise HTTPException(400, '当前账号未绑定成员，无法保存部门')
         member_depts_out = _clean_dept_list(req.departments)
         _set_member_departments(mrow2[0]['id'], member_depts_out)
+    # T-191 人员媒体历史：头像/照片变更留档（本人上传同样记录 → 管理端可按条回滚）
+    _um = dbq('SELECT avatar, photo FROM users WHERE username=?', (username,))
+    if _um:
+        if (_um[0]['avatar'] or '') != avatar:
+            _log_user_media(username, 'avatar', _um[0]['avatar'] or '', avatar, username)
+        if (_um[0]['photo'] or '') != photo:
+            _log_user_media(username, 'photo', _um[0]['photo'] or '', photo, username)
     # T-013b 登录页通知栏：超级管理员个人中心的「登入通知」字段（同一输入框）
     #   写全局配置 app_settings.login_notice；**users.status_text 保持原值不动**
     #   （顶栏个人状态栏语义不变）。非超管用户完全走原「个人状态」逻辑。
@@ -7147,6 +7376,412 @@ def change_password(req: PasswordChangeReq, username: str = Depends(require_auth
     dbe('UPDATE users SET password_hash=? WHERE username=?', (hash_pw(new), username))
     audit_log(username, client_ip(request), 'password_change', '修改密码', '密码修改成功', 'success')
     return {'ok': True, 'need_relogin': True}
+
+
+# ---------------- API：人员管理（T-191；T-191d 权限改为「部门负责人及以上」） ----------------
+# ① 人员信息全字段清单（users + team_members 合并）；
+# ② 头像/照片统一管理（参照小精灵图模块：网格展示、替换/清除、历史按条回滚、
+#    全量快照与回滚）。图片本体始终以 data URL 存 users.avatar / users.photo，
+#    历史与快照表只做留档 —— 「数据持久化到数据库」天然满足，bat 快照链可直接备份 app.db。
+#
+# 权限口径（T-191d，用户确认）：
+#   · 开放对象 = **部门负责人及以上**（总经理 / 中心负责人 / 部门负责人 / 管理员 / 超管）；
+#     小组组长及以下不开放；
+#   · 总经理 / 中心负责人 / 管理员 / 超管 → 查看与管理**全部**人员；
+#   · 部门负责人 → 仅**本部门**（负责部门 + 其全部后代节点）的人员；
+#   · 岗位判定与 perm.py _arch_leader_nodes 同构（双来源并集）：
+#       来源 A = org_nodes.owner 显式配置（仅 center/dept 节点 —— 小组的 owner 不算）；
+#       来源 B = org_appointments 岗位任命 role_key ∈ (gm, center_head, dept_head)。
+STAFF_MEDIA_FIELDS = ('avatar', 'photo')
+STAFF_MEDIA_LABEL = {'avatar': '头像', 'photo': '个人照片'}
+STAFF_LEADER_ROLES = ('gm', 'center_head', 'dept_head')
+
+
+def _staff_perm(username: str):
+    """人员管理权限判定（T-191d）。
+
+    返回 (allowed, all_scope, scope_ids)
+      allowed=False          → 部门负责人以下 → 403；
+      all_scope=True         → 管理员 / 总经理 / 中心负责人 → 全部人员；
+      scope_ids=set(node_id) → 部门负责人 → 负责部门 + 全部后代节点的 id 集合。
+    """
+    if is_admin(username):
+        return True, True, None
+    names = identity_names(username, dbq)
+    marks = ','.join('?' * len(names))
+    all_scope = False
+    dept_nodes = set()
+    # 来源 A：显式节点负责人（仅 center/dept —— 小组节点 owner 不是「部门负责人」）
+    for r in dbq('SELECT id, node_type FROM org_nodes WHERE owner IN (%s)' % marks, tuple(names)):
+        if r['node_type'] == 'center':
+            all_scope = True
+        elif r['node_type'] == 'dept':
+            dept_nodes.add(r['id'])
+    # 来源 B：岗位任命
+    rows = dbq(
+        'SELECT DISTINCT a.node_id, a.role_key, n.node_type FROM org_appointments a'
+        ' JOIN team_members m ON m.id=a.member_id'
+        ' JOIN org_nodes n ON n.id=a.node_id'
+        ' WHERE a.role_key IN (%s) AND (m.account IN (%s) OR m.name IN (%s))'
+        % (','.join('?' * len(STAFF_LEADER_ROLES)), marks, marks),
+        tuple(STAFF_LEADER_ROLES) + tuple(names) + tuple(names))
+    for r in rows:
+        if r['role_key'] in ('gm', 'center_head') or r['node_type'] == 'center':
+            all_scope = True
+        elif r['role_key'] == 'dept_head':
+            dept_nodes.add(r['node_id'])
+    if all_scope:
+        return True, True, None
+    if not dept_nodes:
+        return False, False, None
+    # 部门负责人：负责部门 + 全部后代节点（子部门 / 子组）—— 沿 _arch_scope_nodes 同款展开
+    nmap = _org_node_map()
+    scope_ids = set()
+    for nid in dept_nodes:
+        scope_ids.add(nid)
+        stack = [nid]
+        while stack:
+            cur = stack.pop()
+            for cid, n in nmap.items():
+                if n.get('parent_id') == cur:
+                    scope_ids.add(cid)
+                    stack.append(cid)
+    return True, False, scope_ids
+
+
+def _staff_scope_check(username: str, all_scope: bool, scope_ids, target: str) -> bool:
+    """target 账号是否在人员管理范围内（all_scope 恒过；部门负责人按节点范围判定）。
+
+    成员命中范围的两条路径（任一即可）：
+      ① team_members.departments 里的部门名 ∈ 范围节点名集合；
+      ② 该成员在范围节点上有 org_appointments 任命（挂靠为空但被任命的场景）。
+    未绑定成员的账号（如内置 admin）仅 all_scope 用户可见。
+    """
+    if all_scope:
+        return True
+    node_ids = scope_ids or set()
+    if not node_ids:
+        return False
+    nmap = _org_node_map()
+    names = {nmap[i]['name'] for i in node_ids if i in nmap}
+    m = dbq('SELECT id, departments FROM team_members WHERE account=? LIMIT 1', (target,))
+    if not m:
+        return False          # 未绑定成员的账号 → 部门负责人不可见
+    depts = [x.strip() for x in (m[0]['departments'] or '').split(',') if x.strip()]
+    if any(d in names for d in depts):
+        return True
+    return bool(dbq('SELECT 1 FROM org_appointments WHERE member_id=? AND node_id IN (%s) LIMIT 1'
+                    % ','.join('?' * len(node_ids)), (m[0]['id'], *node_ids)))
+
+
+def require_staff(username: str = Depends(require_auth)):
+    """人员管理准入依赖（T-191d）：部门负责人及以上，返回 (username, all_scope, scope_ids)。"""
+    allowed, all_scope, scope_ids = _staff_perm(username)
+    if not allowed:
+        raise HTTPException(403, '人员管理仅对部门负责人及以上开放')
+    return (username, all_scope, scope_ids)
+
+
+def _log_user_media(username: str, field: str, old: str, new: str, by: str):
+    """头像/照片变更留档（T-191）：新旧值各存完整 data URL，供按条回滚。"""
+    dbe('INSERT INTO user_media_history (username, field, old_value, new_value, changed_by)'
+        ' VALUES (?,?,?,?,?)', (username, field, old or '', new or '', by))
+
+
+def _serve_user_media(username: str, field: str) -> Response:
+    """users.avatar / users.photo 的 data URL 解码直出（管理端查看，不过公开面）。"""
+    if field not in STAFF_MEDIA_FIELDS:
+        raise HTTPException(404, '未知图片字段')
+    row = dbq('SELECT %s FROM users WHERE username=?' % field, (username,))
+    if not row or not (row[0][field] or '').strip():
+        raise HTTPException(404, '该用户未上传' + STAFF_MEDIA_LABEL[field])
+    try:
+        head, _, payload = row[0][field].partition(',')
+        mime = head[5:].split(';')[0].strip().lower() or 'image/png'
+        raw = base64.b64decode(payload)
+    except Exception:
+        raise HTTPException(500, '图片数据损坏')
+    # no-store：同一 URL 的内容会被替换/清除，绝不能缓存
+    return Response(content=raw, media_type=mime,
+                    headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
+@app.get('/api/staff/list')
+def staff_list(actor_info=Depends(require_staff), request: Request = None):
+    """人员信息全字段清单（T-191；T-191d 权限：部门负责人及以上）。
+
+    team_members 为主行、users 左联（按 account 绑定），未绑定成员的账号
+    （如内置 admin）单独补行 —— **仅 all_scope 用户可见**（部门负责人看不到
+    无部门归属的账号）。头像/照片只给存在标志，图片内容走
+    /api/staff/img/{username}/{field} 按需直出（避免清单载荷爆炸）。
+    返回 scope: 'all' | 'dept' 供前端提示可见范围。
+    """
+    actor, all_scope, scope_ids = actor_info
+    users = {r['username']: r for r in dbq(
+        'SELECT username, role, status_text, last_login_at, last_login_ip, created_at,'
+        " (avatar<>'') AS has_avatar, (photo<>'') AS has_photo,"
+        ' gender, hire_date, birth_date, native_province, native_city, phone, political_status'
+        ' FROM users')}
+
+    def _row(name, mid, acc, emp_no, departments, departed):
+        u = users.get(acc) if acc else None
+        return {
+            'member_id': mid, 'name': name, 'username': (acc or ''),
+            'role': (u['role'] if u else '') or '',
+            'emp_no': emp_no or '', 'departments': departments or '',
+            'departed': bool(departed),
+            'gender': ((u['gender'] if u else '') or ''),
+            'hire_date': ((u['hire_date'] if u else '') or ''),
+            'birth_date': ((u['birth_date'] if u else '') or ''),
+            'native_province': ((u['native_province'] if u else '') or ''),
+            'native_city': ((u['native_city'] if u else '') or ''),
+            'phone': ((u['phone'] if u else '') or ''),
+            'political_status': ((u['political_status'] if u else '') or ''),
+            'status_text': ((u['status_text'] if u else '') or ''),
+            'has_avatar': bool(u and u['has_avatar']),
+            'has_photo': bool(u and u['has_photo']),
+            'last_login_at': ((u['last_login_at'] if u else '') or ''),
+            'last_login_ip': ((u['last_login_ip'] if u else '') or ''),
+            'created_at': ((u['created_at'] if u else '') or ''),
+        }
+
+    out = []
+    linked = set()
+    for m in dbq('SELECT id, name, account, emp_no, departments, status FROM team_members ORDER BY id'):
+        acc = m['account'] or ''
+        if acc:
+            linked.add(acc)
+        out.append((m['name'], m['id'], acc, m['emp_no'], m['departments'],
+                    m['status'] == 'departed'))
+    unbound = []
+    for acc, u in users.items():
+        if acc not in linked:
+            unbound.append((acc, None, acc, '', '', False))
+    # T-191d 部门负责人范围过滤：成员行按「部门名 ∈ 范围节点名」或「任命 ∈ 范围节点」
+    rows = out + unbound
+    # T-194 建库期遗留测试账号仅超级管理员可见（超管本人仍可查看以便后续清理）
+    if actor != SUPER_ADMIN:
+        rows = [r for r in rows if r[2] not in LEGACY_TEST_ACCOUNTS]
+    if not all_scope:
+        nmap = _org_node_map()
+        scope_names = {nmap[i]['name'] for i in (scope_ids or set()) if i in nmap}
+        scope_appt_ids = set()
+        if out:
+            mids = [r[1] for r in out]
+            marks = ','.join('?' * len(mids))
+            amap = defaultdict(set)
+            for r in dbq('SELECT member_id, node_id FROM org_appointments WHERE member_id IN (%s)' % marks,
+                         tuple(mids)):
+                amap[r['member_id']].add(r['node_id'])
+            keep = set()
+            for r in out:
+                depts = [x.strip() for x in (r[4] or '').split(',') if x.strip()]
+                if any(d in scope_names for d in depts) or (amap.get(r[1]) or set()) & (scope_ids or set()):
+                    keep.add(r[1])
+            rows = [r for r in out if r[1] in keep]
+        else:
+            rows = []
+        # 未绑定成员的账号对部门负责人不可见（包括部门负责人自己若未绑定成员）
+    audit_log(actor, client_ip(request), 'view', '人员管理',
+              '查看人员信息清单（%s）' % ('全部' if all_scope else '本部门'),
+              'success')
+    return {'staff': [_row(*r) for r in rows], 'scope': 'all' if all_scope else 'dept'}
+
+
+def _staff_img_auth(tk: Optional[str] = Cookie(None, alias='tk'),
+                    authorization: Optional[str] = Header(None)):
+    """人员图片直出的**窄域鉴权**（T-191b 修复「预览大图加载失败」）：
+
+    <img src> 请求**不会携带 Authorization 头**（浏览器图片请求不带自定义头），
+    只认 Bearer 的全局 require_auth 会让缩略图/大图全部 401。
+    前端登录时已写 tk cookie（login.html / setTkCookie），这里对**本端点单独**
+    接受「Bearer 头 或 tk cookie」双通道 —— 不动全局 require_auth（其余 API
+    仍严格走 Bearer 头，避免 cookie 通道扩大攻击面）。
+    """
+    token = None
+    if authorization and authorization.startswith('Bearer '):
+        token = authorization[7:]
+    elif tk:
+        token = tk
+    username = verify_token(token) if token else None
+    if not username:
+        raise HTTPException(401, '未登录')
+    if not is_admin(username):
+        raise HTTPException(403, '需要管理员权限')
+    return username
+
+
+@app.get('/api/staff/img/{acc}/{field}')
+def staff_img(acc: str, field: str, actor_info=Depends(require_staff)):
+    """人员头像/照片直出（部门负责人及以上，**范围校验**：仅可查看本部门人员；
+    no-store 防替换后读到旧图）。"""
+    actor, all_scope, scope_ids = actor_info
+    if not _staff_scope_check(actor, all_scope, scope_ids, acc):
+        raise HTTPException(403, '仅可查看本部门人员的图片')
+    return _serve_user_media(acc, field)
+
+
+class StaffMediaReq(BaseModel):
+    username: str           # 目标账号
+    field: str              # avatar / photo
+    data: str = ''          # 图片 data URL；空串 = 清除
+
+
+@app.post('/api/staff/media')
+def staff_media_set(req: StaffMediaReq, actor_info=Depends(require_staff),
+                    request: Request = None):
+    """管理员代管头像/照片：设置（data URL）或清除（data 空串）。每次变更留档。
+    ⚠️ T-191d：部门负责人仅可管理**本部门**人员的头像/照片。"""
+    actor, all_scope, scope_ids = actor_info
+    if req.field not in STAFF_MEDIA_FIELDS:
+        raise HTTPException(400, 'field 仅支持 avatar / photo')
+    acc = (req.username or '').strip()
+    if not acc:
+        raise HTTPException(400, '缺少目标账号')
+    if not _staff_scope_check(actor, all_scope, scope_ids, acc):
+        raise HTTPException(403, '仅可管理本部门人员的头像/照片')
+    if (req.data or '').strip():
+        limit = MAX_IMAGE_BYTES if req.field == 'avatar' else MAX_PHOTO_BYTES
+        data = _check_image_data_url(req.data, limit)
+    else:
+        data = ''
+    row = dbq('SELECT username, %s FROM users WHERE username=?' % req.field, (acc,))
+    if not row:
+        raise HTTPException(404, '账号不存在')
+    old = row[0][req.field] or ''
+    if old == data:
+        return {'ok': True, 'changed': False}
+    dbe('UPDATE users SET %s=? WHERE username=?' % req.field, (data, acc))
+    _log_user_media(acc, req.field, old, data, actor)
+    audit_log(actor, client_ip(request), 'staff_media', '人员管理',
+              '%s %s 的%s' % ('清除' if not data else '设置', acc, STAFF_MEDIA_LABEL[req.field]),
+              'success')
+    return {'ok': True, 'changed': True}
+
+
+@app.get('/api/staff/media/history')
+def staff_media_history(user: Optional[str] = None, field: Optional[str] = None,
+                        limit: int = 100, actor_info=Depends(require_staff)):
+    """头像/照片变更历史（T-191）：不含 data URL 本体，只给存在标志与大小，
+    按条回滚时旧值从库内直取（前端拿不到也不需要拿到大图数据）。
+    ⚠️ T-191d：部门负责人仅见**本部门**人员的变更记录（范围外条目直接过滤）。"""
+    actor, all_scope, scope_ids = actor_info
+    if field and field not in STAFF_MEDIA_FIELDS:
+        raise HTTPException(400, 'field 仅支持 avatar / photo')
+    rows = dbq('SELECT id, username, field, old_value, new_value, changed_by, changed_at'
+               ' FROM user_media_history ORDER BY id DESC LIMIT ?', (max(1, min(limit, 300)),))
+    out = []
+    for r in rows:
+        if user and r['username'] != user:
+            continue
+        if field and r['field'] != field:
+            continue
+        if not _staff_scope_check(actor, all_scope, scope_ids, r['username']):
+            continue
+        out.append({
+            'id': r['id'], 'username': r['username'], 'field': r['field'],
+            'changed_by': r['changed_by'], 'changed_at': r['changed_at'],
+            'has_old': bool(r['old_value']), 'has_new': bool(r['new_value']),
+            'old_kb': len(r['old_value']) * 3 // 4 // 1024,
+            'new_kb': len(r['new_value']) * 3 // 4 // 1024,
+        })
+    return {'history': out}
+
+
+@app.post('/api/staff/media/history/{hid}/restore')
+def staff_media_history_restore(hid: int, actor_info=Depends(require_staff),
+                                request: Request = None):
+    """按条回滚：把该条历史的「旧值」写回当前字段（回滚本身同样留档，可再回滚找回）。
+    ⚠️ T-191d：部门负责人仅可回滚**本部门**人员的历史条目。"""
+    actor, all_scope, scope_ids = actor_info
+    h = dbq('SELECT username, field, old_value FROM user_media_history WHERE id=?', (hid,))
+    if not h:
+        raise HTTPException(404, '历史记录不存在')
+    acc, field, old = h[0]['username'], h[0]['field'], h[0]['old_value'] or ''
+    if not _staff_scope_check(actor, all_scope, scope_ids, acc):
+        raise HTTPException(403, '仅可回滚本部门人员的变更')
+    cur = dbq('SELECT %s FROM users WHERE username=?' % field, (acc,))
+    if not cur:
+        raise HTTPException(404, '账号已不存在，无法回滚')
+    now = cur[0][field] or ''
+    if now == old:
+        return {'ok': True, 'changed': False}
+    dbe('UPDATE users SET %s=? WHERE username=?' % field, (old, acc))
+    _log_user_media(acc, field, now, old, actor)
+    audit_log(actor, client_ip(request), 'staff_media', '人员管理',
+              '回滚 %s 的%s（历史 #%d）' % (acc, STAFF_MEDIA_LABEL[field], hid), 'success')
+    return {'ok': True, 'changed': True}
+
+
+def _require_staff_all_scope(actor_info):
+    """快照级整包备份/回滚的准入：仅 all_scope 用户（总经理/中心负责人/管理员）——
+    快照是全局操作（覆盖全部账号），部门负责人无权触发。"""
+    actor, all_scope, scope_ids = actor_info
+    if not all_scope:
+        raise HTTPException(403, '快照级整包备份/回滚仅总经理/中心负责人/管理员可用')
+    return actor
+
+
+@app.get('/api/staff/media/snapshots')
+def staff_media_snapshots(actor_info=Depends(require_staff)):
+    """快照清单（不含 data 本体；users = 快照覆盖的账号数）。"""
+    _require_staff_all_scope(actor_info)
+    rows = dbq('SELECT id, data, note, created_by, created_at FROM user_media_snapshots'
+               ' ORDER BY id DESC LIMIT 50')
+    out = [{'id': r['id'], 'note': r['note'], 'created_by': r['created_by'],
+            'created_at': r['created_at'],
+            'users': len(json.loads(r['data'] or '{}'))} for r in rows]
+    return {'snapshots': out}
+
+
+class StaffMediaSnapReq(BaseModel):
+    note: str = ''
+
+
+@app.post('/api/staff/media/snapshots')
+def staff_media_snapshot_create(req: StaffMediaSnapReq, actor_info=Depends(require_staff),
+                                request: Request = None):
+    """创建全量快照：所有账号的头像+照片整包备份（含空值 → 回滚 = 忠实还原）。"""
+    username = _require_staff_all_scope(actor_info)
+    data = {}
+    for r in dbq('SELECT username, avatar, photo FROM users'):
+        data[r['username']] = {'avatar': r['avatar'] or '', 'photo': r['photo'] or ''}
+    dbe('INSERT INTO user_media_snapshots (data, note, created_by) VALUES (?,?,?)',
+        (json.dumps(data, ensure_ascii=False), (req.note or '').strip()[:100], username))
+    sid = dbq('SELECT id FROM user_media_snapshots ORDER BY id DESC LIMIT 1')[0]['id']
+    audit_log(username, client_ip(request), 'staff_media_snapshot', '人员管理',
+              '创建头像/照片快照 #%d（%d 个账号）' % (sid, len(data)), 'success')
+    return {'ok': True, 'id': sid, 'users': len(data)}
+
+
+@app.post('/api/staff/media/snapshots/{sid}/restore')
+def staff_media_snapshot_restore(sid: int, actor_info=Depends(require_staff),
+                                 request: Request = None):
+    """回滚快照：整包还原所有账号的头像+照片（与快照时点逐字段比对，仅写有变化的；
+    每个被还原的字段同样留档 → 误回滚可再找回。回滚不自动产生新快照 ——
+    与 T-0190 偏好备份同口径：备份的唯一入口是显式手动创建）。"""
+    username = _require_staff_all_scope(actor_info)
+    row = dbq('SELECT data FROM user_media_snapshots WHERE id=?', (sid,))
+    if not row:
+        raise HTTPException(404, '快照不存在')
+    try:
+        data = json.loads(row[0]['data'] or '{}')
+    except Exception:
+        raise HTTPException(500, '快照数据损坏')
+    changed = 0
+    for acc, fields in data.items():
+        cur = dbq('SELECT avatar, photo FROM users WHERE username=?', (acc,))
+        if not cur:
+            continue
+        for f in STAFF_MEDIA_FIELDS:
+            want = (fields.get(f) or '') if isinstance(fields, dict) else ''
+            if (cur[0][f] or '') != want:
+                dbe('UPDATE users SET %s=? WHERE username=?' % f, (want, acc))
+                _log_user_media(acc, f, cur[0][f] or '', want, username)
+                changed += 1
+    audit_log(username, client_ip(request), 'staff_media_snapshot', '人员管理',
+              '回滚头像/照片快照 #%d（还原 %d 个字段）' % (sid, changed), 'success')
+    return {'ok': True, 'changed': changed}
 
 
 class DeptProfileReq(BaseModel):
@@ -7702,11 +8337,40 @@ def delete_export_template(tid: int, username: str = Depends(require_auth), requ
     return {'ok': True}
 
 
+@app.get('/api/due_counts')
+def due_counts(board_id: Optional[str] = None, status: Optional[str] = None,
+               owner: Optional[str] = None, column: Optional[str] = None,
+               q: Optional[str] = None, created_start: Optional[str] = None,
+               created_end: Optional[str] = None, cc: Optional[str] = None,
+               week: Optional[str] = None, person: Optional[str] = None,
+               years: Optional[str] = None, board_ids: Optional[str] = None,
+               username: str = Depends(require_auth)):
+    """日历热力图数据（T-191 到期筛选）：当前筛选范围内各截止日期的到期事项数。
+
+    接受与 /api/cards 相同的筛选参数（**除 due_dates 外**——本接口就是为日历
+    提供候选热度，若叠加到期筛选本身会自证循环），权限口径同 /api/cards
+    （user_allowed 双层可见性），只统计顶层事项。返回 {'counts': {'YYYY-MM-DD': n}}。
+    """
+    boards, columns = user_allowed(username)
+    mine, _, _ = _filter_cards_for_user(
+        username, boards, columns,
+        board_id=board_id, board_ids=board_ids, status=status, owner=owner,
+        column=column, q=q, created_start=created_start, created_end=created_end,
+        cc=cc, week=week, person=person, years=years, level='top')
+    counts = defaultdict(int)
+    for r in mine:
+        d = (r.get('due') or '').strip()[:10]
+        if d:
+            counts[d] += 1
+    return {'counts': dict(counts)}
+
+
 @app.get('/api/export/xlsx')
 def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
                 owner: str = '', column: str = '', q: str = '',
                 created_start: str = '', created_end: str = '',
                 cc: str = '', week: str = '', person: str = '', years: str = '',
+                due_dates: str = '',
                 fields: str = '', card_ids: str = '',
                 username: str = Depends(require_auth), request: Request = None):
     """导出**当前筛选结果**的事项为 xlsx（.xlsx，一维表，每行一个事项）
@@ -7749,7 +8413,8 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
         username, boards, columns,
         board_id=board_id, board_ids=board_ids, status=status, owner=owner,
         column=column, q=q, created_start=created_start, created_end=created_end,
-        cc=cc, week=week, person=person, years=years, board_set=target_boards)
+        cc=cc, week=week, person=person, years=years, due_dates=due_dates,
+        board_set=target_boards)
     # #161 导出勾选：与勾选清单取交集（交集在权限过滤之后 → 不可见 id 无法借道导出）
     if (card_ids or '').strip():
         want = {x.strip() for x in card_ids.split(',') if x.strip()}
@@ -7948,9 +8613,11 @@ async def import_data(req: ImportReq, username: str = Depends(require_admin), re
                 conn.execute(f'INSERT OR REPLACE INTO board_columns ({",".join(cols)}) '
                              f'VALUES ({",".join("?"*len(cols))})',
                              [c[k] for k in cols])
-            # 板块评论/待办按 col_key 挂靠（T-0188）—— 导入替换后清掉失联数据
+            # 板块评论/待办/操作记录按 col_key 挂靠（T-0188；操作记录 2026-11-13）
+            # —— 导入替换后清掉失联数据
             conn.execute('DELETE FROM column_comments WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
             conn.execute('DELETE FROM column_todos WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
+            conn.execute('DELETE FROM column_actions WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
         # ---- 板块配置 ----
         if req.board_config:
             conn.execute('DELETE FROM board_config')
