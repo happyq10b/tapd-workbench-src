@@ -6976,25 +6976,44 @@ function renderPickers(){
   // 父子事项共用同一张表，无需后端改动 —— 之前是前端主动隐藏了。
   initPersonPicker('e_cc',window._editCc=window._editCc||[],pool,'e_owner',false);
 }
-// 事项选人池（2026-11-04 层级约束）：所属板块的负责人与参与人（账号 → 姓名）。
-// 板块元数据缺失（板块未配置负责人/参与人，或 COLS_META 里找不到）时，
-// 回退到所属看板的负责人与参与人 —— 层级链：看板池 ⊇ 板块池。
+// 事项选人池（2026-11-04 层级约束；2026-11-17 #140 严格口径修订）：
+// 板块元信息**实时取**（GET /api/boards/{bid}/columns，visible_columns 口径、
+// 已含 ACL 读取过滤）——不再依赖 COLS_META（渲染态缓存：只含当前看板、
+// 依赖页面渲染时序，切换入口时会拿旧看板的板块列表）。
+// · 板块**已登记且可见**（接口清单里找得到）→ 池 = 板块负责人+参与人，
+//   **名单为空 = 池空（无可选人员）**——不回退看板池！旧逻辑把「板块名单空」
+//   误当「板块未配置」回退看板池，导致空板块（如「收入工作事项/测试」）能选到
+//   看板层人员（吴婷婷/李梦子），提交又被后端剔除（前后端口径割裂）。
+// · 板块未登记/不可见 → 回退看板池，与后端 _card_allowed_accounts 的回退条件
+//   （板块行不存在才回退）保持一致。
+// · 部门约束：与 colPickPool 同款 aclAccsInDept——看板配了归属部门（部门级）
+//   → 池 ∩ 部门成员（后端 _card_allowed_accounts 同口径）。
 async function cardPickPool(boardId,columnName){
   await bcLoadAclMembers();
   const n2=function(a){const m=BC_ACL_MEMBERS.filter(x=>x.account===a)[0];return m?(m.name||a):a;};
   let accs=[];
-  const meta=(window.COLS_META||[]).find(x=>x.col_key===(boardId+'::'+columnName));
-  if(meta){
-    if(meta.owner)accs.push(meta.owner);
-    (meta.participants||'').split(',').forEach(a=>{if(a)accs.push(a);});
+  let metaFound=false;
+  if(columnName&&boardId){
+    try{
+      const d=await api('/api/boards/'+encodeURIComponent(boardId)+'/columns');
+      const meta=((d||{}).columns||[]).find(x=>x.column_name===columnName);
+      if(meta){
+        metaFound=true;
+        if(meta.owner)accs.push(meta.owner);
+        (meta.participants||'').split(',').forEach(a=>{if(a)accs.push(a);});
+      }
+    }catch(e){/* 接口异常 → 回退看板池（与未登记同路径） */}
   }
-  if(!accs.length){
+  if(!metaFound){
     const b=(ME.boards||[]).find(x=>x.board_id===boardId);
     if(b){
       if(b.owner)accs.push(b.owner);
       (b.participants||'').split(',').forEach(a=>{if(a)accs.push(a);});
     }
   }
+  // 部门约束（账号层过滤，先于账号→姓名映射）：看板归属部门级节点才生效
+  const _b0=(ME.boards||[]).find(x=>x.board_id===boardId);
+  if(_b0&&_b0.dept)accs=aclAccsInDept(_b0.dept,accs);
   const names=accs.filter(Boolean).map(n2).filter(Boolean);
   // T-013c：离岗成员不再进入事项的负责人/参与人选人池（存量指派=历史数据，照常显示）
   const departedNames=new Set(BC_ACL_MEMBERS.filter(x=>x.status==='departed').map(x=>x.name));

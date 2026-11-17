@@ -624,17 +624,23 @@ def _column_allowed_accounts(bid: str, actor: str = None):
     return acl if pool is None else (acl & pool)
 
 
-def _card_allowed_accounts(bid: str, column_id: str = '', actor: str = None):
+def _card_allowed_accounts(bid: str, column_id: str = '', actor: str = None,
+                           column_name: str = ''):
     """事项层允许指派账号集合 = 上级板块 owner+participants
     （板块未登记回退看板 ACL）∩ 部门池（若配置）。
     2026-11-17 修订：同 _column_allowed_accounts——部门约束只是附加交集，
-    层级约束（事项 ⊆ 板块名单）不依赖部门配置。"""
+    层级约束（事项 ⊆ 板块名单）不依赖部门配置。
+    column_name 兜底（#140）：column_id 查不到板块行时按板块名查——
+    防止「只传板块名不传 column_id」的请求绕过板块池直落看板池。"""
     pool = _board_dept_pool_accounts(bid)
     acl = set()
     col = None
     if (column_id or '').strip():
         col = dbq('SELECT owner, participants FROM board_columns WHERE board_id=? AND column_id=? LIMIT 1',
                   (bid, column_id))
+    if col is None and (column_name or '').strip():
+        col = dbq('SELECT owner, participants FROM board_columns WHERE board_id=? AND column_name=? LIMIT 1',
+                  (bid, column_name.strip()))
     src = col if col else dbq('SELECT owner, participants FROM boards WHERE board_id=?', (bid,))
     if src:
         if (src[0]['owner'] or '').strip():
@@ -3599,7 +3605,7 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     if not fields:
         raise HTTPException(400, '没有可更新的字段')
     # 乐观锁：先取当前 version + board_id
-    cur = dbq('SELECT version, parent_id, begin, due, board_id, column_id, owner, cc FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    cur = dbq('SELECT version, parent_id, begin, due, board_id, column_id, column_name, owner, cc FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur:
         raise HTTPException(404, '卡片不存在或已删除')
     # 分级权限（2026-11-02）：修改事项分两档 ——
@@ -3667,7 +3673,12 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
                     _removed_assign += [x for x in _vals if x not in _allowed_names]
                     assign_fields[_k] = ';'.join(_kept)
         else:
-            _card_allowed = _card_allowed_accounts(cur[0]['board_id'], str(cur[0]['column_id'] or ''), username)
+            # 池按**目标板块**算（#140）：PUT 可带 column_id 移动板块 → 移入板块的池生效；
+            # column_id 查不到板块行时按板块名兜底（fields 或卡片现值）
+            _tgt_col = str(fields.get('column_id') or cur[0]['column_id'] or '')
+            _tgt_cname = str(fields.get('column_name') or cur[0]['column_name'] or '')
+            _card_allowed = _card_allowed_accounts(cur[0]['board_id'], _tgt_col, username,
+                                                   column_name=_tgt_cname)
             if _card_allowed is not None:
                 _nm = _account_name_map()          # account → name
                 _allowed_names = {_nm.get(a, a) for a in _card_allowed}
@@ -3806,7 +3817,8 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
                     _removed_create += [x for x in _vals if x not in _pnames]
                     _flds[_k] = ';'.join(_kept)
         else:
-            _cc_allowed = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username)
+            _cc_allowed = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username,
+                                                 column_name=str(_flds.get('column_name') or ''))
             if _cc_allowed is not None:
                 _nm = _account_name_map()
                 _allowed_names = {_nm.get(a, a) for a in _cc_allowed}
@@ -4393,7 +4405,8 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
             _alw = _parent_card_allowed_names(parent_id)
             _alw_names = _alw      # 姓名集
         elif not is_sub:
-            _alw = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username)
+            _alw = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username,
+                                          column_name=str(req.column_name or ''))
             _alw_names = None if _alw is None else {_account_name_map().get(a, a) for a in _alw}
         else:
             _alw_names = None
@@ -7302,7 +7315,7 @@ async def set_card_participants(card_id: str, req: AclReq, username: str = Depen
                                 request: Request = None):
     # 指派事项参与人（事项负责人及以上）。
     # 参与人 = 可修改该事项的**可见内容**，但无增删与指派权限。
-    row = dbq('SELECT board_id, column_id, parent_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    row = dbq('SELECT board_id, column_id, column_name, parent_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not row:
         raise HTTPException(404, '事项不存在或已删除')
     # 编辑锁（2026-11-12 补缺）：参与人是事项的可编辑内容，纳入事项锁
@@ -7329,7 +7342,8 @@ async def set_card_participants(card_id: str, req: AclReq, username: str = Depen
     if _pnames is not None:
         _alw_names = _pnames
     else:
-        _alw_cc = _card_allowed_accounts(row[0]['board_id'], row[0]['column_id'])
+        _alw_cc = _card_allowed_accounts(row[0]['board_id'], row[0]['column_id'],
+                                         column_name=row[0]['column_name'])
         _alw_names = None if _alw_cc is None else {_nm.get(a, a) for a in _alw_cc}
     if _alw_names is not None:
         _kept_cc = [x for x in _vals if x in _alw_names]
