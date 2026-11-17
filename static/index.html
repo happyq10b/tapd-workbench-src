@@ -3369,6 +3369,37 @@ function refreshToolbarOps(canEdit){
 //   ② 服务端逐条校验：POST /api/cards/batch-delete 逐卡做存在性/权限/编辑锁校验，
 //      失败项单独报告，不影响其余；
 //   ③ 板块名下事项并入删除清单统一下发（一次请求）。
+// 勾选删除预检（2026-11-17 用户需求）：判定单卡是否在删除权限内。
+// 口径与后端 _delete_card_core 一致（OP_DELETE ≥ 事项负责人 的继承链，T-198）：
+//   管理员/超管 → 事项负责人 → 板块负责人 → 看板负责人 → 架构负责人（看板挂的
+//   架构节点 ∈ 我的 arch_scope，含后代）。前端按 /api/me 能力位近似判定，
+//   服务端逐卡校验兜底不变（预检只影响「是否询问/是否下发」，不放宽权限）。
+function chkCardColKey(cardId,seen){
+  seen=seen||{};
+  if(seen[cardId])return '';
+  seen[cardId]=1;
+  for(const k in CHK_COL_CARDS){
+    if((CHK_COL_CARDS[k]||[]).indexOf(cardId)>=0)return k;
+  }
+  for(const p in CHK_CARD_SUBS){
+    if((CHK_CARD_SUBS[p]||[]).indexOf(cardId)>=0)return chkCardColKey(p,seen);
+  }
+  return '';
+}
+function canDeleteCheckedCard(cardId){
+  if(ME&&(ME.is_admin||ME.is_super))return true;
+  const meta=(window.CHK_CURRENT_CARDS_META||{})[cardId]||{};
+  if(isCardOwnerOf(meta.owner||''))return true;                     // ① 事项负责人
+  const colKey=meta.colKey||chkCardColKey(cardId);
+  if(colKey){
+    if((ME.managed_columns||[]).indexOf(colKey)>=0)return true;     // ② 板块负责人
+    const bid=colKey.slice(0,colKey.indexOf('::'));
+    if((ME.managed_boards||[]).indexOf(bid)>=0)return true;         // ③ 看板负责人
+    const b=(ME.boards||[]).find(x=>x.board_id===bid);
+    if(b&&b.dept_node_id&&(ME.arch_scope||[]).indexOf(b.dept_node_id)>=0)return true; // ④ 架构负责人
+  }
+  return false;
+}
 async function bulkDeleteChecked(){
   const colKeys=[...COL_CHECKED];
   const cardIds=[...ITEM_CHECKED];
@@ -3393,6 +3424,24 @@ async function bulkDeleteChecked(){
     validCards=validCards.filter(function(id){return alive.has(id);});
   }catch(e){ /* 校验接口失败不阻断 —— 服务端逐卡兜底 */ }
   if(!validCards.length){toast('勾选内容均已失效（可能已被他人删除），未执行删除');return}
+  // ⓪ 删除权限预检（2026-11-17 用户需求）：只能删自己负责的事项（事项负责人，
+  //    或其板块/看板/架构负责人——与后端删除口径一致）。超出 → 询问「仅删权限内」。
+  const allowedCards=[],deniedCards=[];
+  validCards.forEach(function(id){
+    (canDeleteCheckedCard(id)?allowedCards:deniedCards).push(id);
+  });
+  if(!allowedCards.length){
+    toast('勾选的事项均无删除权限：删除需为事项负责人，或该事项所属板块/看板/架构的负责人');
+    return;
+  }
+  if(deniedCards.length){
+    const nm=function(id){const m=(CHK_CURRENT_CARDS_META||{})[id];return (m&&m.name)||id;};
+    if(!bcConfirm('部分事项无删除权限，是否仅删除权限内事项？\n'
+      +'权限内 '+allowedCards.length+' 个；无权限 '+deniedCards.length+' 个：'
+      +deniedCards.slice(0,3).map(nm).join('、')+(deniedCards.length>3?' 等':'')
+      +'\n【确定】仅删除权限内的事项；【取消】放弃本次删除'))return;
+    validCards=allowedCards;
+  }
   const msg='确认删除勾选的'
     +(validCols.length?(' '+validCols.length+' 个板块下的全部事项'):'')
     +((validCols.length&&validCards.length)?' 与':'')
@@ -6516,7 +6565,11 @@ function renderSubTree(box,nodes,level){
   const parentId=box.id.replace(/^subtree_/,'');
   const acc=CHK_CARD_SUBS[parentId]=CHK_CARD_SUBS[parentId]||[];
   acc.length=0;
-  (function flat(ns){(ns||[]).forEach(function(n){acc.push(n.card_id);flat(n.children);});})(nodes);
+  (function flat(ns){(ns||[]).forEach(function(n){
+    acc.push(n.card_id);
+    // 注册子事项元数据（2026-11-17）：勾选删除预检需要子卡的 owner/名称
+    CHK_CURRENT_CARDS_META[n.card_id]={name:n.card_name,owner:n.owner||'',cc:n.cc||''};
+    flat(n.children);});})(nodes);
   // 父卡已勾选（勾选时子树可能尚未展开注册）→ 展开后子事项自动跟随为勾选
   if(ITEM_CHECKED.has(parentId))acc.forEach(function(s){ITEM_CHECKED.add(s);});
   if(!nodes||!nodes.length){
