@@ -7263,12 +7263,28 @@ function colRenderParticipants(){
   colInitPickers();
 }
 // ---------- 板块负责人/参与人选择（T-191l：与事项编辑同款 member-picker）----------
-// 复用 initPersonPicker（tag 标签 + 搜索下拉）；池 = BC_ACL_MEMBERS 全量（所属看板
-// 负责人/参与人约束由上级配置保证，与事项层级链同思路）。
-// COL_OWNER/COL_PARTS 仍是**账号**（提交口径不变）；window._colOwnerArr/_colPartsArr
-// 是 picker 直接操作的**姓名**数组，保存时经 colNamesToAccounts 反查回账号。
+// 复用 initPersonPicker（tag 标签 + 搜索下拉）；COL_OWNER/COL_PARTS 仍是**账号**
+// （提交口径不变）；window._colOwnerArr/_colPartsArr 是 picker 直接操作的**姓名**
+// 数组，保存时经 colNamesToAccounts 反查回账号。
 // 权限：无指派权（colCanAssignOwner / colCanAssignParticipants）时容器加 pp-readonly
 // → 隐藏输入行与标签删除叉（只读展示）；服务端 403 兜底不变。
+// 选人池（2026-11-17 层级约束）：**上级看板**的负责人与参与人 —— 与事项层级链
+// （cardPickPool：板块池 ⊆ 看板池）同思路闭环：板块的人只能来自看板的人。
+// 看板未配置负责人/参与人 → 池为空（picker 显示「无可选人员，请先配置上级」）。
+function colPickPool(boardId){
+  const b=((ME&&ME.boards)||[]).find(function(x){return x.board_id===boardId});
+  if(!b)return [];
+  const accs=[];
+  if(b.owner)accs.push(b.owner);
+  (b.participants||'').split(',').forEach(function(a){if(a)accs.push(a);});
+  const labels=accs.filter(Boolean).map(function(a){
+    const m=BC_ACL_MEMBERS.filter(function(x){return x.account===a})[0];
+    return m?m.label:a;
+  }).filter(Boolean);
+  // T-013c 同口径：离岗成员不进选人池（存量指派照常显示，新增不选）
+  const departed=new Set(BC_ACL_MEMBERS.filter(function(x){return x.status==='departed'}).map(function(x){return x.name}));
+  return [...new Set(labels)].filter(function(n){return !departed.has(n);});
+}
 function colNamesToAccounts(names){
   return (names||[]).map(function(n){
     const m=BC_ACL_MEMBERS.filter(function(x){return x.label===n})[0];
@@ -7278,7 +7294,11 @@ function colNamesToAccounts(names){
 function colOwnerAccounts(){return colNamesToAccounts(window._colOwnerArr);}
 function colPartsAccounts(){return colNamesToAccounts(window._colPartsArr);}
 function colInitPickers(){
-  const pool=BC_ACL_MEMBERS.map(function(x){return x.label;});
+  // 选人池 = 上级看板的负责人与参与人（2026-11-17 层级约束）：
+  // 新建跟随 #c_board 当前选中项（切换看板 onchange 重建 picker → 池随动）；
+  // 编辑模式看板锁定为 COLUMN_EDIT_BOARD。
+  const bid=COLUMN_MODE==='edit'?COLUMN_EDIT_BOARD:((document.getElementById('c_board')||{}).value||'');
+  const pool=colPickPool(bid);
   window._colOwnerArr=(COL_OWNER?[colOwnerLabel(COL_OWNER)]:[]);
   window._colPartsArr=COL_PARTS.map(colPartsLabel);
   initPersonPicker('c_owner',window._colOwnerArr,pool,'c_parts',true);
