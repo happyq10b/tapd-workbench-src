@@ -398,6 +398,11 @@ button{font-family:inherit}
 /* UI审查 B3：#646a73 on var(--border) 仅约 4.2:1 → #444b54（小字 AA）；仅本规则收口，不动全局 token */
 .tree-dept .dept-count{background:var(--border);color:#444b54;font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
 .tree-dept.open .dept-count{background:var(--primary);color:#fff}
+/* 架构节点选中态（2026-11-17 #141 多选）：实底高亮，区别于 open（展开）——
+   选中即展开，两者并存；多选可同时点亮多个架构节点 */
+.tree-dept.sel{background:var(--primary);border-color:var(--primary);color:#fff}
+.tree-dept.sel .dept-count{background:#fff;color:var(--primary)}
+.tree-dept.sel .chev{transform:rotate(90deg);color:#fff}
 /* 空部门：仍展示节点，虚线+弱化配色，视觉上可辨识但明显区别于有内容的部门 */
 .tree-dept.empty{border-style:dashed;color:var(--text2);background:#fafafa}
 .tree-dept.empty:hover{color:var(--primary)}
@@ -3589,6 +3594,12 @@ function ensureInitialSelection(){
 //   部门之间互斥，避免多个部门同时铺开把页面撑得很长。
 var DEPT_OPEN={};
 var UNASSIGNED_KEY='__unassigned__';
+// 架构多选选中集合（2026-11-17 #141）：ARCH_SEL 里的架构节点**自身挂载**的看板
+// 构成看板选择（curBoards）——选「财务中心」只统计/展示财务中心看板（不含
+// 核算部等下级部门看板，看板归属由 board_config.dept 单层决定）；多选架构 →
+// curBoards = 各架构看板并集，顶部统计卡与事项列表自动累加汇总。
+// 会话内有效（不持久化）；DEPT_OPEN 继续承担展开态与持久化（选中即展开）。
+var ARCH_SEL=new Set();
 function loadDeptOpen(){
   try{
     const raw=localStorage.getItem('tapd.deptOpen');
@@ -3663,25 +3674,28 @@ function renderTabs(){
   const boardBox=document.getElementById('tbBoards');
   if(!tabs||!deptBox||!boardBox)return;
   // ── 带 1：架构部门（三列小栅格，按列优先填充）
-  // 部门节点全部展示（空部门同样占位）；单选展开，同一时刻只展开一个部门。
-  // 注：「全部看板」卡片已按需求隐藏 —— 逐个部门展开即可覆盖全部板块。
+  // 部门节点全部展示（空部门同样占位）。
+  // 架构多选（2026-11-17 #141）：点击节点 = 选中/取消该架构（与板块选择同款交互，
+  // 可多选）——选中的架构**自身挂载**的看板进入看板选择（curBoards），顶部统计卡
+  // 与事项列表随之联动并跨架构累加汇总；点「主页」仍进入部门主页（stopPropagation）。
   let dhtml='';
   g.depts.forEach(d=>{
     const open=!!DEPT_OPEN[d.name];
+    const sel=ARCH_SEL.has(d.name);
     const cnt=d.boards.length;
     const emptyCls=cnt?'':' empty';
-    // 两个独立入口，避免歧义（之前「点名字进部门页」导致用户只是想展开板块却误入）：
-    //   ① 部门块本身 = 展开/收起该部门的**看板**（保持原有行为）
-    //   ② 「主页」按钮 = 进入该部门的部门主页
-    const tip=cnt?('点击展开/收起该部门的看板'):(d.name+' 下暂无看板（可在「看板管理」中把看板挂载到该部门）');
-    dhtml+=`<span class="tree-dept${open?' open':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
+    const tip=cnt
+      ?('单击选中「'+d.name+'」（统计与列表仅统计该架构自身挂载的看板）；再次单击取消；可多选多个架构累加汇总')
+      :(d.name+' 下暂无看板（可在「看板管理」中把看板挂载到该部门）');
+    dhtml+=`<span class="tree-dept${open?' open':''}${sel?' sel':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
       +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span>`
       +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">主页</span>`
       +`</span>`;
   });
   if(g.unassigned.length){
     const open=!!DEPT_OPEN[UNASSIGNED_KEY];
-    dhtml+=`<button class="tree-dept${open?' open':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的看板" aria-expanded="${open}">`
+    const sel=ARCH_SEL.has(UNASSIGNED_KEY);
+    dhtml+=`<button class="tree-dept${open?' open':''}${sel?' sel':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的看板（单击选中 / 再次单击取消，可多选）" aria-expanded="${open}">`
       +`<span class="chev">▶</span>未配置<span class="dept-count">${g.unassigned.length}</span></button>`;
   }
   deptBox.innerHTML=dhtml;
@@ -3740,23 +3754,36 @@ function syncBoardBandHeight(){
   if(h1<=0||h2<=0)return;   // 度量异常（隐藏中）→ 不动现有值
   grid.style.maxHeight=Math.ceil(h1+gap+h2)+'px';
 }
-// 单选切换：点已展开的部门 → 收起；点其他部门 → 展开它并收起其他
+// 架构选择 → 看板选择联动：重算 curBoards = 选中架构看板并集（覆盖手动微调——
+// 架构选择是批量语义；此后仍可点看板 tab 单独增删微调，统计跟 curBoards 走）
+function syncArchSelection(){
+  curBoards.clear();
+  curYears=new Set([YEAR_DEFAULT]);
+  ARCH_SEL.forEach(function(name){
+    (ME.boards||[]).forEach(function(b){
+      if((b.dept||UNASSIGNED_KEY)===name)curBoards.add(b.board_id);
+    });
+  });
+  curBoard=curBoards.size?[...curBoards][curBoards.size-1]:'';
+  LAST_EMPTY_REASON=ARCH_SEL.size?(curBoards.size?'':'该架构暂无看板'):'';
+  // 从部门页进入事项列表（与 pickBoard 同款）
+  if(CUR_DEPT)backToBoardList();
+}
+// 架构节点点击 = 多选 toggle（与板块选择同款交互：单击选中 / 再次单击取消）
 function toggleDept(name){
-  const wasOpen=!!DEPT_OPEN[name];
-  if(wasOpen){
+  if(ARCH_SEL.has(name)){
+    ARCH_SEL.delete(name);
     delete DEPT_OPEN[name];
-    saveDeptOpen();
-    // 收起部门 → 该部门的看板不再可见 → 当前看板作废，回到「未选看板」空状态。
-    // ⚠️ 不能保留上一个看板的内容 —— 否则会残留上一个部门的事项数据。
-    if(!boardBelongsToOpenDept())clearBoardSelection('部门已收起');
   }else{
-    expandOnly(name);
-    // 展开另一个部门 → 原部门的看板不再可见 → 切到新部门的看板（无看板则空状态）
-    selectDeptBoards(name);
+    ARCH_SEL.add(name);
+    DEPT_OPEN[name]=true;      // 选中即展开该架构的看板 tab（不收其他——多选并存）
   }
+  saveDeptOpen();
+  syncArchSelection();
   renderTabs();
-  if(curBoard)reload(1); else renderEmptyBoardState();
-  renderProgress();
+  if(curBoards.size){reload(1);renderProgress();}
+  else{renderEmptyBoardState();renderProgress();}
+  updateNewBtn();
 }
 // 当前已选看板是否仍属于「当前展开中」的部门
 function boardBelongsToOpenDept(){
@@ -3807,9 +3834,10 @@ function renderEmptyBoardState(){
   if(!c)return;
   // 「无选择」类空态（取消选择 / 初始未选）统一为「请选择看板」并加大加粗
   //   （2026-11-10 #128 用户要求）；「部门已收起 / 该看板暂无数据」保留原因说明。
-  const noSel=LAST_EMPTY_REASON!=='部门已收起'&&LAST_EMPTY_REASON!=='该看板暂无数据';
+  const noSel=LAST_EMPTY_REASON!=='部门已收起'&&LAST_EMPTY_REASON!=='该看板暂无数据'&&LAST_EMPTY_REASON!=='该架构暂无看板';
   const msg=noSel?'请选择看板'
-    :(LAST_EMPTY_REASON==='部门已收起'?'部门已收起，请从上方选择看板':'该看板暂无数据');
+    :(LAST_EMPTY_REASON==='部门已收起'?'部门已收起，请从上方选择看板'
+    :(LAST_EMPTY_REASON==='该架构暂无看板'?'选中的架构下暂无看板':'该看板暂无数据'));
   c.innerHTML=`<div class="empty${noSel?' empty-strong':''}">${esc(msg)}</div>`;
 }
 // ---------------- 部门主页面 ----------------
@@ -5112,10 +5140,9 @@ function ensureDeptOpen(bid){
   const b=ME.boards.find(x=>x.board_id===bid);
   if(!b)return;
   const d=b.dept||UNASSIGNED_KEY;
-  // 单选：切换到另一个部门时，旧部门自动收起
-  const keys=Object.keys(DEPT_OPEN).filter(k=>DEPT_OPEN[k]);
-  if(keys.length===1&&keys[0]===d)return;
-  expandOnly(d);
+  // 架构多选（2026-11-17 #141）：展开不收起其他部门（多选架构的看板 tab 并存）；
+  // 仅当该部门尚未展开时补开
+  if(!DEPT_OPEN[d]){DEPT_OPEN[d]=true;saveDeptOpen();}
 }
 function updateNewBtn(){
   const btn=document.getElementById('newBtn');
