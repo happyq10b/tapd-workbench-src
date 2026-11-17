@@ -5670,8 +5670,11 @@ function boardFilterCandidates(){
     if(!bid)return;
     const b=(ME.boards||[]).find(x=>x.board_id===bid);
     if(!b)return;
-    if(b.owner)accs.push(b.owner);
-    (b.participants||'').split(',').forEach(function(a){if(a)accs.push(a);});
+    // 归属部门约束（2026-11-17）：与 colPickPool/bcFilterAclByDept 同口径——
+    // 不属于看板归属部门的人员不入候选（存量 ACL 数据；部门空/中心不过滤）
+    aclAccsInDept(b.dept||'',
+      [b.owner].concat((b.participants||'').split(',')).filter(Boolean)
+    ).forEach(function(a){accs.push(a);});
   });
   const labels=accs.filter(Boolean).map(function(a){
     const m=BC_ACL_MEMBERS.filter(x=>x.account===a)[0];
@@ -7430,9 +7433,10 @@ function colRenderParticipants(){
 function colPickPool(boardId){
   const b=((ME&&ME.boards)||[]).find(function(x){return x.board_id===boardId});
   if(!b)return [];
-  const accs=[];
-  if(b.owner)accs.push(b.owner);
-  (b.participants||'').split(',').forEach(function(a){if(a)accs.push(a);});
+  // 归属部门约束（2026-11-17）：与看板管理 bcFilterAclByDept 同口径——
+  // 看板 ACL 里不属于看板归属部门的人员**不入池**（存量数据；部门空/中心不过滤）
+  const accs=aclAccsInDept(b.dept||'',
+    [b.owner].concat((b.participants||'').split(',')).filter(Boolean));
   const labels=accs.filter(Boolean).map(function(a){
     const m=BC_ACL_MEMBERS.filter(function(x){return x.account===a})[0];
     return m?m.label:a;
@@ -7585,7 +7589,7 @@ function openColumnModal(){
   const nat=document.querySelector('input[name="c_nature"]:checked');
   if(nat)nat.checked=true;
   COL_OWNER='';
-  bcLoadAclMembers().then(colInitPickers);   // T-191l：member-picker 初始化（池加载后）
+  Promise.all([bcLoadAclMembers(), ensureOrgTree(false)]).then(colInitPickers);   // T-191l：member-picker 初始化（池加载后）
   // 板块描述（2026-11-09 #93）：新建时清空
   document.getElementById('c_desc').value='';
   // 板块完成情况（2026-11-04 需求3）→ T-191j：新建时默认「未完成」，头部按钮承载
@@ -7640,7 +7644,7 @@ async function openColumnEdit(d,fromDetail){
   COL_OWNER=d.owner||'';
   // 板块参与人回填（账号数组）
   COL_PARTS=(d.parts||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
-  bcLoadAclMembers().then(colInitPickers);   // T-191l：member-picker 初始化
+  Promise.all([bcLoadAclMembers(), ensureOrgTree(false)]).then(colInitPickers);   // T-191l：member-picker 初始化
   document.getElementById('c_modal_title').textContent='✏️ 编辑板块';
   document.getElementById('c_submit').textContent='保存';
   // T-191l：编辑态不再显示「保存后板块名称…」提示文案（对齐事项编辑弹窗：无底部 tip）
@@ -12528,6 +12532,26 @@ function bcDeptPoolAccounts(dept){
     if((m.depts||[]).indexOf(dept)>=0)pool.add(m.account);
   });
   return pool;
+}
+// 看板 ACL 账号按**归属部门约束**过滤（2026-11-17）：与 bcFilterAclByDept 同口径——
+// 看板 owner/participants 里不属于看板归属部门的人员剔除（存量数据；板块选人池
+// colPickPool 与筛选候选 boardFilterCandidates 共用，保证「界面显示」与「候选池」
+// 读到同一份过滤后的名单）。dept 空（未配置归属）或中心部门 → 不过滤（原样返回）。
+// 依赖 BC_ACL_MEMBERS（bcLoadAclMembers 加载，成员含 depts 数组）。
+function aclAccsInDept(dept,accs){
+  if(!dept)return (accs||[]);
+  // 中心部门判定用架构树（ORG_TREE 的 node_type）——不依赖 BC_DEPTS（看板管理
+  // 专属数据，板块弹窗/筛选场景未加载；bcIsCenterDept 在那里会误判为非中心
+  // → fail-closed 空池 → 中心看板候选全空）
+  let isCenter=false;
+  (function walk(ns){(ns||[]).forEach(function(n){
+    if(n.name===dept&&n.node_type==='center')isCenter=true;
+    walk(n.children||[]);});})(typeof ORG_TREE!=='undefined'?ORG_TREE:[]);
+  if(isCenter)return (accs||[]);
+  let pool=null;
+  try{ pool=bcDeptPoolAccounts(dept); }catch(e){ pool=null; }
+  if(!pool)return (accs||[]);
+  return (accs||[]).filter(function(a){return pool.has(a);});
 }
 // 部门约束池的成员姓名清单（合成单节点树 poolTree 用）
 function bcDeptPoolNames(dept){
