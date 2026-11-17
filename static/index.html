@@ -6887,6 +6887,22 @@ async function cardPickPool(boardId,columnName){
   const departedNames=new Set(BC_ACL_MEMBERS.filter(x=>x.status==='departed').map(x=>x.name));
   return [...new Set(names)].filter(function(n){return !departedNames.has(n);});
 }
+// 子事项选人池（2026-11-17 层级约束）：**父事项**的负责人+参与人。
+// cards.owner/cc 存姓名（`;` 分隔）—— 直接使用，无需账号→姓名映射。
+// 父事项没有任何人员 → 池为空（picker 显示「无可选人员」提示）。
+// 层级链闭环：子事项池 ⊆ 父事项名单 ⊆ 板块池 ⊆ 看板池。
+function parentCardPool(p){
+  if(!p)return [];
+  return [...new Set((p.owner||'').split(';').concat((p.cc||'').split(';'))
+    .map(function(s){return s.trim();}).filter(Boolean))];
+}
+// 选人池提交守卫（2026-11-17「确保所选人员必须包含在集合内」）：返回违规名单（空=通过）。
+// 编辑态放行卡片**原有**人员（存量指派不受新池限制，可原样保存）；新增选择必须 ⊆ 池。
+function poolViolation(finalNames,pool,origNames){
+  const _pool=pool||[];
+  const _orig=new Set(origNames||[]);
+  return (finalNames||[]).filter(function(n){return !_pool.includes(n)&&!_orig.has(n);});
+}
 // 打开事项弹窗。子事项复用同一套弹窗（子事项模式）：隐藏「所属看板」，
 // 补上父事项信息与父时间范围约束，字段布局与主事项完全一致。
 async function openEdit(id,preloaded){
@@ -6924,9 +6940,19 @@ async function openEdit(id,preloaded){
   document.getElementById('editTitle').textContent=EDIT_IS_SUB?'编辑子事项':'编辑事项';
   applyOwnerSlot(EDIT_IS_SUB);
   // 父事项上下文与选人池互不依赖 → 并行（2026-11-09 #98：编辑弹窗填充提速）
-  await Promise.all([applySubContext(c), cardPickPool(c.board_id,c.column_name||'').then(function(p){
+  // 选人池（2026-11-17 层级约束）：子事项 ⊆ **父事项**的负责人+参与人；
+  // 主事项 ⊆ 所属板块的负责人与参与人（板块缺失回退看板池，cardPickPool 原口径）
+  window._editOwnerOrig=(c.owner||'').split(';').filter(Boolean);
+  window._editCcOrig=(c.cc||'').split(';').filter(Boolean);
+  await Promise.all([applySubContext(c), (async function(){
+    if(EDIT_IS_SUB&&c.parent_id){
+      let p=null;
+      try{const pd=await api('/api/cards?card_id='+c.parent_id);p=pd.cards&&pd.cards[0]||null;}catch(e){}
+      if(p){window._cardPickPool={owner:parentCardPool(p)};return}
+    }
+    const p=await cardPickPool(c.board_id,c.column_name||'');
     window._cardPickPool={owner:p};
-  })]);
+  })()]);
   renderPickers();
   window.__oe=(window.__oe||[]).concat(['before-flex']);
   openModal('editModal');
@@ -7005,6 +7031,16 @@ async function saveEdit(){
   fields.week_no=wk;
   // 参与人：主事项与子事项都有（对标主事项，cc 是 cards 表的标准字段）
   fields.cc=(window._editCc||[]).join(';');
+  // 提交守卫（2026-11-17）：**新增**的负责人/参与人必须 ⊆ 上级池
+  // （子事项=父事项名单、主事项=板块池；卡片原有人员放行——存量指派可原样保存）
+  {
+    const _bad=poolViolation((window._editOwner||[]).concat(window._editCc||[]),
+                             (window._cardPickPool||{}).owner,
+                             (window._editOwnerOrig||[]).concat(window._editCcOrig||[]));
+    if(_bad.length){toast('提交被拒绝：'+_bad.join('、')
+      +' 不在上级'+(EDIT_IS_SUB?'父事项':'板块')+'的负责人/参与人名单内'
+      +'（原有人员可保留，新增只能从名单中选）');return}
+  }
   try{
     // T-191l：所属看板选择框已移除 → 不再支持跨看板移动，board_id 保持原值
     await api('/api/cards/'+id,{method:'PUT',body:JSON.stringify({fields})});
@@ -7136,9 +7172,10 @@ async function openNewSubModal(parentId){
   document.getElementById('n_week').value=cpWeekOf();   // 子事项同样有周数维度
   NEW_CARD_STATUS='open';
   document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
-  // 选人池：父事项所属板块的负责人与参与人（层级约束，缺失时回退看板池）
+  // 选人池：**父事项**的负责人与参与人（2026-11-17 层级约束：子事项 ⊆ 父事项名单。
+  // 原为父事项所属板块池 —— 板块池是主事项的上级口径，子事项的直接上级是父事项）
   {
-    const _pool=await cardPickPool(p.board_id,p.column_name||'');
+    const _pool=parentCardPool(p);
     window._cardPickPool={owner:_pool};
     NEW_CARD_OWNER=[];initPersonPicker('n_owner',NEW_CARD_OWNER,_pool,'n_cc',true);
     NEW_CARD_CC=[];initPersonPicker('n_cc',NEW_CARD_CC,_pool,'n_owner',false);
@@ -7158,6 +7195,11 @@ async function createCard(){
   const nb=document.getElementById('n_begin').value,nd=document.getElementById('n_due').value;
   if(nb&&nd&&nb>nd){toast('开始日期不能晚于截止日期');return}
   if(NEW_CARD_MODE==='sub'){await createSubCard(card_name);return}
+  // 提交守卫（2026-11-17）：主事项的负责人/参与人必须 ⊆ 上级板块池（cardPickPool）
+  {
+    const _bad=poolViolation(NEW_CARD_OWNER.concat(NEW_CARD_CC),(window._cardPickPool||{}).owner,[]);
+    if(_bad.length){toast('提交被拒绝：'+_bad.join('、')+' 不在所属板块的负责人/参与人名单内，请从下拉中选择');return}
+  }
   const board_id=document.getElementById('n_board').value;
   const board=ME.boards.find(b=>b.board_id===board_id);
   try{
@@ -7184,6 +7226,11 @@ async function createCard(){
 async function createSubCard(card_name){
   const p=NEW_SUB_PARENT;
   if(!p){toast('父事项上下文已失效，请重新打开');return}
+  // 提交守卫（2026-11-17）：子事项的负责人/参与人必须 ⊆ 父事项名单（parentCardPool）
+  {
+    const _bad=poolViolation(NEW_CARD_OWNER.concat(NEW_CARD_CC),(window._cardPickPool||{}).owner,[]);
+    if(_bad.length){toast('提交被拒绝：'+_bad.join('、')+' 不在父事项的负责人/参与人名单内，请从下拉中选择');return}
+  }
   const nw=(document.getElementById('n_week').value||'').trim().replace(/^(\d{4})-(\d{1,2})$/,'$1年第$2周');
   if(nw&&!/^\d{4}年第(\d{1,2})周$/.test(nw)){toast('周数格式应为「2026年第41周」');return}
   try{
