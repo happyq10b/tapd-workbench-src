@@ -6088,7 +6088,10 @@ function renderBoard(cards,cols,q,colHits){
       {label:'📋 复制',fn:function(){openCopyModal('column',JSON.parse(_copyPayload));}}
     ];
     const _colOpsId=rowOpsRegister(_colOps);
-    return `<div class="week-group open" id="wg_${i}">
+    // 板块默认折叠（2026-11-17 #142 用户需求）：选中看板（单选/多选一致）后板块
+    // 收起，仅用户手动点 ▶ 才展开；手动展开过记入 COL_OPEN，reload 重绘
+    // （保存/WS 刷新）后按记忆恢复，手动操作不丢失。expandAll/collapseAll 同步记忆。
+    return `<div class="week-group${COL_OPEN.has(colKey)?' open':''}" id="wg_${i}" data-ck="${esc(colKey)}">
       <div class="week-header">
         <span class="chev" onclick="toggleWeek(${i});event.stopPropagation()" title="展开 / 收起该板块下的事项">▶</span>
         ${CHK_MODE?`<input type="checkbox" class="col-chk" data-ck="${esc(colKey)}" onclick="toggleColChk(this.dataset.ck,this);event.stopPropagation()"
@@ -6932,10 +6935,28 @@ function attachRipple(container,selector){
     setTimeout(()=>{if(span.parentNode)span.parentNode.removeChild(span)},620);
   });
 }
-function toggleWeek(i){const g=document.getElementById('wg_'+i);g.classList.toggle('open')}
+function toggleWeek(i){
+  const g=document.getElementById('wg_'+i);
+  if(!g)return;
+  g.classList.toggle('open');
+  // 展开记忆（2026-11-17 #142）：按板块 col_key 记录手动展开/收起，
+  // reload 重绘后恢复用户手动展开的板块（默认折叠不丢操作）
+  const ck=g.getAttribute('data-ck')||'';
+  if(ck){
+    if(g.classList.contains('open'))COL_OPEN.add(ck);
+    else COL_OPEN.delete(ck);
+  }
+}
 // 展开板块：展开所有板块，并展开各主事项下的子事项目录
+// 板块展开记忆（2026-11-17 #142）：COL_OPEN 记录用户手动展开的板块（col_key）——
+// 默认折叠后，reload 重绘（保存/WS 刷新）靠它恢复手动展开态；会话内有效
+var COL_OPEN=new Set();
 async function expandAll(){
-  document.querySelectorAll('.week-group').forEach(g=>g.classList.add('open'));
+  document.querySelectorAll('.week-group').forEach(function(g){
+    g.classList.add('open');
+    const ck=g.getAttribute('data-ck')||'';
+    if(ck)COL_OPEN.add(ck);
+  });
   const arrows=document.querySelectorAll('.item-chev');
   for(let i=0;i<arrows.length;i++){
     await toggleSubTree(arrows[i].getAttribute('data-cid'),true);
@@ -6944,6 +6965,7 @@ async function expandAll(){
 // 折叠板块：收起所有板块（含其下子事项目录）
 function collapseAll(){
   document.querySelectorAll('.week-group').forEach(g=>g.classList.remove('open'));
+  COL_OPEN.clear();   // 手动全局折叠 → 清空展开记忆（重绘后保持折叠）
   document.querySelectorAll('.sub-tree').forEach(t=>t.style.display='none');
   document.querySelectorAll('.item-chev').forEach(a=>a.classList.remove('open'));
 }
