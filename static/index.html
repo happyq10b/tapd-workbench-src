@@ -3354,7 +3354,9 @@ function refreshToolbarOps(canEdit){
     // #158/#161 批量删除：只删当前用户勾选的板块+事项（勾选按用户隔离）；无勾选不执行
     {label:'— 危险操作 —',disabled:true},
     {label:'🗑 批量删除勾选',fn:function(){bulkDeleteChecked();}},
-    // #162 清空无事项板块：删除当前看板下没有任何事项的板块（看板负责人及以上，服务端逐列校验）
+    // #162 清空无事项板块：删除当前看板下没有任何事项的板块
+    //   （2026-11-17 用户校对：**板块负责人及以上**才可清空，板块参与人不可；
+    //     purgeEmptyColumns 内预检 + 服务端逐列校验兜底）
     {label:'🧹 清空无事项板块',fn:function(){purgeEmptyColumns();}});
   ROW_OPS['toolbarOps']=items;
 }
@@ -3475,7 +3477,20 @@ async function bulkDeleteChecked(){
 
 // #162 清空无事项板块：找出当前看板下**没有任何事项**的板块并删除（板块本身）。
 //   空板块判定用当前看板的板块清单（/api/cards 返回的 columns 带 count）；
-//   权限 = 看板负责人及以上，逐列走 DELETE /api/columns（服务端校验，403 单独报告）。
+//   权限（2026-11-17 用户校对）= **板块负责人及以上**（继承链），板块参与人不可清空；
+//   预检 colPurgeAllowed + 逐列走 DELETE /api/columns（服务端校验兜底，403 单独报告）。
+// 清空无事项板块的删除权预检（2026-11-17 用户校对）：口径与后端 delete_column
+// 一致（OP_DELETE ≥ 板块负责人的继承链，T-0190）—— 管理员/超管直通 → 板块负责人
+// → 看板负责人 → 架构负责人；**板块参与人不在清单内，不允许清空**。
+function colPurgeAllowed(colKey){
+  if(ME&&(ME.is_admin||ME.is_super))return true;
+  const bid=colKey.slice(0,colKey.indexOf('::'));
+  if((ME.managed_columns||[]).indexOf(colKey)>=0)return true;    // 板块负责人本人
+  if((ME.managed_boards||[]).indexOf(bid)>=0)return true;        // 看板负责人
+  const b=(ME.boards||[]).find(x=>x.board_id===bid);
+  if(b&&b.dept_node_id&&(ME.arch_scope||[]).indexOf(b.dept_node_id)>=0)return true; // 架构负责人
+  return false;
+}
 async function purgeEmptyColumns(){
   try{
     const ps=buildFilterParams();
@@ -3484,12 +3499,27 @@ async function purgeEmptyColumns(){
     const cols=(d.columns||[]);
     const empty=cols.filter(function(x){return !(x.card_count||0);});
     if(!empty.length){toast('当前看板下没有无事项的板块');return}
-    const names=empty.map(function(x){return x.column_name;});
-    if(!bcConfirm('确认删除 '+empty.length+' 个无事项板块？\n'
+    // 权限预检（2026-11-17 用户校对）：清空板块 = 删除板块本身，仅板块负责人及
+    // 以上（继承链）；板块参与人**不允许**。部分越权 → 「仅清空权限内」确认。
+    const allowed=empty.filter(function(x){return colPurgeAllowed(x.col_key);});
+    const denied=empty.filter(function(x){return !colPurgeAllowed(x.col_key);});
+    if(!allowed.length){
+      toast('无权限清空：仅板块负责人及以上可删除板块（板块负责人/看板负责人/架构负责人/管理员），板块参与人不可清空');
+      return;
+    }
+    if(denied.length){
+      const nm=function(x){return x.column_name||x.col_key;};
+      if(!bcConfirm('部分板块无删除权限，是否仅清空权限内板块？\n'
+        +'权限内 '+allowed.length+' 个；无权限 '+denied.length+' 个：'
+        +denied.slice(0,8).map(nm).join('、')+(denied.length>8?' 等':'')
+        +'\n【确定】仅清空权限内的板块；【取消】放弃本次清空'))return;
+    }
+    const names=allowed.map(function(x){return x.column_name;});
+    if(!bcConfirm('确认删除 '+allowed.length+' 个无事项板块？\n'
       +names.slice(0,8).join('、')+(names.length>8?' 等':'')+'\n'
-      +'板块本身将被删除（其下没有事项，不涉及事项数据）；仅看板负责人及以上可删除。'))return;
+      +'板块本身将被删除（其下没有事项，不涉及事项数据）；仅板块负责人及以上可删除。'))return;
     let okN=0;const fails=[];
-    for(const c of empty){
+    for(const c of allowed){
       try{
         await api('/api/columns/'+encodeURIComponent(c.col_key),{method:'DELETE'});
         okN++;COL_CHECKED.delete(c.col_key);
