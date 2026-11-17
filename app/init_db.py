@@ -743,47 +743,56 @@ def _migrate_org(conn):
         existing.add(cur.lastrowid)
 
     # ---------- 3) 任职关系转换 ----------
-    # 3a) leader → 唯一槽位岗位
-    LEADER_ROLE = {'center': 'center_head', 'dept': 'dept_head', 'group': 'group_leader',
-                   'special': 'group_leader'}
-    for w in wgs:
-        leader = (w['leader'] or '').strip()
-        if not leader:
-            continue
-        m = conn.execute('SELECT id FROM team_members WHERE name=?', (leader,)).fetchone()
-        if not m:
-            continue
-        nid = id_map.get(w['id'])
-        if not nid:
-            continue
-        nt = conn.execute('SELECT node_type FROM org_nodes WHERE id=?', (nid,)).fetchone()[0]
-        conn.execute('INSERT OR IGNORE INTO org_appointments (node_id, member_id, role_key, is_primary)'
-                     ' VALUES (?,?,?,1)', (nid, m[0], LEADER_ROLE.get(nt, 'group_leader')))
-
-    # 3b) team_members.workgroups（分号串）→ 组员任职
-    # 只挂到「常规小组 / 专项小组」节点；部门与中心的成员归属由下级组传导。
-    for m in conn.execute('SELECT id, name, workgroups FROM team_members'):
-        m = dict(zip(('id', 'name', 'workgroups'), m))
-        names = [x.strip() for x in (m['workgroups'] or '').split(';') if x.strip()]
-        for nm in names:
-            nid = None
-            for w in wgs:
-                if w['name'] != nm:
-                    continue
-                nt = conn.execute('SELECT node_type FROM org_nodes WHERE id=?',
-                                  (id_map.get(w['id'], 0),)).fetchone()
-                if nt and nt[0] in ('group', 'special'):
-                    nid = id_map[w['id']]
-                break
+    # 🔴 2026-11-17 #130（用户复现两次后定案）：任职回填**只在 org_appointments 为空时**
+    #    （= 旧库首次迁移）执行一次。原实现「每次启动都 INSERT OR IGNORE」——
+    #    INSERT OR IGNORE 只挡「已存在」，挡不住「用户已删除」：架构管理里删掉的
+    #    组长/组员，只要 legacy 源（workgroups.leader / team_members.workgroups 串）
+    #    仍挂着，下次服务重启（每次 sync --prod 都会）就被回填复活。
+    #    迁移完成后 org_appointments 是**唯一权威源**，legacy 表/字段只作写回兼容视图，
+    #    不再作为回填数据源。
+    acnt = conn.execute('SELECT COUNT(*) FROM org_appointments').fetchone()[0]
+    if acnt == 0:
+        # 3a) leader → 唯一槽位岗位
+        LEADER_ROLE = {'center': 'center_head', 'dept': 'dept_head', 'group': 'group_leader',
+                       'special': 'group_leader'}
+        for w in wgs:
+            leader = (w['leader'] or '').strip()
+            if not leader:
+                continue
+            m = conn.execute('SELECT id FROM team_members WHERE name=?', (leader,)).fetchone()
+            if not m:
+                continue
+            nid = id_map.get(w['id'])
             if not nid:
                 continue
-            # 该成员若是此组组长，则不再重复挂「组员」
-            is_leader = conn.execute('SELECT 1 FROM org_appointments WHERE node_id=? AND member_id=?'
-                                     ' AND role_key=?', (nid, m['id'], 'group_leader')).fetchone()
-            if is_leader:
-                continue
+            nt = conn.execute('SELECT node_type FROM org_nodes WHERE id=?', (nid,)).fetchone()[0]
             conn.execute('INSERT OR IGNORE INTO org_appointments (node_id, member_id, role_key, is_primary)'
-                         ' VALUES (?,?,?,0)', (nid, m['id'], 'member'))
+                         ' VALUES (?,?,?,1)', (nid, m[0], LEADER_ROLE.get(nt, 'group_leader')))
+
+        # 3b) team_members.workgroups（分号串）→ 组员任职
+        # 只挂到「常规小组 / 专项小组」节点；部门与中心的成员归属由下级组传导。
+        for m in conn.execute('SELECT id, name, workgroups FROM team_members'):
+            m = dict(zip(('id', 'name', 'workgroups'), m))
+            names = [x.strip() for x in (m['workgroups'] or '').split(';') if x.strip()]
+            for nm in names:
+                nid = None
+                for w in wgs:
+                    if w['name'] != nm:
+                        continue
+                    nt = conn.execute('SELECT node_type FROM org_nodes WHERE id=?',
+                                      (id_map.get(w['id'], 0),)).fetchone()
+                    if nt and nt[0] in ('group', 'special'):
+                        nid = id_map[w['id']]
+                    break
+                if not nid:
+                    continue
+                # 该成员若是此组组长，则不再重复挂「组员」
+                is_leader = conn.execute('SELECT 1 FROM org_appointments WHERE node_id=? AND member_id=?'
+                                         ' AND role_key=?', (nid, m['id'], 'group_leader')).fetchone()
+                if is_leader:
+                    continue
+                conn.execute('INSERT OR IGNORE INTO org_appointments (node_id, member_id, role_key, is_primary)'
+                             ' VALUES (?,?,?,0)', (nid, m['id'], 'member'))
 
 
 def _backfill_week_no(conn):

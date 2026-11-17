@@ -6028,7 +6028,10 @@ def _org_sync_member_legacy(member_id: int):
     if not row:
         return
     gs = [x.strip() for x in (row[0]['workgroups'] or '').split(';') if x.strip()]
-    keep = [g for g in gs if g not in names]
+    # 🔴 2026-11-17 #130：保留条件原写反（`g not in names`）——会**移除仍有任职的组、
+    #    保留已无任职的组**，legacy 串与实际任职长期反向偏离（王伟娜：串里无收入组、
+    #    却挂着已删除的统筹）。正解：保留「仍有任职」的组。
+    keep = [g for g in gs if g in names]
     if keep != gs:
         dbe('UPDATE team_members SET workgroups=? WHERE id=?', (';'.join(keep), member_id))
 
