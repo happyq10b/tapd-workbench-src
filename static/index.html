@@ -11097,9 +11097,14 @@ async function addOrgAppt(nodeId,roleKey,inp){
     }
   }
   if(!mid){toast('请输入成员姓名');return}
-  // T-0172 角色冲突：该成员已是本组组员 → 拦截任命组长
+  // T-0172 角色冲突：该成员已担任本组对侧岗位 → 拒绝提交（文案按方向给明确提示）
   const clash=orgLeaderMemberClash(ORG_FLAT.find(x=>x.id===Number(nodeId)),roleKey,[mid]);
-  if(clash){toast('「'+clash.join('、')+'」已是本组组员，组长与组员不可兼任；请先移除其组员身份再任命组长');return}
+  if(clash){
+    toast(roleKey==='group_leader'
+      ? '提交被拒绝：「'+clash.join('、')+'」已是本组组员，组长与组员不可兼任；请先移除其组员身份再任命组长'
+      : '提交被拒绝：「'+clash.join('、')+'」已是本组组长，组长与组员不可兼任；请先解除其组长身份，或从名单中去掉后再提交');
+    return;
+  }
   try{
     await api('/api/org/appointments',{method:'POST',body:JSON.stringify({node_id:nodeId,member_id:Number(mid),role_key:roleKey})});
     toast('已任命');
@@ -11107,11 +11112,20 @@ async function addOrgAppt(nodeId,roleKey,inp){
   }catch(e){toast(e.message)}
 }
 // 组员任命：树选人**多选**（2026-11-05 用户需求：组员的添加支持多选）
+// 2026-11-17（用户两项修复）：
+//   ① 原有组员（预勾选态）**静默跳过、不进提示名单** —— 追加任命时只提示本次新增的成员，
+//      不再出现「失败 N：原有成员（已是组员）…」被误读为「对全部成员重新任命」；
+//   ② 勾选了现任组长 → **拒绝提交**并给明确文案（组长与组员不可兼任），
+//      不再混入「已是组员」的误导提示（后端 409 同口径兜底不变）。
 function openOrgMemberPick(nodeId,roleKey,anchor){
   const node=ORG_FLAT.find(x=>x.id===nodeId);
   if(!node){toast('节点不存在');return}
-  const appointed={};   // 已任命的组员：跳过重复
-  (node.appointments||[]).forEach(a=>{appointed[a.member_id]=a.member_name;});
+  const existing={};    // 已任命的**组员**（同岗位）：静默跳过
+  const leaders={};     // 现任组长：勾选即拒绝提交（T-0172）
+  (node.appointments||[]).forEach(a=>{
+    if(a.role_key==='group_leader')leaders[a.member_id]=a.member_name;
+    else if(a.role_key===roleKey)existing[a.member_id]=a.member_name;
+  });
   // #168 候选按部门+任职要求过滤：仅同部门（team_members.departments）且未任该岗位者
   const names=orgApptCandidates(node,roleKey).map(function(m){return m.name;});
   if(!names.length){toast('该部门暂无可任命的成员（已按部门与任职要求过滤）');return;}
@@ -11120,15 +11134,16 @@ function openOrgMemberPick(nodeId,roleKey,anchor){
     .map(function(a){return ORG_PERSON_PREFIX+a.member_name;});
   openTreePick(anchor, preselect, function(persons){
     if(!persons||!persons.length)return;
-    // 姓名反查 id，剔除已任命的（树里可能带着其他节点的同名成员）
-    const ids=[];
-    const skip=[];
+    // 姓名反查 id；三类分流：组长=拒绝、原有组员=静默跳过、其余=本次追加
+    const ids=[], skip=[], clash=[];
     persons.forEach(function(n){
       const m=ORG_MEMBERS.find(function(x){return x.name===n;});
       if(!m){skip.push(n+'（无账号映射）');return;}
-      if(appointed[m.id]){skip.push(n+'（已是组员）');return;}
+      if(leaders[m.id]){clash.push(n+'（已是本组组长，组长与组员不可兼任）');return;}
+      if(existing[m.id]){return;}   // 原有组员：本次未变化，不提示
       ids.push({id:m.id,name:n});
     });
+    if(clash.length){toast('提交被拒绝：'+clash.join('、')+'。请从勾选中去掉该成员，或先解除其组长身份再追加为组员');return;}
     if(!ids.length){toast('未选择新增成员'+(skip.length?'：'+skip.join('、'):''));return;}
     addOrgApptMulti(nodeId,roleKey,ids,skip);
   }, {mode:'filter', pickMode:'person', width:360, height:460,
@@ -11138,7 +11153,7 @@ function openOrgMemberPick(nodeId,roleKey,anchor){
 async function addOrgApptMulti(nodeId,roleKey,ids,skip){
   // T-0172 角色冲突：批量名单中有人已是本组组长 → 整批拦截（阻止提交）
   const clash=orgLeaderMemberClash(ORG_FLAT.find(x=>x.id===Number(nodeId)),roleKey,(ids||[]).map(it=>it.id));
-  if(clash){toast('组长与组员不可兼任：'+clash.join('、')+' 已是本组组长，请先移除其组长身份，或从名单中去掉后再提交');return}
+  if(clash){toast('提交被拒绝——组长与组员不可兼任：'+clash.join('、')+' 已是本组组长。请先解除其组长身份，或从名单中去掉后再提交');return}
   const okList=[],failList=(skip||[]).slice();
   for(const it of ids){
     try{
@@ -11147,8 +11162,11 @@ async function addOrgApptMulti(nodeId,roleKey,ids,skip){
       okList.push(it.name);
     }catch(e){failList.push(it.name+'（'+(e.message||'失败')+'）');}
   }
-  toast('已任命 '+okList.length+' 人'+(failList.length?('；失败 '+failList.length+'：'+failList.join('、')):''));
-  if(okList.length)await openWgModal();
+  if(!okList.length){toast('未追加任何成员'+(failList.length?('；失败 '+failList.length+'：'+failList.join('、')):''));return;}
+  // 2026-11-17（需求①）：只提示本次**追加**的成员，不列原有成员
+  toast('已追加任命 '+okList.length+' 人：'+okList.join('、')
+    +(failList.length?('；失败 '+failList.length+'：'+failList.join('、')):''));
+  await openWgModal();
 }
 // 免职：移除任职
 async function removeOrgAppt(apptId,name){
