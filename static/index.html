@@ -3353,11 +3353,11 @@ function refreshToolbarOps(canEdit){
     {label:'导入（xlsx）',fn:function(){openImportModal();}},
     // #158/#161 批量删除：只删当前用户勾选的板块+事项（勾选按用户隔离）；无勾选不执行
     {label:'— 危险操作 —',disabled:true},
-    {label:'🗑 批量删除勾选',fn:function(){bulkDeleteChecked();}},
+    {label:'批量删除勾选',fn:function(){bulkDeleteChecked();}},
     // #162 清空无事项板块：删除当前看板下没有任何事项的板块
     //   （2026-11-17 用户校对：**板块负责人及以上**才可清空，板块参与人不可；
     //     purgeEmptyColumns 内预检 + 服务端逐列校验兜底）
-    {label:'🧹 清空无事项板块',fn:function(){purgeEmptyColumns();}});
+    {label:'清空无事项板块',fn:function(){purgeEmptyColumns();}});
   ROW_OPS['toolbarOps']=items;
 }
 
