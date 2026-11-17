@@ -3537,6 +3537,7 @@ async function init(){
   try{
     loadDeptOpen();
     ME=await api('/api/me');
+    await bcLoadAclMembers().catch(function(){});   // #138 预加载姓名映射：板块目录负责人等显示场景不能回退显示账号
     loadColChecked();   // #158：按当前账号载入板块勾选状态（sessionStorage 按用户分桶）
     loadItemChecked();  // #159：载入勾选开关与事项勾选（按用户分桶）
     DEPT_OPTIONS=ME.dept_options||[];   // #165 部门多选选项（架构前两级节点）
@@ -7330,8 +7331,8 @@ async function createCard(){
       body.column_id=NEW_CARD_COL.column_id||'';
       fields.column_name=NEW_CARD_COL.column_name;
     }
-    await api('/api/cards',{method:'POST',body:JSON.stringify(body)});
-    toast('已创建');closeModal('newModal');reload(1);renderProgress();
+    const _ccR=await api('/api/cards',{method:'POST',body:JSON.stringify(body)});
+    toast('已创建'+(_ccR&&_ccR.removed&&_ccR.removed.length?('（已移除超出范围人员：'+_ccR.removed.join('、')+'）'):''));closeModal('newModal');reload(1);renderProgress();
   }catch(e){toast(e.message)}
 }
 // 新建子事项：与主事项走同一个弹窗、同一套字段与校验，只是归属挂在父事项下
@@ -8028,8 +8029,8 @@ async function saveColumn(){
       const compPayload=colCanEditCompletion()?{completion:COL_COMPLETION}:{};
       const descPayload={description:document.getElementById('c_desc').value.trim()};
       const duePayload={due_date:due_date};   // T-0188：截止日期随编辑整包提交（空 = 清空）
-      await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload,duePayload))});
-      toast('板块已保存：'+column_name);
+      const _saveR=await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload,duePayload))});
+      toast('板块已保存：'+column_name+(_saveR&&_saveR.removed&&_saveR.removed.length?('（已移除超出范围人员：'+_saveR.removed.join('、')+'）'):''));
       releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 保存成功释放板块编辑锁
       // 从浏览界面进来的编辑：保存后带着**最新表单值**回浏览界面（T-0183，
       // 与事项「保存后回详情」一致）；其余入口保持原行为直接关窗
@@ -13367,8 +13368,9 @@ async function saveBoardAll(){
   try{
     // ① 负责人（架构负责人及以上）
     if(canAssign){
-      await api('/api/boards/'+encodeURIComponent(bid)+'/acl',{method:'PUT',
+      const _aclR=await api('/api/boards/'+encodeURIComponent(bid)+'/acl',{method:'PUT',
         body:JSON.stringify({owner:BC_FORM.owner||''})});
+      if(_aclR&&_aclR.removed&&_aclR.removed.length)BC_REMOVED_TIP=(BC_REMOVED_TIP||[]).concat(_aclR.removed);
       saved.push('负责人');
     }
     // ② 基本信息 + 参与人（看板负责人及以上）
@@ -13379,8 +13381,9 @@ async function saveBoardAll(){
         collab_depts:bcIsCenterDept(BC_FORM.dept)?(BC_FORM.collab_depts||[]):[]};   // T-013d 协作部门
       if(BC_EDIT_ID){ await api('/api/board-config/'+BC_EDIT_ID,{method:'PUT',body:JSON.stringify(payload)}); }
       else{ await api('/api/board-config',{method:'POST',body:JSON.stringify(payload)}); }
-      await api('/api/boards/'+encodeURIComponent(bid)+'/participants',{method:'PUT',
+      const _ptR=await api('/api/boards/'+encodeURIComponent(bid)+'/participants',{method:'PUT',
         body:JSON.stringify({participants:(BC_FORM.participants||[]).join(',')})});
+      if(_ptR&&_ptR.removed&&_ptR.removed.length)BC_REMOVED_TIP=(BC_REMOVED_TIP||[]).concat(_ptR.removed);
       saved.push('基本信息');
       // ③ 看板改名（2026-11-10 #124）：与基本信息同权限口径；**名称有变才发请求**
       const newName=(BC_FORM.board_name||'').trim();
@@ -13405,7 +13408,8 @@ async function saveBoardAll(){
         owner:nb.owner||'',participants:(nb.participants||'').split(',').filter(Boolean)};}
     renderBoardList();
     renderEditArea();
-    toast('已保存'+(saved.length?('（'+saved.join('、')+'）'):''));
+    toast('已保存'+(saved.length?('（'+saved.join('、')+'）'):'')
+      +((typeof BC_REMOVED_TIP!=='undefined'&&BC_REMOVED_TIP&&BC_REMOVED_TIP.length)?('；已移除超出范围人员：'+BC_REMOVED_TIP.join('、')):''));
   }catch(e){ /* api 内部已 toast 错误 */ }
 }
 

@@ -596,6 +596,73 @@ def _board_dept_pool_accounts(bid: str):
     return accs
 
 
+# ---------------- ACL 指派范围（2026-11-17 用户要求）：写入剔除 + 读取过滤 ----------------
+# 层级链与前端选人池同口径（T-132/133/135）：
+#   看板层 = 归属部门池（None=不限）；板块层 = 上级看板 owner+participants ∩ 部门池；
+#   事项层 = 上级板块 owner+participants（未登记板块回退看板 ACL）∩ 部门池。
+# 凡超出允许范围的配置值：**写入时直接剔除**（响应带回 removed 名单，前端 toast 提示），
+# **读取时**（/api/me 看板 ACL、/api/cards 板块元信息）同样过滤下发。
+def _board_allowed_accounts(bid: str):
+    """看板层允许指派账号集合（None = 不限：归属部门未配置或中心级）"""
+    return _board_dept_pool_accounts(bid)
+
+
+def _column_allowed_accounts(bid: str, actor: str = None):
+    """板块层允许指派账号集合 = 上级看板 owner+participants ∩ 部门池。
+    看板 ACL 为空 → 空集（完全限制，与前端空选人池一致）。"""
+    pool = _board_dept_pool_accounts(bid)
+    acl = set()
+    row = dbq('SELECT owner, participants FROM boards WHERE board_id=?', (bid,))
+    if row:
+        if (row[0]['owner'] or '').strip():
+            acl.add(row[0]['owner'].strip())
+        acl |= {x.strip() for x in (row[0]['participants'] or '').split(',') if x.strip()}
+    if pool is None or is_admin(actor or ''):
+        return None          # 管理员/无部门约束 → 不限（管理员指派不受池限）
+    return acl & pool
+
+
+def _card_allowed_accounts(bid: str, column_id: str = '', actor: str = None):
+    """事项层允许指派账号集合 = 上级板块 owner+participants
+    （板块未登记回退看板 ACL）∩ 部门池"""
+    pool = _board_dept_pool_accounts(bid)
+    acl = set()
+    col = None
+    if (column_id or '').strip():
+        col = dbq('SELECT owner, participants FROM board_columns WHERE board_id=? AND column_id=? LIMIT 1',
+                  (bid, column_id))
+    src = col if col else dbq('SELECT owner, participants FROM boards WHERE board_id=?', (bid,))
+    if src:
+        if (src[0]['owner'] or '').strip():
+            acl.add(src[0]['owner'].strip())
+        acl |= {x.strip() for x in (src[0]['participants'] or '').split(',') if x.strip()}
+    if pool is None or is_admin(actor or ''):
+        return None          # 管理员/无部门约束 → 不限
+    return acl & pool
+
+
+def _filter_acl_accounts(items, allowed):
+    """账号列表按允许集合过滤 → (kept, removed)；allowed=None = 不限（原样通过）"""
+    vals = [x.strip() for x in (items or []) if x and x.strip()]
+    if allowed is None:
+        return vals, []
+    kept = [x for x in vals if x in allowed]
+    removed = [x for x in vals if x not in allowed]
+    return kept, removed
+
+
+def _account_name_map():
+    """account -> 成员姓名映射（team_members 绑定账号；供姓名/账号双向比对）"""
+    return {r['account']: r['name'] for r in dbq(
+        "SELECT account, name FROM team_members WHERE account <> ''")}
+
+
+def _account_names(accs):
+    """账号列表 → 姓名列表（提示文案用；未绑定回退账号）"""
+    m = _account_name_map()
+    return [m.get(a, a) for a in accs]
+
+
 def _account_member_name(acc: str) -> str:
     """账号 → 成员姓名（提示文案用；查不到回退账号本身）。"""
     rows = dbq('SELECT name FROM team_members WHERE account=? LIMIT 1', (acc,))
@@ -1470,6 +1537,18 @@ def visible_columns(username, boards, columns, board_id=None, counts=None, board
         # 锁 key = column:<col_key>（通用编辑锁，板块编辑弹窗认领）
         d['locked_by'] = lock_mgr.who('column:' + d['col_key'])
         d['locked_by_name'] = lock_mgr.who_name('column:' + d['col_key'])
+        # 归属约束读取过滤（2026-11-17 用户要求「读取时均被过滤清理」）：
+        # 板块 owner/participants 中不属于上级看板 ACL（∩归属部门池）的人员不下发
+        try:
+            _alw = _column_allowed_accounts(d['board_id'], username)
+            if _alw is not None:
+                if (d.get('owner') or '') and d['owner'] not in _alw:
+                    d['owner'] = ''
+                if d.get('participants'):
+                    d['participants'] = ','.join(
+                        [x.strip() for x in d['participants'].split(',') if x.strip() in _alw])
+        except Exception:
+            pass
         out.append(d)
     # 板块待办计数（T-0190）：目录板块行显示【待办：已完成/总数】（与事项行代办槽位对齐）
     if out:
@@ -2405,6 +2484,18 @@ def me(username: str = Depends(require_auth)):
         item['dept'] = dn
         item['dept_node_id'] = dnode or 0
         item['owner'], item['participants'] = _acl_map.get(b['board_id'], ('', ''))
+        # 归属部门约束读取过滤（2026-11-17 用户要求「读取时均被过滤清理」）：
+        # 与看板管理 bcFilterAclByDept 同口径——ACL 中不属于归属部门的人员不下发。
+        # （前端 aclAccsInDept 双保险仍在；此处收口保证任何读取方一致。）
+        try:
+            _dpool = _board_dept_pool_accounts(b['board_id'])
+            if _dpool is not None:
+                _o = (item['owner'] or '').strip()
+                _ps = [x.strip() for x in (item['participants'] or '').split(',') if x.strip()]
+                item['owner'] = _o if (_o and _o in _dpool) else ''
+                item['participants'] = ','.join([x for x in _ps if x in _dpool])
+        except Exception:
+            pass
         # 板块弹窗的负责人/参与人指派门槛（2026-11-04 / T-0185 修订）：与后端写接口**同一判定**，
         # 前端不再手写 is_admin（#43 同款问题的教训）。
         #   can_edit          → 可指派板块参与人（板块负责人及以上，看板/架构负责人继承）
@@ -2944,6 +3035,16 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
         new_owner = _norm_acl_owner(req.owner)
     # ⚠️ 参与人此前**模型有字段但 create 没落库**（静默丢弃）—— 一并补上
     parts = _norm_acl_participants(req.participants) if (req.participants or '').strip() else ''
+    # 范围剔除（2026-11-17 用户要求）：板块负责人/参与人候选 = 上级看板负责人+参与人
+    _col_allowed = _column_allowed_accounts(req.board_id, username)
+    _removed_col_create = []
+    if _col_allowed is not None:
+        if new_owner and new_owner not in _col_allowed:
+            _removed_col_create.append(new_owner)
+            new_owner = ''
+        _kept_p, _rm_p = _filter_acl_accounts([x for x in parts.split(',') if x.strip()], _col_allowed)
+        _removed_col_create += _rm_p
+        parts = ','.join(_kept_p)
     new_cid = 'COL' + str(int(time.time() * 1000))
     # 新建板块的完成情况（2026-11-04 需求3）：创建者声明，默认未完成
     new_completion = (req.completion or '').strip() or 'open'
@@ -2963,7 +3064,8 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'created_at': created, 'creator': username, 'nature': req.nature,
-            'year': year, 'pinned': 0, 'owner': new_owner, 'participants': parts}
+            'year': year, 'pinned': 0, 'owner': new_owner, 'participants': parts,
+            'removed': _account_names(_removed_col_create)}
 
 
 @app.put('/api/columns')
@@ -3012,6 +3114,8 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     # 原「架构负责人及以上」挡住了看板负责人 —— 与 /api/me 能力位同口径）。
     owner_val = (req.owner or '').strip()
     new_owner = None
+    _removed_col_owner = []      # 范围剔除（2026-11-17）：池外负责人/参与人除名名单
+    _removed_col_parts = []
     if owner_val:
         perm_check(username, perm_chain(board_id=board_id, column_id=(old['column_id'] if old else '')),
                    OP_ASSIGN_OWNER, LV_BOARD_OWNER, 'column:' + (req.col_key or ''),
@@ -3058,6 +3162,12 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
         dbe('UPDATE column_actions SET col_key=? WHERE col_key=?', (new_key, req.col_key))
     if old:
         if new_owner is not None:
+            # 范围剔除（2026-11-17）：板块负责人候选 = 上级看板 ACL（继承链），
+            # 池外直接除名为空（响应带回 removed）
+            _allowed_col = _column_allowed_accounts(board_id, username)
+            if new_owner and _allowed_col is not None and new_owner not in _allowed_col:
+                _removed_col_owner.append(new_owner)
+                new_owner = ''
             dbe('UPDATE board_columns SET owner=? WHERE col_key=?', (new_owner, req.col_key))
         if new_completion is not None:
             dbe('UPDATE board_columns SET completion=? WHERE col_key=?', (new_completion, req.col_key))
@@ -3068,8 +3178,14 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
             perm_check(username, perm_chain(board_id=board_id, column_id=old['column_id']),
                        OP_ASSIGN_PARTICIPANT, LV_COLUMN_OWNER, 'column:' + req.col_key,
                        min_level=LV_COLUMN_OWNER)
+            _parts_norm = _norm_acl_participants(req.participants)
+            # 范围剔除（2026-11-17）：候选 = 上级看板 ACL，池外直接除名
+            _allowed_col2 = _column_allowed_accounts(board_id, username)
+            _kept_parts, _rm = _filter_acl_accounts(_parts_norm.split(','), _allowed_col2)
+            _removed_col_parts += _rm
+            _parts_norm = ','.join(_kept_parts)
             dbe('UPDATE board_columns SET participants=? WHERE col_key=?',
-                (_norm_acl_participants(req.participants), req.col_key))
+                (_parts_norm, req.col_key))
         dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=?, description=?, due_date=? WHERE col_key=?',
             (new_key, name, year, created, nature,
              (req.description if req.description is not None else (old['description'] if old and 'description' in old.keys() else '')) or '',
@@ -3104,7 +3220,8 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
                             prev_col_key=(req.col_key if (old and req.col_key != new_key) else ''))
     return {'ok': True, 'col_key': new_key, 'column_name': name, 'year': year,
             'nature': nature, 'created_at': created,
-            'owner': (new_owner if new_owner is not None else (old['owner'] if old else ''))}
+            'owner': (new_owner if new_owner is not None else (old['owner'] if old else '')),
+            'removed': _account_names(_removed_col_owner + _removed_col_parts)}
 
 
 @app.post('/api/columns/pin')
@@ -3462,7 +3579,7 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     if not fields:
         raise HTTPException(400, '没有可更新的字段')
     # 乐观锁：先取当前 version + board_id
-    cur = dbq('SELECT version, parent_id, begin, due, board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    cur = dbq('SELECT version, parent_id, begin, due, board_id, column_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur:
         raise HTTPException(404, '卡片不存在或已删除')
     # 分级权限（2026-11-02）：修改事项分两档 ——
@@ -3509,6 +3626,23 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
         perm_check(username, _chain, OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'card:' + card_id,
                    min_level=LV_CARD_OWNER)
     # 归属字段判定通过后再合并回去（保证后续 UPDATE 语句带上它们）
+    # 范围剔除（2026-11-17 用户要求）：事项负责人/参与人候选 = 上级板块
+    # （缺省回退看板）负责人+参与人 ∩ 归属部门池；cards 存**姓名**，
+    # allowed 是账号集 → 经映射比对，池外姓名直接除名（响应带回 removed）
+    _removed_assign = []
+    try:
+        _card_allowed = _card_allowed_accounts(cur[0]['board_id'], str(cur[0]['column_id'] or ''), username)
+        if _card_allowed is not None:
+            _nm = _account_name_map()          # account → name
+            _allowed_names = {_nm.get(a, a) for a in _card_allowed}
+            for _k in ('owner', 'cc'):
+                if _k in assign_fields:
+                    _vals = [x.strip() for x in (assign_fields[_k] or '').split(';') if x.strip()]
+                    _kept = [x for x in _vals if x in _allowed_names]
+                    _removed_assign += [x for x in _vals if x not in _allowed_names]
+                    assign_fields[_k] = ';'.join(_kept)
+    except Exception:
+        _removed_assign = []      # 池计算异常不阻断保存（fail-open，与可见性口径分离）
     fields.update(assign_fields)
     check_board_access(cur[0]['board_id'], username)
     # 板块级校验：账号被限定了某看板的板块白名单时，不得把事项移入不可见的板块
@@ -3560,7 +3694,7 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     lock_mgr.release(card_id, username)
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id,
         'by': username}, exclude=username)
-    return {'ok': True}
+    return {'ok': True, 'removed': _account_names(_removed_assign)}
 
 @app.post('/api/cards')
 async def create_card(req: CardCreate, username: str = Depends(require_writer), request: Request = None):
@@ -3617,6 +3751,22 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
         perm_check(username, perm_chain(board_id=req.board_id, column_id=req.column_id),
                    OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'board:' + req.board_id,
                    min_level=LV_COLUMN_OWNER)
+    # 范围剔除（2026-11-17 用户要求）：事项负责人/参与人候选 = 上级板块
+    # （缺省回退看板）负责人+参与人 ∩ 部门池；cards 存姓名 → 映射比对后除名
+    _removed_create = []
+    try:
+        _cc_allowed = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username)
+        if _cc_allowed is not None:
+            _nm = _account_name_map()
+            _allowed_names = {_nm.get(a, a) for a in _cc_allowed}
+            for _k in ('owner', 'cc'):
+                if _flds.get(_k):
+                    _vals = [x.strip() for x in _flds[_k].split(';') if x.strip()]
+                    _kept = [x for x in _vals if x in _allowed_names]
+                    _removed_create += [x for x in _vals if x not in _allowed_names]
+                    _flds[_k] = ';'.join(_kept)
+    except Exception:
+        _removed_create = []      # 池计算异常不阻断创建（fail-open）
     vals.update(req.fields)
     vals['card_id'] = new_id
     vals['board_id'] = req.board_id
@@ -3651,7 +3801,8 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
     audit_log(username, client_ip(request), 'create', f'卡片 {new_id}', f'新建卡片：{req.card_name}' + (f'（父事项 {req.parent_id}）' if req.parent_id else ''), 'success')
     await ws_mgr.broadcast({'type': 'card_create', 'card_id': new_id,
         'board_id': req.board_id, 'by': username}, exclude=username)
-    return {'ok': True, 'card_id': new_id}
+    return {'ok': True, 'card_id': new_id,
+            'removed': _account_names(_removed_create)}
 
 # ---------------- API：看板管理（新建看板） ----------------
 class BoardCreateReq(BaseModel):
@@ -6943,11 +7094,13 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     _lk = 'board:' + bid
     _fresh = _lock_oneshot(_lk, username, '看板', '设置负责人')
     owner = _norm_acl_owner(req.owner)
-    # 部门约束（2026-11-12）：归属部门为部门级节点时，负责人必须是该部门成员
+    # 部门约束（2026-11-12）+ 范围剔除（2026-11-17 用户要求：写入直接除名而非 400）：
+    # 负责人不属于归属部门 → 剔除为空（响应带回 removed）
+    _removed_owner = []
     _pool = _board_dept_pool_accounts(bid)
     if _pool is not None and owner and owner not in _pool:
-        raise HTTPException(400, f'负责人「{_account_member_name(owner)}」不属于该看板的'
-                               f'归属部门，无法指派（归属部门成员方可担任负责人）')
+        _removed_owner = [owner]
+        owner = ''
     # 2026-11-04 恢复：参与人字段重新启用（人员选择层级约束 —— 板块的选人池
     # 来自所属看板的负责人与参与人），不再随负责人保存清空。
     # 2026-11-05 用户修订：**取消负责人/参与人互斥** —— 负责人可同为参与人，
@@ -6956,11 +7109,13 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     parts = ((_row[0]['participants'] if _row else '') or '')
     dbe('UPDATE boards SET owner=?, participants=? WHERE board_id=?', (owner, parts, bid))
     audit_log(username, client_ip(request), 'board_acl', f'看板 {bid}',
-              f'设置看板负责人：{owner or "(无)"}', 'success')
+              f'设置看板负责人：{owner or "(无)"}'
+              + (f'（剔除超范围 {len(_removed_owner)} 人）' if _removed_owner else ''), 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     if _fresh:
         _lock_release(_lk, username)
-    return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': parts}
+    return {'ok': True, 'board_id': bid, 'owner': owner, 'participants': parts,
+            'removed': _account_names(_removed_owner)}
 
 
 @app.put('/api/boards/{board_id}/participants')
@@ -6979,20 +7134,21 @@ async def set_board_participants(board_id: str, req: AclReq, username: str = Dep
     _lk = 'board:' + bid
     _fresh = _lock_oneshot(_lk, username, '看板', '设置参与人')
     parts = _norm_acl_participants(req.participants)
-    # 部门约束（2026-11-12）：归属部门为部门级节点时，参与人必须是该部门成员
+    # 部门约束（2026-11-12）+ 范围剔除（2026-11-17 用户要求）：池外参与人直接除名
+    _removed_parts = []
     _pool = _board_dept_pool_accounts(bid)
     if _pool is not None:
-        _bad = [a for a in parts.split(',') if a and a not in _pool]
-        if _bad:
-            raise HTTPException(400, '以下参与人不属于该看板的归属部门：'
-                               + '、'.join(_account_member_name(a) for a in _bad))
+        _kept, _removed_parts = _filter_acl_accounts(parts.split(','), _pool)
+        parts = ','.join(_kept)
     # 2026-11-05 用户修订：取消负责人/参与人互斥 —— 参与人名单不再剔除当前负责人。
     dbe('UPDATE boards SET participants=? WHERE board_id=?', (parts, bid))
     audit_log(username, client_ip(request), 'board_participants', f'看板 {bid}',
-              f'设置看板参与人：{parts or "(无)"}', 'success')
+              f'设置看板参与人：{parts or "(无)"}'
+              + (f'（剔除超范围 {len(_removed_parts)} 人）' if _removed_parts else ''), 'success')
     if _fresh:
         _lock_release(_lk, username)
-    return {'ok': True, 'board_id': bid, 'participants': parts}
+    return {'ok': True, 'board_id': bid, 'participants': parts,
+            'removed': _account_names(_removed_parts)}
 
 
 class BoardRenameReq(BaseModel):
@@ -7051,12 +7207,19 @@ async def set_column_participants(col_key: str, req: AclReq, username: str = Dep
     perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
                OP_ASSIGN_PARTICIPANT, LV_COLUMN_OWNER, 'column:' + key, min_level=LV_COLUMN_OWNER)
     parts = _norm_acl_participants(req.participants)
+    # 范围剔除（2026-11-17 用户要求）：板块参与人候选 = 上级看板负责人+参与人，
+    # 池外直接除名（响应带回 removed）
+    _allowed = _column_allowed_accounts(row[0]['board_id'], username)
+    _kept, _removed_parts = _filter_acl_accounts(parts.split(','), _allowed)
+    parts = ','.join(_kept)
     dbe('UPDATE board_columns SET participants=? WHERE col_key=?', (parts, key))
     audit_log(username, client_ip(request), 'column_participants', f'板块 {key}',
-              f'设置板块参与人：{parts or "(无)"}', 'success')
+              f'设置板块参与人：{parts or "(无)"}'
+              + (f'（剔除超范围 {len(_removed_parts)} 人）' if _removed_parts else ''), 'success')
     if _fresh:
         _lock_release(_lk, username)
-    return {'ok': True, 'col_key': key, 'participants': parts}
+    return {'ok': True, 'col_key': key, 'participants': parts,
+            'removed': _account_names(_removed_parts)}
 
 
 @app.put('/api/cards/{card_id}/participants')
@@ -7072,13 +7235,18 @@ async def set_card_participants(card_id: str, req: AclReq, username: str = Depen
     perm_check(username, perm_chain(card_id=card_id),
                OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'card:' + card_id)
     parts = _norm_acl_participants(req.participants)
+    # 范围剔除（2026-11-17 用户要求）：事项参与人候选 = 上级板块（缺省看板）ACL ∩ 部门池
+    _allowed_cc = _card_allowed_accounts(row[0]['board_id'], row[0]['column_id'])
+    _kept_cc, _removed_cc = _filter_acl_accounts(parts.split(','), _allowed_cc)
+    parts = ','.join(_kept_cc)
     dbe('UPDATE cards SET cc=? WHERE card_id=? AND deleted=0', (parts, card_id))
     audit_log(username, client_ip(request), 'card_participants', f'事项 {card_id}',
               f'设置事项参与人：{parts or "(无)"}', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id, 'by': username})
     if _fresh:
         _lock_release(card_id, username)
-    return {'ok': True, 'card_id': card_id, 'participants': parts}
+    return {'ok': True, 'card_id': card_id, 'participants': parts,
+            'removed': _account_names(_removed_cc)}
 
 
 @app.put('/api/columns/{col_key}/acl')
@@ -7100,16 +7268,25 @@ async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(requ
     perm_check(username, perm_chain(board_id=row[0]['board_id'], column_id=row[0]['column_id']),
                OP_ASSIGN_OWNER, LV_COLUMN_OWNER, 'column:' + key, min_level=LV_BOARD_OWNER)
     owner = _norm_acl_owner(req.owner)
+    # 范围剔除（2026-11-17 用户要求）：板块负责人候选 = 上级看板负责人+参与人
+    # （继承链），池外直接除名（响应带回 removed）
+    _allowed = _column_allowed_accounts(row[0]['board_id'], username)
+    _removed_owner = []
+    if owner and _allowed is not None and owner not in _allowed:
+        _removed_owner = [owner]
+        owner = ''
     # 2026-11-05 用户修订：取消负责人/参与人互斥 —— 设板块负责人不再清空参与人。
     _row = dbq('SELECT participants FROM board_columns WHERE col_key=?', (key,))
     _parts = ((_row[0]['participants'] if _row else '') or '')
     dbe('UPDATE board_columns SET owner=?, participants=? WHERE col_key=?', (owner, _parts, key))
     audit_log(username, client_ip(request), 'column_acl', f'板块 {key}',
-              f'设置板块负责人：{owner or "(无)"}', 'success')
+              f'设置板块负责人：{owner or "(无)"}'
+              + (f'（剔除超范围 {len(_removed_owner)} 人）' if _removed_owner else ''), 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     if _fresh:
         _lock_release(_lk, username)
-    return {'ok': True, 'col_key': key, 'owner': owner, 'participants': ''}
+    return {'ok': True, 'col_key': key, 'owner': owner, 'participants': _parts,
+            'removed': _account_names(_removed_owner)}
 
 
 # ⚠️ 2026-11-04 下线两个批量接口（用户需求）：
