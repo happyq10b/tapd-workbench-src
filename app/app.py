@@ -608,7 +608,9 @@ def _board_allowed_accounts(bid: str):
 
 
 def _column_allowed_accounts(bid: str, actor: str = None):
-    """板块层允许指派账号集合 = 上级看板 owner+participants ∩ 部门池。
+    """板块层允许指派账号集合 = 上级看板 owner+participants（∩ 部门池，若配置）。
+    2026-11-17 修订：部门约束只是**附加交集**——未配置归属部门时池 = 看板 ACL
+    全量（与前端 colPickPool 同口径），层级约束不依赖部门配置。
     看板 ACL 为空 → 空集（完全限制，与前端空选人池一致）。"""
     pool = _board_dept_pool_accounts(bid)
     acl = set()
@@ -617,14 +619,16 @@ def _column_allowed_accounts(bid: str, actor: str = None):
         if (row[0]['owner'] or '').strip():
             acl.add(row[0]['owner'].strip())
         acl |= {x.strip() for x in (row[0]['participants'] or '').split(',') if x.strip()}
-    if pool is None or is_admin(actor or ''):
-        return None          # 管理员/无部门约束 → 不限（管理员指派不受池限）
-    return acl & pool
+    if is_admin(actor or ''):
+        return None          # 管理员指派不受池限（#138 用户认可口径）
+    return acl if pool is None else (acl & pool)
 
 
 def _card_allowed_accounts(bid: str, column_id: str = '', actor: str = None):
     """事项层允许指派账号集合 = 上级板块 owner+participants
-    （板块未登记回退看板 ACL）∩ 部门池"""
+    （板块未登记回退看板 ACL）∩ 部门池（若配置）。
+    2026-11-17 修订：同 _column_allowed_accounts——部门约束只是附加交集，
+    层级约束（事项 ⊆ 板块名单）不依赖部门配置。"""
     pool = _board_dept_pool_accounts(bid)
     acl = set()
     col = None
@@ -636,9 +640,25 @@ def _card_allowed_accounts(bid: str, column_id: str = '', actor: str = None):
         if (src[0]['owner'] or '').strip():
             acl.add(src[0]['owner'].strip())
         acl |= {x.strip() for x in (src[0]['participants'] or '').split(',') if x.strip()}
-    if pool is None or is_admin(actor or ''):
-        return None          # 管理员/无部门约束 → 不限
-    return acl & pool
+    if is_admin(actor or ''):
+        return None          # 管理员指派不受池限
+    return acl if pool is None else (acl & pool)
+
+
+def _parent_card_allowed_names(parent_id: str):
+    """子事项层允许的**姓名**集合 = 父事项 owner+cc（2026-11-17 用户要求：
+    子事项的负责人与参与人要仅能在父事项的负责人与参与人中选择）。
+    cards 存姓名（';' 分隔）→ 直接姓名比对，无需账号映射。
+    父事项不存在/已删除 → None（fail-open，与既有池口径一致）。"""
+    if not (parent_id or '').strip():
+        return None
+    row = dbq('SELECT owner, cc FROM cards WHERE card_id=? AND deleted=0', (parent_id,))
+    if not row:
+        return None
+    names = set()
+    for k in ('owner', 'cc'):
+        names |= {x.strip() for x in (row[0][k] or '').split(';') if x.strip()}
+    return names
 
 
 def _filter_acl_accounts(items, allowed):
@@ -3579,7 +3599,7 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     if not fields:
         raise HTTPException(400, '没有可更新的字段')
     # 乐观锁：先取当前 version + board_id
-    cur = dbq('SELECT version, parent_id, begin, due, board_id, column_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    cur = dbq('SELECT version, parent_id, begin, due, board_id, column_id, owner, cc FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur:
         raise HTTPException(404, '卡片不存在或已删除')
     # 分级权限（2026-11-02）：修改事项分两档 ——
@@ -3628,19 +3648,39 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     # 归属字段判定通过后再合并回去（保证后续 UPDATE 语句带上它们）
     # 范围剔除（2026-11-17 用户要求）：事项负责人/参与人候选 = 上级板块
     # （缺省回退看板）负责人+参与人 ∩ 归属部门池；cards 存**姓名**，
-    # allowed 是账号集 → 经映射比对，池外姓名直接除名（响应带回 removed）
+    # allowed 是账号集 → 经映射比对，池外姓名直接除名（响应带回 removed）。
+    # 子事项层级约束（2026-11-17 用户要求）：候选 = **父事项**的负责人+参与人
+    # （与前端 parentCardPool 同口径），卡片原有人员放行（存量指派可原样保存）。
     _removed_assign = []
     try:
-        _card_allowed = _card_allowed_accounts(cur[0]['board_id'], str(cur[0]['column_id'] or ''), username)
-        if _card_allowed is not None:
-            _nm = _account_name_map()          # account → name
-            _allowed_names = {_nm.get(a, a) for a in _card_allowed}
+        _pnames = _parent_card_allowed_names(cur[0]['parent_id']) \
+            if cur[0]['parent_id'] else None
+        if _pnames is not None:
+            _orig_names = set()
+            for _k0 in ('owner', 'cc'):
+                _orig_names |= {x.strip() for x in (cur[0][_k0] or '').split(';') if x.strip()}
+            _allowed_names = _pnames | _orig_names
             for _k in ('owner', 'cc'):
                 if _k in assign_fields:
                     _vals = [x.strip() for x in (assign_fields[_k] or '').split(';') if x.strip()]
                     _kept = [x for x in _vals if x in _allowed_names]
                     _removed_assign += [x for x in _vals if x not in _allowed_names]
                     assign_fields[_k] = ';'.join(_kept)
+        else:
+            _card_allowed = _card_allowed_accounts(cur[0]['board_id'], str(cur[0]['column_id'] or ''), username)
+            if _card_allowed is not None:
+                _nm = _account_name_map()          # account → name
+                _allowed_names = {_nm.get(a, a) for a in _card_allowed}
+                # 存量放行（2026-11-17）：卡片原有人员可原样保存（与子事项分支、
+                # 前端 poolViolation 的 origNames 放行同口径）
+                for _k0 in ('owner', 'cc'):
+                    _allowed_names |= {x.strip() for x in (cur[0][_k0] or '').split(';') if x.strip()}
+                for _k in ('owner', 'cc'):
+                    if _k in assign_fields:
+                        _vals = [x.strip() for x in (assign_fields[_k] or '').split(';') if x.strip()]
+                        _kept = [x for x in _vals if x in _allowed_names]
+                        _removed_assign += [x for x in _vals if x not in _allowed_names]
+                        assign_fields[_k] = ';'.join(_kept)
     except Exception:
         _removed_assign = []      # 池计算异常不阻断保存（fail-open，与可见性口径分离）
     fields.update(assign_fields)
@@ -3752,19 +3792,30 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
                    OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'board:' + req.board_id,
                    min_level=LV_COLUMN_OWNER)
     # 范围剔除（2026-11-17 用户要求）：事项负责人/参与人候选 = 上级板块
-    # （缺省回退看板）负责人+参与人 ∩ 部门池；cards 存姓名 → 映射比对后除名
+    # （缺省回退看板）负责人+参与人 ∩ 部门池；cards 存姓名 → 映射比对后除名。
+    # 子事项层级约束（2026-11-17 用户要求）：候选 = **父事项**的负责人+参与人
+    # （与前端 parentCardPool 同口径；此前子事项 board_id 为空走 fail-open 无约束）
     _removed_create = []
     try:
-        _cc_allowed = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username)
-        if _cc_allowed is not None:
-            _nm = _account_name_map()
-            _allowed_names = {_nm.get(a, a) for a in _cc_allowed}
+        _pnames = _parent_card_allowed_names(req.parent_id) if req.parent_id else None
+        if _pnames is not None:
             for _k in ('owner', 'cc'):
                 if _flds.get(_k):
                     _vals = [x.strip() for x in _flds[_k].split(';') if x.strip()]
-                    _kept = [x for x in _vals if x in _allowed_names]
-                    _removed_create += [x for x in _vals if x not in _allowed_names]
+                    _kept = [x for x in _vals if x in _pnames]
+                    _removed_create += [x for x in _vals if x not in _pnames]
                     _flds[_k] = ';'.join(_kept)
+        else:
+            _cc_allowed = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username)
+            if _cc_allowed is not None:
+                _nm = _account_name_map()
+                _allowed_names = {_nm.get(a, a) for a in _cc_allowed}
+                for _k in ('owner', 'cc'):
+                    if _flds.get(_k):
+                        _vals = [x.strip() for x in _flds[_k].split(';') if x.strip()]
+                        _kept = [x for x in _vals if x in _allowed_names]
+                        _removed_create += [x for x in _vals if x not in _allowed_names]
+                        _flds[_k] = ';'.join(_kept)
     except Exception:
         _removed_create = []      # 池计算异常不阻断创建（fail-open）
     vals.update(req.fields)
@@ -4332,6 +4383,29 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
     vals['modified'] = ''
     vals['completed'] = ''
     vals['parent_id'] = parent_id
+    # 范围剔除（2026-11-17 用户要求）：复制也必须守住选人层级——
+    # 主事项副本 ⊆ 目标板块（缺省看板）负责人+参与人 ∩ 部门池；
+    # 子事项副本 ⊆ **目标主事项**的负责人+参与人（parentCardPool 同口径）。
+    # cards 存姓名：板块池经账号映射比对，父名单直接姓名比对；池外除名。
+    _removed_copy = []
+    try:
+        if is_sub and parent_id:
+            _alw = _parent_card_allowed_names(parent_id)
+            _alw_names = _alw      # 姓名集
+        elif not is_sub:
+            _alw = _card_allowed_accounts(req.board_id, str(req.column_id or ''), username)
+            _alw_names = None if _alw is None else {_account_name_map().get(a, a) for a in _alw}
+        else:
+            _alw_names = None
+        if _alw_names is not None:
+            for _k in ('owner', 'cc'):
+                if vals.get(_k):
+                    _vals = [x.strip() for x in vals[_k].split(';') if x.strip()]
+                    _kept = [x for x in _vals if x in _alw_names]
+                    _removed_copy += [x for x in _vals if x not in _alw_names]
+                    vals[_k] = ';'.join(_kept)
+    except Exception:
+        _removed_copy = []        # 池计算异常不阻断复制（fail-open）
     vals['version'] = 1
     vals['deleted'] = 0
     vals['pinned'] = 0
@@ -4352,7 +4426,8 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
         'board_id': req.board_id, 'by': username}, exclude=username)
     return {'ok': True, 'card_id': new_id, 'card_name': name, 'board_id': req.board_id,
             'column_id': vals['column_id'], 'column_name': vals['column_name'],
-            'parent_id': parent_id, 'week_no': vals['week_no'], 'copy_from': src['card_id']}
+            'parent_id': parent_id, 'week_no': vals['week_no'], 'copy_from': src['card_id'],
+            'removed': _account_names(_removed_copy)}
 
 
 @app.get('/api/boards/{board_id}/columns')
@@ -7227,26 +7302,50 @@ async def set_card_participants(card_id: str, req: AclReq, username: str = Depen
                                 request: Request = None):
     # 指派事项参与人（事项负责人及以上）。
     # 参与人 = 可修改该事项的**可见内容**，但无增删与指派权限。
-    row = dbq('SELECT board_id, column_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    row = dbq('SELECT board_id, column_id, parent_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not row:
         raise HTTPException(404, '事项不存在或已删除')
     # 编辑锁（2026-11-12 补缺）：参与人是事项的可编辑内容，纳入事项锁
     _fresh = _lock_oneshot(card_id, username, '卡片', '设置参与人')
     perm_check(username, perm_chain(card_id=card_id),
                OP_ASSIGN_PARTICIPANT, LV_CARD_OWNER, 'card:' + card_id)
-    parts = _norm_acl_participants(req.participants)
-    # 范围剔除（2026-11-17 用户要求）：事项参与人候选 = 上级板块（缺省看板）ACL ∩ 部门池
-    _allowed_cc = _card_allowed_accounts(row[0]['board_id'], row[0]['column_id'])
-    _kept_cc, _removed_cc = _filter_acl_accounts(parts.split(','), _allowed_cc)
-    parts = ','.join(_kept_cc)
+    # cards 层专属归一（2026-11-17）：cards.cc 存**姓名**（';' 分隔），
+    # 不能复用 _norm_acl_participants（那是 boards/board_columns 的**账号**语义，
+    # 强校验 users 存在性 → 姓名输入会 400）。这里按 , ; 、 拆分，逐项尝试
+    # 「账号 → 姓名」映射（team_members 绑定账号），无映射则原样保留（兼容直接传姓名），
+    # 去重后交由下方池过滤剔除越界项。
+    _nm_pre = _account_name_map()
+    _raw_items = re.split(r'[,;、]', req.participants) if isinstance(req.participants, str) else (req.participants or [])
+    parts = ';'.join(dict.fromkeys(
+        x.strip() for x in (_nm_pre.get(x.strip(), x.strip()) for x in _raw_items)
+        if x.strip()))
+    # 范围剔除（2026-11-17 用户要求）：事项参与人候选 = 上级板块（缺省看板）ACL ∩ 部门池；
+    # 子事项层级约束：候选 = **父事项**的负责人+参与人（parentCardPool 同口径）。
+    # cards.cc 存**姓名**（';' 分隔）→ 输入先归一为姓名（兼容账号输入，经映射再比对），
+    # 落库统一 ';' 分隔姓名；池外除名（响应带回 removed）。
+    _nm = _account_name_map()
+    _vals = [_nm.get(x.strip(), x.strip()) for x in parts.split(';') if x.strip()]
+    _pnames = _parent_card_allowed_names(row[0]['parent_id'])
+    if _pnames is not None:
+        _alw_names = _pnames
+    else:
+        _alw_cc = _card_allowed_accounts(row[0]['board_id'], row[0]['column_id'])
+        _alw_names = None if _alw_cc is None else {_nm.get(a, a) for a in _alw_cc}
+    if _alw_names is not None:
+        _kept_cc = [x for x in _vals if x in _alw_names]
+        _removed_cc = [x for x in _vals if x not in _alw_names]
+    else:
+        _kept_cc, _removed_cc = _vals, []
+    parts = ';'.join(_kept_cc)
     dbe('UPDATE cards SET cc=? WHERE card_id=? AND deleted=0', (parts, card_id))
     audit_log(username, client_ip(request), 'card_participants', f'事项 {card_id}',
-              f'设置事项参与人：{parts or "(无)"}', 'success')
+              f'设置事项参与人：{parts or "(无)"}'
+              + (f'（剔除超范围 {len(_removed_cc)} 人）' if _removed_cc else ''), 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': card_id, 'by': username})
     if _fresh:
         _lock_release(card_id, username)
     return {'ok': True, 'card_id': card_id, 'participants': parts,
-            'removed': _account_names(_removed_cc)}
+            'removed': _removed_cc}
 
 
 @app.put('/api/columns/{col_key}/acl')
