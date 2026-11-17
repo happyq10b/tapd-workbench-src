@@ -1701,6 +1701,7 @@ function goLogin(){
         <!-- 分类快速勾选（#196，#201 样式统一）：与【全选当前】同款蓝描边形态，顺序排在
              全选当前与启用勾选之间。仅勾选模式启用后出现（同显隐）；按数据归属匹配
             （负责人/参与人含我），勾选时仍受 #163 权限约束（无权勾的事项跳过）。 -->
+        <button id="chkMineColBtn" class="btn-clear btn-cat btn-cat-all" style="display:none" onclick="selectCategoryCols()" title="一键勾选当前筛选结果中我负责的板块及其下全部事项（再点一次取消该类勾选；不影响其他板块的勾选状态）">负责板块</button>
         <button id="chkMineOwnerBtn" class="btn-clear btn-cat btn-cat-all" style="display:none" onclick="selectCategoryCards('owner')" title="一键勾选当前筛选结果中我负责的事项（再点一次取消该类勾选）">负责事项</button>
         <button id="chkMineCcBtn" class="btn-clear btn-cat btn-cat-all" style="display:none" onclick="selectCategoryCards('cc')" title="一键勾选当前筛选结果中我参与的事项（再点一次取消该类勾选）">参与事项</button>
         <button id="chkModeBtn" class="btn-clear chk-mode-btn" onclick="toggleChkMode()" title="点击开启勾选模式（板块/事项/子事项前显示勾选框）">启用勾选</button>
@@ -5628,11 +5629,35 @@ function renderWeekFilter(weeks){
 const _manualWeek=new Set();   // 手工输入（非候选列表）的周数：不受「选项收缩」清理
 // ---------- 从架构树批量选人（人员筛选的补充入口） ----------
 // 树里勾选的人员会并入 PERSON_SEL（同样锚定 owner 字段）。
+// 候选联动（2026-11-17 用户需求）：负责人/参与人筛选只显示**当前所选看板**的
+// 负责人+参与人（curBoards 各看板 ACL 聚合），不再展示全量人员 —— 打开树时
+// 实时计算（看板切换后自然刷新），账号→姓名映射走 BC_ACL_MEMBERS，离岗排除。
+function boardFilterCandidates(){
+  const accs=[];
+  let bs=null;
+  try{ bs=(curBoards&&curBoards.size)?curBoards:new Set([curBoard||'']); }catch(e){ bs=new Set(); }
+  bs.forEach(function(bid){
+    if(!bid)return;
+    const b=(ME.boards||[]).find(x=>x.board_id===bid);
+    if(!b)return;
+    if(b.owner)accs.push(b.owner);
+    (b.participants||'').split(',').forEach(function(a){if(a)accs.push(a);});
+  });
+  const labels=accs.filter(Boolean).map(function(a){
+    const m=BC_ACL_MEMBERS.filter(x=>x.account===a)[0];
+    return m?m.label:a;
+  }).filter(Boolean);
+  const dep=new Set(BC_ACL_MEMBERS.filter(x=>x.status==='departed').map(x=>x.name));
+  return [...new Set(labels)].filter(function(n){return !dep.has(n);});
+}
 async function openPersonFilterPicker(anchor){
   // 强制刷新架构数据：人员筛选要反映最新的任命（免职/任命后立即生效），
   // 同时让「数据刷新后展开状态同步」这条路径被真正走到。
-  try{ await ensureOrgTree(true); }catch(e){ toast('架构数据加载失败'); return; }
-  if(!ORG_TREE.length){ toast('架构数据为空'); return; }
+  // 候选联动（2026-11-17）：树改为「当前所选看板的负责人+参与人」池
+  // （boardFilterCandidates），不再展示全量架构 —— 看板切换后选项随之刷新。
+  try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
+  const _poolNames=boardFilterCandidates();
+  if(!_poolNames.length){ toast('当前所选看板未配置负责人/参与人，无筛选候选'); return; }
   // 已选人员回填进树（避免每次打开都从零开始）。
   // ⚠️ 特殊值「无负责人」不是架构里的真实人员，**不带** __P__ 前缀回填
   //    （否则永远匹配不上）—— 它由树上的独立「无负责人」选项承载，
@@ -5646,14 +5671,14 @@ async function openPersonFilterPicker(anchor){
     if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
-  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
+  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(_poolNames,'当前看板负责人/参与人'),
       showNoneOwner:true, clearable:true, keyword:''});
 }
-// T-0189 参与人筛选：与负责人同款架构树选人（无「无负责人」特殊值 —— 参与人语义为
-// 「事项参与人包含所勾选的任意一人」，锚定 cc 字段，后端 /api/cards 已支持）。
+// T-0189 参与人筛选：与负责人同款（2026-11-17 候选联动：仅当前所选看板的负责人+参与人）
 async function openCcFilterPicker(anchor){
-  try{ await ensureOrgTree(true); }catch(e){ toast('架构数据加载失败'); return; }
-  if(!ORG_TREE.length){ toast('架构数据为空'); return; }
+  try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
+  const _poolCc=boardFilterCandidates();
+  if(!_poolCc.length){ toast('当前所选看板未配置负责人/参与人，无筛选候选'); return; }
   const cur=[...CC_SEL].map(n=>ORG_PERSON_PREFIX+n);
   openTreePick(anchor, cur, (persons)=>{
     // 全部取消勾选后点确定 → 视为清空该筛选（与负责人同口径）
@@ -5661,7 +5686,8 @@ async function openCcFilterPicker(anchor){
     window._ccFilter=[...CC_SEL].join(',');
     paintFilterCombos();
     reload(1);
-  }, {mode:'filter', pickMode:'person', width:360, height:460, tree:ORG_TREE,
+  }, {mode:'filter', pickMode:'person', width:360, height:460,
+      tree:poolTree(_poolCc,'当前看板负责人/参与人'),
       clearable:true, keyword:''});
 }
 function applyPersonFilter(kind, persons){
@@ -9765,8 +9791,8 @@ function syncChkModeBtn(btn){
   btn.title=CHK_MODE?'勾选模式已启用，点击关闭并清空全部勾选'
                     :'点击开启勾选模式（板块/事项/子事项前显示勾选框）';
   btn.classList.toggle('on',CHK_MODE);
-  // #161/#196 「全选当前」「负责事项」「参与事项」仅在勾选启用后出现
-  ['chkAllBtn','chkMineOwnerBtn','chkMineCcBtn'].forEach(function(id){
+  // #161/#196 「全选当前」「负责板块」「负责事项」「参与事项」仅在勾选启用后出现
+  ['chkAllBtn','chkMineColBtn','chkMineOwnerBtn','chkMineCcBtn'].forEach(function(id){
     const b=document.getElementById(id);
     if(b)b.style.display=CHK_MODE?'':'none';
   });
@@ -9917,6 +9943,52 @@ function selectCategoryCards(kind){
   saveItemChecked();saveColChecked();
   syncCheckStates();syncChkAllBtn();
   toast('已勾选 '+n+' 个'+mc.label+'事项'+(n<hit.length?('（'+(hit.length-n)+' 个无权限未勾）'):''));
+}
+// 【负责板块】（2026-11-17 用户需求）：一键勾选当前筛选结果中**我负责的板块**
+// 及其板块下全部事项；再点一次取消该类勾选。只操作命中板块，不影响其他板块
+// 的勾选状态。「我负责的板块」= 板块负责人本人（managed_columns）
+// ∪ 看板负责人名下板块（managed_boards → 该看板全部板块）∪ 管理员直通。
+// 板块勾选语义沿用 #162：勾选板块 = 删除时只删其下事项，板块本身保留。
+function myOwnedCols(){
+  return Object.keys(CHK_COL_CARDS).filter(function(k){
+    if(ME&&(ME.is_admin||ME.is_super))return true;
+    if((ME.managed_columns||[]).indexOf(k)>=0)return true;          // 板块负责人本人
+    const bid=CHK_COL_BOARD[k]||'';
+    return !!(bid&&(ME.managed_boards||[]).indexOf(bid)>=0);        // 看板负责人名下
+  });
+}
+function selectCategoryCols(){
+  if(!CHK_MODE){toast('请先启用勾选模式');return}
+  const keys=myOwnedCols().filter(function(k){return (CHK_COL_CARDS[k]||[]).length;});
+  if(!keys.length){toast('当前筛选结果中没有我负责的板块');return}
+  const allOn=keys.every(function(k){return COL_CHECKED.has(k);});
+  if(allOn){
+    // —— 取消：仅清我负责板块的勾选与其下事项（含子事项）——
+    keys.forEach(function(k){
+      COL_CHECKED.delete(k);
+      (CHK_COL_CARDS[k]||[]).forEach(function(id){
+        ITEM_CHECKED.delete(id);
+        (CHK_CARD_SUBS[id]||[]).forEach(function(s){ITEM_CHECKED.delete(s);});
+      });
+    });
+    saveItemChecked();saveColChecked();
+    syncCheckStates();syncChkAllBtn();
+    toast('已取消 '+keys.length+' 个我负责的板块的勾选');
+    return;
+  }
+  // —— 勾选：板块 + 其下全部事项（含子事项）；已在勾选态的板块只补事项 ——
+  let cols=0,cards=0;
+  keys.forEach(function(k){
+    if(!COL_CHECKED.has(k)){COL_CHECKED.add(k);cols++;}
+    (CHK_COL_CARDS[k]||[]).forEach(function(id){
+      if(!ITEM_CHECKED.has(id))cards++;
+      ITEM_CHECKED.add(id);
+      (CHK_CARD_SUBS[id]||[]).forEach(function(s){ITEM_CHECKED.add(s);});
+    });
+  });
+  saveItemChecked();saveColChecked();
+  syncCheckStates();syncChkAllBtn();
+  toast('已勾选我负责的板块 '+cols+' 个及其下 '+cards+' 个事项');
 }
 // #146 ID 列排序方向（双击表头切换）：1=升序 -1=降序
 var TM_SORT_DIR=1;
