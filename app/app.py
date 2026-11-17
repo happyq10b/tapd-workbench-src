@@ -1375,6 +1375,17 @@ def require_admin(username: str = Depends(require_auth)):
     return username
 
 
+def require_super(username: str = Depends(require_auth)):
+    """超级管理员（仅内置 admin 账号，不含 role='admin' 的普通管理员）。
+
+    2026-11-17 #143：数据导入（xlsx）收缩至超级管理员——导入是唯一能
+    批量灌入外部数据的写通道，权限与 /api/import（JSON 覆盖式恢复）看齐。
+    """
+    if username != SUPER_ADMIN:
+        raise HTTPException(403, '仅超级管理员可执行导入')
+    return username
+
+
 def require_writer(username: str = Depends(require_auth)):
     """写操作的**粗闸门**：只要求「已登录」。
 
@@ -8534,22 +8545,28 @@ XLSX_COLUMNS = [
     ('板块性质',   '_col_nature',  10),
     ('板块负责人', '_col_owner',   12),
     ('板块完成情况', '_col_completion', 12),
-    ('完成情况',   '_status_text', 10),
-    ('事项状态',   'status_name',  10),
+    # 2026-11-17 #143：原「完成情况」改名「事项状态」并与 status_name 合并——
+    # status_name 落库值 = statusText(status) 派生写入，与 _status_text 完全同义，
+    # 保留派生列（权威源 status，不怕存量脏数据），删除 status_name 列
+    ('事项状态',   '_status_text', 10),
     ('负责人',     'owner',        12),
     ('参与人',     'cc',           18),
-    ('关注人',     'follower',     12),
+    # 2026-11-17 #143 删除：关注人 follower（UI 无关注人功能，0 数据）、
+    #   优先级 priority（新建/编辑弹窗均无此字段，存量 1 条）、
+    #   标签 label（UI 无标签功能，382 条为 TAPD 同步时代存量）、
+    #   归档状态 is_filed（UI 无归档功能，0 条）
     ('周数',       'week_no',      14),
     ('开始时间',   'begin',        14),
     ('截止时间',   'due',          14),
     ('创建时间',   'created',      18),
     ('修改时间',   'modified',     18),
     ('完成时间',   'completed',    14),
-    ('优先级',     'priority',     10),
+    # 2026-11-17 #143 新增：结算情况（T-191j 逾期结算，与前端 settleText 同口径）
+    ('结算情况',   '_settle_text', 12),
     ('创建人',     'creator',      12),
     ('描述',       'description',  50),
-    ('标签',       'label',        14),
-    ('归档状态',   'is_filed',     10),
+    # 2026-11-17 #143 新增：代办任务（编辑弹窗「代办任务」，card_subtasks 表明细）
+    ('代办任务',   '_subtasks_text', 40),
     ('是否子事项', '_is_sub',      10),
     ('父事项名称', '_parent_name', 24),
 ]
@@ -8742,6 +8759,14 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
         _marks = ','.join('?' * len(_pids))
         for r in dbq('SELECT card_id, card_name FROM cards WHERE card_id IN (%s)' % _marks, _pids):
             _pmap[r['card_id']] = r['card_name']
+    # 代办任务明细（2026-11-17 #143：编辑弹窗「代办任务」，card_subtasks 表）
+    _stmap = {}
+    _cids = [c.get('card_id') for c in cards]
+    if _cids:
+        _marks = ','.join('?' * len(_cids))
+        for r in dbq('SELECT card_id, title, done FROM card_subtasks '
+                     'WHERE card_id IN (%s) ORDER BY card_id, sort, id' % _marks, _cids):
+            _stmap.setdefault(r['card_id'], []).append(r)
     for c in cards:
         _cm = _colmap.get((c.get('board_id'), c.get('column_name') or ''))
         c['_col_year'] = (_cm['year'] if _cm else '') or ''
@@ -8751,6 +8776,20 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
         c['_status_text'] = _status_text(c.get('status'))
         c['_is_sub'] = '是' if c.get('parent_id') else '否'
         c['_parent_name'] = _pmap.get(c.get('parent_id') or '', '')
+        # 结算情况（T-191j，与前端 settleText 同口径）：已完成事项的逾期结算
+        _od = c.get('overdue_days')
+        if _od is None or _od == '':
+            c['_settle_text'] = ''
+        else:
+            try:
+                _n = int(_od)
+                c['_settle_text'] = ('逾期%d天' % _n) if _n > 0 else (('提前%d天' % -_n) if _n < 0 else '按时完成')
+            except (TypeError, ValueError):
+                c['_settle_text'] = ''
+        # 代办任务明细：√ 已完成 / □ 未完成，换行分隔
+        _sts = _stmap.get(c.get('card_id') or '', [])
+        c['_subtasks_text'] = '\n'.join(
+            ('√ ' if r['done'] else '□ ') + (r['title'] or '') for r in _sts)
 
     wb = Workbook()
     ws = wb.active
@@ -9118,8 +9157,11 @@ XLSX_STATUS_MAP = {
 }
 
 @app.get('/api/import/template')
-def download_import_template(username: str = Depends(require_auth)):
-    """下载 TAPD 数据导入模板（.xlsx），含表头 + 字段说明 + 2 行示例"""
+def download_import_template(username: str = Depends(require_super)):
+    """下载 TAPD 数据导入模板（.xlsx），含表头 + 字段说明 + 2 行示例
+
+    2026-11-17 #143：随导入功能一并收缩至超级管理员（模板是导入流程入口）。
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -9262,8 +9304,11 @@ def download_import_template(username: str = Depends(require_auth)):
     )
 
 @app.post('/api/import/xlsx')
-async def import_xlsx(request: Request, username: str = Depends(require_editor)):
-    """从上传的 .xlsx 导入 TAPD 数据（追加式，不删除既有数据）"""
+async def import_xlsx(request: Request, username: str = Depends(require_super)):
+    """从上传的 .xlsx 导入 TAPD 数据（追加式，不删除既有数据）
+
+    2026-11-17 #143：权限收缩至超级管理员（原 require_editor）。
+    """
     if 'multipart/form-data' not in (request.headers.get('content-type') or ''):
         raise HTTPException(400, '请以 multipart/form-data 方式上传 xlsx 文件')
     form = await request.form()

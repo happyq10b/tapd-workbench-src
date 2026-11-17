@@ -3355,7 +3355,10 @@ function refreshToolbarOps(canEdit){
     // 模板管理并入导出弹窗（页签），外部不再单设按钮
     // #161：导出升级为「导出勾选」—— 仅导出当前用户勾选的事项
     {label:'导出勾选（xlsx）',fn:function(){openExportModal();}},
-    {label:'导入（xlsx）',fn:function(){openImportModal();}},
+    // #143（2026-11-17）：导入收缩至**超级管理员**（仅内置 admin 账号，ME.is_super）——
+    // 导入是唯一批量灌入外部数据的写通道；普通管理员（role='admin'）同样不可见。
+    // 后端 /api/import/xlsx、/api/import/template 已同步收紧（require_super）
+    ...(ME&&ME.is_super?[{label:'导入（xlsx）',fn:function(){openImportModal();}}]:[]),
     // #158/#161 批量删除：只删当前用户勾选的板块+事项（勾选按用户隔离）；无勾选不执行
     {label:'— 危险操作 —',disabled:true},
     {label:'批量删除勾选',fn:function(){bulkDeleteChecked();}},
