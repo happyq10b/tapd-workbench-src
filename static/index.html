@@ -1264,9 +1264,12 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* #205j（2026-11-18）：预览界面人员名单单行省略 —— 参与人/负责人可能几十人，
    换行会把元信息区顶开几屏（截图反馈）。.m1l 包住名单值：
    inline-block + max-width:100% + nowrap + ellipsis → 超宽时独占一行、
-   行末「…」截断；人数少时仍与前后字段同行，不破坏原排版。 */
+   行末「…」截断；人数少时仍与前后字段同行，不破坏原排版。
+   #205j-bis（用户反馈）：点击「…」展开全部名单（.open 取消截断换行显示），
+   再点收起；悬停提示仅在真正截断时出现（metaClampTitles 按溢出判定写入）。 */
 .detail-meta .m1l{display:inline-block;max-width:100%;vertical-align:bottom;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.detail-meta .m1l.open{white-space:normal;text-overflow:clip}
 .parent-box{border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--bg);
   font-size:12.5px;color:var(--text2);line-height:1.8;word-break:break-all}
 .parent-box .pv{color:var(--text);font-weight:600}
@@ -1780,13 +1783,15 @@ function goLogin(){
       </span>
       <!-- 专项/日常筛选（#205j 2026-11-18）：按板块性质（看板 board_config.attr）客户端
            过滤板块行（cols 载荷自带 attr）。与板块状态筛选同款 combo 交互（多选+全选/清空）。
-           位置：状态与负责人之间（用户指定）；label 仅配一个 emoji。 -->
+           位置：状态与负责人之间（用户指定）；label = 🏷️ 性质（与其他框等宽 56px），
+           「专项/日常」放 input placeholder（#205j-bis：框体尺寸与其他筛选框完全一致）；
+           选中后由计数徽标占位、placeholder 自动隐藏（既有 .has-count 规则）。 -->
       <span class="combo-filter" id="attrFilterWrap" title="按板块性质筛选（专项/日常，可多选）">
-        <span class="cf-label" style="width:auto">🏷️ 专项/日常</span>
+        <span class="cf-label">🏷️ 性质</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="attrFilterInput" autocomplete="off" readonly
-                 placeholder="" onclick="toggleAttrDrop(event)" onfocus="toggleAttrDrop(event)"
-                 aria-label="专项/日常筛选，可多选">
+                 placeholder="专项/日常" onclick="toggleAttrDrop(event)" onfocus="toggleAttrDrop(event)"
+                 aria-label="板块性质筛选（专项/日常），可多选">
           <span class="cf-count" id="attrFilterCount"></span>
           <span class="cf-chips" id="attrFilterChips"></span>
         </span>
@@ -2782,6 +2787,9 @@ function goLogin(){
    颜色直接落在 span 上 → 优先级高于 .cf-opt.on / .cf-opt:hover 的继承色，
    勾选态（on）与当前周（cur-week）叠加时高亮依然生效 */
 .cf-opt.cur-week span{color:#CCB484;font-weight:700}
+/* #205j-bis：性质框 placeholder「专项/日常」需占满 field 显示（其余框 input 缩窄让位徽标）；
+   ID 优先级高于 has-count 的收窄规则 → 选中后 input 自动缩到徽标旁剩余空间 */
+#attrFilterInput{flex:1 1 auto;min-width:0;font-size:12px}
 .cf-opt input{width:14px;height:14px;accent-color:var(--primary);cursor:pointer;margin:0}
 .cf-empty{padding:8px 12px;font-size:12px;color:var(--text3)}
 .cf-tip{padding:6px 12px;font-size:11.5px;color:var(--text3);border-bottom:1px solid var(--border);margin-bottom:3px;white-space:normal}
@@ -5843,7 +5851,7 @@ async function openPersonFilterPicker(anchor){
     if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
-  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(_cand,'当前看板负责人/参与人'),
+  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolOrgShapeTree(_cand,'当前看板负责人/参与人'),
       showNoneOwner:true, clearable:true, keyword:''});
 }
 // T-0189 参与人筛选：与负责人同款（2026-11-17 候选联动：仅当前所选看板的负责人+参与人）
@@ -5862,7 +5870,7 @@ async function openCcFilterPicker(anchor){
     paintFilterCombos();
     reload(1);
   }, {mode:'filter', pickMode:'person', width:360, height:460,
-      tree:poolTree(_candCc,'当前看板负责人/参与人'),
+      tree:poolOrgShapeTree(_candCc,'当前看板负责人/参与人'),
       clearable:true, keyword:''});
 }
 function applyPersonFilter(kind, persons){
@@ -7752,6 +7760,48 @@ function poolTree(names,label){
   return [{id:-99,name:'__pool__',label:label||'可选人员',children:[],
            members:(names||[]).map(function(n){return {name:n,node_id:-99};})}];
 }
+// #205k（2026-11-18）：筛选树候选按**架构节点**折叠分组（负责人/参与人树共用）——
+//   · 候选 label「姓名(账号)」→ BC_ACL_MEMBERS 反查成员 → team_members.depts
+//     挂到同名架构节点下（可属多部门 → 多节点各出现一次，与 bcDeptShapeTree 同口径）；
+//   · 挂不上节点（无部门/部门不在树/无成员映射）→ 收进合成节点「未分组」（默认展开）；
+//   · 剪枝：直属无候选且子树全空的节点不渲染；各节点默认展开，tpToggle 手动折叠互不干扰；
+//   · 无架构数据 → 退回 poolTree 扁平池（与看板管理树同兜底）。
+function poolOrgShapeTree(labels,label){
+  if(!ORG_TREE||!ORG_TREE.length)return poolTree(labels,label);
+  const byName={};
+  (function walk(ns){(ns||[]).forEach(function(n){ if(!(n.name in byName))byName[n.name]=n.id; walk(n.children||[]); });})(ORG_TREE);
+  const label2m={};
+  BC_ACL_MEMBERS.forEach(function(m){ if(!(m.label in label2m))label2m[m.label]=m; });
+  const mounted={};
+  const rest=[];
+  (labels||[]).forEach(function(lb){
+    const m=label2m[lb];
+    let hit=false;
+    if(m){
+      (m.depts||[]).forEach(function(dn){
+        const id=byName[dn];
+        if(id!==undefined){(mounted[id]=mounted[id]||[]).push({name:lb,node_id:id});hit=true;}
+      });
+    }
+    if(!hit)rest.push({name:lb,node_id:-98});
+  });
+  function shape(ns){
+    const out=[];
+    (ns||[]).forEach(function(n){
+      const kids=shape(n.children||[]);
+      const mem=mounted[n.id]||[];
+      if(!mem.length&&!kids.length)return;
+      out.push(Object.assign({},n,{children:kids,members:mem}));
+    });
+    return out;
+  }
+  const shaped=shape(ORG_TREE);
+  if(rest.length)shaped.push({id:-98,name:'__pool__',label:'未分组',children:[],members:rest});
+  if(!shaped.length)return poolTree(labels,label);   // 整树剪空 → 退回扁平池
+  (function ex(ns){(ns||[]).forEach(function(n){ TREE_EXPANDED.add(n.id); ex(n.children||[]); });})(shaped);
+  TREE_EXPANDED.add(-98);
+  return shaped;
+}
 // ── 看板管理选人树（T-0186）：架构树形状 + 部门成员挂载 ──
 // 口径：
 //   · **保留原有架构树节点层级**（不再是 poolTree 的单节点扁平池）；
@@ -7909,6 +7959,22 @@ async function openColumnEdit(d,fromDetail){
   return true;
 }
 // ---------- 板块浏览界面（T-0183；T-0188 动态区改为「待办 + 评论」）----------
+// #205j-bis（2026-11-18）：预览元信息人员名单（.m1l）交互 ——
+//   · metaClampTitles：渲染后按「真溢出」给截断的名单写悬停提示（未截断不给提示）
+//   · toggleMetaNames：点击在「单行省略 ↔ 全部展开」间切换（.open 取消截断）
+function metaClampTitles(id){
+  const m=document.getElementById(id);
+  if(!m)return;
+  m.querySelectorAll('.m1l').forEach(function(s){
+    s.classList.remove('open');
+    s.title=(s.scrollWidth>s.clientWidth+1)?'点击展开全部':'';
+  });
+}
+function toggleMetaNames(el){
+  if(!el)return;
+  const open=el.classList.toggle('open');
+  el.title=open?'点击收起':'点击展开全部';
+}
 // 点击板块标题 → 浏览界面（元信息 + 描述 + 待办/评论模块 + 头部「✏️ 编辑」按钮）；
 // 浏览**不认锁**（与事项详情一致），进入编辑时才认领锁。
 // dataset 来自行内 data-*（openColumnDetail）或保存后的表单值（backToColumnDetail）。
@@ -7949,8 +8015,9 @@ function renderColumnDetail(d){
   document.getElementById('cd_meta').innerHTML=
     `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
     // T-191j 界面统一：完成情况不再在元信息里重复呈现 —— 由头部完成情况按钮统一承载（与事项状态同范式）
-    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<span class="m1l"><b>${esc(parts.length?parts.join('、'):'—')}</b></span><br>`
+    +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(parts.length?parts.join('、'):'—')}</b></span><br>`
     +`创建日期：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　创建人：<b>${esc(d.creator||'—')}</b>　截止日期：<b>${esc(_due||'—')}</b>　倒计时：${_cdHtml}`;
+  metaClampTitles('cd_meta');
   const dd=document.getElementById('cd_desc');
   if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
   // 待办 + 评论 + 操作记录（T-0188/T-204b）：三者互不依赖 → 并行拉取；
@@ -9433,7 +9500,8 @@ async function openDetail(id){
   const _dSettle=(c.status==='done')?settleHtml(c.overdue_days):null;
   document.getElementById('d_meta').innerHTML=
     `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b><br>`+
-    `负责人：<span class="m1l"><b>${esc(c.owner||'—')}</b></span>　周数：<b>${esc(c.week_no||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>　倒计时：<b>${_dSettle?_dSettle:(c.status==='done'?'已完成 · 倒计时停用':`<span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span>`)}</b>`;
+    `负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'—')}</b></span>　周数：<b>${esc(c.week_no||'—')}</b>　创建日期：<b>${esc(fmtDate(c.created)||'—')}</b>　截止日期：<b>${esc(fmtDate(c.due)||'—')}</b>　倒计时：<b>${_dSettle?_dSettle:(c.status==='done'?'已完成 · 倒计时停用':`<span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span>`)}</b>`;
+  metaClampTitles('d_meta');
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
   // 评论预览（2026-11-13）：评论已按时间倒序（最新在前）→ 最近 10 条 = 前 10 条
