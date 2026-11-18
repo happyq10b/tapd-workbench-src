@@ -1020,6 +1020,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .status-tag.done{background:#f6ffed;color:#17853f;border:1px solid #b7eb8f}
 .status-tag.progressing{background:#e6f7ff;color:var(--primary);border:1px solid #91d5ff}
 .status-tag.pending{background:#fff1f0;color:#cb3939;border:1px solid #ffa39e}
+/* #205t（2026-11-18）：「未开始」统一灰色系 —— 与预览界面 statusDotColor(#8a93a6)
+   同一色系，目录列表（status-tag）与预览/弹窗（status-btn）内外一致 */
+.status-tag.notstarted{background:#f0f2f5;color:#6b7280;border:1px solid #d5dbe3}
 /* 状态标签同时是行内唯一的状态切换入口：可点击，带按压态与涟漪反馈 */
 .status-tag-act{cursor:pointer;-webkit-user-select:none;user-select:none;transition:transform .12s,box-shadow .15s,filter .15s}
 .status-tag-act:hover{box-shadow:0 0 0 2px rgba(22,119,255,.16);filter:brightness(.97)}
@@ -1041,6 +1044,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .status-btn.progressing .status-dot{background:#1890ff;box-shadow:0 0 0 3px rgba(24,144,255,.18)}
 .status-btn.open{background:#fff1f0;border-color:#ffa39e;color:#cf1322}
 .status-btn.open .status-dot{background:#ff4d4d;box-shadow:0 0 0 3px rgba(255,77,77,.16)}
+/* #205t（2026-11-18）：「未开始」状态按钮补样式（原缺失 → 白底无点，与列表灰色标签不一致） */
+.status-btn.notstarted{background:#f0f2f5;border-color:#d5dbe3;color:#6b7280}
+.status-btn.notstarted .status-dot{background:#8a93a6;box-shadow:0 0 0 3px rgba(138,147,166,.18)}
 .status-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:60;min-width:134px;background:#fff;
   border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);
   padding:4px;display:flex;flex-direction:column;gap:1px}
@@ -6340,10 +6346,13 @@ function renderBoard(cards,cols,q,colHits){
       return;
     }
   }
-  // 专项/日常过滤（#205j 2026-11-18）：按看板性质（cols 载荷自带 attr）客户端过滤；
-  // 未配置性质的板块仅在「未筛选」时显示（与 colStatus 的空值视同口径一致 → 不显示）
+  // 专项/日常过滤（#205j 2026-11-18；#205t 2026-11-18 修复）：按**板块自身性质**
+  // （board_columns.nature，cols 载荷自带）客户端过滤。
+  // ⚠️ 修复记录：原实现读 m.attr —— 那是**看板级** board_config.attr（整块看板一个值），
+  // 板块级性质 nature 完全没参与 → 看板=日常时选「专项」恒空、选「日常」连专项板块一起放行，
+  // 表现为「专项/日常 筛选颠倒」。未配置性质的板块视同「日常」（与新建默认一致）。
   if(ATTR_SEL&&ATTR_SEL.size){
-    names=names.filter(k=>{const m=cmeta[k];return !!m&&ATTR_SEL.has(m.attr||'')});
+    names=names.filter(k=>{const m=cmeta[k];return !!m&&ATTR_SEL.has(m.nature||'日常')});
     if(!names.length){
       c.innerHTML='<div class="empty">没有符合性质条件的板块</div>';
       return;
@@ -8978,7 +8987,9 @@ async function saveSubtaskTitle(sid,title){
 // 状态标签：主事项行、子事项目录行、抽屉子事项行共用同一套 class 与文案，保证视觉一致
 // 同时它就是行内**唯一的状态切换入口**（点击在「未完成 ⇄ 已完成」间切换），
 // 行内不再另设「完成」按钮，避免同一行出现两个做同一件事的控件
-function statusCls(s){return s==='done'?'done':s==='progressing'?'progressing':'pending'}
+// #205t（2026-11-18 修复）：未开始（notstarted）独立灰色 class —— 原实现落入
+// 'pending'（未完成红）分支，目录列表显示红色、与预览界面（灰色圆点）不一致
+function statusCls(s){return s==='done'?'done':s==='progressing'?'progressing':s==='notstarted'?'notstarted':'pending'}
 function statusText(s){return s==='done'?'已完成':s==='progressing'?'进行中':s==='notstarted'?'未开始':'未完成'}
 // 目录中的事项完成情况：**只读展示**（2026-11-04 需求3）
 // ⚠️ 变更语义：此前点击标签可切换完成/未完成；现在移除该交互 ——

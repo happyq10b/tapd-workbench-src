@@ -1608,9 +1608,12 @@ def ensure_column(board_id, column_name, column_id='', creator='', created_at=''
         return key
     cid = column_id or ('COL' + str(int(time.time() * 1000)))
     ca = created_at or time.strftime('%Y-%m-%d %H:%M:%S')
-    dbe('INSERT OR IGNORE INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned)'
-        ' VALUES (?,?,?,?,?,?,?,?,0)',
-        (key, cid, board_id, column_name, ca, creator or '', '日常', (ca or '')[:4]))
+    # #205t（2026-11-18 修复）：隐式建板块（新建事项带新板块名 / 导入等）也要落
+    # #205n 口径的默认完成情况「进行中」—— 原来缺省走表默认 'open'（未完成），
+    # 导致新建板块状态显示与状态筛选（进行中）对不上。
+    dbe('INSERT OR IGNORE INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, completion)'
+        ' VALUES (?,?,?,?,?,?,?,?,0,?)',
+        (key, cid, board_id, column_name, ca, creator or '', '日常', (ca or '')[:4], 'progressing'))
     return key
 
 
@@ -3387,10 +3390,11 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     else:
         new_cid = 'COL' + str(int(time.time() * 1000))
         parts = _norm_acl_participants(req.participants) if req.participants else ''
-        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, description)'
-            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?)',
+        # #205t（2026-11-18）：首次登记同样落 #205n 默认「进行中」（表默认是 'open'）
+        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, description, completion)'
+            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)',
             (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or '', parts,
-             (req.description or '').strip()))
+             (req.description or '').strip(), 'progressing'))
     log_action('__column__', username, 'update', f'编辑板块 {name}')
     # 板块操作记录（2026-11-13）：创建 / 编辑都落 col_key 流水（板块浏览界面「操作记录」）
     log_column_action(new_key, username, 'update' if old else 'create',
@@ -4371,9 +4375,12 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
         raise HTTPException(400, '性质只能是「日常」或「专项」')
     year = _norm_year(req.year) or (src['year'] or '') or created[:4]
     new_cid = 'COL' + str(int(time.time() * 1000))
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, copy_from)'
-        ' VALUES (?,?,?,?,?,?,?,?,0,?)',
-        (key, new_cid, req.board_id, name, created, username, nature, year, src['col_key']))
+    # #205t（2026-11-18）：副本继承源板块完成情况（原缺省落表默认 'open'，状态凭空改变）
+    _src_completion = (src['completion'] or '').strip() or 'progressing'
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, copy_from, completion)'
+        ' VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+        (key, new_cid, req.board_id, name, created, username, nature, year, src['col_key'],
+         _src_completion))
     log_action('__column__', username, 'copy', f'复制板块 {name}')
     audit_log(username, client_ip(request), 'column_copy', f'板块 {src["col_key"]}',
               f'复制板块「{src["column_name"]}」→「{name}」（目标看板 {req.board_id}）', 'success')
@@ -4424,11 +4431,12 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
         new_key = new_board_id + '::' + c['column_name']
         conn.execute(
             'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
-            ' creator, nature, pinned, year, copy_from, owner, participants)'
-            ' VALUES (?,?,?,?,?,?,?,0,?,?,?,?)',
+            ' creator, nature, pinned, year, copy_from, owner, participants, completion)'
+            ' VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?)',
             (new_key, new_cid, new_board_id, c['column_name'], c['created_at'],
              username, c['nature'], c['year'], c['col_key'],
-             c.get('owner') or '', c.get('participants') or ''))
+             c.get('owner') or '', c.get('participants') or '',
+             (c.get('completion') or '').strip() or 'progressing'))
         col_id_map[c['column_id']] = new_cid
         key_map[c['col_key']] = new_key
     # ── ② 事项（主事项 + 子事项）──
