@@ -1094,11 +1094,12 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    行高基准（CDP 实测）：pp-tag 25px（font12+line-height+padding4+border2）→ 87px；
    cf-chip 22px（font11.5+padding2+border2）→ 78px；gap 6px → 3 行 = 高×3 + 6×2。 */
 .pp-tags{max-height:87px;overflow:hidden;position:relative}
-#bc_owner_box,#bc_parts_box{max-height:78px;overflow:hidden;position:relative}
+#bc_owner_box,#bc_parts_box{max-height:79px;overflow:hidden;position:relative}
 .pp-tags.clamped::after,#bc_owner_box.clamped::after,#bc_parts_box.clamped::after{
-  content:'…';position:absolute;right:1px;bottom:0;
-  font-size:12px;font-weight:700;color:var(--text2);line-height:20px;
-  background:#fff;padding:0 2px 0 16px}
+  content:'…';position:absolute;right:2px;bottom:1px;
+  font-size:13px;font-weight:700;color:var(--text2);line-height:20px;
+  background:linear-gradient(to right,rgba(255,255,255,0),#fff 10px);
+  padding:0 3px 0 12px;border-radius:8px}
 /* 只读模式（T-191l）：无指派权的用户只展示当前值 —— 隐藏输入行与标签删除叉 */
 .pp-readonly .pp-ip{display:none}
 .pp-readonly .pp-tag i{display:none}
@@ -13720,18 +13721,20 @@ async function bcAfterDelete(deletedIds){
 //   白底「…」角标盖住第 3 行末尾（纯 CSS 无法条件判断溢出，由 JS 补判定）。
 function applyPersonClamp(el){
   if(!el)return;
-  // ⚠️ flex-wrap 容器的 scrollHeight 不反映溢出内容（实测 30 人 10 行仍 ≈ clientHeight）
-  // → 改用子元素 bottom 判定：最后一个 chip 的底缘 − 容器顶缘 > 容器可视高 = 溢出
-  let over = false;
+  // 「…」截断策略（#205f 用户反馈：半裁 chip 会留下残影，必要时缩减一个成员展示）
+  // → 按 **chip 整体**裁：第 4 行起的 chip 整个隐藏（display:none），第 3 行完整显示；
+  //   有隐藏即加 .clamped（右下角白底渐变「…」角标收尾）。
+  // 步骤：① 先还原上一轮隐藏的 chips ② 再按 chip.top 是否进入第 4 行区域重新隐藏。
+  // top 判定（而非 bottom）：chip 的顶缘越过 3 行可视区底界（clientHeight）即第 4 行。
   const kids = el.children;
-  if(kids.length){
-    const top = el.getBoundingClientRect().top;
-    let maxBottom = top;
-    for(const k of kids){
-      const b = k.getBoundingClientRect().bottom;
-      if(b > maxBottom)maxBottom = b;
+  for(const k of kids){ if(k.style.display==='none') k.style.display=''; }
+  let over = false;
+  const top = el.getBoundingClientRect().top;
+  for(const k of kids){
+    if(k.getBoundingClientRect().top - top >= el.clientHeight - 1){
+      k.style.display = 'none';
+      over = true;
     }
-    over = maxBottom - top > el.clientHeight + 2;
   }
   el.classList.toggle('clamped', over);
 }
