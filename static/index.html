@@ -689,7 +689,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .tb-stat-band .stat-card{padding:7px 10px}
 .tb-stat-band .stat-label{font-size:11px}
 .tb-stat-band .stat-value{font-size:16px;letter-spacing:0}
-.stat-value.blue{color:var(--primary)}.stat-value.green{color:#178740}.stat-value.orange{color:#a46907}.stat-value.red{color:#d73d3d}
+.stat-value.blue{color:var(--primary)}.stat-value.green{color:#178740}.stat-value.orange{color:#a46907}.stat-value.red{color:#d73d3d}.stat-value.gray{color:#8a93a6}
 /* 部门页顶部切换条：只在部门主页面显示 */
 .dept-switch-bar{display:flex;align-items:center;gap:10px;max-width:1440px;margin:0 auto;padding:12px 24px 0;flex-wrap:wrap}
 .dept-switch-bar .dsw-label{font-size:12.5px;color:var(--text2)}
@@ -4054,13 +4054,14 @@ function renderDeptStats(d){
   const box=document.getElementById('deptStatsBody');
   if(!box)return;
   const s=d.stats||{};
-  // 核心指标（4 个）：总事项 / 已完成 / 进行中 / 未完成 —— 同屏展示
+  // 核心指标（5 个）：总事项 / 未开始 / 进行中 / 已完成 / 未完成 —— 同屏展示（#205o）
   const core=[
     {k:'总事项',v:s.total||0,c:'blue'},
-    {k:'已完成',v:s.done||0,c:'green'},
+    {k:'未开始',v:s.notstarted||0,c:'gray'},
     {k:'进行中',v:s.progressing||0,c:'blue'},
+    {k:'已完成',v:s.done||0,c:'green'},
     {k:'未完成',v:s.open||0,c:'orange'},
-  ];
+  ];   // #205o 四态（用户口径排序）+ 总事项
   // 次要指标：逾期 / 未分配负责人 —— 折叠进「更多」
   const more=[
     {k:'已逾期',v:s.overdue||0,c:'red'},
@@ -5265,8 +5266,9 @@ async function renderProgress(){
     };
     box.innerHTML=`
       <div class="stat-card"><div class="stat-label">总事项</div><div class="stat-value blue">${ov.total}</div></div>
-      ${card('done','已完成','green',ov.done)}
+      ${card('notstarted','未开始','gray',ov.notstarted||0)}
       ${card('progressing','进行中','blue',ov.progressing||0)}
+      ${card('done','已完成','green',ov.done)}
       ${card('open','未完成','orange',ov.open)}`;
   }
   await renderNoticeBar();
@@ -6433,7 +6435,7 @@ function onYearFilterClick(ev){
 // ---------- 板块状态筛选（2026-11-06 #81） ----------
 // completion ∈ ('open','progressing','done')（与后端 COLUMN_COMPLETIONS 同一套）；
 // 空集合 = 全部。客户端过滤板块行（/api/cards 的 cols 载荷自带 completion）。
-const COL_STATUS_OPTS=[['open','未完成'],['progressing','进行中'],['done','已完成']];
+const COL_STATUS_OPTS=[['notstarted','未开始'],['progressing','进行中'],['done','已完成'],['open','未完成']];   // #205o 用户口径排序
 let COL_STATUS_SEL=new Set();     // 已选状态（空 = 全部）
 let _colStatusDropOpen=false;
 // ── 专项/日常筛选（#205j 2026-11-18）：按板块性质（看板 attr）客户端过滤，交互镜像板块状态 ──
@@ -6607,7 +6609,7 @@ function srItemHtml(x){
     <span class="sr-name" onclick="openDetail('${x.card_id}')" title="${esc(x.card_name)}">${esc(x.card_name)}</span>
     <span class="sr-badge" title="所属板块 / 看板">${esc(badge)}</span>
     <span class="fcols">${fieldCols({owner:x.owner,created:x.created,due:x.due,status:x.status,overdue_days:x.overdue_days})}</span>
-    <span class="slot-status"><span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':'pending'}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':'未完成'}</span></span>
+    <span class="slot-status"><span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':x.status==='notstarted'?'pending':''}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':x.status==='notstarted'?'未开始':'未完成'}</span></span>
   </div>`;
 }
 // 排序比较：置顶优先 → 创建时间降序 → 名称（保证同分时顺序稳定）
@@ -7313,7 +7315,7 @@ async function openEdit(id,preloaded){
   window._editCc=(c.cc||'').split(';').filter(Boolean);
   document.getElementById('e_name').value=c.card_name||'';
   // 状态不在表单里设置 —— 统一由弹窗头部的状态按钮承载（见 statusPickerHtml）
-  const curStatus=c.status==='done'?'done':c.status==='progressing'?'progressing':'open';
+  const curStatus=c.status==='done'?'done':c.status==='progressing'?'progressing':c.status==='notstarted'?'notstarted':'open';
   const esOps=document.getElementById('e_status_ops');
   if(esOps)esOps.innerHTML=statusPickerHtml(curStatus,'e');
   document.getElementById('e_begin').value=c.begin||'';
@@ -8732,7 +8734,7 @@ async function saveSubtaskTitle(sid,title){
 // 同时它就是行内**唯一的状态切换入口**（点击在「未完成 ⇄ 已完成」间切换），
 // 行内不再另设「完成」按钮，避免同一行出现两个做同一件事的控件
 function statusCls(s){return s==='done'?'done':s==='progressing'?'progressing':'pending'}
-function statusText(s){return s==='done'?'已完成':s==='progressing'?'进行中':'未完成'}
+function statusText(s){return s==='done'?'已完成':s==='progressing'?'进行中':s==='notstarted'?'未开始':'未完成'}
 // 目录中的事项完成情况：**只读展示**（2026-11-04 需求3）
 // ⚠️ 变更语义：此前点击标签可切换完成/未完成；现在移除该交互 ——
 //    目录只负责呈现，修改完成情况请到事项详情/编辑界面。
@@ -9762,18 +9764,18 @@ async function openDetailEdit(){
 // 状态在弹窗里只出现这一处：按钮本身显示当前状态，点击展开状态菜单完成设置。
 // 编辑弹窗内部（表单区）不再有状态下拉 —— 状态设置统一收敛到弹窗主界面（头部）。
 // 详情 / 编辑 / 新建三个弹窗共用这套渲染与交互，仅菜单 id 不同（ctx='d' / 'e' / 'n'）。
-function statusDotColor(v){return v==='done'?'#52c41a':v==='progressing'?'#1890ff':'#ff4d4d'}
+function statusDotColor(v){return v==='done'?'#52c41a':v==='progressing'?'#1890ff':v==='notstarted'?'#8a93a6':'#ff4d4d'}
 function statusMenuId(ctx){return ctx==='e'?'e_status_menu':ctx==='n'?'n_status_menu':ctx==='c'?'c_status_menu':ctx==='ce'?'ce_status_menu':'d_status_menu'}
 function statusPickerId(ctx){return ctx==='e'?'e_status_picker':ctx==='n'?'n_status_picker':ctx==='c'?'c_status_picker':ctx==='ce'?'ce_status_picker':'d_status_picker'}
 function statusPickerHtml(status,ctx){
-  const st=status==='done'?'done':status==='progressing'?'progressing':'open';
+  const st=status==='done'?'done':status==='progressing'?'progressing':status==='notstarted'?'notstarted':'open';
   const pid=statusPickerId(ctx);
   const mid=statusMenuId(ctx);
   return `<span class="status-picker" id="${pid}">`
     +`<button class="status-btn ${st}" onclick="toggleStatusMenu(event,'${ctx}')" title="点击更改状态">`
     +`<span class="status-dot"></span>${statusText(st)}<span class="status-caret">▼</span></button>`
     +`<div class="status-menu" id="${mid}" hidden>`
-    +['open','progressing','done'].map(v=>`<button class="${v===st?'cur':''}" onclick="pickStatus('${ctx}','${v}')">`
+    +['notstarted','progressing','done','open'].map(v=>`<button class="${v===st?'cur':''}" onclick="pickStatus('${ctx}','${v}')">`   // #205o 用户口径排序
       +`<span class="status-dot" style="background:${statusDotColor(v)}"></span>${statusText(v)}</button>`).join('')
     +`</div></span>`;
 }

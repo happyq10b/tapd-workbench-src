@@ -1488,7 +1488,7 @@ def filter_rows(rows, boards, columns):
 COLUMN_NATURES = {'日常', '专项'}
 # 板块「完成情况」取值（2026-11-04 需求3）——与事项 status 同一套语义
 # open=未完成 / progressing=进行中 / done=已完成
-COLUMN_COMPLETIONS = ('open', 'progressing', 'done')
+COLUMN_COMPLETIONS = ('notstarted', 'progressing', 'done', 'open')   # #205o 追加「未开始」（用户口径排序）
 
 
 def _settle_days(due):
@@ -2733,7 +2733,7 @@ def overview(board_id: Optional[str] = None, board_ids: Optional[str] = None,
     elif board_id:
         rows = [r for r in rows if r['board_id'] == board_id]
     names = {}
-    by_board = defaultdict(lambda: {'total': 0, 'done': 0, 'progressing': 0})
+    by_board = defaultdict(lambda: {'total': 0, 'done': 0, 'progressing': 0, 'notstarted': 0})
     owner_cnt, owner_done = defaultdict(int), defaultdict(int)
     for r in rows:
         names[r['board_id']] = r['board_name']
@@ -2742,6 +2742,8 @@ def overview(board_id: Optional[str] = None, board_ids: Optional[str] = None,
             by_board[r['board_id']]['done'] += 1
         elif r['status'] == 'progressing':
             by_board[r['board_id']]['progressing'] += 1
+        elif r['status'] == 'notstarted':
+            by_board[r['board_id']]['notstarted'] += 1
         for name in (r['owner'] or '').split(';'):
             name = name.strip()
             if not name:
@@ -2755,7 +2757,8 @@ def overview(board_id: Optional[str] = None, board_ids: Optional[str] = None,
         board_stats.append({'board_id': bid, 'board_name': names.get(bid, bid),
             'total': s['total'], 'done': s['done'],
             'progressing': s['progressing'],
-            'open': s['total'] - s['done'] - s['progressing'],
+            'notstarted': s['notstarted'],
+            'open': s['total'] - s['done'] - s['progressing'] - s['notstarted'],
             'done_rate': round(s['done'] / s['total'] * 100, 1) if s['total'] else 0})
     owner_stats = [{'owner': o, 'total': owner_cnt[o], 'done': owner_done.get(o, 0)}
                    for o in owner_cnt]
@@ -2763,17 +2766,18 @@ def overview(board_id: Optional[str] = None, board_ids: Optional[str] = None,
     return {'total': sum(s['total'] for s in board_stats),
             'done': sum(s['done'] for s in board_stats),
             'progressing': sum(s['progressing'] for s in board_stats),
+            'notstarted': sum(s['notstarted'] for s in board_stats),
             'open': sum(s['open'] for s in board_stats),
             'boards': board_stats, 'owners': owner_stats[:20]}
 
 def _status_text(st):
     """状态 → 中文文案（与前端 statusText 同口径）"""
-    return '已完成' if st == 'done' else ('进行中' if st == 'progressing' else '未完成')
+    return '已完成' if st == 'done' else ('进行中' if st == 'progressing' else ('未开始' if st == 'notstarted' else '未完成'))
 
 
 def _completion_text(st):
     """板块完成情况 → 中文文案（与事项 status 同一套语义）"""
-    return '已完成' if st == 'done' else ('进行中' if st == 'progressing' else '未完成')
+    return '已完成' if st == 'done' else ('进行中' if st == 'progressing' else ('未开始' if st == 'notstarted' else '未完成'))
 
 
 def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_ids=None,
@@ -2874,7 +2878,10 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
                     return True
                 if 'progressing' in _sset and st == 'progressing':
                     return True
-                if 'open' in _sset and st != 'done' and st != 'progressing':
+                if 'notstarted' in _sset and st == 'notstarted':
+                    return True
+                # open = 未完成（非 done/progressing/notstarted；#205o「未开始」独立成态）
+                if 'open' in _sset and st not in ('done', 'progressing', 'notstarted'):
                     return True
                 return False
             mine = [r for r in mine if _status_hit(r)]
@@ -3144,7 +3151,7 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     # 新建板块的完成情况（2026-11-04 需求3）：创建者声明，默认「进行中」（#205n）
     new_completion = (req.completion or '').strip() or 'progressing'
     if new_completion not in COLUMN_COMPLETIONS:
-        raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
+        raise HTTPException(400, '完成情况只能是「未开始」「未完成」「进行中」或「已完成」')
     dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion, description, due_date)'
         ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?)',
         (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts, new_completion,
@@ -3229,7 +3236,7 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     if req.completion is not None:
         cv = (req.completion or '').strip() or 'open'
         if cv not in COLUMN_COMPLETIONS:
-            raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
+            raise HTTPException(400, '完成情况只能是「未开始」「未完成」「进行中」或「已完成」')
         new_completion = cv
         if new_completion == 'done' and old:
             _bid = old['board_id'] if 'board_id' in old.keys() else (req.board_id or '')
@@ -8218,6 +8225,8 @@ def get_dept_page(dept: str, username: str = Depends(require_auth)):
                 stat['done'] += 1
             elif st == 'progressing':
                 stat['progressing'] += 1
+            elif st == 'notstarted':
+                stat['notstarted'] += 1
             else:
                 stat['open'] += 1
             if r['due'] and st != 'done' and r['due'] < today:
@@ -9221,7 +9230,7 @@ def norm_xlsx_header(h):
 XLSX_STATUS_MAP = {
     '已完成': 'done', '完成': 'done', 'done': 'done', '已关闭': 'done', 'closed': 'done',
     '进行中': 'progressing', '处理中': 'progressing', 'progressing': 'progressing',
-    '未开始': 'open', '待处理': 'open', 'open': 'open', '未完成': 'open', 'todo': 'open',
+    '未开始': 'notstarted', '待处理': 'open', 'open': 'open', '未完成': 'open', 'todo': 'open',   # #205o「未开始」独立成态
 }
 
 @app.get('/api/import/template')
@@ -9468,7 +9477,7 @@ async def import_xlsx(request: Request, username: str = Depends(require_super)):
             card_id = 'C' + str(int(time.time() * 1000000)) + str(created)
             status = cell('status').lower()
             status = XLSX_STATUS_MAP.get(status, status) or 'open'
-            status_name = cell('status_name') or {'done': '已完成', 'progressing': '进行中', 'open': '未完成'}.get(status, '未完成')
+            status_name = cell('status_name') or {'done': '已完成', 'progressing': '进行中', 'notstarted': '未开始', 'open': '未完成'}.get(status, '未完成')
             vals = {
                 'card_id': card_id, 'board_id': board_id, 'board_name': board_name,
                 'column_id': '', 'column_name': cell('column_name'),
