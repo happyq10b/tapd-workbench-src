@@ -170,6 +170,25 @@ button{font-family:inherit}
 /* 设计规范对齐【架构管理】弹窗：蓝色说明横幅 + 分区留白 + 大格热力日历 + 已选 chips */
 .due-info-banner{background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;
   padding:8px 12px;font-size:12.5px;color:#0050b3;line-height:1.7}
+/* ---------------- 排序设定弹窗（#205y 2026-11-18） ----------------
+   每行 = 一个排序字段：勾选框 + 名称 + 优先级徽标 + 升/降序分段按钮。
+   勾选先后顺序 = 优先级（徽标实时显示「第N优先」）；未勾选行灰显禁用。 */
+.ss-section{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ss-title{font-weight:600;font-size:13px;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.ss-none{font-weight:400;font-size:11.5px;color:var(--text3)}
+.ss-row{display:flex;align-items:center;gap:10px;padding:5px 4px;border-radius:6px}
+.ss-row.on{background:#f5f8ff}
+.ss-row+.ss-row{border-top:1px dashed var(--border)}
+.ss-check{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:12.5px;color:var(--text);flex:0 0 auto}
+.ss-check input{cursor:pointer;accent-color:var(--primary)}
+.ss-pri{flex-shrink:0;font-size:11px;padding:1px 8px;border-radius:10px;background:#e6f7ff;color:var(--primary);font-weight:600;min-width:56px;text-align:center}
+.ss-pri-off{background:var(--border);color:#8a93a6;font-weight:400}
+.ss-dir{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0}
+.ss-dir-btn{border:none;background:transparent;padding:3px 12px;font-size:12px;color:var(--text2);cursor:pointer}
+.ss-dir-btn+.ss-dir-btn{border-left:1px solid var(--border)}
+.ss-dir-btn.on{background:var(--primary);color:#fff;font-weight:600}
+.ss-dir-btn:disabled{color:#c0c6cf;cursor:not-allowed}
+.ss-dir-off{opacity:.55}
 .due-cal-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .due-cal-title{font-weight:600;font-size:15px;min-width:104px;text-align:center;
   font-variant-numeric:tabular-nums}
@@ -436,9 +455,7 @@ button{font-family:inherit}
    始终排在同一行，日期区间不再被挤到第二行。
    空间不够时由弹性项（搜索框、两个可输入控件）自行收缩，日期区间宽度固定不缩。 */
 .toolbar-left{display:flex;gap:8px;flex-wrap:nowrap;flex:1;align-items:center;min-width:0}
-/* 排序选项（#205u 2026-11-18）：与其他筛选框同排，label 等宽 56px */
-.sort-filter{display:inline-flex;align-items:center;gap:2px;flex-shrink:0}
-.sort-filter .cf-label{width:56px;box-sizing:border-box}
+/* #205y（2026-11-18）：.sort-filter 已随筛选栏排序下拉移除而删除（样式回滚） */
 /* 需求5 补强（2026-11-02 UI设计师）：工具栏也要锁宽度。
    T-005 只锁了顶部栏三兄弟（.topbar / .topbar-main / .topbar-aside），
    **漏了 .toolbar-left** —— 它是 `flex:1` 弹性列 → 视口变窄时整体被压窄，
@@ -1780,6 +1797,9 @@ function goLogin(){
              ⚠️ 与【清空筛选】【启用勾选】同为 .btn-clear 同规格按钮，不带 emoji（T-191e）
              顺序（2026-11-13 用户需求）：到期筛选在前，清空筛选固定尾部 -->
         <button id="dueFilterBtn" class="btn-clear" onclick="openDueCalModal()" title="按事项截止日期筛选：日历多选，热力展示各日到期事项数">到期筛选<span id="dueFilterBadge" hidden></span></button>
+        <!-- 排序设定（#205y 2026-11-18）：独立弹窗，板块/事项分别配置多级排序（勾选顺序=优先级，
+             各字段独立升/降序）；置顶始终最优先不参与配置。与【到期筛选】同 .btn-clear 形态。 -->
+        <button id="sortSetBtn" class="btn-clear" onclick="openSortSetModal()" title="排序设定：板块与事项分别配置排序字段（勾选顺序 = 优先级）与升/降序；置顶始终优先，不参与配置">排序设定</button>
         <button id="clearFilterBtn" class="btn-clear" onclick="clearAllRowFilters()" title="清空本行全部筛选条件（搜索/状态/负责人/参与人/年份/周数/到期）">清空筛选</button>
       </span>
     </div>
@@ -1891,19 +1911,9 @@ function goLogin(){
         </span>
         <div class="cf-drop" id="weekFilterDrop" hidden></div>
       </span>
-      <!-- 创建日期区间筛选已移除（T-0189）：该行右尾空间交由操作按钮与搜索框自适应 -->
-      <!-- 事项排序选项（#205u；#205w 2026-11-18 用户修订）：**个人置顶始终优先**（公共首级，
-           不再作为选项出现），下拉三档：开始时间升序 / 截止时间升序（最近到期在前）/ 创建时间降序。
-           同一选项同步作用于主事项、子事项与板块（板块无开始时间字段 → 以创建时间作为开始）。
-           按账号持久化（localStorage）；日期维度空值排最后、同值按创建时间降序兜底。 -->
-      <span class="sort-filter" id="cardSortWrap" title="排序方式：置顶始终优先（按账号记忆）">
-        <span class="cf-label">↕️ 排序</span>
-        <select class="form-select" id="cardSortSel" style="width:120px;padding:6px 8px" onchange="setCardSort(this.value)" aria-label="排序方式（置顶始终优先）">
-          <option value="created">创建时间</option>
-          <option value="begin">开始时间</option>
-          <option value="due">截止时间</option>
-        </select>
-      </span>
+      <!-- 创建日期区间筛选已移除（T-0189）：该行右尾空间交由操作按钮与搜索框自适应
+           #205y（2026-11-18）：#205u 的「↕️ 排序」下拉已移除（该行样式回滚到 #205u 之前），
+           排序配置改由「排序设定」弹窗承担（见 dueFilterBtn 与 clearFilterBtn 之间的按钮）。 -->
       <!-- 操作按钮（T-0189）：从筛选明细行移到筛选框行末尾 —— 新建板块/展开/折叠 -->
       <span class="slot-ops" style="flex-shrink:0;width:auto;margin-left:auto"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
     </div>
@@ -2538,6 +2548,28 @@ function goLogin(){
   </div>
 </div>
 
+<!-- 排序设定弹窗（#205y 2026-11-18）：
+     板块与事项分别独立配置多级排序 —— 勾选字段参与排序、勾选先后顺序 = 优先级、
+     每字段独立升/降序；取消 = 还原打开时快照；置顶始终最优先（不在配置范围内）。 -->
+<div class="modal-overlay" id="sortSetModal" style="display:none;z-index:110">
+  <div class="modal" style="width:520px;max-width:94vw">
+    <div class="modal-header"><h2>↕️ 排序设定</h2><button class="modal-close" onclick="sortSetCancel()">✕</button></div>
+    <div class="modal-body" style="padding:12px 16px;gap:10px">
+      <div class="due-info-banner">
+        勾选字段即参与排序，<strong>勾选的先后顺序 = 优先级</strong>（先勾选的优先级最高）；
+        每个已勾选字段可单独选择<strong>升序 / 降序</strong>。<strong>板块</strong>与<strong>事项</strong>分别独立配置、互不影响；
+        置顶条目始终最优先，不参与排序配置。配置按账号记忆。
+      </div>
+      <div id="sortSetBody"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;align-items:center">
+      <button class="btn-default" onclick="sortSetReset()" title="恢复默认：仅按创建时间降序">恢复默认</button>
+      <span style="flex:1"></span>
+      <button class="btn-secondary" onclick="sortSetCancel()">取消</button>
+      <button class="btn-primary" onclick="sortSetApply()">确定</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="cropModal" style="display:none">
   <div class="modal" style="width:520px;max-width:94vw">
     <div class="modal-header"><h2 id="cropTitle">✂️ 裁切图片</h2><button class="modal-close" onclick="cancelCrop()">✕</button></div>
@@ -6364,7 +6396,7 @@ function filtersActive(q){
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
-  loadCardSort();   // #205u：事项排序选项按账号恢复（同步下拉框回显）
+  loadSortCfg();   // #205y：排序设定（板块/事项独立多级配置）按账号恢复
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
   renderYearFilter(cols);
   paintColStatus();   // 板块状态 combo 首绘/重绘（2026-11-06 #81）
@@ -6932,25 +6964,17 @@ function srItemHtml(x){
     <span class="slot-status"><span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':x.status==='notstarted'?'pending':''}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':x.status==='notstarted'?'未开始':'未完成'}</span></span>
   </div>`;
 }
-// 排序比较：置顶优先（公共首级）→ 所选排序方式（#205w 同步到板块层）→ 名称（保证同分时顺序稳定）
-// 置顶是**个人设置**，因此这里读的是当前账号的置顶集合，而不是服务端的共享字段
-// #205w：板块与事项共用同一排序选项 —— 板块无独立开始时间字段（板块创建即开始），
-// 「开始时间」以 created_at 升序承担；「截止时间」用 due_date（空排最后）；「创建时间」为降序。
+// 排序比较（#205y 2026-11-18 重构）：板块与事项**分别独立**的多级排序配置（排序设定弹窗）——
+// 置顶恒在最前（公共首级，不参与配置）→ 按 SORT_CFG.<kind>.order 依次比较
+// （勾选先后顺序 = 优先级）→ 各字段独立升/降序 → 配置字段全同分时按创建时间降序兜底
+//（板块再按 column_sort / 名称兜底），保证顺序稳定。
 function colPinKey(name,meta){return (meta&&meta.col_key)?meta.col_key:(curBoard+'::'+name)}
 function cmpColumn(a,b,cmeta,csort){
   const ma=cmeta[a]||{},mb=cmeta[b]||{};
   const pa=isPinned('column',colPinKey(a,ma))?0:1,pb=isPinned('column',colPinKey(b,mb))?0:1;
-  if(pa!==pb)return pa-pb;
-  if(CARD_SORT==='begin'||CARD_SORT==='due'){
-    const key=CARD_SORT==='due'?'due_date':'created_at';
-    const ka=tsVal(ma[key]),kb=tsVal(mb[key]);
-    const ea=!ka,eb=!kb;
-    if(ea!==eb)return ea?1:-1;          // 无日期的板块排最后
-    if(ka!==kb)return ka-kb;            // 升序
-  }else{
-    const ta=tsVal(ma.created_at),tb=tsVal(mb.created_at);
-    if(ta!==tb)return tb-ta;            // 创建时间降序（默认）
-  }
+  if(pa!==pb)return pa-pb;            // 置顶恒在最前（不受排序配置影响）
+  const r=cmpByCfg(ma,mb,SORT_CFG.col,colSortField);
+  if(r!==null)return r;
   // 末级排序（2026-11-04 用户需求）：按**板块自身的排序字段**（cards.column_sort，
   // TAPD 导入的板块排序值）；未携带排序值的板块排最后，再按名称兜底。
   if(csort){
@@ -6960,35 +6984,106 @@ function cmpColumn(a,b,cmeta,csort){
   }
   return String(a).localeCompare(String(b),'zh');
 }
-// 排序比较（#205u；#205w 2026-11-18 用户修订）：**个人置顶始终优先**（公共首级，
-// 不再是选项），下拉三档按 CARD_SORT 生效，且同一选项同步作用于主事项/子事项/板块——
-//   created = 创建时间降序（新的在前，默认）
-//   begin   = 开始时间升序（早的在前）
-//   due     = 截止时间升序（最近到期在前）
-// 日期维度：空值排最后，同值按创建时间降序兜底（保证顺序稳定）。
-var CARD_SORT='created';
-function loadCardSort(){
-  try{CARD_SORT=localStorage.getItem('tapd.cardSort_'+(ME&&ME.username||''))||'created'}catch(e){CARD_SORT='created'}
-  // 旧版本可能存过 'pin'（现已并入公共首级）→ 迁移为默认「创建时间」
-  if(CARD_SORT!=='begin'&&CARD_SORT!=='due'&&CARD_SORT!=='created')CARD_SORT='created';
-  const sel=document.getElementById('cardSortSel');
-  if(sel&&sel.value!==CARD_SORT)sel.value=CARD_SORT;
+// 排序配置（#205y）：{card:{order:['created'],dir:{...}}, col:{...}} —— 按账号记忆（localStorage）
+// order = 勾选的字段清单（数组顺序 = 优先级）；dir = 各字段 asc/desc。
+// 默认 = 仅「创建时间」降序（延续 #205w 默认行为）。
+var SORT_FIELDS=['begin','due','created'];
+var SORT_FIELD_LABEL={begin:'开始时间',due:'截止时间',created:'创建时间'};
+var SORT_CFG_DEFAULT=function(){return {order:['created'],dir:{begin:'asc',due:'asc',created:'desc'}}};
+var SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT()};
+var SORT_CFG_SNAP=null;   // 弹窗打开时快照（取消 = 还原）
+function normalizeSortCfg(v){
+  const out={};
+  ['card','col'].forEach(function(k){
+    const s=v[k]||{};
+    const seen=new Set();
+    const ord=(Array.isArray(s.order)?s.order:[]).filter(function(x){
+      return SORT_FIELDS.indexOf(x)>=0&&!seen.has(x)&&seen.add(x);
+    });
+    const dir={};
+    SORT_FIELDS.forEach(function(f){dir[f]=(s.dir&&s.dir[f]==='desc')?'desc':'asc'});
+    out[k]={order:ord,dir:dir};
+  });
+  return out;
 }
-function setCardSort(v){
-  CARD_SORT=(v==='begin'||v==='due')?v:'created';
-  try{localStorage.setItem('tapd.cardSort_'+(ME&&ME.username||''),CARD_SORT)}catch(e){}
-  reload(1);
+function loadSortCfg(){
+  try{
+    const raw=localStorage.getItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'));
+    if(raw){const v=JSON.parse(raw);if(v&&(v.card||v.col))SORT_CFG=normalizeSortCfg(v);}
+  }catch(e){SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT()}}
 }
+function saveSortCfg(){
+  try{localStorage.setItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'),JSON.stringify(SORT_CFG))}catch(e){}
+}
+// ---------- 排序设定弹窗（#205y） ----------
+function openSortSetModal(){
+  SORT_CFG_SNAP=JSON.parse(JSON.stringify(SORT_CFG));
+  renderSortSetBody();
+  document.getElementById('sortSetModal').style.display='flex';
+}
+function renderSortSetBody(){
+  const body=document.getElementById('sortSetBody');
+  body.innerHTML=['card','col'].map(function(kind){
+    const cfg=SORT_CFG[kind];
+    const title=kind==='card'?'📋 事项排序':'🗂️ 板块排序';
+    const rows=SORT_FIELDS.map(function(f){
+      const idx=cfg.order.indexOf(f),on=idx>=0,dir=cfg.dir[f]||'asc';
+      const dis=on?'':'disabled';
+      return '<div class="ss-row'+(on?' on':'')+'">'
+        +'<label class="ss-check"><input type="checkbox"'+(on?' checked':'')
+        +" onchange=\"sortSetToggle('"+kind+"','"+f+"',this.checked)\">"
+        +'<span>'+SORT_FIELD_LABEL[f]+'</span></label>'
+        +(on?'<span class="ss-pri">第'+(idx+1)+'优先</span>':'<span class="ss-pri ss-pri-off">不参与</span>')
+        +'<span class="ss-dir'+(on?'':' ss-dir-off')+'">'
+        +'<button class="ss-dir-btn'+(dir==='asc'?' on':'')+'"'+dis
+        +" onclick=\"sortSetDir('"+kind+"','"+f+"','asc')\">升序</button>"
+        +'<button class="ss-dir-btn'+(dir==='desc'?' on':'')+'"'+dis
+        +" onclick=\"sortSetDir('"+kind+"','"+f+"','desc')\">降序</button>"
+        +'</span></div>';
+    }).join('');
+    return '<div class="ss-section"><div class="ss-title">'+title
+      +(cfg.order.length?'':'<span class="ss-none">（未勾选任何字段 → 按创建时间降序兜底）</span>')+'</div>'+rows+'</div>';
+  }).join('');
+}
+// 勾选 / 取消勾选：order 数组顺序即优先级；取消勾选后后续字段优先级依次前移
+function sortSetToggle(kind,f,on){
+  const ord=SORT_CFG[kind].order;
+  const i=ord.indexOf(f);
+  if(on){if(i<0)ord.push(f);}
+  else{if(i>=0)ord.splice(i,1);}
+  renderSortSetBody();
+}
+function sortSetDir(kind,f,d){SORT_CFG[kind].dir[f]=d;renderSortSetBody();}
+function sortSetReset(){
+  SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT()};
+  renderSortSetBody();
+}
+function sortSetCancel(){
+  if(SORT_CFG_SNAP)SORT_CFG=JSON.parse(JSON.stringify(SORT_CFG_SNAP));
+  closeModal('sortSetModal');
+}
+function sortSetApply(){saveSortCfg();closeModal('sortSetModal');reload(curPage);}
+// 多级比较（#205y）：按 cfg.order 依次比较（先勾选优先），dir 决定升降；
+// 日期空值恒排最后（与升降方向无关）；配置字段全同分返回 null（由调用方兜底）。
+// get(o,f) 取值器：事项取卡对象自身字段；板块 begin 无独立字段 → created_at 承担。
+function cmpByCfg(oa,ob,cfg,get){
+  for(var i=0;i<cfg.order.length;i++){
+    const f=cfg.order[i],d=cfg.dir[f]==='desc'?-1:1;
+    const ta=tsVal(get(oa,f)),tb=tsVal(get(ob,f));
+    const ea=!ta,eb=!tb;
+    if(ea!==eb)return ea?1:-1;          // 空值恒排最后
+    if(ta!==tb)return (ta<tb?-1:1)*d;   // 升/降序
+  }
+  return null;
+}
+function cardSortField(o,f){return o[f];}
+function colSortField(m,f){return f==='due'?m.due_date:m.created_at;}
 function cmpCard(a,b){
   const pa=isPinned('card',a.card_id)?0:1,pb=isPinned('card',b.card_id)?0:1;
-  if(pa!==pb)return pa-pb;              // 置顶恒在最前（所有排序方式的公共首级）
-  if(CARD_SORT==='begin'||CARD_SORT==='due'){
-    const ka=tsVal(a[CARD_SORT]),kb=tsVal(b[CARD_SORT]);
-    const ea=!ka,eb=!kb;
-    if(ea!==eb)return ea?1:-1;          // 未填日期的排最后
-    if(ka!==kb)return ka-kb;            // 升序
-  }
-  return tsVal(b.created)-tsVal(a.created);
+  if(pa!==pb)return pa-pb;              // 置顶恒在最前（不受排序配置影响）
+  const r=cmpByCfg(a,b,SORT_CFG.card,cardSortField);
+  if(r!==null)return r;
+  return tsVal(b.created)-tsVal(a.created);   // 兜底：创建时间降序
 }
 // 归一化时间：'YYYY-MM-DD' / 'YYYY-MM-DD HH:MM:SS' → 可比较的数值
 function tsVal(v){
@@ -7262,7 +7357,7 @@ function renderSubTree(box,nodes,level){
     return;
   }
   // #205w（2026-11-18）：子事项目录与主事项**同一排序选项**（个人置顶优先 + 所选方式）——
-  // 后端仅按服务端 pinned + created 降序返回，渲染前按 cmpCard（个人置顶 + CARD_SORT）重排。
+  // 后端仅按服务端 pinned + created 降序返回，渲染前按 cmpCard（个人置顶 + 排序设定配置）重排。
   const _sorted=nodes.slice().sort(cmpCard);
   box.innerHTML=_sorted.map(n=>subNodeHtml(n,level,parentId)).join('');
   if(typeof syncCheckStates==='function')syncCheckStates();   // #159 渲染后同步三态
@@ -13074,6 +13169,15 @@ async function exportXlsx(fields){
     const ps=buildFilterParams();
     // #161：勾选清单下发，服务端在权限过滤后取交集（不可见 id 借道无效）
     ps.set('card_ids',[...ITEM_CHECKED].join(','));
+    // #205y：导出结果同步「排序设定」的**事项**配置（多级字段+升降序），
+    // 并下发个人置顶事项 → 服务端置顶恒排最前（与页面 cmpCard 口径一致）
+    const sc=SORT_CFG.card;
+    if(sc.order.length){
+      ps.set('sort_keys',sc.order.join(','));
+      ps.set('sort_dirs',sc.order.map(f=>sc.dir[f]||'asc').join(','));
+    }
+    const pins=Object.keys(MY_PINS.card||{}).filter(id=>ITEM_CHECKED.has(id));
+    if(pins.length)ps.set('pin_ids',pins.join(','));
     if(fields&&fields.length)ps.set('fields',fields.join(','));
     const q=ps.toString()?('?'+ps.toString()):'';
     const r=await fetch(apiUrl('/api/export/xlsx'+q),{headers:{'Authorization':'Bearer '+TOKEN}});

@@ -8868,6 +8868,7 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
                 cc: str = '', week: str = '', person: str = '', years: str = '',
                 due_dates: str = '',
                 fields: str = '', card_ids: str = '',
+                sort_keys: str = '', sort_dirs: str = '', pin_ids: str = '',
                 username: str = Depends(require_auth), request: Request = None):
     """导出**当前筛选结果**的事项为 xlsx（.xlsx，一维表，每行一个事项）
 
@@ -8915,8 +8916,54 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
     if (card_ids or '').strip():
         want = {x.strip() for x in card_ids.split(',') if x.strip()}
         cards = [c for c in cards if c.get('card_id') in want]
-    # 稳定排序：按开始时间、卡片名，保证多次导出一致
-    cards.sort(key=lambda c: (str(c.get('begin') or ''), str(c.get('card_name') or '')))
+    # #205y（2026-11-18）：导出结果同步页面「排序设定」的**事项**配置 ——
+    #   sort_keys = 勾选的字段清单（逗号分隔，数组顺序 = 优先级，先勾选的优先级最高）；
+    #   sort_dirs = 各字段 asc/desc（与 sort_keys 一一对应）；
+    #   pin_ids   = 用户个人置顶且已勾选的事项 → 恒排最前（置顶不受排序配置影响，
+    #               与前端 cmpCard 的公共首级口径一致）。
+    # 日期空值恒排最后；配置字段全同分时按创建时间降序兜底（与前端一致）。
+    import functools
+
+    def _ts(s):
+        s = str(s or '').strip()
+        if not s:
+            return None
+        from datetime import datetime
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(s, fmt).timestamp()
+            except ValueError:
+                pass
+        return None
+
+    _sk = [x.strip() for x in (sort_keys or '').split(',')
+           if x.strip() in ('begin', 'due', 'created')]
+    _sd = [x.strip() for x in (sort_dirs or '').split(',')]
+    _pins = [x.strip() for x in (pin_ids or '').split(',') if x.strip()]
+    _pinset = {p: i for i, p in enumerate(_pins)}
+
+    def _cmp(x, y):
+        px = _pinset.get(x.get('card_id') or '', 10 ** 9)
+        py = _pinset.get(y.get('card_id') or '', 10 ** 9)
+        if px != py:
+            return -1 if px < py else 1          # 置顶恒排最前
+        for i, k in enumerate(_sk):
+            d = -1 if (i < len(_sd) and _sd[i] == 'desc') else 1
+            tx, ty = _ts(x.get(k)), _ts(y.get(k))
+            if (tx is None) != (ty is None):
+                return 1 if tx is None else -1   # 空值恒排最后
+            if tx != ty:
+                return (-d if tx < ty else d)    # 升/降序
+        sx, sy = str(x.get('created') or ''), str(y.get('created') or '')
+        if sx != sy:
+            return 1 if sx < sy else -1          # 兜底：创建时间降序
+        return 0
+
+    if _sk or _pins:
+        cards.sort(key=functools.cmp_to_key(_cmp))
+    else:
+        # 稳定排序：按开始时间、卡片名，保证多次导出一致（未配置排序时的兜底）
+        cards.sort(key=lambda c: (str(c.get('begin') or ''), str(c.get('card_name') or '')))
     # 派生列需要板块元信息与父事项名称
     _colmap = {}
     for r in dbq('SELECT board_id, column_name, year, nature, owner, completion '
