@@ -6989,8 +6989,13 @@ function cmpColumn(a,b,cmeta,csort){
 // 默认 = 仅「创建时间」降序（延续 #205w 默认行为）。
 var SORT_FIELDS=['begin','due','created'];
 var SORT_FIELD_LABEL={begin:'开始时间',due:'截止时间',created:'创建时间'};
-var SORT_CFG_DEFAULT=function(){return {order:['created'],dir:{begin:'asc',due:'asc',created:'desc'}}};
-var SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT()};
+// 默认配置（#205y 2026-11-18 用户指定）：事项 = 开始↑/截止↑/创建↑（优先级 1/2/3），
+// 板块 = 开始↓/截止↓/创建↓。「恢复默认」按钮同用此函数。
+var SORT_CFG_DEFAULT=function(){return {order:['begin','due','created'],
+  dir:{begin:'asc',due:'asc',created:'asc'}}};
+var SORT_CFG_DEFAULT_COL=function(){return {order:['begin','due','created'],
+  dir:{begin:'desc',due:'desc',created:'desc'}}};
+var SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT_COL()};
 var SORT_CFG_SNAP=null;   // 弹窗打开时快照（取消 = 还原）
 function normalizeSortCfg(v){
   const out={};
@@ -7010,7 +7015,7 @@ function loadSortCfg(){
   try{
     const raw=localStorage.getItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'));
     if(raw){const v=JSON.parse(raw);if(v&&(v.card||v.col))SORT_CFG=normalizeSortCfg(v);}
-  }catch(e){SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT()}}
+  }catch(e){SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT_COL()}}
 }
 function saveSortCfg(){
   try{localStorage.setItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'),JSON.stringify(SORT_CFG))}catch(e){}
@@ -7055,7 +7060,7 @@ function sortSetToggle(kind,f,on){
 }
 function sortSetDir(kind,f,d){SORT_CFG[kind].dir[f]=d;renderSortSetBody();}
 function sortSetReset(){
-  SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT()};
+  SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT_COL()};
   renderSortSetBody();
 }
 function sortSetCancel(){
