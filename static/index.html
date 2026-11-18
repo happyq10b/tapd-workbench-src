@@ -397,6 +397,9 @@ button{font-family:inherit}
 .tree-dept.open .chev{transform:rotate(90deg)}
 /* UI审查 B3：#646a73 on var(--border) 仅约 4.2:1 → #444b54（小字 AA）；仅本规则收口，不动全局 token */
 .tree-dept .dept-count{background:var(--border);color:#444b54;font-size:11px;padding:0 7px;border-radius:10px;font-weight:500}
+/* #205u（2026-11-18 用户需求5）：架构节点名称占满剩余宽度 → 数量徽标被推到「主页」按钮左侧
+   （与看板行的板块数徽标同一位置语义）；单行省略与 .tab-name 同口径 */
+.tree-dept .dept-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .tree-dept.open .dept-count{background:var(--primary);color:#fff}
 /* 架构节点选中态（2026-11-17 #141 多选）：实底高亮，区别于 open（展开）——
    选中即展开，两者并存；多选可同时点亮多个架构节点 */
@@ -433,6 +436,9 @@ button{font-family:inherit}
    始终排在同一行，日期区间不再被挤到第二行。
    空间不够时由弹性项（搜索框、两个可输入控件）自行收缩，日期区间宽度固定不缩。 */
 .toolbar-left{display:flex;gap:8px;flex-wrap:nowrap;flex:1;align-items:center;min-width:0}
+/* 排序选项（#205u 2026-11-18）：与其他筛选框同排，label 等宽 56px */
+.sort-filter{display:inline-flex;align-items:center;gap:2px;flex-shrink:0}
+.sort-filter .cf-label{width:56px;box-sizing:border-box}
 /* 需求5 补强（2026-11-02 UI设计师）：工具栏也要锁宽度。
    T-005 只锁了顶部栏三兄弟（.topbar / .topbar-main / .topbar-aside），
    **漏了 .toolbar-left** —— 它是 `flex:1` 弹性列 → 视口变窄时整体被压窄，
@@ -824,7 +830,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .week-title.edit:hover{color:var(--primary)}
 /* 归属年份徽标 */
 .week-year{font-size:11.5px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;flex-shrink:0;white-space:nowrap}
-.week-meta{font-size:12px;color:var(--text2)}
+/* .week-meta 已移除（#205u 2026-11-18）：n/N 前缀并入进度条格（.fcol-bar .bar-count） */
 /* ⚠️ 进度条向左溢出 8px 进入列间距 → 「n/N 完成」与条起点只差 4px（紧靠）。
    meta 不加任何 margin；标题 flex:1 仍吸收全部剩余空间。 */
 /* 2026-11-04 需求2：板块进度条**宽度固定**（≈ 两个周数列的宽度），不做伸缩。
@@ -873,13 +879,15 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    板块本身没有周数 → 第一格（周数位）复用为**进度条位**。
    ⚠️ 两行 fcols 宽度必须相同（都 634px），否则右端锚点相同但左端错位。 */
 .fcols.week-fcols{grid-template-columns:204px 118px 104px 104px 72px;width:634px;flex:0 0 634px}
-/* 进度条：**占满整个周数位格（204px，#205s 需求5 同步加宽）**，并向左溢出 8px 进入列间距区。
-   - margin-left:-8px  → 起点 = 格起点 - 8 = -8 → 紧靠「n/N 完成」（间距 4px）
-   - margin-right:8px  → 终点 = 格右端 - 8 = 196 → 距「负责人」列 16px
-   垂直居中由 fcol-bar 的 align-items:center 保证。 */
-.fcols.week-fcols .fcol-bar{display:flex;align-items:center;justify-content:flex-end;
+/* 进度条位（#205u 2026-11-18 压缩）：前缀 n/N 移入格内与进度条同行，
+   组合整体宽度 = 204px 周数列宽（与下方事项行「周数」文本对齐）；
+   进度条本体 flex:1 吃掉前缀之外的剩余宽度，随 n/N 位数自适应。
+   - margin-left:-8px / margin-right:8px 沿用原左溢出列间距的锚点设计。 */
+.fcols.week-fcols .fcol-bar{display:flex;align-items:center;gap:6px;
   padding-right:0;margin-left:-8px;margin-right:8px;box-sizing:border-box;overflow:visible}
-.fcols.week-fcols .fcol-bar .week-bar{width:204px;flex:0 0 204px}
+.fcols.week-fcols .fcol-bar .bar-count{font-size:11.5px;color:var(--text2);
+  white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
+.fcols.week-fcols .fcol-bar .week-bar{flex:1;min-width:0;width:auto}
 /* 2026-11-04 #55：列宽 648→446（-202px 全部让给标题）——
    周数值压缩为「2026·W32」、列序调整为 周数/负责人/创建/截止。 */
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -1881,6 +1889,18 @@ function goLogin(){
         <div class="cf-drop" id="weekFilterDrop" hidden></div>
       </span>
       <!-- 创建日期区间筛选已移除（T-0189）：该行右尾空间交由操作按钮与搜索框自适应 -->
+      <!-- 事项排序选项（#205u 2026-11-18）：个人置顶优先（默认，现行为）/ 开始时间升序 /
+           截止时间升序（最近到期在前）/ 创建时间降序。按账号持久化（localStorage）；
+           日期维度空值排最后、同值按创建时间降序兜底。 -->
+      <span class="sort-filter" id="cardSortWrap" title="事项排序方式（按账号记忆）">
+        <span class="cf-label">↕️ 排序</span>
+        <select class="form-select" id="cardSortSel" style="width:132px;padding:6px 8px" onchange="setCardSort(this.value)" aria-label="事项排序方式">
+          <option value="pin">个人置顶优先</option>
+          <option value="begin">开始时间</option>
+          <option value="due">截止时间</option>
+          <option value="created">创建时间</option>
+        </select>
+      </span>
       <!-- 操作按钮（T-0189）：从筛选明细行移到筛选框行末尾 —— 新建板块/展开/折叠 -->
       <span class="slot-ops" style="flex-shrink:0;width:auto;margin-left:auto"><button class="btn-default ops-btn" id="toolbarOpsBtn" onclick="event.stopPropagation();rowOpsShow(event,'toolbarOps')" title="新建板块 / 展开 / 折叠" style="padding:7px 16px;font-size:13px;border-radius:var(--radius-sm)">操作 ▾</button></span>
     </div>
@@ -3789,7 +3809,9 @@ function renderTabs(){
       ?('单击选中「'+d.name+'」（统计与列表仅统计该架构自身挂载的看板）；再次单击取消；可多选多个架构累加汇总')
       :(d.name+' 下暂无看板（可在「看板管理」中把看板挂载到该部门）');
     dhtml+=`<span class="tree-dept${open?' open':''}${sel?' sel':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
-      +`<span class="chev">▶</span>${esc(d.name)}<span class="dept-count">${cnt}</span>`
+      // #205u（2026-11-18 用户需求5）：看板数量徽标移到「主页」按钮左侧（名称 flex:1 占满，
+      // 徽标与看板行的板块数徽标同款 .tab-col-count 形态），不再紧跟名称
+      +`<span class="chev">▶</span><span class="dept-name">${esc(d.name)}</span><span class="dept-count tab-col-count">${cnt}</span>`
       +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">主页</span>`
       +`</span>`;
   });
@@ -3797,7 +3819,7 @@ function renderTabs(){
     const open=!!DEPT_OPEN[UNASSIGNED_KEY];
     const sel=ARCH_SEL.has(UNASSIGNED_KEY);
     dhtml+=`<button class="tree-dept${open?' open':''}${sel?' sel':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的看板（单击选中 / 再次单击取消，可多选）" aria-expanded="${open}">`
-      +`<span class="chev">▶</span>未配置<span class="dept-count">${g.unassigned.length}</span></button>`;
+      +`<span class="chev">▶</span><span class="dept-name">未配置</span><span class="dept-count tab-col-count">${g.unassigned.length}</span></button>`;
   }
   deptBox.innerHTML=dhtml;
   // ── 带 2：板块（展开的部门下的看板 tab，同样三列小栅格）
@@ -3872,6 +3894,18 @@ function toggleDept(name){
   if(ARCH_SEL.has(name)){
     ARCH_SEL.delete(name);
     delete DEPT_OPEN[name];
+    // #205u（2026-11-18 用户需求3）：取消架构选择 → 该架构下**已选的看板联动取消**——
+    // 看板 tab 随 DEPT_OPEN 删除不再显示（renderTabs 只渲染展开部门的看板），
+    // 但 curBoards 里残留的看板会继续参与统计与事项列表汇总（「看不见的看板仍在算数」），
+    // 必须同步移除；主看板（curBoard）被移除时回落到剩余选中项或置空。
+    let _removed=false;
+    (ME.boards||[]).forEach(function(b){
+      if((b.dept||UNASSIGNED_KEY)===name&&curBoards.delete(b.board_id))_removed=true;
+    });
+    if(_removed){
+      if(curBoard&&!curBoards.has(curBoard))curBoard=[...curBoards][0]||'';
+      if(!curBoards.size)curYears=new Set();   // 看板清空后年份候选失效，一并复位
+    }
   }else{
     ARCH_SEL.add(name);
     DEPT_OPEN[name]=true;      // 选中即展开该架构的看板 tab（不收其他——多选并存）
@@ -6293,6 +6327,7 @@ function filtersActive(q){
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
+  loadCardSort();   // #205u：事项排序选项按账号恢复（同步下拉框回显）
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
   renderYearFilter(cols);
   paintColStatus();   // 板块状态 combo 首绘/重绘（2026-11-06 #81）
@@ -6412,11 +6447,14 @@ function renderBoard(cards,cols,q,colHits){
     const _ownerName=bcMemberName(meta?(meta.owner||''):'');
     const _colDue=meta?(meta.due_date||''):'';
     const _cdStop=(meta?(meta.completion||''):'')==='done';   // T-191i：板块已完成 → 倒计时停用
-    //  ① 第一格 = **固定宽度进度条**（192px ≈ 两个周数列），右端与负责人列起点对齐
+    //  ① 第一格 = 进度条位（#205u 2026-11-18 压缩）：**前缀 n/N 移入格内**，与进度条
+    //     组合后的整体宽度 = 204px 周数列宽 → 与下方事项行的「周数」文本对齐；
+    //     可见文案去掉「完成」二字（悬停提示其余文案不变）。
     //  ② 板块「完成情况」= 负责人手动声明的独立字段（completion），
     //     与进度条（done/total 自动统计）**并存且互不覆盖**
     const _colFcols='<span class="fcols week-fcols">'
       +`<span class="fcol fcol-bar" title="板块完成进度（按事项完成数自动统计）：${done}/${total}">`
+      +`<span class="bar-count">${done}/${total}</span>`
       +`<span class="week-bar"><i style="width:${rate}%"></i></span></span>`
       +(_ownerName?`<span class="fcol fcol-owner" title="板块负责人">负责人 ${esc(_ownerName)}</span>`
                   :'<span class="fcol fcol-owner fcol-empty" title="未设置板块负责人">负责人 —</span>')
@@ -6455,7 +6493,7 @@ function renderBoard(cards,cols,q,colHits){
         ${titleHtml}
         ${_lockTag}
         ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
-        <span class="week-meta">${done}/${total} 完成</span>
+        <!-- #205u：前缀 n/N 移入进度条格内（原 week-meta「n/N 完成」独立 span 移除） -->
         ${_colFcols}
         <span class="item-tail">
           <span class="slot-subtask">${(meta?meta.todo_total:0)>0?`<span class="st-mini ${meta.todo_done===meta.todo_total?'all':''}" title="板块待办完成进度（勾选在板块编辑界面或浏览界面进行）">【待办：${meta.todo_done}/${meta.todo_total}】</span>`:''}</span>
@@ -6826,12 +6864,36 @@ function cmpColumn(a,b,cmeta,csort){
   }
   return String(a).localeCompare(String(b),'zh');
 }
+// 排序比较（#205u 2026-11-18 重构）：排序选项四档，按账号记忆（localStorage）——
+//   pin     = 个人置顶优先（默认，现行为：置顶在前 + 创建时间降序）
+//   begin   = 开始时间升序（早的在前）
+//   due     = 截止时间升序（最近到期在前）
+//   created = 创建时间降序（新的在前）
+// 日期维度：空值排最后，同值按创建时间降序兜底（保证顺序稳定）。
+var CARD_SORT='pin';
+function loadCardSort(){
+  try{CARD_SORT=localStorage.getItem('tapd.cardSort_'+(ME&&ME.username||''))||'pin'}catch(e){CARD_SORT='pin'}
+  if(CARD_SORT!=='begin'&&CARD_SORT!=='due'&&CARD_SORT!=='created')CARD_SORT='pin';
+  const sel=document.getElementById('cardSortSel');
+  if(sel&&sel.value!==CARD_SORT)sel.value=CARD_SORT;
+}
+function setCardSort(v){
+  CARD_SORT=(v==='begin'||v==='due'||v==='created')?v:'pin';
+  try{localStorage.setItem('tapd.cardSort_'+(ME&&ME.username||''),CARD_SORT)}catch(e){}
+  reload(1);
+}
 function cmpCard(a,b){
+  if(CARD_SORT==='begin'||CARD_SORT==='due'){
+    const ka=tsVal(a[CARD_SORT]),kb=tsVal(b[CARD_SORT]);
+    const ea=!ka,eb=!kb;
+    if(ea!==eb)return ea?1:-1;          // 未填日期的排最后
+    if(ka!==kb)return ka-kb;            // 升序
+    return tsVal(b.created)-tsVal(a.created);
+  }
+  if(CARD_SORT==='created')return tsVal(b.created)-tsVal(a.created);
   const pa=isPinned('card',a.card_id)?0:1,pb=isPinned('card',b.card_id)?0:1;
   if(pa!==pb)return pa-pb;
-  const ta=tsVal(a.created),tb=tsVal(b.created);
-  if(ta!==tb)return tb-ta;
-  return 0;
+  return tsVal(b.created)-tsVal(a.created);
 }
 // 归一化时间：'YYYY-MM-DD' / 'YYYY-MM-DD HH:MM:SS' → 可比较的数值
 function tsVal(v){
