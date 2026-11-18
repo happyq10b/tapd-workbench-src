@@ -861,27 +861,30 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    用 grid 定宽列 → 负责人姓名长短、周数文本长短、空值占位都不影响后续列的起始位置。
    父事项行与子事项行共用同一套类名与同一套字段定义（列宽也必须完全一致，
    否则父行与子行的字段列起点会错位）。 */
-.fcols{display:grid;grid-template-columns:96px 118px 104px 104px 72px;gap:0 8px;align-items:center;
-  width:530px;flex:0 0 530px}
+/* #205s（2026-11-18 需求5）：周数列统一 204px —— 保证「周数 + 两个完整周数
+   （2026年第47周、2026年第48周…）」完整展示，空间从标题列压缩（标题 flex:1 自动吸收）；
+   全部行（父事项/子事项/板块进度条位）同宽 → 纵向对齐不被多周行打乱。 */
+.fcols{display:grid;grid-template-columns:204px 118px 104px 104px 72px;gap:0 8px;align-items:center;
+  width:634px;flex:0 0 634px}
 /* 板块行的字段网格（2026-11-04 需求2）：第一格是**固定宽度的进度条**（192px ≈ 两个周数列），
    后面几格与事项行同宽同序 → 负责人列起点与事项行完全一致。 */
-/* 板块行字段网格：**与事项行完全同构**（96/118/104/104/72 = 530px）
-   → 板块的「负责人/创建/截止/倒计时」四列与事项行的对应列**像素级一一对齐**。
+/* 板块行字段网格：**与事项行完全同构**（204/118/104/104/72 = 634px，#205s 需求5 同步加宽）
+   → 板块的「负责人/开始/截止/倒计时」四列与事项行的对应列**像素级一一对齐**。
    板块本身没有周数 → 第一格（周数位）复用为**进度条位**。
-   ⚠️ 两行 fcols 宽度必须相同（都 530px），否则右端锚点相同但左端错位。 */
-.fcols.week-fcols{grid-template-columns:96px 118px 104px 104px 72px;width:530px;flex:0 0 530px}
-/* 进度条：**占满整个周数位格（96px）**，并向左溢出 8px 进入列间距区。
+   ⚠️ 两行 fcols 宽度必须相同（都 634px），否则右端锚点相同但左端错位。 */
+.fcols.week-fcols{grid-template-columns:204px 118px 104px 104px 72px;width:634px;flex:0 0 634px}
+/* 进度条：**占满整个周数位格（204px，#205s 需求5 同步加宽）**，并向左溢出 8px 进入列间距区。
    - margin-left:-8px  → 起点 = 格起点 - 8 = -8 → 紧靠「n/N 完成」（间距 4px）
-   - margin-right:8px  → 终点 = 格右端 - 8 = 88 → 距「负责人」列 16px
+   - margin-right:8px  → 终点 = 格右端 - 8 = 196 → 距「负责人」列 16px
    垂直居中由 fcol-bar 的 align-items:center 保证。 */
 .fcols.week-fcols .fcol-bar{display:flex;align-items:center;justify-content:flex-end;
   padding-right:0;margin-left:-8px;margin-right:8px;box-sizing:border-box;overflow:visible}
-.fcols.week-fcols .fcol-bar .week-bar{width:96px;flex:0 0 96px}
+.fcols.week-fcols .fcol-bar .week-bar{width:204px;flex:0 0 204px}
 /* 2026-11-04 #55：列宽 648→446（-202px 全部让给标题）——
    周数值压缩为「2026·W32」、列序调整为 周数/负责人/创建/截止。 */
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .fcol-owner{color:var(--text2)}
-.fcol-week_no{color:var(--text2)}
+.fcol-week_no{color:var(--text2);text-align:left}
 .fcol-created{color:var(--text3)}
 .fcol-due{color:var(--text2)}
 /* 倒计时列（T-0188）：随当前日期自动计算；逾期红色高亮（与「逾期」标签同色系） */
@@ -958,10 +961,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .sub-node .s-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub-node.done .s-title{color:var(--text2);text-decoration:line-through}
 /* 子事项行的字段列：与父事项行同一套类名、同一套字段定义（仅字号更小）。
-   T-0190 修复：父行 fcols 已扩为 5 列（+倒计时 72px = 530px），此处仍是旧
+   T-0190 修复：父行 fcols 已扩为 5 列（+倒计时 72px = 634px），此处仍是旧
    4 列 446px → 子行的字段列与父行错位、尾部槽位被挤压换行。
-   必须与 .fcols 完全同步（列宽/列数/宽度三处一致）。 */
-.sub-node .fcols{grid-template-columns:96px 118px 104px 104px 72px;gap:0 8px;width:530px;flex:0 0 530px}
+   必须与 .fcols 完全同步（列宽/列数/宽度三处一致，#205s 需求5 同步加宽）。 */
+.sub-node .fcols{grid-template-columns:204px 118px 104px 104px 72px;gap:0 8px;width:634px;flex:0 0 634px}
 .sub-node .fcol{font-size:11px}
 /* 子事项行的尾部槽位：同样固定宽度 → 与父事项行同样的对齐逻辑 */
 /* 子事项行的尾部槽位宽度与父事项行**完全一致**（含 gap），
@@ -1944,19 +1947,23 @@ function goLogin(){
       <div class="form-row" id="e_meta_row">
         <!-- 所属看板选择框已移除（T-191l 用户口径）：权限控制下不该在编辑界面改归属；
              事项保存时 board_id 保持原值不变 -->
-        <div class="form-group" id="e_week_group" style="grid-column:span 2"><label>周数</label>
-          <div style="position:relative">
-            <label class="week-auto-line" title="勾选后禁用手动选择周数（已手选的周数会被清空）；系统按创建日期到截止日期自动计算并回填全部周数">
-              <input type="checkbox" id="e_week_auto" onchange="onWeekAutoToggle('e')">自动回填周数（按创建 ～ 截止日期计算）
+        <div class="form-group" id="e_week_group" style="grid-column:span 2">
+          <!-- #205s（2026-11-18 需求3）：自动回填勾选移入「周数」标题行（不换行、留间距） -->
+          <div class="week-label-row">
+            <label>周数</label>
+            <label class="week-auto-line" title="勾选后禁用手动选择周数（已手选的周数会被清空）；系统按开始日期到截止日期自动计算并回填全部周数（保存时按当前表单日期执行）">
+              <input type="checkbox" id="e_week_auto" onchange="onWeekAutoToggle('e')">自动回填周数（按开始 ～ 截止日期计算）
             </label>
+          </div>
+          <div style="position:relative">
             <input type="text" class="form-input" id="e_week" autocomplete="off"
-                   placeholder="" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉多选或直接输入多个（、分隔）" onfocus="openWeekCombo('e')" onclick="openWeekCombo('e')" oninput="weekComboInput('e')" onkeydown="weekComboKeydown('e',event)">
+                   placeholder="" title="周数维度（自然周：周一~周日）；默认按开始日期计算，可下拉多选或直接输入多个（、分隔）" onfocus="openWeekCombo('e')" onclick="openWeekCombo('e')" oninput="weekComboInput('e')" onkeydown="weekComboKeydown('e',event)">
             <div class="cf-drop" id="e_week_drop" hidden></div>
           </div>
         </div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin"></div>
+        <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin" oninput="weekAutoRefresh('e')" onchange="weekAutoRefresh('e')"></div>
         <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due" oninput="weekAutoRefresh('e')" onchange="weekAutoRefresh('e')"></div>
       </div>
       <div class="form-row" id="e_owner_row">
@@ -2002,13 +2009,18 @@ function goLogin(){
       <div class="form-group" id="n_parent_wrap" style="display:none"><label>父事项</label><div id="n_parent_info" class="parent-box"></div></div>
       <div class="form-row" id="n_meta_row">
         <div class="form-group" id="n_board_wrap"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
-        <div class="form-group" id="n_week_group"><label>周数</label>
-          <div style="position:relative">
-            <label class="week-auto-line" title="勾选后禁用手动选择周数（已手选的周数会被清空）；系统按创建日期到截止日期自动计算并回填全部周数">
-              <input type="checkbox" id="n_week_auto" onchange="onWeekAutoToggle('n')">自动回填周数（按创建 ～ 截止日期计算）
+        <div class="form-group" id="n_week_group">
+          <!-- #205s（2026-11-18 需求3）：自动回填勾选移入「周数」标题行（不换行、留间距）；
+               新建时勾选不立即回显周数（需求4）—— 保存时按开始/截止日期统一回填 -->
+          <div class="week-label-row">
+            <label>周数</label>
+            <label class="week-auto-line" title="勾选后禁用手动选择周数（已手选的周数会被清空）；保存时按开始日期到截止日期自动计算并回填全部周数">
+              <input type="checkbox" id="n_week_auto" onchange="onWeekAutoToggle('n')">自动回填周数（按开始 ～ 截止日期计算）
             </label>
+          </div>
+          <div style="position:relative">
             <input type="text" class="form-input" id="n_week" autocomplete="off"
-                     placeholder="" title="周数维度（自然周：周一~周日）；默认按创建日期计算，可下拉多选或直接输入多个（、分隔）" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="weekComboInput('n')" onkeydown="weekComboKeydown('n',event)">
+                     placeholder="" title="周数维度（自然周：周一~周日）；默认按开始日期计算，可下拉多选或直接输入多个（、分隔）" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="weekComboInput('n')" onkeydown="weekComboKeydown('n',event)">
             <div class="cf-drop" id="n_week_drop" hidden></div>
           </div>
         </div>
@@ -2800,8 +2812,11 @@ function goLogin(){
 /* #205p（2026-11-18）：事项周数多选下拉——选项带 checkbox（整行可点、勾选行高亮） */
 #e_week_drop .cf-opt input[type=checkbox],#n_week_drop .cf-opt input[type=checkbox]{width:13px;height:13px;margin:0 6px 0 0;accent-color:var(--primary);cursor:pointer;flex-shrink:0;vertical-align:-2px}
 #e_week_drop .cf-opt:has(input:checked),#n_week_drop .cf-opt:has(input:checked){color:var(--primary);font-weight:600}
-/* 自动回填周数勾选行（事项弹窗内，位于周数输入框上方） */
-.week-auto-line{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text2);cursor:pointer;user-select:none;margin-bottom:5px;white-space:nowrap}
+/* 自动回填周数勾选行（#205s 2026-11-18 需求3）：移入「周数」标题行内联展示，
+   与标题同行、留 10px 间距、不换行 */
+.week-label-row{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.week-label-row>label{margin-bottom:0;flex-shrink:0}
+.week-auto-line{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text2);cursor:pointer;user-select:none;margin-bottom:0;white-space:nowrap;min-width:0;overflow:hidden}
 .week-auto-line input[type=checkbox]{width:13px;height:13px;margin:0;accent-color:var(--primary);cursor:pointer}
 .week-auto-line:hover{color:var(--text)}
 /* 周数候选里的「当前周」高亮（2026-11-09 需求4）：#CCB484 + 加粗。
@@ -5682,8 +5697,11 @@ function weekComboToggle(which,w,cb){
   weekSyncInp(which);
   paintWeekCombo(which);
 }
-// ---------- 自动回填周数（#205p 需求3）----------
-// 勾选 → 禁用手动选择（已手选的周数清空），按创建日期 ~ 截止日期自动计算全部周数
+// ---------- 自动回填周数（#205p 需求3；#205s 2026-11-18 需求2/4 修订）----------
+// 勾选 → 禁用手动选择（已手选的周数清空）。
+// 起始周数取值来源由「创建日期」改为「**开始日期**」（需求2）；
+// 新建弹窗勾选后**不立即回显**周数（开始/截止日期可能尚未填写，需求4）——
+// 保存时由 weekGather 按当前表单日期统一计算回填。
 function onWeekAutoToggle(which){
   const cbx=document.getElementById(which+'_week_auto');
   const inp=document.getElementById(weekComboInpId(which));
@@ -5692,33 +5710,38 @@ function onWeekAutoToggle(which){
     weekComboSel(which).clear();
     WEEK_COMBO_TYPED[which]=false;
     inp.disabled=true;
-    weekAutoRefresh(which);
+    if(which==='e'){
+      weekAutoRefresh('e');          // 编辑态：开始/截止日期已存在 → 立即预览
+    }else{
+      WEEK_AUTO.n=null;              // 新建态：不回显，留待保存时按表单日期回填（需求4）
+      inp.value='';
+    }
   }else{
     inp.disabled=false;
     WEEK_AUTO[which]=null;
     inp.value='';
   }
 }
-// 勾选状态下按（创建日期, 截止日期）重算回填预览；日期变化时同步刷新
+// 勾选状态下按（开始日期, 截止日期）重算回填预览；日期变化时同步刷新。
+// 仅编辑弹窗调用（新建弹窗勾选不回显，需求4）。
 function weekAutoRefresh(which){
   const cbx=document.getElementById(which+'_week_auto');
   if(!cbx||!cbx.checked)return;
   const inp=document.getElementById(weekComboInpId(which));
-  let created='';
-  if(which==='e'){
-    created=String((window._editCard||{}).created||'').slice(0,10);
-  }else{
-    created=new Date().toISOString().slice(0,10);   // 新建：创建时间=当下
-  }
-  const due=(document.getElementById(which==='e'?'e_due':'n_due')||{value:''}).value||'';
-  const list=weekRangeOf(created,due);
+  const begId=(which==='e')?'e_begin':'n_begin';
+  const dueId=(which==='e')?'e_due':'n_due';
+  let begin=(document.getElementById(begId)||{value:''}).value||'';
+  if(which==='e'&&!begin)begin=String((window._editCard||{}).begin||'').slice(0,10);   // 输入框为空回退存量开始日期
+  const due=(document.getElementById(dueId)||{value:''}).value||'';
+  const list=weekRangeOf(begin,due);
   WEEK_AUTO[which]=list;
   inp.value=list.join('、');
 }
-// 由起始/截止日期计算覆盖的全部自然周标签（升序、去重；无截止=起始所在周）
-function weekRangeOf(created,due){
+// 由起始/截止日期计算覆盖的全部自然周标签（升序、去重；无截止=起始所在周）。
+// #205s（2026-11-18 需求2）：起始日期改由「开始日期」提供（原为创建日期）
+function weekRangeOf(begin,due){
   const parse=function(s){const m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(s||''));return m?new Date(Date.UTC(+m[1],+m[2]-1,+m[3])):null};
-  const a=parse(created);
+  const a=parse(begin);
   if(!a)return [];
   const b=parse(due)||a;
   if(b<a)return [cpWeekOf(a)];
@@ -5730,10 +5753,19 @@ function weekRangeOf(created,due){
   }
   return [...set].sort(weekSortAsc);
 }
-// 保存时收集周数：自动回填优先 → 勾选集 → 输入框直接输入（解析多值）
+// 保存时收集周数：自动回填优先 → 勾选集 → 输入框直接输入（解析多值）。
+// #205s（2026-11-18 需求2/4）：自动回填在**保存时刻**按当前表单的（开始日期, 截止日期）
+// 统一计算 —— 新建弹窗勾选后不回显、编辑弹窗预览与落库同源，起始周数取自开始日期。
 function weekGather(which){
   const cbx=document.getElementById(which+'_week_auto');
-  if(cbx&&cbx.checked)return (WEEK_AUTO[which]||[]);
+  if(cbx&&cbx.checked){
+    const beg=(document.getElementById(which==='e'?'e_begin':'n_begin')||{value:''}).value||'';
+    if(which==='e'&&!beg){
+      const snap=String((window._editCard||{}).begin||'').slice(0,10);
+      return weekRangeOf(snap,(document.getElementById('e_due')||{value:''}).value||'');
+    }
+    return weekRangeOf(beg,(document.getElementById(which==='e'?'e_due':'n_due')||{value:''}).value||'');
+  }
   const sel=[...weekComboSel(which)];
   if(sel.length)return sel.sort(weekSortAsc);
   const inp=document.getElementById(weekComboInpId(which));
@@ -6884,25 +6916,21 @@ function weekCompact(w){
 function cardWeeks(o){return String((o&&o.week_no)||'').split(';').map(x=>x.trim()).filter(Boolean).sort(weekSortAsc)}
 function weekCellText(weeks){
   if(!weeks.length)return '';
-  // #205r（2026-11-18 用户需求1）：目录周数列展示**最早 2 周**，2 周以上以「…」收尾
-  return weeks.slice(0,2).map(weekCompact).join('、')+(weeks.length>2?'…':'');
+  // #205s（2026-11-18 需求5）：目录周数列展示**最早 2 个完整周数**（全称，非压缩形态），
+  // 2 周以上以「…」收尾；列宽已统一加宽到 204px（空间从标题列压缩）
+  return weeks.slice(0,2).join('、')+(weeks.length>2?'…':'');
 }
 function weekCellTip(weeks,cy){
   if(!weeks.length)return '未设置周数';
-  let tip='周数：'+weeks.map(weekCompact).join('、');
+  let tip='周数：'+weeks.join('、');
   if(cy)tip+='（所属板块年份：'+esc(cy)+'年）';
   return tip;
 }
-// 跨多周时加宽周数列、压缩标题列容纳（需求4）：2~3 周 116px、≥4 周 136px；
-// 单周保持原 96px，列对齐不受影响。返回行内 style（.fcols 容器用）。
+// #205s（2026-11-18 需求5）：周数列宽已统一为 204px（CSS .fcols/.sub-node .fcols/.week-fcols
+// 三处同步），不再按周数逐行动态加宽 —— 全部行同宽，纵向对齐更稳，标题列自动压缩。
+// 函数保留（调用点不改动），恒返回空 style。
 function fcolsGridStyle(o){
-  const n=cardWeeks(o).length;
-  if(n<=1)return '';
-  // #205r：单元格展示最早 2 周（+…），列宽相应加大——2 周 ≈128px、≥3 周（带…）≈144px
-  const w=n>=3?144:128;
-  // 总宽 = 五列之和 + 4 个列间距 8px（与 CSS .fcols width 的构成一致，含 gap）
-  const total=w+118+104+104+72+32;
-  return ` style="grid-template-columns:${w}px 118px 104px 104px 72px;width:${total}px;flex:0 0 ${total}px"`;
+  return '';
 }
 // 网格版（列表里的父/子事项行）：四列固定宽度，跨行纵向对齐。
 // 负责人姓名长短不影响后续列的起始位置；空值统一占位为「—」。
@@ -6972,9 +7000,11 @@ function cardItem(c,seq){
     :'';
   // 列表最前方只保留顺序序号（每个板块独立从 1 开始，按当前排序规则连续排列）
   const seqHtml=seq?`<span class="item-seq ${pinned?'pin':''}" title="本板块第 ${seq} 项">${seq}</span>`:'';
-  // 负责人 / 周数 / 创建日期 / 截止日期 —— 四列固定网格，跨行纵向对齐。
+  // 负责人 / 周数 / 开始日期 / 截止日期 —— 四列固定网格，跨行纵向对齐。
   // 负责人与子事项**各自独立取值**，不做父子关联或继承。
-  const _fo={owner:c.owner,week_no:c.week_no,created:c.created,due:c.due,column_name:c.column_name,status:c.status,overdue_days:c.overdue_days};
+  // #205s（2026-11-18 需求1）：目录「开始」列必须用**事项自己的 begin 字段**——
+  // 之前 _fo 漏传 begin → fieldItems 回退 created，「抬头写开始、实际显示创建时间」。
+  const _fo={owner:c.owner,week_no:c.week_no,begin:c.begin,created:c.created,due:c.due,column_name:c.column_name,status:c.status,overdue_days:c.overdue_days};
   const colsHtml=fieldCols(_fo);
   // #163 勾选权限：板块负责人及以上可勾板块内全部事项；否则仅事项负责人可勾自己的
   const _colKey=(c.board_id||curBoard)+'::'+(c.column_name||'');
@@ -7086,7 +7116,8 @@ function subNodeHtml(n,level,parentId){
   //（「逾期」标识列已移除 2026-11-13，空间让给标题列）
   // 字段列复用父事项的 fieldCols() → 字段集合与顺序天然一致（含周数列）
   // 负责人与父事项**各自独立取值**，子事项不会继承父事项负责人
-  const _fo={owner:n.owner,week_no:n.week_no,created:n.created,due:n.due,column_name:n.column_name,status:n.status,overdue_days:n.overdue_days};
+  // #205s（2026-11-18 需求1）：子事项行同样传 begin（与父行同口径，开始列用真实开始日期）
+  const _fo={owner:n.owner,week_no:n.week_no,begin:n.begin,created:n.created,due:n.due,column_name:n.column_name,status:n.status,overdue_days:n.overdue_days};
   const colsHtml=fieldCols(_fo);
   // 置顶/复制合并为「操作 ▾」（#55，与主事项行同构）
   const _sid=n.card_id;

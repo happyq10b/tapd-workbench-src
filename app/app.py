@@ -3861,14 +3861,15 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     # 板块级校验：账号被限定了某看板的板块白名单时，不得把事项移入不可见的板块
     if fields.get('column_id'):
         check_column_access(cur[0]['board_id'], str(fields.get('column_id')), username)
-    # 周数维度：格式校验；清空则回落到「按创建日期所在自然周」
+    # 周数维度：格式校验；清空则回落到「按开始日期（空回退创建日期）所在自然周」
+    # #205s（2026-11-18 需求2）：默认起始周数取值来源由创建日期改为开始日期
     if 'week_no' in fields:
         raw = str(fields.get('week_no') or '').strip()
         if raw:
             fields['week_no'] = _norm_weeks(raw)   # #205p 多周归一（;分隔，去重升序）
         else:
-            crow = dbq('SELECT created FROM cards WHERE card_id=?', (card_id,))
-            fields['week_no'] = week_label(crow[0]['created']) if crow else ''
+            crow = dbq('SELECT begin, created FROM cards WHERE card_id=?', (card_id,))
+            fields['week_no'] = week_label((crow[0]['begin'] if crow else '') or (crow[0]['created'] if crow else '')) if crow else ''
     cur_ver = cur[0]['version']
     # 子事项时间约束：起始 ≥ 父起始，截止 ≤ 父截止
     if cur[0]['parent_id']:
@@ -4014,8 +4015,9 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
     vals['creator'] = username
     vals['created'] = time.strftime('%Y-%m-%d %H:%M:%S')
     vals['parent_id'] = req.parent_id
-    # 周数维度：默认取**创建日期**所处的自然周；前端显式传入时以其为准（可手动调整）
-    vals['week_no'] = _norm_weeks(req.week_no or vals.get('week_no', '')) or week_label(vals['created'])   # #205p 多周归一
+    # 周数维度：默认取**开始日期**（空回退创建日期）所处的自然周；前端显式传入时以其为准（可手动调整）
+    # #205s（2026-11-18 需求2）：默认起始周数取值来源由创建日期改为开始日期
+    vals['week_no'] = _norm_weeks(req.week_no or vals.get('week_no', '')) or week_label(vals.get('begin') or vals['created'])   # #205p 多周归一
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
@@ -4591,8 +4593,8 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
     vals['deleted'] = 0
     vals['pinned'] = 0
     vals['copy_from'] = src['card_id']
-    # 周数：默认按**副本创建日期**所在自然周，可手动指定
-    vals['week_no'] = _norm_weeks(req.week_no) or week_label(now)
+    # 周数：默认按**开始日期**（空回退副本创建日期）所在自然周，可手动指定
+    vals['week_no'] = _norm_weeks(req.week_no) or week_label(vals.get('begin') or now)
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
