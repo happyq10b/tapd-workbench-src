@@ -1129,6 +1129,8 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .pp-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:5px}
 .pp-tag{display:inline-flex;align-items:center;gap:4px;background:#e6f1fb;color:#185fa5;font-size:12px;padding:2px 6px 2px 9px;border-radius:10px;border:1px solid #b5d4f4}
 .pp-tag i{font-style:normal;cursor:pointer;color:#4a7db5;font-size:13px;line-height:1}
+/* #205g：下拉面板顶部「全选」条 */
+.pp-all{font-weight:600;color:var(--primary);background:#f0f7ff;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1}
 .pp-tag i:hover{color:var(--danger)}
 .pp-ip{position:relative}
 .pp-in{width:100%;border:none;outline:none;font-size:13px;padding:4px 2px;background:transparent;box-sizing:border-box}
@@ -7992,7 +7994,7 @@ async function cdLoadComments(colkey){
     const cs=_all.slice(0,10);
     const hint=_all.length>10
       ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">共 ${_all.length} 条，仅显示最近 10 条，点击【全部评论】查看全部</div>`:'';
-    box.innerHTML=(cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')+hint)
+    box.innerHTML=(cs.map(x=>`<div class="comment-item"><span class="who">${esc(bcMemberName(x.username))}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')+hint)
       ||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
   }catch(e){
     box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">评论加载失败：'+esc(e.message||'')+'</div>';
@@ -8034,7 +8036,7 @@ async function cdLoadActions(colkey){
     // 操作记录仅显示最近 12 条（与事项详情 #116 同款口径）
     const _more=(res.actions||[]).length>12
       ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">仅显示最近 12 条，更早的完整操作日志请通过【更多 → 操作日志】查询（管理员权限）</div>`:'';
-    box.innerHTML=_acts.map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(colActCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')+_more
+    box.innerHTML=_acts.map(a=>`<div class="comment-item"><span class="who">${esc(bcMemberName(a.username))}</span> ${esc(colActCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')+_more
       ||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
   }catch(e){
     box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">操作记录加载失败：'+esc(e.message||'')+'</div>';
@@ -8064,7 +8066,7 @@ async function openAllComments(type){
       cs=res.comments||[];
     }
     list.innerHTML=cs.length
-      ?cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')
+      ?cs.map(x=>`<div class="comment-item"><span class="who">${esc(bcMemberName(x.username))}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')
       :'<div style="color:var(--text2);font-size:12px;padding:6px 4px">暂无评论</div>';
   }catch(e){
     list.innerHTML='<div style="color:var(--danger);font-size:12px;padding:6px 4px">评论加载失败：'+esc(e.message||'')+'</div>';
@@ -8581,10 +8583,14 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
   const tags=el.querySelector('.pp-tags'),inp=el.querySelector('.pp-in'),drop=el.querySelector('.pp-drop');
   PP[containerId]={arr,tags,inp,drop,ALL,pair:pairId||'',isOwner:!!isOwner};
   const rt=()=>{tags.innerHTML=arr.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="ppRemove('${containerId}','${esc(n)}')">×</i></span>`).join('')};
-  const rd=(f)=>{let list=ALL.filter(n=>!f||n.includes(f));
+  const rd=(f)=>{
+    // #205g：下拉面板顶部「全选」条（toggle：全部已选时显示「取消全选」）
+    let list=ALL.filter(n=>!f||n.includes(f));
     // 2026-11-05：取消负责人/参与人互斥 —— 参与人下拉不再隐藏当前负责人
-    drop.innerHTML=list.map(n=>`<div class="pp-opt ${arr.includes(n)?'sel':''}" onmousedown="ppToggle('${containerId}','${esc(n)}')">${esc(n)}</div>`).join('')
-      ||(ALL.length?'<div class="pp-empty">无匹配成员</div>':'<div class="pp-empty">无可选人员（请先在上级层级配置负责人/参与人）</div>');
+    const allSel=ALL.length&&ALL.every(n=>arr.includes(n));
+    const allBar=ALL.length?`<div class="pp-opt pp-all" onmousedown="ppToggleAll('${containerId}')">${allSel?'✕ 取消全选':'☑ 全选'}（${ALL.length} 人）</div>`:'';
+    drop.innerHTML=allBar+(list.map(n=>`<div class="pp-opt ${arr.includes(n)?'sel':''}" onmousedown="ppToggle('${containerId}','${esc(n)}')">${esc(n)}</div>`).join('')
+      ||(ALL.length?'<div class="pp-empty">无匹配成员</div>':'<div class="pp-empty">无可选人员（请先在上级层级配置负责人/参与人）</div>'));
     drop.style.display='block';
     // #166：下拉底部溢出视口 → 向上弹（改锚定输入框上方）
     const _dr=drop.getBoundingClientRect();
@@ -9192,6 +9198,25 @@ function ppToggle(containerId,n){
   }
   ppSyncTags(containerId);
   o.drop.querySelectorAll('.pp-opt').forEach(d=>{d.classList.toggle('sel',o.arr.includes(d.dataset.name))});
+  // #205g：从下拉点选人员后清空输入框 —— IME 组合上屏的拼音/文本残留一并清掉，
+  // 选择后输入框为空、可直接搜索下一位人员
+  o.inp.value='';
+}
+// #205g（2026-11-18）：一键选中全部人员（toggle：已全选则取消全选）。
+// 范围 = 当前选人池 ALL（层级约束后的可用名单）；覆盖 member-picker 全部实例
+// （事项/子事项的负责人与参与人、板块的负责人与参与人）。
+function ppToggleAll(containerId){
+  const o=PP[containerId];if(!o)return;
+  const names=o.ALL.map(x=>(typeof x==='string'?x:x.name));
+  const allSel=names.length&&names.every(n=>o.arr.includes(n));
+  if(allSel){
+    o.arr=o.arr.filter(n=>!names.includes(n));   // 取消全选：只清本池人员（池外存量不动）
+  }else{
+    names.forEach(n=>{if(!o.arr.includes(n))o.arr.push(n);});
+  }
+  ppSyncTags(containerId);
+  o.inp.value='';
+  if(o.rd)o.rd('');   // 重绘下拉（全选条 label 与 sel 态同步）
 }
 // 联动刷新：配对选择器的下拉若开着，按新状态重绘（互斥过滤）
 function ppRefreshDrop(id){const o=PP[id];if(o&&o.rd&&o.drop.style.display==='block')o.rd(o.inp.value);}
@@ -9228,13 +9253,13 @@ function renderCardCommentPreview(all){
   const _cs=(all||[]).slice(0,10);
   const _chint=(all||[]).length>10
     ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">共 ${(all||[]).length} 条，仅显示最近 10 条，点击【全部评论】查看全部</div>`:'';
-  document.getElementById('d_comments').innerHTML=(_cs.map(x=>`<div class="comment-item"><span class="who">${esc(x.username)}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')+_chint)||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
+  document.getElementById('d_comments').innerHTML=(_cs.map(x=>`<div class="comment-item"><span class="who">${esc(bcMemberName(x.username))}</span> ${renderCommentText(x.content)}<span class="when">${esc(x.created_at)}</span></div>`).join('')+_chint)||'<div style="color:var(--text2);font-size:12px">暂无评论</div>';
 }
 function renderCardActionsPreview(actions){
   const _acts=(actions||[]).slice(0,12);
   const _more=(actions||[]).length>12
     ?`<div style="padding:6px 4px 2px;font-size:11.5px;color:var(--text3);border-top:1px dashed var(--border);margin-top:4px">仅显示最近 12 条，更早的完整操作日志请通过【更多 → 操作日志】查询（管理员权限）</div>`:'';
-  document.getElementById('d_actions').innerHTML=_acts.map(a=>`<div class="comment-item"><span class="who">${esc(a.username)}</span> ${esc(actCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')+_more||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
+  document.getElementById('d_actions').innerHTML=_acts.map(a=>`<div class="comment-item"><span class="who">${esc(bcMemberName(a.username))}</span> ${esc(actCn(a.action))}<span class="when">${esc(a.created_at)}</span></div>`).join('')+_more||'<div style="color:var(--text2);font-size:12px">暂无记录</div>';
 }
 async function openDetail(id){
   DETAIL_ID=id;
@@ -11090,6 +11115,7 @@ function renderAuditList(items){
     <thead><tr style="background:var(--bg)">
       <th style="padding:6px 8px;text-align:left;width:140px">时间</th>
       <th style="padding:6px 8px;text-align:left;width:90px">账号</th>
+      <th style="padding:6px 8px;text-align:left;width:100px">姓名</th>
       <th style="padding:6px 8px;text-align:left;width:100px">IP</th>
       <th style="padding:6px 8px;text-align:left;width:90px">操作</th>
       <th style="padding:6px 8px;text-align:left;width:160px">对象</th>
@@ -11099,6 +11125,7 @@ function renderAuditList(items){
     <tbody>${items.map(it=>`<tr style="border-bottom:1px solid var(--border)">
       <td style="padding:6px 8px;color:var(--text2);white-space:nowrap">${esc(it.ts)}</td>
       <td style="padding:6px 8px;white-space:nowrap">${esc(it.username)}</td>
+      <td style="padding:6px 8px;white-space:nowrap;color:var(--text2)">${esc(bcMemberName(it.username))}</td>
       <td style="padding:6px 8px;white-space:nowrap">${esc(it.ip)}</td>
       <td style="padding:6px 8px;white-space:nowrap">${esc(AUDIT_ACTIONS[it.action]||it.action)}</td>
       <td style="padding:6px 8px;color:var(--text2)">${esc(it.target)}</td>
