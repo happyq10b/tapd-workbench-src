@@ -1636,6 +1636,15 @@ function goLogin(){
           <!-- 已选看板明细（2026-11-10 #126）：标题后一行小字，列示当前选中的看板；
                样式与筛选明细行（.filter-hint）同款。内容由 renderTabs() 按 curBoards 更新。 -->
           <span class="band-sel-hint" id="boardSelHint"></span>
+          <!-- ＋ 新建看板（2026-11-18 #205e）：看板带标题行右端。
+               点击 → 打开看板管理弹窗并自动叠加「新建看板」弹窗。
+               显隐 = renderPermissionEntries() 按新建看板权限控制
+               （管理员/超管 或 架构负责人及以上，与后端 POST /api/boards
+               的 perm_check_arch_scope 同口径）；无权限用户不渲染。 -->
+          <span class="tb-band-head-entry" id="boardNewEntry">
+            <button id="bandNewBoardBtn" class="btn-primary" style="padding:3px 12px;font-size:12px"
+              onclick="bandNewBoard()" title="打开看板管理并新建看板">＋ 新建看板</button>
+          </span>
           <!-- 归属年份筛选已移入下方筛选工具栏（2026-11-06 #81 用户需求）：
                改为与周数同款的 combo 多选下拉，与本栏解耦。 -->
           <!-- 【看板管理】入口已按 2026-11-10 需求移除：单看板配置由看板卡片上的
@@ -3325,6 +3334,13 @@ function renderPermissionEntries(){
   // ── 架构管理入口（顶部【更多】菜单内）──
   const wgBtn=document.getElementById('wgBtn');
   if(wgBtn)wgBtn.style.display=p.canManageArch?'':'none';
+  // ── ＋ 新建看板（看板带标题行右端，#205e 2026-11-18）──
+  // 口径与看板管理弹窗内 bcNewBoardBtn 完全一致：管理员/超管 或 任一架构节点
+  // 负责人（arch_scope 非空）——对应后端 POST /api/boards 的
+  // perm_check_arch_scope（管理员豁免 + 任一架构负责人放行，fail-closed）。
+  // 无权限用户整个入口槽 display:none（按钮不渲染可见形态）。
+  const bnEntry=document.getElementById('boardNewEntry');
+  if(bnEntry)bnEntry.style.display=(ME.is_admin||(ME.arch_scope||[]).length>0)?'':'none';
 }
 function applyPermissionUI(){
   if(!ME)return;
@@ -12791,7 +12807,7 @@ async function openBoardConfigModalFor(bid){
   }
 }
 async function openBoardConfigModal(){
-  if(!(await bcPrepModal()))return;
+  if(!(await bcPrepModal()))return false;   // #205e：把准入结果回传给调用方
   BC_FROM_CARD=false;
   bcReleaseLock();   // 2026-11-12：进入看板管理先清残留编辑锁
   BC_SELECTED=null; BC_EDIT_ID=0;
@@ -12806,6 +12822,14 @@ async function openBoardConfigModal(){
   openModal('boardConfigModal');
   renderBoardList();
   renderEditArea();
+  return true;
+}
+// ＋ 新建看板（#205e）：看板带标题行按钮 → 打开看板管理弹窗（跳转语义），
+// 成功进入后**自动叠加「新建看板」弹窗**（openBoardModal 自带 z-index 抬升，
+// 盖在看板管理之上；关闭新建后回到看板管理列表）。准入失败则不叠加。
+async function bandNewBoard(){
+  const okOpen=await openBoardConfigModal();
+  if(okOpen)openBoardModal();
 }
 async function loadBoardConfig(){
   const res=await api('/api/boards');
