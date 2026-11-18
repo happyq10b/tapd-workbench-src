@@ -2558,7 +2558,7 @@ function goLogin(){
       <div class="due-info-banner">
         勾选字段即参与排序，<strong>勾选的先后顺序 = 优先级</strong>（先勾选的优先级最高）；
         每个已勾选字段可单独选择<strong>升序 / 降序</strong>。<strong>板块</strong>与<strong>事项</strong>分别独立配置、互不影响；
-        置顶条目始终最优先，不参与排序配置。配置按账号记忆。
+        置顶条目始终最优先，不参与排序配置。配置为个人偏好：确定即固化保存到您的账号，换设备/换浏览器不丢失，直到您主动更改（不同账号互不影响）。
       </div>
       <div id="sortSetBody"></div>
     </div>
@@ -6396,7 +6396,7 @@ function filtersActive(q){
 }
 function renderBoard(cards,cols,q,colHits){
   const c=document.getElementById('boardContent');
-  loadSortCfg();   // #205y：排序设定（板块/事项独立多级配置）按账号恢复
+  loadSortCfg();   // #205y：排序设定（板块/事项独立多级配置）按账号恢复（#205z：本地缓存先行，服务端 user_prefs 异步覆盖）
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
   renderYearFilter(cols);
   paintColStatus();   // 板块状态 combo 首绘/重绘（2026-11-06 #81）
@@ -6984,7 +6984,7 @@ function cmpColumn(a,b,cmeta,csort){
   }
   return String(a).localeCompare(String(b),'zh');
 }
-// 排序配置（#205y）：{card:{order:['created'],dir:{...}}, col:{...}} —— 按账号记忆（localStorage）
+// 排序配置（#205y/#205z）：{card:{...}, col:{...}} —— 个人偏好按账号持久化（服务端 user_prefs.sort_cfg，localStorage 为本地缓存兜底）
 // order = 勾选的字段清单（数组顺序 = 优先级）；dir = 各字段 asc/desc。
 // 默认 = 仅「创建时间」降序（延续 #205w 默认行为）。
 var SORT_FIELDS=['begin','due','created'];
@@ -7017,8 +7017,13 @@ function loadSortCfg(){
     if(raw){const v=JSON.parse(raw);if(v&&(v.card||v.col))SORT_CFG=normalizeSortCfg(v);}
   }catch(e){SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT_COL()}}
 }
+// #205z（2026-11-18）：排序方式改为**个人偏好设置** —— 服务端 user_prefs.sort_cfg 为真源
+// （user_prefs 按 username 行隔离，不同用户互不影响）；localStorage 只是本地缓存兜底
+// （服务端短暂不可达时界面不丢配置）。弹窗点「确定」即固化保存，直到用户主动更改。
 function saveSortCfg(){
-  try{localStorage.setItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'),JSON.stringify(SORT_CFG))}catch(e){}
+  const _u=((ME&&ME.username)||'anon');
+  try{localStorage.setItem('tapd.sortCfg_'+_u,JSON.stringify(SORT_CFG))}catch(e){}
+  _prefPush('sort_cfg',SORT_CFG);   // 防抖 800ms 上传服务端；失败静默（内存态已生效）
 }
 // ---------- 排序设定弹窗（#205y） ----------
 function openSortSetModal(){
@@ -7478,6 +7483,19 @@ async function loadUserPrefs(){
     if(p.subtree_open&&typeof p.subtree_open==='object'){
       Object.keys(p.subtree_open).forEach(function(k){if(p.subtree_open[k])SUBTREE_OPEN[k]=1;});
       renderCurrentViewForPrefs();
+    }
+    // 排序方式偏好（#205z 2026-11-18）：服务端为真源 —— 登录后拉取覆盖内存并回写本地缓存；
+    // 服务端缺、本地浏览器有 → 一次性迁移上传（换设备/换浏览器配置不丢）。
+    // 覆盖后若与当前内存配置不同，重载当前列表让排序立即生效（幂等，防首屏双刷）。
+    if(p.sort_cfg&&p.sort_cfg.card&&p.sort_cfg.col){
+      const _nc=normalizeSortCfg(p.sort_cfg);
+      const _chg=JSON.stringify(_nc)!==JSON.stringify(SORT_CFG);
+      SORT_CFG=_nc;
+      try{localStorage.setItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'),JSON.stringify(SORT_CFG))}catch(e){}
+      if(_chg&&typeof curPage!=='undefined'&&typeof reload==='function')reload(curPage);
+    }else{
+      const _local=(function(){try{const raw=localStorage.getItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'));return raw?JSON.parse(raw):null}catch(e){return null}})();
+      _migrateLocalPref('sort_cfg',_local,!!p.sort_cfg);
     }
   }catch(e){}
 }
