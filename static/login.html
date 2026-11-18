@@ -78,7 +78,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
    保持 10px 固定间距 → 文本区从 96px 起 */
 /* 最小高度 = 2 行（line-height 1.6 × 11.5px ≈ 18.4px/行）：通知文字短时
    也预留两行空间，版本号稳定在下方（#147 用户反馈） */
-.hint{margin-top:18px;font-size:11.5px;color:#566275;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word;min-height:37px}
+/* margin-top 46px = 原 18px + 1.5 行（约 28px）整体下移（用户反馈 2026-11-18） */
+.hint{margin-top:46px;font-size:11.5px;color:#566275;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word;min-height:37px}
 /* 版本号（#147）：登录卡片底部右下角小字，仅超管配置后显示 */
 .ver{margin-top:10px;font-size:10.5px;color:#8a93a6;text-align:right;letter-spacing:.3px}
 /* ===== 键盘可达 + 焦点可见（UI审查 E1/B2）=====
