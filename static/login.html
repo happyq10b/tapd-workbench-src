@@ -70,7 +70,8 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
 button{padding:12px;border:none;border-radius:8px;background:#002D74;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s;
   letter-spacing:2px;font-family:inherit}
 /* 登录按钮撑满；其他按钮（如小眼睛）由各自规则控制尺寸 */
-#btn{width:100%}
+/* #205r（2026-11-18 用户需求7）：登录按钮整体下移约一行高度（≈20px） */
+#btn{width:100%;margin-top:20px}
 /* 输入框/按钮统一继承页面字体 —— 否则各控件会用浏览器默认字体，
    与标题字体不一致（中文尤其明显），整体显得不专业。 */
 .field input,.btn,.field input::placeholder{font-family:inherit}

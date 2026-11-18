@@ -2609,9 +2609,14 @@ def me(username: str = Depends(require_auth)):
     # → /api/me 每看板下发 owner / participants（boards 表字段，_all_boards 不查这两列）
     _acl_map = {r['board_id']: (r['owner'] or '', r['participants'] or '')
                 for r in dbq('SELECT board_id, owner, participants FROM boards')}
+    # #205r（2026-11-18）：看板 tab 标题后的「板块数量」徽标 —— 一次分组查询，
+    # 每看板下发 col_count（板块总数口径；数量徽标非权限边界。board_columns 无 deleted 列）
+    _col_counts = {r['board_id']: r['n']
+                   for r in dbq('SELECT board_id, COUNT(*) AS n FROM board_columns GROUP BY board_id')}
     boards_out = []
     for b in allb:
         item = dict(b)
+        item['col_count'] = _col_counts.get(b['board_id'], 0)   # #205r 板块数量徽标
         dn, dnode = dept_map.get(b['board_id'], ('', 0))
         item['dept'] = dn
         item['dept_node_id'] = dnode or 0
