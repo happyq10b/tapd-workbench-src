@@ -4334,9 +4334,21 @@ class CopyColumnReq(BaseModel):
 @app.post('/api/columns/copy')
 async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer),
                       request: Request = None):
-    """复制板块：复制到**指定看板**（归属重选）。
+    """复制板块：复制到**指定看板**（归属重选），并**连带完整复制板块下全部事项**。
 
-    权限三重校验：
+    · #205ab（2026-11-18 用户需求）：复制板块时连同该板块下的**全部事项一并完整复制，
+      不得遗漏** —— 主事项与子事项（cards.parent_id 层级）+ 每张卡的勾选清单
+      （card_subtasks，含勾选状态/勾选人/时间与子任务层级）+ 板块配置
+      （负责人/参与人/性质/归属年份/完成情况）全部随附；
+      事项字段**保真复制**（状态、完成时间、创建人/创建时间、开始/截止/周数、
+      负责人/参与人/描述/优先级/标签、逾期结算 overdue_days 等一律原样），
+      仅重映射身份与归属：card_id 新生成、board_id / board_name / column_id /
+      column_name / workspace_id 指向副本板块、parent_id 指向新主事项、
+      copy_from 记录来源、pinned=0（置顶是**个人级**配置，真源在 user_prefs
+      'pins'，不属于板块内容）。副本与原板块**不共享任何数据**（全部新 ID）。
+    · 不复制：评论（历史讨论 —— 与 copy_card / 看板整套复制既有口径一致）、
+      个人级置顶、系统留痕（actions / audit_logs / state_history / messages）。
+    · 权限三重校验：
       ① 源板块必须对当前账号可见（否则无权复制）；
       ② 目标看板必须可见且当前账号有编辑权；
       ③ 目标板块（若指定）必须对该账号可见 —— 越权板块既不可见也不可选。
@@ -4377,17 +4389,113 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     new_cid = 'COL' + str(int(time.time() * 1000))
     # #205t（2026-11-18）：副本继承源板块完成情况（原缺省落表默认 'open'，状态凭空改变）
     _src_completion = (src['completion'] or '').strip() or 'progressing'
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, copy_from, completion)'
-        ' VALUES (?,?,?,?,?,?,?,?,0,?,?)',
-        (key, new_cid, req.board_id, name, created, username, nature, year, src['col_key'],
-         _src_completion))
-    log_action('__column__', username, 'copy', f'复制板块 {name}')
+    # #205ab：板块配置完整随附 —— 负责人 / 参与人一并复制（原实现遗漏这两列）。
+    # ⚠️ 事务原子性：板块行与连带的事项/勾选在同一事务内，任一步失败整体回滚
+    #（不会留下「空板块副本」）—— 因此这里用 conn.execute 而不是 dbe（dbe 逐句提交）
+    conn = get_conn()
+    copied_cards = copied_subtasks = 0
+    try:
+        conn.execute(
+            'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
+            ' creator, nature, year, pinned, copy_from, completion, owner, participants)'
+            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)',
+            (key, new_cid, req.board_id, name, created, username, nature, year, src['col_key'],
+             _src_completion, src.get('owner') or '', src.get('participants') or ''))
+        copied_cards, copied_subtasks = _deep_copy_column_cards(
+            src, req.board_id, name, new_cid)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    log_action('__column__', username, 'copy', f'复制板块 {name}（含事项 {copied_cards} 条、勾选 {copied_subtasks} 条）')
     audit_log(username, client_ip(request), 'column_copy', f'板块 {src["col_key"]}',
-              f'复制板块「{src["column_name"]}」→「{name}」（目标看板 {req.board_id}）', 'success')
+              f'复制板块「{src["column_name"]}」→「{name}」（目标看板 {req.board_id}，'
+              f'连带事项 {copied_cards} / 勾选 {copied_subtasks}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'board_id': req.board_id, 'copy_from': src['col_key'],
-            'created_at': created, 'creator': username, 'nature': nature, 'year': year}
+            'created_at': created, 'creator': username, 'nature': nature, 'year': year,
+            'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks}
+
+
+def _deep_copy_column_cards(src_col, dst_board_id, dst_col_name, dst_column_id):
+    """#205ab：板块复制的正文部分 —— 该板块下全部事项（主 + 子层级）+ 勾选清单。
+
+    保真口径（用户需求「完整复制、不得遗漏，副本与原板块完全一致」）：
+      · cards **全字段原样**（含状态/完成时间/创建人/创建时间/日期/周数/逾期结算），
+        仅重映射：card_id 新生成（CPC 前缀）、board_id / board_name / column_id /
+        column_name / workspace_id 指向副本、parent_id 指向新主事项（保持主→子结构）、
+        copy_from 记录来源、pinned=0（置顶真源在 user_prefs 'pins'，个人级不随附）。
+      · card_subtasks 全量复制：title / done / sort / done_by / done_at /
+        created_by / created_at 原样；子任务层级（parent_id）按新 id 重映射。
+      · 兼容存量：cards 可能存在 column_id 为空、仅靠 column_name 归属的旧数据
+        （OR 条件双匹配；col_key=board::name 保证看板内板块名唯一，不会误捞）。
+    返回 (复制的事项数, 复制的勾选数)。
+    """
+    dst_board_name = ''
+    _b = dbq('SELECT board_name FROM boards WHERE board_id=?', (dst_board_id,))
+    if _b:
+        dst_board_name = _b[0]['board_name'] or ''
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    stamp = str(int(time.time() * 1000))
+    conn = get_conn()
+    src_cards = [dict(r) for r in dbq(
+        "SELECT * FROM cards WHERE board_id=? AND deleted=0"
+        " AND (column_id=? OR (column_id='' AND column_name=?))"
+        ' ORDER BY card_id', (src_col['board_id'], src_col.get('column_id') or '', src_col['column_name']))]
+    card_id_map = {}          # 原 card_id → 新 card_id
+    # 先建主事项（parent_id 空），再建子事项（parent_id 指向新主事项，保持层级）
+    ordered = [c for c in src_cards if not (c.get('parent_id') or '')]
+    ordered += [c for c in src_cards if (c.get('parent_id') or '')]
+    # 身份与归属字段重映射；其余字段保真原样
+    REMAP = {'card_id': None, 'board_id': dst_board_id, 'board_name': dst_board_name,
+             'column_id': dst_column_id, 'column_name': dst_col_name,
+             'workspace_id': '', 'parent_id': '', 'copy_from': '', 'pinned': 0}
+    for i, c in enumerate(ordered):
+        orig_cid = c['card_id']
+        new_cid = 'CPC' + stamp + str(i)
+        vals = {}
+        for k, v in c.items():
+            if k in REMAP:
+                continue
+            vals[k] = v
+        vals.update(REMAP)
+        vals['card_id'] = new_cid
+        vals['copy_from'] = orig_cid
+        vals['parent_id'] = card_id_map.get(c.get('parent_id') or '', '')
+        cols = list(vals.keys())
+        marks = ','.join('?' * len(cols))
+        conn.execute('INSERT INTO cards (%s) VALUES (%s)' % (','.join(cols), marks),
+                     [vals[k] for k in cols])
+        card_id_map[orig_cid] = new_cid
+    # ── 勾选清单：全量复制 + 子任务层级重映射 ──
+    copied_subtasks = 0
+    orig_ids = list(card_id_map.keys())
+    if orig_ids:
+        marks = ','.join('?' * len(orig_ids))
+        src_subs = [dict(r) for r in dbq(
+            'SELECT * FROM card_subtasks WHERE card_id IN (%s) ORDER BY id' % marks, orig_ids)]
+        sub_id_map = {}       # 原子任务 id → 新 id
+        pending_parents = []  # (新子任务 id, 原上级子任务 id)
+        for s in src_subs:
+            cur = conn.execute(
+                'INSERT INTO card_subtasks (card_id, title, done, sort, done_by, done_at,'
+                ' created_by, parent_id, created_at) VALUES (?,?,?,?,?,?,?,0,?)',
+                (card_id_map.get(s['card_id'], ''), s['title'] or '', s['done'] or 0,
+                 s['sort'] or 0, s['done_by'] or '', s['done_at'] or '',
+                 s['created_by'] or '', s['created_at'] or ''))
+            sub_id_map[s['id']] = cur.lastrowid
+            if s['parent_id']:
+                pending_parents.append((cur.lastrowid, s['parent_id']))
+        for new_sid, old_pid in pending_parents:
+            conn.execute('UPDATE card_subtasks SET parent_id=? WHERE id=?',
+                         (sub_id_map.get(old_pid, 0), new_sid))
+        copied_subtasks = len(src_subs)
+    conn.commit()
+    return len(card_id_map), copied_subtasks
 
 
 class CopyCardReq(BaseModel):

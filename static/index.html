@@ -9065,7 +9065,10 @@ async function openCopyModal(kind,payload){
     document.getElementById('cp_nature').value=P.nature||'日常';
     document.getElementById('cp_col_year').value=P.year||'';
     fillCopyBoards(P.board_id);
-    tipEl.innerHTML='副本会新建在<b>所选看板</b>下（归属重选），与原板块<b>不共享任何数据</b>；<b>不复制</b>该板块下的事项。';
+    tipEl.innerHTML='副本会新建在<b>所选看板</b>下（归属重选），与原板块<b>不共享任何数据</b>。'
+      +'#205ab：板块下的<b>全部事项连带完整复制</b> —— 主事项与子事项层级、每张卡的勾选清单（含勾选状态与层级）、'
+      +'事项内容与配置（状态/完成情况/日期/周数/负责人/参与人/描述/优先级等）<b>原样随附</b>；'
+      +'板块负责人/参与人配置同步继承。评论（历史讨论）与个人级置顶不复制。';
   }else{
     document.getElementById('cp_title').textContent=(kind==='sub'?'📋 复制子事项':'📋 复制主事项');
     titleEl.textContent='事项标题';
