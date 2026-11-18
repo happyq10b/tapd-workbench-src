@@ -2835,6 +2835,9 @@ function goLogin(){
 .cf-opt{display:flex;align-items:center;gap:7px;padding:6px 12px;font-size:12.5px;color:var(--text);cursor:pointer;white-space:nowrap}
 .cf-opt:hover{background:#f0f5ff;color:var(--primary)}
 .cf-opt.on{background:#eef5ff;color:var(--primary);font-weight:600}
+/* #205v（2026-11-18）：筛选下拉选项行右侧的板块数量（灰字右对齐，实时分面统计） */
+.cf-opt .opt-count{margin-left:auto;font-size:11px;color:var(--text3);
+  font-variant-numeric:tabular-nums;flex-shrink:0;-webkit-user-select:none;user-select:none}
 /* #205p（2026-11-18）：事项周数多选下拉——选项带 checkbox（整行可点、勾选行高亮） */
 #e_week_drop .cf-opt input[type=checkbox],#n_week_drop .cf-opt input[type=checkbox]{width:13px;height:13px;margin:0 6px 0 0;accent-color:var(--primary);cursor:pointer;flex-shrink:0;vertical-align:-2px}
 #e_week_drop .cf-opt:has(input:checked),#n_week_drop .cf-opt:has(input:checked){color:var(--primary);font-weight:600}
@@ -6692,6 +6695,7 @@ function paintAttrDrop(){
   if(!drop)return;
   if(!_attrDropOpen){drop.hidden=true;drop.innerHTML='';return}
   drop.hidden=false;
+  const _ac=attrCounts();   // #205v：一次计算全部选项计数
   drop.innerHTML='<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'
     +'<span>板块性质</span>'
     +'<span style="display:flex;gap:4px;flex-shrink:0">'
@@ -6700,7 +6704,9 @@ function paintAttrDrop(){
     +'</span></div>'
     +ATTR_OPTS.map(o=>{
       const on=ATTR_SEL.has(o[0]);
-      return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-attr="${o[0]}"><span>${o[1]}</span></label>`;
+      // #205v：选项行右侧追加当前范围内的板块数量（灰字，右对齐）
+      const n=_ac[o[0]]||0;
+      return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-attr="${o[0]}"><span>${o[1]}</span><span class="opt-count" title="当前范围内的板块数量">${n}</span></label>`;
     }).join('');
 }
 // 幂等「确保打开」（与板块状态 toggleColStatusDrop 同款，防 focus→click 双触发闪退）
@@ -6731,6 +6737,31 @@ function colStatusLabel(v){
   const o=COL_STATUS_OPTS.find(x=>x[0]===v);
   return o?o[1]:v;
 }
+// ---------- 筛选选项计数（#205v 2026-11-18） ----------
+// 每个选项后追加该选项在**当前筛选范围**内的板块数量（截图设计：选项行右侧灰字数字）。
+// 统计口径 = 分面（faceted）：看板范围由 COLS_META 载荷天然限定（随看板选择下发），
+// 计入年份筛选与**另一维度**的已选（性质↔状态互为对方的前置条件），
+// 排除自身维度已选 —— 否则勾选某项后它自己会显示 0，下拉数字失去导航意义。
+function _facetBase(excludeDim){   // excludeDim: 'status' | 'attr' | ''（参与统计的板块行）
+  return (window.COLS_META||[]).filter(function(m){
+    if(curYears&&curYears.size&&!curYears.has(m.year||''))return false;
+    if(excludeDim!=='status'&&COL_STATUS_SEL&&COL_STATUS_SEL.size&&!COL_STATUS_SEL.has(m.completion||'open'))return false;
+    if(excludeDim!=='attr'&&ATTR_SEL&&ATTR_SEL.size&&!ATTR_SEL.has(m.nature||'日常'))return false;
+    return true;
+  });
+}
+function colStatusCounts(){   // {notstarted:n, progressing:n, done:n, open:n}
+  const out={};
+  COL_STATUS_OPTS.forEach(function(o){out[o[0]]=0;});
+  _facetBase('status').forEach(function(m){const k=m.completion||'open';out[k]=(out[k]||0)+1;});
+  return out;
+}
+function attrCounts(){        // {专项:n, 日常:n}
+  const out={};
+  ATTR_OPTS.forEach(function(o){out[o[0]]=0;});
+  _facetBase('attr').forEach(function(m){const k=m.nature||'日常';out[k]=(out[k]||0)+1;});
+  return out;
+}
 // 纯重绘：chips + 计数 + 面板（模式与周数/归属年份 combo 一致）
 function paintColStatus(){
   const wrap=document.getElementById('colStatusWrap');
@@ -6748,6 +6779,7 @@ function paintColStatusDrop(){
   if(!drop)return;
   if(!_colStatusDropOpen){drop.hidden=true;drop.innerHTML='';return}
   drop.hidden=false;
+  const _cc=colStatusCounts();   // #205v：一次计算全部选项计数
   drop.innerHTML='<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'
     +'<span>板块完成情况</span>'
     +'<span style="display:flex;gap:4px;flex-shrink:0">'
@@ -6756,7 +6788,9 @@ function paintColStatusDrop(){
     +'</span></div>'
     +COL_STATUS_OPTS.map(o=>{
       const on=COL_STATUS_SEL.has(o[0]);
-      return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-cs="${o[0]}"><span>${o[1]}</span></label>`;
+      // #205v：选项行右侧追加当前范围内的板块数量（灰字，右对齐）
+      const n=_cc[o[0]]||0;
+      return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-cs="${o[0]}"><span>${o[1]}</span><span class="opt-count" title="当前范围内的板块数量">${n}</span></label>`;
     }).join('');
 }
 // 展开（2026-11-06 #85 修复「单击闪退」）：输入框同时绑定 focus 与 click——
