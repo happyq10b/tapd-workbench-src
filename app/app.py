@@ -613,6 +613,55 @@ def _board_dept_pool_accounts(bid: str):
     return accs
 
 
+def _collab_dept_accounts(bid: str):
+    """协同部门成员账号集合（T-013d 协作部门；#205q 并入选人池）。
+
+    board_config.collab_depts 存 org_nodes.id（,分隔，仅中心级归属看板可配）
+    → 解析节点名 → team_members.departments 含该部门名的账号。
+    未配置/节点已删 → 空集。"""
+    row = dbq('SELECT collab_depts FROM board_config WHERE board_id=? '
+              'ORDER BY id LIMIT 1', (bid,))
+    if not row:
+        return set()
+    ids = set()
+    for x in (row[0]['collab_depts'] or '').split(','):
+        x = x.strip()
+        if x.isdigit():
+            ids.add(int(x))
+    if not ids:
+        return set()
+    names = set()
+    for nid in ids:
+        n = dbq('SELECT name FROM org_nodes WHERE id=?', (nid,))
+        if n:
+            names.add(n[0]['name'])
+    if not names:
+        return set()
+    accs = set()
+    for r in dbq('SELECT account, departments FROM team_members'):
+        depts = {x.strip() for x in (r['departments'] or '').split(',') if x.strip()}
+        if depts & names and (r['account'] or '').strip():
+            accs.add(r['account'].strip())
+    return accs
+
+
+def _collab_dept_names(bid: str):
+    """协同部门**名称**列表（#205q：/api/me 下发，前端选人池计算用）。"""
+    row = dbq('SELECT collab_depts FROM board_config WHERE board_id=? '
+              'ORDER BY id LIMIT 1', (bid,))
+    if not row:
+        return []
+    names = []
+    for x in (row[0]['collab_depts'] or '').split(','):
+        x = x.strip()
+        if not x.isdigit():
+            continue
+        n = dbq('SELECT name FROM org_nodes WHERE id=?', (int(x),))
+        if n and n[0]['name'] not in names:
+            names.append(n[0]['name'])
+    return names
+
+
 # ---------------- ACL 指派范围（2026-11-17 用户要求）：写入剔除 + 读取过滤 ----------------
 # 层级链与前端选人池同口径（T-132/133/135）：
 #   看板层 = 归属部门池（None=不限）；板块层 = 上级看板 owner+participants ∩ 部门池；
@@ -620,36 +669,38 @@ def _board_dept_pool_accounts(bid: str):
 # 凡超出允许范围的配置值：**写入时直接剔除**（响应带回 removed 名单，前端 toast 提示），
 # **读取时**（/api/me 看板 ACL、/api/cards 板块元信息）同样过滤下发。
 def _board_allowed_accounts(bid: str):
-    """看板层允许指派账号集合（None = 不限：归属部门未配置或中心级）"""
-    return _board_dept_pool_accounts(bid)
+    """看板层允许指派账号集合（None = 不限：归属部门未配置或中心级）。
+    #205q：协同部门成员并入（板块/事项筛选受制于看板=看板 ACL+协同部门）。"""
+    pool = _board_dept_pool_accounts(bid)
+    if pool is None:
+        return None
+    return pool | _collab_dept_accounts(bid)
 
 
 def _column_allowed_accounts(bid: str, actor: str = None):
-    """板块层允许指派账号集合 = 上级看板 owner+participants（∩ 部门池，若配置）。
-    2026-11-17 修订：部门约束只是**附加交集**——未配置归属部门时池 = 看板 ACL
-    全量（与前端 colPickPool 同口径），层级约束不依赖部门配置。
-    看板 ACL 为空 → 空集（完全限制，与前端空选人池一致）。"""
-    pool = _board_dept_pool_accounts(bid)
+    """板块层允许指派账号集合（#205q 口径修订）：= 上级看板 owner+participants
+    **∪ 协同部门成员** —— 板块的筛选/选人受制于**看板**，不再与架构部门池做交集
+    （用户反馈：板块已配置的参与人被架构范围错误排除、协同部门未并入）。
+    看板 ACL 与协同部门均空 → 空集（完全限制，与前端空选人池一致）。"""
     acl = set()
     row = dbq('SELECT owner, participants FROM boards WHERE board_id=?', (bid,))
     if row:
         if (row[0]['owner'] or '').strip():
             acl.add(row[0]['owner'].strip())
         acl |= {x.strip() for x in (row[0]['participants'] or '').split(',') if x.strip()}
+    acl |= _collab_dept_accounts(bid)
     if is_admin(actor or ''):
         return None          # 管理员指派不受池限（#138 用户认可口径）
-    return acl if pool is None else (acl & pool)
+    return acl
 
 
 def _card_allowed_accounts(bid: str, column_id: str = '', actor: str = None,
                            column_name: str = ''):
     """事项层允许指派账号集合 = 上级板块 owner+participants
-    （板块未登记回退看板 ACL）∩ 部门池（若配置）。
-    2026-11-17 修订：同 _column_allowed_accounts——部门约束只是附加交集，
-    层级约束（事项 ⊆ 板块名单）不依赖部门配置。
+    （板块未登记回退看板 ACL）—— #205q 口径修订：**不再与架构部门池做交集**，
+    事项的参与人/负责人范围取决于板块所配置的人员（板块层已受制于看板）。
     column_name 兜底（#140）：column_id 查不到板块行时按板块名查——
     防止「只传板块名不传 column_id」的请求绕过板块池直落看板池。"""
-    pool = _board_dept_pool_accounts(bid)
     acl = set()
     col = None
     if (column_id or '').strip():
@@ -665,7 +716,7 @@ def _card_allowed_accounts(bid: str, column_id: str = '', actor: str = None,
         acl |= {x.strip() for x in (src[0]['participants'] or '').split(',') if x.strip()}
     if is_admin(actor or ''):
         return None          # 管理员指派不受池限
-    return acl if pool is None else (acl & pool)
+    return acl
 
 
 def _parent_card_allowed_names(parent_id: str):
@@ -2569,12 +2620,15 @@ def me(username: str = Depends(require_auth)):
         # 与看板管理 bcFilterAclByDept 同口径——ACL 中不属于归属部门的人员不下发。
         # （前端 aclAccsInDept 双保险仍在；此处收口保证任何读取方一致。）
         try:
-            _dpool = _board_dept_pool_accounts(b['board_id'])
+            # #205q：读过滤 = 归属部门池 ∪ 协同部门成员（与看板写校验同口径）
+            _dpool = _board_allowed_accounts(b['board_id'])
             if _dpool is not None:
                 _o = (item['owner'] or '').strip()
                 _ps = [x.strip() for x in (item['participants'] or '').split(',') if x.strip()]
                 item['owner'] = _o if (_o and _o in _dpool) else ''
                 item['participants'] = ','.join([x for x in _ps if x in _dpool])
+            # 协同部门名称下发（前端 colPickPool 选人池计算用）
+            item['collab_depts'] = _collab_dept_names(b['board_id'])
         except Exception:
             pass
         # 板块弹窗的负责人/参与人指派门槛（2026-11-04 / T-0185 修订）：与后端写接口**同一判定**，
@@ -7294,7 +7348,7 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     # 部门约束（2026-11-12）+ 范围剔除（2026-11-17 用户要求：写入直接除名而非 400）：
     # 负责人不属于归属部门 → 剔除为空（响应带回 removed）
     _removed_owner = []
-    _pool = _board_dept_pool_accounts(bid)
+    _pool = _board_allowed_accounts(bid)   # #205q：并入协同部门成员
     if _pool is not None and owner and owner not in _pool:
         _removed_owner = [owner]
         owner = ''
@@ -7333,7 +7387,7 @@ async def set_board_participants(board_id: str, req: AclReq, username: str = Dep
     parts = _norm_acl_participants(req.participants)
     # 部门约束（2026-11-12）+ 范围剔除（2026-11-17 用户要求）：池外参与人直接除名
     _removed_parts = []
-    _pool = _board_dept_pool_accounts(bid)
+    _pool = _board_allowed_accounts(bid)   # #205q：并入协同部门成员
     if _pool is not None:
         _kept, _removed_parts = _filter_acl_accounts(parts.split(','), _pool)
         parts = ','.join(_kept)
