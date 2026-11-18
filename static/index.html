@@ -1783,14 +1783,14 @@ function goLogin(){
       </span>
       <!-- 专项/日常筛选（#205j 2026-11-18）：按板块性质（看板 board_config.attr）客户端
            过滤板块行（cols 载荷自带 attr）。与板块状态筛选同款 combo 交互（多选+全选/清空）。
-           位置：状态与负责人之间（用户指定）；label = 🏷️ 性质（与其他框等宽 56px），
-           「专项/日常」放 input placeholder（#205j-bis：框体尺寸与其他筛选框完全一致）；
-           选中后由计数徽标占位、placeholder 自动隐藏（既有 .has-count 规则）。 -->
+           位置：状态与负责人之间（用户指定）；label = 🏷️ 性质（与其他框等宽 56px）。
+           #205k-bis（用户反馈）：框内不留「专项/日常」提示词，与其他框一致留空；
+           选中后由计数徽标占位。 -->
       <span class="combo-filter" id="attrFilterWrap" title="按板块性质筛选（专项/日常，可多选）">
         <span class="cf-label">🏷️ 性质</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="attrFilterInput" autocomplete="off" readonly
-                 placeholder="专项/日常" onclick="toggleAttrDrop(event)" onfocus="toggleAttrDrop(event)"
+                 placeholder="" onclick="toggleAttrDrop(event)" onfocus="toggleAttrDrop(event)"
                  aria-label="板块性质筛选（专项/日常），可多选">
           <span class="cf-count" id="attrFilterCount"></span>
           <span class="cf-chips" id="attrFilterChips"></span>
