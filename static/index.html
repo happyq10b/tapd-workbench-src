@@ -10170,7 +10170,18 @@ function cardChkState(id){
 function syncCheckStates(){
   // 板块：聚合其下主事项的三态 —— 全部 all=全选；出现 some=半选；其余=未选
   document.querySelectorAll('.col-chk').forEach(function(chk){
-    const cards=CHK_COL_CARDS[chk.dataset.ck]||[];
+    const key=chk.dataset.ck;
+    const cards=CHK_COL_CARDS[key]||[];
+    if(!cards.length){
+      // #205m（2026-11-18 用户反馈「1/2周无法勾选」）：板块下无可聚合事项
+      // （空板块，或其事项被当前筛选过滤掉——板块行仍显示）时，若照搬下面的
+      // 聚合逻辑（all=states.length>0&&...），勾选会被 all=false **立即打回**，
+      // 勾选框永远点不上。此处按板块自身勾选态（COL_CHECKED）显示——板块勾选
+      // 的权威状态本来就是 COL_CHECKED（sessionStorage 按账号隔离）。
+      chk.checked=COL_CHECKED.has(key);
+      chk.indeterminate=false;
+      return;
+    }
     const states=cards.map(function(id){return cardChkState(id);});
     const all=states.length>0&&states.every(function(s){return s==='all';});
     const some=states.some(function(s){return s==='some';});
