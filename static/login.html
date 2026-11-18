@@ -76,9 +76,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
 /* 通知栏（T-013b）：超管「登入通知」配置内容；文字左对齐（紧随精灵之后
    固定间距起排，不居中）、允许换行；padding-left 与精灵（30+56=86px）
    保持 10px 固定间距 → 文本区从 96px 起 */
-.hint{margin-top:18px;font-size:11.5px;color:#566275;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word}
+/* 最小高度 = 2 行（line-height 1.6 × 11.5px ≈ 18.4px/行）：通知文字短时
+   也预留两行空间，版本号稳定在下方（#147 用户反馈） */
+.hint{margin-top:18px;font-size:11.5px;color:#566275;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word;min-height:37px}
 /* 版本号（#147）：登录卡片底部右下角小字，仅超管配置后显示 */
-.ver{margin-top:6px;font-size:10.5px;color:#8a93a6;text-align:right;letter-spacing:.3px}
+.ver{margin-top:10px;font-size:10.5px;color:#8a93a6;text-align:right;letter-spacing:.3px}
 /* ===== 键盘可达 + 焦点可见（UI审查 E1/B2）=====
    登录是安全关键路径：主界面有 :focus-visible 通用兜底，登录页此前完全没有
    → Tab 时焦点不可见。⚠️ .field input 基础规则自带 outline:none（特异性高于
