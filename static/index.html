@@ -8591,13 +8591,14 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
     // #205g：下拉面板顶部「全选」条（toggle：全部已选时显示「取消全选」）
     let list=ALL.filter(n=>!f||n.includes(f));
     // 2026-11-05：取消负责人/参与人互斥 —— 参与人下拉不再隐藏当前负责人
-    const allSel=ALL.length&&ALL.every(n=>arr.includes(n));
-    const allBar=ALL.length?`<div class="pp-opt pp-all" onmousedown="ppToggleAll('${containerId}')">${allSel?'✕ 取消全选':'☑ 全选'}（${ALL.length} 人）</div>`:'';
+    const curArr=PP[containerId].arr;   // #205h 动态取：ppToggleAll 的 o.arr=[] 重新赋值后闭包旧引用会脱节
+    const allSel=ALL.length&&ALL.every(n=>curArr.includes(n));
+    const allBar=ALL.length?`<label class="pp-opt pp-all"><input type="checkbox" ${allSel?'checked':''} onchange="ppToggleAll('${containerId}',this)"><span>全选</span></label>`:'';
     // #205h（2026-11-18）：交互改勾选多选——下拉项 = checkbox（label 包裹，点文字=勾选）；
     // 选中数据仍走 ppToggle（arr 数组），表单提交逻辑不变。
     // ⚠️ drop 容器 mousedown preventDefault：勾选时输入框不失焦 → 面板保持打开，
     //    可连续勾选多人（旧交互每点一项面板即关）。
-    drop.innerHTML=allBar+(list.map(n=>`<label class="pp-opt"><input type="checkbox" ${arr.includes(n)?'checked':''} onchange="ppToggle('${containerId}','${esc(n)}',this)"><span>${esc(n)}</span></label>`).join('')
+    drop.innerHTML=allBar+(list.map(n=>`<label class="pp-opt"><input type="checkbox" ${curArr.includes(n)?'checked':''} onchange="ppToggle('${containerId}','${esc(n)}',this)"><span>${esc(n)}</span></label>`).join('')
       ||(ALL.length?'<div class="pp-empty">无匹配成员</div>':'<div class="pp-empty">无可选人员（请先在上级层级配置负责人/参与人）</div>'));
     drop.onmousedown=function(e){e.preventDefault();};
     drop.style.display='block';
@@ -9213,21 +9214,20 @@ function ppToggle(containerId,n,cb){
   // 选择后输入框为空、可直接搜索下一位人员
   o.inp.value='';
 }
-// #205g（2026-11-18）：一键选中全部人员（toggle：已全选则取消全选）。
-// 范围 = 当前选人池 ALL（层级约束后的可用名单）；覆盖 member-picker 全部实例
-// （事项/子事项的负责人与参与人、板块的负责人与参与人）。
-function ppToggleAll(containerId){
+// #205h（2026-11-18 用户简化）：顶部「全选」= checkbox——
+// 勾上 = 选中本池全部人员；取消 = **清空全部人员**（含池外存量），
+// 所有人员取消勾选、tags 同步清空。
+function ppToggleAll(containerId, cb){
   const o=PP[containerId];if(!o)return;
-  const names=o.ALL.map(x=>(typeof x==='string'?x:x.name));
-  const allSel=names.length&&names.every(n=>o.arr.includes(n));
-  if(allSel){
-    o.arr=o.arr.filter(n=>!names.includes(n));   // 取消全选：只清本池人员（池外存量不动）
+  const doAll = cb ? !!cb.checked : false;
+  if(!doAll){
+    o.arr=[];                                   // 取消全选：清空全部人员
   }else{
-    names.forEach(n=>{if(!o.arr.includes(n))o.arr.push(n);});
+    o.ALL.map(x=>(typeof x==='string'?x:x.name)).forEach(n=>{if(!o.arr.includes(n))o.arr.push(n);});
   }
   ppSyncTags(containerId);
   o.inp.value='';
-  if(o.rd)o.rd('');   // 重绘下拉（全选条 label 与 sel 态同步）
+  if(o.rd)o.rd('');   // 重绘下拉（全部 checkbox 与全选框状态同步）
 }
 // 联动刷新：配对选择器的下拉若开着，按新状态重绘（互斥过滤）
 function ppRefreshDrop(id){const o=PP[id];if(o&&o.rd&&o.drop.style.display==='block')o.rd(o.inp.value);}
