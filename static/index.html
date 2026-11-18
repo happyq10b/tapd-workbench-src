@@ -1088,6 +1088,17 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 只读字段（创建人）：锁定不可修改 */
 .form-input[readonly]{background:#f5f7fa;color:var(--text2);cursor:not-allowed}
 .member-picker{display:flex;flex-wrap:wrap;gap:6px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;min-height:40px}
+/* #205f（2026-11-18）：人员 chips 容器统一 3 行截断 —— 最多显示 3 行，
+   溢出时右下角白底「…」角标盖住第 3 行末尾（.clamped 由 applyPersonClamp
+   按 scrollHeight>clientHeight 判定后添加）。
+   行高基准（CDP 实测）：pp-tag 25px（font12+line-height+padding4+border2）→ 87px；
+   cf-chip 22px（font11.5+padding2+border2）→ 78px；gap 6px → 3 行 = 高×3 + 6×2。 */
+.pp-tags{max-height:87px;overflow:hidden;position:relative}
+#bc_owner_box,#bc_parts_box{max-height:78px;overflow:hidden;position:relative}
+.pp-tags.clamped::after,#bc_owner_box.clamped::after,#bc_parts_box.clamped::after{
+  content:'…';position:absolute;right:1px;bottom:0;
+  font-size:12px;font-weight:700;color:var(--text2);line-height:20px;
+  background:#fff;padding:0 2px 0 16px}
 /* 只读模式（T-191l）：无指派权的用户只展示当前值 —— 隐藏输入行与标签删除叉 */
 .pp-readonly .pp-ip{display:none}
 .pp-readonly .pp-tag i{display:none}
@@ -13691,6 +13702,52 @@ async function bcAfterDelete(deletedIds){
       if(l)l.classList.toggle('on',!!t.checked);
     }
   });
+})();
+
+// ---------- 人员 chips 容器统一 3 行截断（#205f 2026-11-18） ----------
+// 范围（全面排查结论）：
+//   ① .pp-tags          member-picker 已选人员区（事项/子事项编辑与新建 e_/n_、
+//                        板块编辑 c_owner/c_parts 等全部实例；截断只作用于 chips 区，
+//                        .pp-ip 输入行在容器外不受影响，添加人员功能完好）
+//   ② #bc_owner_box / #bc_parts_box
+//                       看板管理「看板负责人与参与人」两框（截图反馈区域）
+// 不在范围（已有约束/单行）：
+//   筛选栏负责人/参与人 chips（cf-chips 为 nowrap 单行 + 右缘渐隐）、
+//   架构管理「岗位与任职」（g_roles_box 240px 滚动容器，表单语义）、
+//   事项/板块行负责人列（fcol-owner，grid 定宽单行文本槽位）。
+// 行高基准：chips ≈20px（font12+padding4+border2）+ gap 6px → 3 行 = 20×3+6×2 = 72px。
+// 省略号：溢出检测（scrollHeight>clientHeight）加 .clamped 类 → CSS 右下角
+//   白底「…」角标盖住第 3 行末尾（纯 CSS 无法条件判断溢出，由 JS 补判定）。
+function applyPersonClamp(el){
+  if(!el)return;
+  // ⚠️ flex-wrap 容器的 scrollHeight 不反映溢出内容（实测 30 人 10 行仍 ≈ clientHeight）
+  // → 改用子元素 bottom 判定：最后一个 chip 的底缘 − 容器顶缘 > 容器可视高 = 溢出
+  let over = false;
+  const kids = el.children;
+  if(kids.length){
+    const top = el.getBoundingClientRect().top;
+    let maxBottom = top;
+    for(const k of kids){
+      const b = k.getBoundingClientRect().bottom;
+      if(b > maxBottom)maxBottom = b;
+    }
+    over = maxBottom - top > el.clientHeight + 2;
+  }
+  el.classList.toggle('clamped', over);
+}
+function clampAllPersonBoxes(root){
+  (root||document).querySelectorAll('.pp-tags,#bc_owner_box,#bc_parts_box').forEach(applyPersonClamp);
+}
+// DOM 变化后统一重算（rAF 防抖）：覆盖所有渲染路径（弹窗重绘/增删 chips/打开弹窗）。
+// 只监听 childList —— .clamped 类切换不会再次触发，无反馈循环。
+(function(){
+  let _pcPending=null;
+  try{
+    new MutationObserver(function(){
+      if(_pcPending)cancelAnimationFrame(_pcPending);
+      _pcPending=requestAnimationFrame(function(){clampAllPersonBoxes();_pcPending=null;});
+    }).observe(document.body,{childList:true,subtree:true});
+  }catch(e){/* 老浏览器兜底：打开弹窗/重绘的调用点已有显式 clamp */}
 })();
 </script>
 </body>
