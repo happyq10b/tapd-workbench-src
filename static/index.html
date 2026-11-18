@@ -1140,6 +1140,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .pp-opt{padding:6px 10px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-radius:4px;white-space:nowrap}
 .pp-opt:hover{background:rgba(47,128,237,.1);color:var(--primary)}
 .pp-opt.sel{background:rgba(47,128,237,.12);color:var(--primary);font-weight:500}
+/* #205h：勾选多选形态——label 包 checkbox，整行可点；勾选行高亮 */
+.pp-opt input[type=checkbox]{width:14px;height:14px;margin:0 4px 0 0;accent-color:var(--primary);cursor:pointer;flex-shrink:0}
+.pp-opt input[type=checkbox]:checked+span{color:var(--primary);font-weight:600}
+.pp-opt.pp-all{justify-content:center}
 .pp-opt.sel::after{content:'✓';color:var(--success)}
 .pp-empty{padding:8px 10px;font-size:12px;color:var(--text3)}
 .tree-pick{position:fixed;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-lg);z-index:900;font-size:13px}
@@ -8589,8 +8593,13 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
     // 2026-11-05：取消负责人/参与人互斥 —— 参与人下拉不再隐藏当前负责人
     const allSel=ALL.length&&ALL.every(n=>arr.includes(n));
     const allBar=ALL.length?`<div class="pp-opt pp-all" onmousedown="ppToggleAll('${containerId}')">${allSel?'✕ 取消全选':'☑ 全选'}（${ALL.length} 人）</div>`:'';
-    drop.innerHTML=allBar+(list.map(n=>`<div class="pp-opt ${arr.includes(n)?'sel':''}" onmousedown="ppToggle('${containerId}','${esc(n)}')">${esc(n)}</div>`).join('')
+    // #205h（2026-11-18）：交互改勾选多选——下拉项 = checkbox（label 包裹，点文字=勾选）；
+    // 选中数据仍走 ppToggle（arr 数组），表单提交逻辑不变。
+    // ⚠️ drop 容器 mousedown preventDefault：勾选时输入框不失焦 → 面板保持打开，
+    //    可连续勾选多人（旧交互每点一项面板即关）。
+    drop.innerHTML=allBar+(list.map(n=>`<label class="pp-opt"><input type="checkbox" ${arr.includes(n)?'checked':''} onchange="ppToggle('${containerId}','${esc(n)}',this)"><span>${esc(n)}</span></label>`).join('')
       ||(ALL.length?'<div class="pp-empty">无匹配成员</div>':'<div class="pp-empty">无可选人员（请先在上级层级配置负责人/参与人）</div>'));
+    drop.onmousedown=function(e){e.preventDefault();};
     drop.style.display='block';
     // #166：下拉底部溢出视口 → 向上弹（改锚定输入框上方）
     const _dr=drop.getBoundingClientRect();
@@ -9188,7 +9197,7 @@ function ppSyncTags(containerId){
   const o=PP[containerId];if(!o)return;
   o.tags.innerHTML=o.arr.map(n=>`<span class="pp-tag">${esc(n)}<i onclick="ppRemove('${containerId}','${esc(n)}')">×</i></span>`).join('');
 }
-function ppToggle(containerId,n){
+function ppToggle(containerId,n,cb){
   const o=PP[containerId];if(!o)return;
   const i=o.arr.indexOf(n);
   if(i>=0)o.arr.splice(i,1);
@@ -9197,8 +9206,10 @@ function ppToggle(containerId,n){
     o.arr.push(n);
   }
   ppSyncTags(containerId);
-  o.drop.querySelectorAll('.pp-opt').forEach(d=>{d.classList.toggle('sel',o.arr.includes(d.dataset.name))});
-  // #205g：从下拉点选人员后清空输入框 —— IME 组合上屏的拼音/文本残留一并清掉，
+  // #205h：勾选态由 checkbox 自身反映（onchange 后浏览器已置位，这里按 arr 校正——
+  // 池变化/重绘后仍以 arr 为准）；不重绘面板 → 保持滚动位置与面板打开
+  if(cb)cb.checked=o.arr.includes(n);
+  // #205g：选择后清空输入框 —— IME 组合上屏的拼音/文本残留一并清掉，
   // 选择后输入框为空、可直接搜索下一位人员
   o.inp.value='';
 }
