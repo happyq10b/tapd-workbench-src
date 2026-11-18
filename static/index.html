@@ -1889,16 +1889,16 @@ function goLogin(){
         <div class="cf-drop" id="weekFilterDrop" hidden></div>
       </span>
       <!-- 创建日期区间筛选已移除（T-0189）：该行右尾空间交由操作按钮与搜索框自适应 -->
-      <!-- 事项排序选项（#205u 2026-11-18）：个人置顶优先（默认，现行为）/ 开始时间升序 /
-           截止时间升序（最近到期在前）/ 创建时间降序。按账号持久化（localStorage）；
-           日期维度空值排最后、同值按创建时间降序兜底。 -->
-      <span class="sort-filter" id="cardSortWrap" title="事项排序方式（按账号记忆）">
+      <!-- 事项排序选项（#205u；#205w 2026-11-18 用户修订）：**个人置顶始终优先**（公共首级，
+           不再作为选项出现），下拉三档：开始时间升序 / 截止时间升序（最近到期在前）/ 创建时间降序。
+           同一选项同步作用于主事项、子事项与板块（板块无开始时间字段 → 以创建时间作为开始）。
+           按账号持久化（localStorage）；日期维度空值排最后、同值按创建时间降序兜底。 -->
+      <span class="sort-filter" id="cardSortWrap" title="排序方式：置顶始终优先（按账号记忆）">
         <span class="cf-label">↕️ 排序</span>
-        <select class="form-select" id="cardSortSel" style="width:132px;padding:6px 8px" onchange="setCardSort(this.value)" aria-label="事项排序方式">
-          <option value="pin">个人置顶优先</option>
+        <select class="form-select" id="cardSortSel" style="width:120px;padding:6px 8px" onchange="setCardSort(this.value)" aria-label="排序方式（置顶始终优先）">
+          <option value="created">创建时间</option>
           <option value="begin">开始时间</option>
           <option value="due">截止时间</option>
-          <option value="created">创建时间</option>
         </select>
       </span>
       <!-- 操作按钮（T-0189）：从筛选明细行移到筛选框行末尾 —— 新建板块/展开/折叠 -->
@@ -6880,15 +6880,25 @@ function srItemHtml(x){
     <span class="slot-status"><span class="status-tag ${x.status==='done'?'done':x.status==='progressing'?'progressing':x.status==='notstarted'?'pending':''}">${x.status==='done'?'已完成':x.status==='progressing'?'进行中':x.status==='notstarted'?'未开始':'未完成'}</span></span>
   </div>`;
 }
-// 排序比较：置顶优先 → 创建时间降序 → 名称（保证同分时顺序稳定）
+// 排序比较：置顶优先（公共首级）→ 所选排序方式（#205w 同步到板块层）→ 名称（保证同分时顺序稳定）
 // 置顶是**个人设置**，因此这里读的是当前账号的置顶集合，而不是服务端的共享字段
+// #205w：板块与事项共用同一排序选项 —— 板块无独立开始时间字段（板块创建即开始），
+// 「开始时间」以 created_at 升序承担；「截止时间」用 due_date（空排最后）；「创建时间」为降序。
 function colPinKey(name,meta){return (meta&&meta.col_key)?meta.col_key:(curBoard+'::'+name)}
 function cmpColumn(a,b,cmeta,csort){
   const ma=cmeta[a]||{},mb=cmeta[b]||{};
   const pa=isPinned('column',colPinKey(a,ma))?0:1,pb=isPinned('column',colPinKey(b,mb))?0:1;
   if(pa!==pb)return pa-pb;
-  const ta=tsVal(ma.created_at),tb=tsVal(mb.created_at);
-  if(ta!==tb)return tb-ta;
+  if(CARD_SORT==='begin'||CARD_SORT==='due'){
+    const key=CARD_SORT==='due'?'due_date':'created_at';
+    const ka=tsVal(ma[key]),kb=tsVal(mb[key]);
+    const ea=!ka,eb=!kb;
+    if(ea!==eb)return ea?1:-1;          // 无日期的板块排最后
+    if(ka!==kb)return ka-kb;            // 升序
+  }else{
+    const ta=tsVal(ma.created_at),tb=tsVal(mb.created_at);
+    if(ta!==tb)return tb-ta;            // 创建时间降序（默认）
+  }
   // 末级排序（2026-11-04 用户需求）：按**板块自身的排序字段**（cards.column_sort，
   // TAPD 导入的板块排序值）；未携带排序值的板块排最后，再按名称兜底。
   if(csort){
@@ -6898,35 +6908,34 @@ function cmpColumn(a,b,cmeta,csort){
   }
   return String(a).localeCompare(String(b),'zh');
 }
-// 排序比较（#205u 2026-11-18 重构）：排序选项四档，按账号记忆（localStorage）——
-//   pin     = 个人置顶优先（默认，现行为：置顶在前 + 创建时间降序）
+// 排序比较（#205u；#205w 2026-11-18 用户修订）：**个人置顶始终优先**（公共首级，
+// 不再是选项），下拉三档按 CARD_SORT 生效，且同一选项同步作用于主事项/子事项/板块——
+//   created = 创建时间降序（新的在前，默认）
 //   begin   = 开始时间升序（早的在前）
 //   due     = 截止时间升序（最近到期在前）
-//   created = 创建时间降序（新的在前）
 // 日期维度：空值排最后，同值按创建时间降序兜底（保证顺序稳定）。
-var CARD_SORT='pin';
+var CARD_SORT='created';
 function loadCardSort(){
-  try{CARD_SORT=localStorage.getItem('tapd.cardSort_'+(ME&&ME.username||''))||'pin'}catch(e){CARD_SORT='pin'}
-  if(CARD_SORT!=='begin'&&CARD_SORT!=='due'&&CARD_SORT!=='created')CARD_SORT='pin';
+  try{CARD_SORT=localStorage.getItem('tapd.cardSort_'+(ME&&ME.username||''))||'created'}catch(e){CARD_SORT='created'}
+  // 旧版本可能存过 'pin'（现已并入公共首级）→ 迁移为默认「创建时间」
+  if(CARD_SORT!=='begin'&&CARD_SORT!=='due'&&CARD_SORT!=='created')CARD_SORT='created';
   const sel=document.getElementById('cardSortSel');
   if(sel&&sel.value!==CARD_SORT)sel.value=CARD_SORT;
 }
 function setCardSort(v){
-  CARD_SORT=(v==='begin'||v==='due'||v==='created')?v:'pin';
+  CARD_SORT=(v==='begin'||v==='due')?v:'created';
   try{localStorage.setItem('tapd.cardSort_'+(ME&&ME.username||''),CARD_SORT)}catch(e){}
   reload(1);
 }
 function cmpCard(a,b){
+  const pa=isPinned('card',a.card_id)?0:1,pb=isPinned('card',b.card_id)?0:1;
+  if(pa!==pb)return pa-pb;              // 置顶恒在最前（所有排序方式的公共首级）
   if(CARD_SORT==='begin'||CARD_SORT==='due'){
     const ka=tsVal(a[CARD_SORT]),kb=tsVal(b[CARD_SORT]);
     const ea=!ka,eb=!kb;
     if(ea!==eb)return ea?1:-1;          // 未填日期的排最后
     if(ka!==kb)return ka-kb;            // 升序
-    return tsVal(b.created)-tsVal(a.created);
   }
-  if(CARD_SORT==='created')return tsVal(b.created)-tsVal(a.created);
-  const pa=isPinned('card',a.card_id)?0:1,pb=isPinned('card',b.card_id)?0:1;
-  if(pa!==pb)return pa-pb;
   return tsVal(b.created)-tsVal(a.created);
 }
 // 归一化时间：'YYYY-MM-DD' / 'YYYY-MM-DD HH:MM:SS' → 可比较的数值
@@ -7200,7 +7209,10 @@ function renderSubTree(box,nodes,level){
     box.innerHTML='<div class="sub-node" style="color:var(--text3)">暂无子事项</div>';
     return;
   }
-  box.innerHTML=nodes.map(n=>subNodeHtml(n,level,parentId)).join('');
+  // #205w（2026-11-18）：子事项目录与主事项**同一排序选项**（个人置顶优先 + 所选方式）——
+  // 后端仅按服务端 pinned + created 降序返回，渲染前按 cmpCard（个人置顶 + CARD_SORT）重排。
+  const _sorted=nodes.slice().sort(cmpCard);
+  box.innerHTML=_sorted.map(n=>subNodeHtml(n,level,parentId)).join('');
   if(typeof syncCheckStates==='function')syncCheckStates();   // #159 渲染后同步三态
 }
 function subNodeHtml(n,level,parentId){
