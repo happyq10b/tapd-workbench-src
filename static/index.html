@@ -5826,7 +5826,21 @@ function boardFilterCandidates(){
   const dep=new Set(BC_ACL_MEMBERS.filter(x=>x.status==='departed').map(x=>x.name));
   return [...new Set(labels)].filter(function(n){return !dep.has(n);});
 }
-async function openPersonFilterPicker(anchor){
+// #205k-bis（2026-11-18 用户反馈「点击后跳闪」）：输入框同时绑定 onclick 与
+// onfocus（一次点击 = focus 先、click 后）→ 本函数被**并发调用两次**，两次都
+// 走完 ensureOrgTree(true)（强制网络刷新）+ cascadePersonCandidates（级联 API）
+// 后各自 openTreePick —— 而它开头先 closeTreePick() 移除面板再重建 → 面板被
+// 拆建两次 = 跳闪。修复：① 并发去重（打开中直接复用同一 Promise）；
+// ② 同锚点已打开 → 不重建（TREE_PICK.srcAnchor 在 openTreePick 后写入，
+// closeTreePick 置空 TREE_PICK 自然解除）。
+var _pfPickBusy=null;
+function openPersonFilterPicker(anchor){
+  if(TREE_PICK&&TREE_PICK.srcAnchor===anchor)return;
+  if(_pfPickBusy)return _pfPickBusy;
+  _pfPickBusy=_openPersonFilterPicker(anchor).finally(function(){_pfPickBusy=null;});
+  return _pfPickBusy;
+}
+async function _openPersonFilterPicker(anchor){
   // 强制刷新架构数据：人员筛选要反映最新的任命（免职/任命后立即生效），
   // 同时让「数据刷新后展开状态同步」这条路径被真正走到。
   // 候选联动（2026-11-17）：树改为「当前所选看板的负责人+参与人」池
@@ -5852,10 +5866,19 @@ async function openPersonFilterPicker(anchor){
     paintFilterCombos();
     reload(1);
   },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolOrgShapeTree(_cand,'当前看板负责人/参与人'),
-      showNoneOwner:true, clearable:true, keyword:''});
+            showNoneOwner:true, clearable:true, keyword:''});
+  if(TREE_PICK)TREE_PICK.srcAnchor=anchor;
 }
 // T-0189 参与人筛选：与负责人同款（2026-11-17 候选联动：仅当前所选看板的负责人+参与人）
-async function openCcFilterPicker(anchor){
+// cc 同款防跳闪（与 openPersonFilterPicker 同一并发去重方案）
+var _ccPickBusy=null;
+function openCcFilterPicker(anchor){
+  if(TREE_PICK&&TREE_PICK.srcAnchor===anchor)return;
+  if(_ccPickBusy)return _ccPickBusy;
+  _ccPickBusy=_openCcFilterPicker(anchor).finally(function(){_ccPickBusy=null;});
+  return _ccPickBusy;
+}
+async function _openCcFilterPicker(anchor){
   try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
   const _poolCc=boardFilterCandidates();
   if(!_poolCc.length){ toast('当前所选看板未配置负责人/参与人，无筛选候选'); return; }
@@ -5872,6 +5895,7 @@ async function openCcFilterPicker(anchor){
   }, {mode:'filter', pickMode:'person', width:360, height:460,
       tree:poolOrgShapeTree(_candCc,'当前看板负责人/参与人'),
       clearable:true, keyword:''});
+  if(TREE_PICK)TREE_PICK.srcAnchor=anchor;
 }
 function applyPersonFilter(kind, persons){
   // 兼容旧调用点：人员筛选已统一锚定到「负责人」维度（owner 字段），
@@ -7776,14 +7800,18 @@ function poolOrgShapeTree(labels,label){
   const rest=[];
   (labels||[]).forEach(function(lb){
     const m=label2m[lb];
+    // ⚠️ members.name 统一存**纯姓名**（bcDeptShapeTree 同口径）：树显示干净、
+    //    确定回传纯姓名（后端 person/cc 子串匹配）、__P__+纯名回填勾选态可点亮
+    //    —— 旧 poolTree 存 label「姓名(账号)」三条都出问题（#205k-bis 修正）
+    const nm=m?m.name:lb.split('(')[0];
     let hit=false;
     if(m){
       (m.depts||[]).forEach(function(dn){
         const id=byName[dn];
-        if(id!==undefined){(mounted[id]=mounted[id]||[]).push({name:lb,node_id:id});hit=true;}
+        if(id!==undefined){(mounted[id]=mounted[id]||[]).push({name:nm,node_id:id});hit=true;}
       });
     }
-    if(!hit)rest.push({name:lb,node_id:-98});
+    if(!hit)rest.push({name:nm,node_id:-98});
   });
   function shape(ns){
     const out=[];
