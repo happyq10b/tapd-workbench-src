@@ -5745,6 +5745,28 @@ const _manualWeek=new Set();   // 手工输入（非候选列表）的周数：�
 // 候选联动（2026-11-17 用户需求）：负责人/参与人筛选只显示**当前所选看板**的
 // 负责人+参与人（curBoards 各看板 ACL 聚合），不再展示全量人员 —— 打开树时
 // 实时计算（看板切换后自然刷新），账号→姓名映射走 BC_ACL_MEMBERS，离岗排除。
+// #205i（2026-11-18）：人员筛选树候选**级联**——基于当前筛选结果生效。
+// 名单来源 = GET /api/filter-options?（带当前筛选参数，后端按 _filter_cards_for_user
+// 同一套过滤聚合「筛选结果事项中出现过的负责人/参与人」——全量权威，不受分页影响）。
+// 全选按钮（tpSelectAll）选的就是树内全部 = 级联后的名单，
+// 名单之外的人员天然排除（树里不渲染，不得被全选包含）。
+// kind='owner' 负责人树（剔除自身维度，受参与人等上级筛选约束）/'cc' 参与人树。
+async function cascadePersonCandidates(kind, poolLabels){
+  const ps=buildFilterParams();
+  ps.delete(kind==='owner'?'person':'cc');   // 剔除本维度自身
+  const hasOther=[...ps.keys()].some(k=>k!=='board_ids');
+  let allowed=null;
+  try{
+    const d=await api('/api/filter-options?'+ps.toString());
+    allowed=new Set((kind==='owner')?(d.people||[]):(d.cc_people||[]));
+  }catch(e){ allowed=null; }
+  if(!hasOther||!allowed)return poolLabels;               // 无其他筛选 → 池不收缩
+  // pool 的 label 形态为「姓名(账号)」→ 取纯姓名与 allowed（纯姓名名单）比对
+  const cand=poolLabels.filter(function(lb){
+    return allowed.has(lb.split('(')[0]);
+  });
+  return cand;
+}
 function boardFilterCandidates(){
   const accs=[];
   let bs=null;
@@ -5774,6 +5796,10 @@ async function openPersonFilterPicker(anchor){
   try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
   const _poolNames=boardFilterCandidates();
   if(!_poolNames.length){ toast('当前所选看板未配置负责人/参与人，无筛选候选'); return; }
+  // #205i 级联：池收缩到「当前筛选结果事项」中出现过的负责人——
+  // 名单之外的人员树里不渲染，全选不得包含；筛选结果为空 → 无可选
+  const _cand=await cascadePersonCandidates('owner', _poolNames);
+  if(!_cand.length){ toast('当前筛选范围内没有可选负责人'); return; }
   // 已选人员回填进树（避免每次打开都从零开始）。
   // ⚠️ 特殊值「无负责人」不是架构里的真实人员，**不带** __P__ 前缀回填
   //    （否则永远匹配不上）—— 它由树上的独立「无负责人」选项承载，
@@ -5787,7 +5813,7 @@ async function openPersonFilterPicker(anchor){
     if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
-  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(_poolNames,'当前看板负责人/参与人'),
+  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolTree(_cand,'当前看板负责人/参与人'),
       showNoneOwner:true, clearable:true, keyword:''});
 }
 // T-0189 参与人筛选：与负责人同款（2026-11-17 候选联动：仅当前所选看板的负责人+参与人）
@@ -5795,6 +5821,9 @@ async function openCcFilterPicker(anchor){
   try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
   const _poolCc=boardFilterCandidates();
   if(!_poolCc.length){ toast('当前所选看板未配置负责人/参与人，无筛选候选'); return; }
+  // #205i 级联：池收缩到「当前筛选结果事项」中出现过的参与人
+  const _candCc=await cascadePersonCandidates('cc', _poolCc);
+  if(!_candCc.length){ toast('当前筛选范围内没有可选参与人'); return; }
   const cur=[...CC_SEL].map(n=>ORG_PERSON_PREFIX+n);
   openTreePick(anchor, cur, (persons)=>{
     // 全部取消勾选后点确定 → 视为清空该筛选（与负责人同口径）
@@ -5803,7 +5832,7 @@ async function openCcFilterPicker(anchor){
     paintFilterCombos();
     reload(1);
   }, {mode:'filter', pickMode:'person', width:360, height:460,
-      tree:poolTree(_poolCc,'当前看板负责人/参与人'),
+      tree:poolTree(_candCc,'当前看板负责人/参与人'),
       clearable:true, keyword:''});
 }
 function applyPersonFilter(kind, persons){

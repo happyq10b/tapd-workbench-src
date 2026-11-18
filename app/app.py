@@ -2652,18 +2652,49 @@ def me(username: str = Depends(require_auth)):
             'depts': dept_list}   # 有序部门清单（**按权限过滤**：只含有可见看板的部门）
 
 @app.get('/api/filter-options')
-def filter_options(username: str = Depends(require_auth)):
-    """筛选栏候选项：人员（负责人）名单 + 周数名单。
+def filter_options(board_ids: Optional[str] = None, status: Optional[str] = None,
+                   q: Optional[str] = None, cc: Optional[str] = None,
+                   person: Optional[str] = None, week: Optional[str] = None,
+                   years: Optional[str] = None, due_dates: Optional[str] = None,
+                   username: str = Depends(require_auth)):
+    """筛选栏候选项：人员（负责人）名单 + 参与人名单 + 周数名单。
 
     · 人员候选 = **当前账号可见范围内**的事项里出现过的负责人姓名（去重、排序）。
       越权事项的负责人不会出现在这里 —— 筛选项本身也遵守权限过滤。
     · 周数候选 = 同理，取可见范围内出现过的 week_no。
     · 两者都作为「可输入下拉」的候选：前端允许手工输入任意文本，
       输入的内容按同样的语义参与过滤（找不到就查不到结果）。
+    · #205i（2026-11-18）：支持带筛选参数（board_ids/status/q/cc/person/week/
+      years/due_dates）——候选基于**当前筛选结果**聚合：负责人树/参与人树的
+      「全选」只对筛选范围内出现的人员生效，名单之外天然排除。
+      cc_people = 筛选结果事项的参与人姓名名单（参与人树级联用）。
     """
     boards, columns = user_allowed(username)
     # ⚠️ 必须带 board_id / column_id —— perm_pass() 要用它们做两级过滤，
     #    只 SELECT owner/week_no 会抛 KeyError（非管理员调用时 500）。
+    # #205i：带筛选参数时改用 _filter_cards_for_user（与 /api/cards 同一套过滤），
+    #   返回的卡片 dict 自带 owner/cc —— 候选聚合基于当前筛选结果。
+    if any(x is not None for x in (board_ids, status, q, cc, person, week, years, due_dates)):
+        cards_f, _w2, _c2 = _filter_cards_for_user(
+            username, boards, columns,
+            board_ids=board_ids, status=status, q=q, cc=cc, person=person,
+            week=week, years=years, due_dates=due_dates)
+        departed_names = {r['name'] for r in dbq("SELECT name FROM team_members WHERE status='departed'")}
+        people, cc_people, weeks = set(), set(), set()
+        for c in cards_f:
+            for n in (c.get('owner') or '').split(';'):
+                n = n.strip()
+                if n and n not in departed_names:
+                    people.add(n)
+            for n in (c.get('cc') or '').split(';'):
+                n = n.strip()
+                if n and n not in departed_names:
+                    cc_people.add(n)
+            w = (c.get('week_no') or '').strip()
+            if w:
+                weeks.add(w)
+        return {'people': sorted(people), 'cc_people': sorted(cc_people),
+                'weeks': sorted(weeks)}
     rows = filter_rows(dbq('SELECT owner, week_no, board_id, column_id FROM cards WHERE deleted=0'),
                        boards, columns)
     people, weeks = set(), set()
