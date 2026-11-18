@@ -3734,15 +3734,12 @@ function syncBoardBandHeight(){
 // 架构选择 → 看板选择联动：重算 curBoards = 选中架构看板并集（覆盖手动微调——
 // 架构选择是批量语义；此后仍可点看板 tab 单独增删微调，统计跟 curBoards 走）
 function syncArchSelection(){
-  curBoards.clear();
-  curYears=new Set([YEAR_DEFAULT]);
-  ARCH_SEL.forEach(function(name){
-    (ME.boards||[]).forEach(function(b){
-      if((b.dept||UNASSIGNED_KEY)===name)curBoards.add(b.board_id);
-    });
-  });
-  curBoard=curBoards.size?[...curBoards][curBoards.size-1]:'';
-  LAST_EMPTY_REASON=ARCH_SEL.size?(curBoards.size?'':'该架构暂无看板'):'';
+  // #145（2026-11-18 用户修订）：架构选择 = **导航语义**——展开该架构的看板
+  // 列表供用户挑选，**不自动选中任何看板**。原 #141 行为（批量填充
+  // curBoards → 看板带全选 + 「已选：…」+ 统计累加）与「进入时各项均未
+  // 选中」冲突，已废弃。看板由用户在展开的 tab 里自行点选（pickBoard），
+  // 统计与事项列表始终跟 curBoards 走：未选看板 = 「请选择看板」空态 +
+  // 全局统计口径（与 #141 之前一致）。
   // 从部门页进入事项列表（与 pickBoard 同款）
   if(CUR_DEPT)backToBoardList();
 }
