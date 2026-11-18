@@ -1552,9 +1552,14 @@ def visible_columns(username, boards, columns, board_id=None, counts=None, board
     counts: {col_key: (总数, 已完成数)}，用于板块进度条
     """
     rows = dbq('SELECT * FROM board_columns')
+    # #205j（2026-11-18）：板块性质（专项/日常）随 cols 载荷下发 —— 前端
+    # 「专项/日常」筛选框按 board_config.attr 客户端过滤板块（与板块状态 completion 同模式）。
+    _attr_map = {r['board_id']: (r['attr'] or '') for r in
+                 dbq('SELECT board_id, attr FROM board_config')}
     out = []
     for r in rows:
         d = dict(r)
+        d['attr'] = _attr_map.get(d['board_id'], '')
         if boards is not None and d['board_id'] not in boards:
             continue
         if board_id and d['board_id'] != board_id:
