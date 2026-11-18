@@ -137,6 +137,23 @@ def _norm_week(v) -> str:
     raise HTTPException(400, '周数格式应为「2026年第41周」')
 
 
+def _norm_weeks(v) -> str:
+    """周数**多值**归一（#205p）：接受「;」「；」「、」「，」分隔的多个周数
+    （每项支持「2026年第41周」/「2026-41」），逐项归一 → 去重 → 按时间升序，
+    以「;」连接存储。空值返回空串；单项非法报 400（与 _norm_week 同口径）。"""
+    parts = [x for x in re.split(r'[;；、，]', str(v or '')) if x.strip()]
+    if not parts:
+        return ''
+    out, seen = [], set()
+    for x in parts:
+        w = _norm_week(x)
+        if w not in seen:
+            seen.add(w)
+            out.append(w)
+    out.sort(key=week_sort_key)
+    return ';'.join(out)
+
+
 CARD_FIELDS = ['card_id','board_id','board_name','column_id','column_name','workspace_id',
     'card_name','status','status_name','priority','creator','owner','cc','follower',
     'begin','due','completed','created','modified','description','attachment_count',
@@ -2695,9 +2712,11 @@ def filter_options(board_ids: Optional[str] = None, status: Optional[str] = None
                 n = n.strip()
                 if n and n not in departed_names:
                     cc_people.add(n)
-            w = (c.get('week_no') or '').strip()
-            if w:
-                weeks.add(w)
+            # #205p：多周按「;」拆分
+            for w in str(c.get('week_no') or '').split(';'):
+                w = w.strip()
+                if w:
+                    weeks.add(w)
         return {'people': sorted(people), 'cc_people': sorted(cc_people),
                 'weeks': sorted(weeks)}
     rows = filter_rows(dbq('SELECT owner, week_no, board_id, column_id FROM cards WHERE deleted=0'),
@@ -2711,9 +2730,11 @@ def filter_options(board_ids: Optional[str] = None, status: Optional[str] = None
             n = n.strip()
             if n and n not in departed_names:
                 people.add(n)
-        w = (r.get('week_no') or '').strip()
-        if w:
-            weeks.add(w)
+        # #205p：多周按「;」拆分
+        for w in str(r.get('week_no') or '').split(';'):
+            w = w.strip()
+            if w:
+                weeks.add(w)
     return {'people': sorted(people), 'weeks': sorted(weeks, key=week_sort_key)}
 
 
@@ -2936,13 +2957,15 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
     # 周数维度：可选周数在**应用周数筛选之前**统计 → 勾选某周后其余周仍可选。
     # 2026-11-09 需求3（联动）：统计点移到**全部其他筛选项（含搜索）之后** ——
     # 只有「当前筛选结果下存在事项」的周数才进入候选，无事项的周数不展示。
-    week_options = sorted({(r.get('week_no') or '').strip()
-                           for r in mine if (r.get('week_no') or '').strip()},
+    # #205p：事项 week_no 可含多周（「;」分隔）→ 候选收集与匹配均按拆分口径
+    def _card_weeks(r):
+        return {x.strip() for x in str(r.get('week_no') or '').split(';') if x.strip()}
+    week_options = sorted({w for r in mine for w in _card_weeks(r)},
                           key=week_sort_key)
     if week:
         wset = {x.strip() for x in week.split(',') if x.strip()}
         if wset:
-            mine = [r for r in mine if (r.get('week_no') or '').strip() in wset]
+            mine = [r for r in mine if _card_weeks(r) & wset]   # 任一周命中即入选
     # 到期日期多选（T-191 到期筛选）：事项截止日期（due 前 10 位）命中任一所选日期。
     # 放在 week_options 统计之前 → 周数候选与到期筛选联动（同一口径）。
     if due_dates:
@@ -3783,7 +3806,7 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     if 'week_no' in fields:
         raw = str(fields.get('week_no') or '').strip()
         if raw:
-            fields['week_no'] = _norm_week(raw)
+            fields['week_no'] = _norm_weeks(raw)   # #205p 多周归一（;分隔，去重升序）
         else:
             crow = dbq('SELECT created FROM cards WHERE card_id=?', (card_id,))
             fields['week_no'] = week_label(crow[0]['created']) if crow else ''
@@ -3933,7 +3956,7 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
     vals['created'] = time.strftime('%Y-%m-%d %H:%M:%S')
     vals['parent_id'] = req.parent_id
     # 周数维度：默认取**创建日期**所处的自然周；前端显式传入时以其为准（可手动调整）
-    vals['week_no'] = _norm_week(req.week_no or vals.get('week_no', '')) or week_label(vals['created'])
+    vals['week_no'] = _norm_weeks(req.week_no or vals.get('week_no', '')) or week_label(vals['created'])   # #205p 多周归一
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
@@ -4510,7 +4533,7 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
     vals['pinned'] = 0
     vals['copy_from'] = src['card_id']
     # 周数：默认按**副本创建日期**所在自然周，可手动指定
-    vals['week_no'] = _norm_week(req.week_no) or week_label(now)
+    vals['week_no'] = _norm_weeks(req.week_no) or week_label(now)
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
