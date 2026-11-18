@@ -5129,11 +5129,27 @@ async function renderProgress(){
   const seq=++_ovSeq;
   // ⚠️ 统计带必须**跟随当前板块**：不带 board_id 时接口返回的是全局汇总，
   //    会出现「切到别的板块、数字却还是上一个板块的」（需求：板块切换彻底联动）。
-  //    curBoard 为空（初始未选板块）→ 不传 board_id → 显示全局概览。
-  // 多看板（2026-11-04）：单选带 board_id，多选带 board_ids（统计反映多看板合计）
-  const ovq=curBoards.size===1
-    ? ('?board_id='+encodeURIComponent([...curBoards][0]))
-    : (curBoards.size>1?('?board_ids='+encodeURIComponent([...curBoards].join(','))):'');
+  // 三级回退口径（#146 2026-11-18）：
+  // ① 选中看板（1 个=board_id / 多个=board_ids）→ 统计所选看板合计
+  // ② 选中架构但未选看板 → 统计选中架构下**全部看板**合计（架构选择是导航语义
+  //    不碰看板选择，#145；ME.boards 本身 = 当前用户权限可见范围，口径不越权）
+  // ③ 未选任何架构 → 全局（用户权限范围内全部数据）
+  // 四张卡来自同一响应 → 各级口径天然一致；/api/overview 只统计主事项。
+  let ovq='';
+  if(curBoards.size===1){
+    ovq='?board_id='+encodeURIComponent([...curBoards][0]);
+  }else if(curBoards.size>1){
+    ovq='?board_ids='+encodeURIComponent([...curBoards].join(','));
+  }else if(ARCH_SEL&&ARCH_SEL.size){
+    const ids=[];
+    ARCH_SEL.forEach(function(name){
+      (ME.boards||[]).forEach(function(b){
+        if((b.dept||UNASSIGNED_KEY)===name)ids.push(b.board_id);
+      });
+    });
+    if(ids.length)ovq='?board_ids='+encodeURIComponent(ids.join(','));
+    // 选中架构下无看板（或架构全为空部门）→ ids 空 → 回退全局口径
+  }
   const ov=await api('/api/overview'+ovq);
   // 快速连续变更（勾两张卡/弹窗改状态+WS 广播并发触发）时，
   // 后发的请求若先返回，先发的旧响应不能覆盖它 —— 序号不一致直接丢弃。
