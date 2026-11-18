@@ -77,6 +77,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
    固定间距起排，不居中）、允许换行；padding-left 与精灵（30+56=86px）
    保持 10px 固定间距 → 文本区从 96px 起 */
 .hint{margin-top:18px;font-size:11.5px;color:#566275;text-align:left;line-height:1.6;padding-left:60px;word-break:break-word}
+/* 版本号（#147）：登录卡片底部右下角小字，仅超管配置后显示 */
+.ver{margin-top:6px;font-size:10.5px;color:#8a93a6;text-align:right;letter-spacing:.3px}
 /* ===== 键盘可达 + 焦点可见（UI审查 E1/B2）=====
    登录是安全关键路径：主界面有 :focus-visible 通用兜底，登录页此前完全没有
    → Tab 时焦点不可见。⚠️ .field input 基础规则自带 outline:none（特异性高于
@@ -115,6 +117,9 @@ button:focus-visible{border-radius:8px}
   <div class="lock-box err" id="conflictBox" hidden></div>
   <div class="lock-box" id="lockBox" hidden></div>
   <div class="hint" id="noticeBar">账号由管理员分配，权限范围以账号配置为准</div>
+  <!-- #147（2026-11-18）：版本号展示（超管个人界面配置）——提示区下方右下角，
+       未配置时隐藏不占位 -->
+  <div class="ver" id="appVer" hidden></div>
 </div>
 <script>
 const u=document.getElementById('u'),p=document.getElementById('p'),btn=document.getElementById('btn'),
@@ -240,10 +245,14 @@ p.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 })();
 
 // —— 通知栏（T-013b）：拉取超管配置的「登入通知」，空则保持默认提示 ——
+// —— 版本号（#147）：同一响应取 version，空则隐藏 ——
 (function(){
   fetch('/api/login/notice').then(function(r){return r.ok?r.json():null;}).then(function(d){
     const t=d&&typeof d.notice==='string'?d.notice.trim():'';
     if(t)document.getElementById('noticeBar').textContent=t;
+    const v=d&&typeof d.version==='string'?d.version.trim():'';
+    const el=document.getElementById('appVer');
+    if(el&&v){el.textContent=v;el.hidden=false;}
   }).catch(function(){});
 })();
 </script>

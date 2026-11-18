@@ -1936,12 +1936,34 @@ def _state_history_rollback(row_id: int, username: str):
 
 @app.get('/api/login/notice')
 def login_notice():
-    """登录页通知栏文案 + 小精灵设置（公开端点，登录前可取）。
+    """登录页通知栏文案 + 小精灵设置 + 版本号（公开端点，登录前可取）。
     pet：原始配置值（兼容旧格式）；pet_url：服务端解析好的最终图片地址
-    （T-0177：固定内置/固定上传图/分区随机——随机在服务端完成，每次拉取换一张）。"""
+    （T-0177：固定内置/固定上传图/分区随机——随机在服务端完成，每次拉取换一张）。
+    version：登录页卡片底部展示的版本号（#147，超管个人界面配置）。"""
     v = _get_setting('login_pet', '')
     return {'notice': _get_setting('login_notice', ''),
-            'pet': v, 'pet_url': _pet_resolved_url(v)}
+            'pet': v, 'pet_url': _pet_resolved_url(v),
+            'version': _get_setting('app_version', '')}
+
+
+class VersionReq(BaseModel):
+    version: str = ''
+
+
+@app.put('/api/version')
+def set_app_version(req: VersionReq, username: str = Depends(require_super)):
+    """登录页版本号（#147 2026-11-18）：仅超级管理员可写，全局配置 app_settings.app_version。
+
+    格式 v年.月.日（如 v2026.11.18）；空串 = 清除（登录页不显示）。
+    """
+    v = (req.version or '').strip()
+    if v and not re.match(r'^v\d{4}\.\d{1,2}\.\d{1,2}$', v):
+        raise HTTPException(400, '版本号格式应为 v2026.11.18（v + 年.月.日）')
+    old = _get_setting('app_version', '')
+    _set_setting('app_version', v)
+    audit_log(username, client_ip(None), 'version_set', '登录页版本号',
+              f'{old or "(空)"} → {v or "(空)"}', 'success')
+    return {'ok': True, 'version': v}
 
 
 @app.get('/api/state-history')

@@ -2284,6 +2284,18 @@ function goLogin(){
         <input type="text" class="form-input" id="profileStatus" maxlength="120" placeholder="例如：本周聚焦成本复盘">
         <div class="profile-avatar-hint" style="text-align:left" id="profileStatusHint">留空则不显示状态栏</div>
       </div>
+      <!-- #147（2026-11-18）：登录页版本号（仅超级管理员）——「登入通知」下方追加，
+           写全局配置 app_settings.app_version；登录卡片底部（提示区下方）角落展示 -->
+      <div class="form-group" id="pfVersionGroup" style="display:none">
+        <label>版本号<span style="color:var(--text3)">（登录页卡片底部展示）</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="text" class="form-input" id="pf_version" maxlength="20"
+                 placeholder="v2026.11.18" style="flex:1"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();saveAppVersion()}">
+          <button class="btn-default" style="flex-shrink:0" onclick="saveAppVersion()">保存</button>
+        </div>
+        <div class="profile-avatar-hint" style="text-align:left">格式 v年.月.日；留空则登录页不显示版本号</div>
+      </div>
       <div class="form-group">
         <label>修改密码</label>
         <div class="pwd-wrap" style="width:100%;margin-bottom:8px">
@@ -4149,6 +4161,17 @@ function updatePfDeptBtn(){
 function openPfDeptPick(btn){
   openDeptPick(btn, PF_DEPTS, function(b,sel){ PF_DEPTS=sel; updatePfDeptBtn(); });
 }
+// #147：保存登录页版本号（仅超级管理员入口渲染；后端 require_super 二次把关）
+function saveAppVersion(){
+  const el=document.getElementById('pf_version');
+  const v=(el&&el.value||'').trim();
+  if(v && !/^v\d{4}\.\d{1,2}\.\d{1,2}$/.test(v)){
+    toast('格式应为 v2026.11.18（v + 年.月.日）');return;
+  }
+  api('/api/version',{method:'PUT',body:JSON.stringify({version:v})})
+    .then(function(){toast(v?('版本号已更新为 '+v):'版本号已清空（登录页不再显示）');})
+    .catch(function(e){toast(e.message||'保存失败');});
+}
 function openProfileModal(){
   if(!ME)return;
   PROFILE_AVATAR=ME.avatar||'';
@@ -4170,6 +4193,15 @@ function openProfileModal(){
   renderProfilePhotoHint();
   const st=document.getElementById('profileStatus');
   if(st)st.value=PROFILE_STATUS;
+  // #147：版本号行仅超级管理员可见；打开时拉取当前值回显（公开端点，登录页同源）
+  const vg=document.getElementById('pfVersionGroup');
+  if(vg)vg.style.display=isSuperMe?'':'none';
+  if(isSuperMe){
+    api('/api/login/notice').then(function(d){
+      const el=document.getElementById('pf_version');
+      if(el)el.value=(d&&d.version)||'';
+    }).catch(function(){});
+  }
   // #152 基本信息：ID/姓名只读回显，其余回填当前值
   // #153 ID 展示值 = 工号（emp_no）；未导入工号时回退成员编号，未绑定成员显示 —
   const mid=document.getElementById('pf_member_id');
