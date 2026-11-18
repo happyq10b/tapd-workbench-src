@@ -3543,7 +3543,6 @@ async function purgeEmptyColumns(){
 async function init(){
   if(!TOKEN){goLogin();return}
   try{
-    loadDeptOpen();
     ME=await api('/api/me');
     await bcLoadAclMembers().catch(function(){});   // #138 预加载姓名映射：板块目录负责人等显示场景不能回退显示账号
     loadColChecked();   // #158：按当前账号载入板块勾选状态（sessionStorage 按用户分桶）
@@ -3568,33 +3567,18 @@ async function init(){
     renderTabs();renderProgress();reload(1);connectWS();setupDraggableModals();
   }catch(e){toast(e.message)}
 }
-// 初始定位：展开一个有看板的部门，但**不自动选中看板** ——
-// 需求3：进入看板后、在用户主动选择看板之前，内容区域默认为空（显示「请选择看板」）。
-// 之前这里会自动选中第一个看板 → 用户还没选就看到满屏数据，
-// 且「看板切换不彻底」的残留问题也因此更难被发现。
+// 初始定位（#144 2026-11-17 修订）：进入系统后架构模块**默认无任何选中/展开项**——
+// 所有架构节点统一收起（▶）未选中态，看板带为空 + 「请选择看板」空态。
+// 原行为（自动展开记忆部门 / 第一个有看板的部门）已废弃：展开态样式（▼+蓝底）
+// 在 #141 架构多选后被用户理解为「选中」，进入即带样式 = 异常残留观感。
+// 会话内行为不变：点架构节点展开/选中、选看板 ensureDeptOpen 自动展开。
 function ensureInitialSelection(){
-  if(!ME||!ME.boards||!ME.boards.length)return;
-  const g=groupBoardsByDept();
-  // 已记住的展开部门若仍有效 → 沿用（只展开，不选看板）
-  // ⚠️ **必须是「有看板的部门」才沿用**（2026-11-02 修正）：
-  //    记住的部门若恰好没有看板，展开它会让顶部「可选看板」带**一个 tab 都没有**，
-  //    用户进来看到空列表却不知该点哪里 —— 回退到第一个有看板的部门。
-  const remembered=Object.keys(DEPT_OPEN).filter(k=>DEPT_OPEN[k])[0];
-  if(remembered){
-    const hit=g.depts.find(d=>d.name===remembered)||(remembered===UNASSIGNED_KEY?{boards:g.unassigned}:null);
-    if(hit&&hit.boards.length){expandOnly(remembered);return;}
-  }
-  // 否则展开第一个有看板的部门（仍不选看板）
-  const first=g.depts.find(d=>d.boards.length);
-  if(first){expandOnly(first.name);return}
-  if(g.unassigned.length)expandOnly(UNASSIGNED_KEY);
 }
 // ---------- 目录树：按「归属部门」分组折叠 ----------
 // 顶层 = 部门节点（含空部门），展开后显示该部门下的**看板**。
-// ME.depts 由后端给出有序部门清单；ME.boards[].dept 为**看板**的归属部门。
-// 展开状态存在 DEPT_OPEN，并持久化到 localStorage（刷新后保留）。
-// ★ 单选：同一时刻只展开一个部门（DEPT_OPEN 只保留一个 key），
-//   部门之间互斥，避免多个部门同时铺开把页面撑得很长。
+// 展开状态存 DEPT_OPEN（**仅会话内存**，#144 2026-11-17：持久化已废弃——
+// 进入系统默认全部收起一致未选中态，不再从 localStorage/user_prefs 恢复）。
+// 多选并存（#141）：点架构节点 toggle 展开/收起，可多个部门同时展开。
 var DEPT_OPEN={};
 var UNASSIGNED_KEY='__unassigned__';
 // 架构多选选中集合（2026-11-17 #141）：ARCH_SEL 里的架构节点**自身挂载**的看板
@@ -3604,21 +3588,11 @@ var UNASSIGNED_KEY='__unassigned__';
 // 会话内有效（不持久化）；DEPT_OPEN 继续承担展开态与持久化（选中即展开）。
 var ARCH_SEL=new Set();
 function loadDeptOpen(){
-  try{
-    const raw=localStorage.getItem('tapd.deptOpen');
-    if(raw){const o=JSON.parse(raw); if(o&&typeof o==='object') DEPT_OPEN=o;}
-  }catch(e){DEPT_OPEN={};}
+  // #144：持久化已废弃——进入系统默认全部收起，不再从 localStorage 恢复。
+  // 保留空函数兼容潜在调用点（当前无调用）。
 }
 function saveDeptOpen(){
-  // 本地兜底 + 服务端持久化（T-0187：原 localStorage 未按账号分桶，入库后天然按用户隔离）
-  try{localStorage.setItem('tapd.deptOpen',JSON.stringify(DEPT_OPEN));}catch(e){}
-  _prefPush('dept_open',DEPT_OPEN);
-}
-// 单选：展开 name 时收起其他所有部门
-function expandOnly(name){
-  DEPT_OPEN={};
-  DEPT_OPEN[name]=true;
-  saveDeptOpen();
+  // #144：持久化已废弃——DEPT_OPEN 仅会话内存态，进入系统默认全部收起。
 }
 // 分组：部门 -> 看板列表。
 // ⚠️ **术语**：本文件里 ME.boards 的每一条 = 后端 boards 表的一行 = **看板**；
@@ -6774,15 +6748,8 @@ async function loadUserPrefs(){
       const mv=_migrateLocalPref('pins',local&&local.card?p.pins||local:local,!!p.pins);
       if(mv&&mv.card){MY_PINS={card:mv.card||{},column:mv.column||{}};renderCurrentViewForPrefs();}
     }
-    // 目录展开状态（原 localStorage tapd.deptOpen 未按账号分桶 → 入库后天然按用户隔离）
-    if(p.dept_open&&typeof p.dept_open==='object'){
-      DEPT_OPEN=p.dept_open;
-      renderCurrentViewForPrefs();
-    }else{
-      const local=(function(){try{const raw=localStorage.getItem('tapd.deptOpen');return raw?JSON.parse(raw):null}catch(e){return null}})();
-      const mv=_migrateLocalPref('dept_open',local,!!p.dept_open);
-      if(mv){DEPT_OPEN=mv;renderCurrentViewForPrefs();}
-    }
+    // 目录展开状态（#144 2026-11-17 废弃恢复）：进入系统默认全部收起一致未选中态，
+    // DEPT_OPEN 仅会话内存态；服务端 user_prefs.dept_open 存量数据不再读取
     // 子事项展开状态（2026-11-13）：按用户持久化 —— 合并进内存（SUBTREE_OPEN 是
     // const 容器，只做键合并）后重绘当前视图，renderBoard 恢复循环会按它自动展开
     if(p.subtree_open&&typeof p.subtree_open==='object'){
