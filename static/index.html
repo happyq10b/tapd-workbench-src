@@ -7455,7 +7455,7 @@ function closeEdit(){
 // openNewModal(boardId, colKey)：从「＋ 事项」按钮进来时锁定看板与板块
 let NEW_CARD_COL=null;   // {board_id, column_id, column_name}
 let NEW_CARD_MODE='card';      // 'card' 主事项 | 'sub' 子事项
-let NEW_CARD_STATUS='open';    // 新建时选定的状态（由头部状态按钮承载）
+let NEW_CARD_STATUS='progressing';    // 新建时选定的状态（由头部状态按钮承载）——#205n 默认「进行中」
 let NEW_CARD_OWNER=[];         // 新建时选定的负责人
 let NEW_CARD_CC=[];            // 新建时选定的参与人（主/子事项一致）
 let NEW_SUB_PARENT=null;       // 子事项模式：父事项的归属与时间范围
@@ -7472,8 +7472,8 @@ async function openNewModal(boardId,colKey){
   document.getElementById('n_week').value=cpWeekOf();   // 周数默认 = 当前自然周
   // 父事项上下文：主事项无（2026-11-09 #96b 与编辑弹窗布局对齐）
   document.getElementById('n_parent_wrap').style.display='none';
-  NEW_CARD_STATUS='open';
-  document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
+  NEW_CARD_STATUS='progressing';
+  document.getElementById('n_status_ops').innerHTML=statusPickerHtml('progressing','n');
   // 选人池（层级约束）：来自指定板块，或当前选中看板（尚无板块场景）
   {
     const _sep=((colKey||'').indexOf('::')>0)?colKey.indexOf('::'):-1;
@@ -7556,8 +7556,8 @@ async function openNewSubModal(parentId){
   document.getElementById('n_begin').value='';
   document.getElementById('n_due').value='';
   document.getElementById('n_week').value=cpWeekOf();   // 子事项同样有周数维度
-  NEW_CARD_STATUS='open';
-  document.getElementById('n_status_ops').innerHTML=statusPickerHtml('open','n');
+  NEW_CARD_STATUS='progressing';
+  document.getElementById('n_status_ops').innerHTML=statusPickerHtml('progressing','n');
   // 选人池：**父事项**的负责人与参与人（2026-11-17 层级约束：子事项 ⊆ 父事项名单。
   // 原为父事项所属板块池 —— 板块池是主事项的上级口径，子事项的直接上级是父事项）
   {
@@ -7754,7 +7754,7 @@ function colPaintPickerPerm(){
 //    completion 是负责人对板块整体完成度的**声明**；两者并存，互不覆盖。
 // T-191j：控件从编辑表单的下拉收敛到**弹窗头部状态按钮**（与事项状态按钮完全同款），
 // 预览（ctx=c）与编辑（ctx=ce）共用；COL_COMPLETION 为当前选中值（保存时随表单提交）。
-var COL_COMPLETION='open';
+var COL_COMPLETION='progressing';   // #205n：新建板块默认「进行中」
 // 2026-11-13（用户裁决「按体系来，不搞特殊」）：完成情况跟随板块编辑权限 =
 // **板块负责人及以上**（继承链），与板块待办/勾选共用 chkColOwnerOf 口径；
 // 后端入口 perm_check(OP_UPDATE, LV_COLUMN_OWNER) 同门槛把关。
@@ -7913,9 +7913,9 @@ function openColumnModal(){
   // 板块描述（2026-11-09 #93）：新建时清空
   document.getElementById('c_desc').value='';
   // 板块完成情况（2026-11-04 需求3）→ T-191j：新建时默认「未完成」，头部按钮承载
-  COL_COMPLETION='open';
+  COL_COMPLETION='progressing';
   const cnOps=document.getElementById('c_status_ops');
-  if(cnOps)cnOps.innerHTML=statusPickerHtml('open','ce');
+  if(cnOps)cnOps.innerHTML=statusPickerHtml('progressing','ce');
   document.getElementById('c_submit').textContent='创建板块';
   const _tipNew=document.getElementById('c_tip');
   if(_tipNew){_tipNew.style.display='';_tipNew.textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项。';}

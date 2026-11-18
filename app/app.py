@@ -3026,7 +3026,7 @@ class ColumnCreate(BaseModel):
     # 板块「完成情况」（2026-11-04 需求3）：open / progressing / done
     # ⚠️ 与进度条（done/total 自动统计）**互不冲突**：
     #    进度条是统计口径，本字段是**板块负责人对整体完成度的声明**。
-    completion: str = 'open'
+    completion: str = 'progressing'   # #205n：新建板块默认「进行中」
     # 板块描述（2026-11-09 #93）：可选说明文字，板块标题 tooltip 展示
     description: str = ''
     # 板块截止日期（T-0188 倒计时）：YYYY-MM-DD，空 = 未设置
@@ -3141,8 +3141,8 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
         _removed_col_create += _rm_p
         parts = ','.join(_kept_p)
     new_cid = 'COL' + str(int(time.time() * 1000))
-    # 新建板块的完成情况（2026-11-04 需求3）：创建者声明，默认未完成
-    new_completion = (req.completion or '').strip() or 'open'
+    # 新建板块的完成情况（2026-11-04 需求3）：创建者声明，默认「进行中」（#205n）
+    new_completion = (req.completion or '').strip() or 'progressing'
     if new_completion not in COLUMN_COMPLETIONS:
         raise HTTPException(400, '完成情况只能是「未完成」「进行中」或「已完成」')
     dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion, description, due_date)'
@@ -3904,6 +3904,12 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
     except Exception:
         _removed_create = []      # 池计算异常不阻断创建（fail-open）
     vals.update(req.fields)
+    # #205n（2026-11-18）：创建未指定状态 → 默认「进行中」（前端 NEW_CARD_STATUS
+    # 已同默认；此处兜底 API 直调/绕过前端场景，保证无 status 落库不再为空）
+    if not (vals.get('status') or '').strip():
+        vals['status'] = 'progressing'
+    if not (vals.get('status_name') or '').strip():
+        vals['status_name'] = '进行中'
     vals['card_id'] = new_id
     vals['board_id'] = req.board_id
     vals['column_id'] = req.column_id or vals.get('column_id', '')
@@ -4461,8 +4467,8 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
     # 运行时字段重置
     vals['card_id'] = new_id
     vals['card_name'] = name
-    vals['status'] = 'open'
-    vals['status_name'] = '未完成'
+    vals['status'] = 'progressing'   # #205n：复制出的新事项默认「进行中」
+    vals['status_name'] = '进行中'
     vals['creator'] = username
     vals['created'] = now
     vals['modified'] = ''
