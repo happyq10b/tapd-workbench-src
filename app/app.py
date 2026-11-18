@@ -3524,7 +3524,7 @@ async def delete_column_todo(tid: int, username: str = Depends(require_writer),
     return {'ok': True}
 
 
-@app.delete('/api/columns/{col_key}')
+@app.delete('/api/columns/{col_key:path}')
 async def delete_column(col_key: str, username: str = Depends(require_writer), request: Request = None):
     """删除单个板块（#158 批量删除的执行单元）。
 
@@ -3532,6 +3532,10 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
     子事项清单行、板块元信息行、板块评论/待办。
     权限（T-0190 用户口径）= **板块负责人及以上**（板块负责人 / 看板负责人 /
     架构负责人 / 管理员；逐列校验，批量场景下无权限的板块各自 403，不影响其他板块）。
+
+    ⚠️ col_key 用 :path 转换器（#205d）：板块名可含「/」（如「2026年第9/10周」），
+    encodeURIComponent 后 %2F 无法被 str 参数匹配 → 裸 404 Not Found；
+    :path 在 raw path 上匹配（%2F 不是实体斜杠）再 URL-decode，还原完整 col_key。
     """
     key = (col_key or '').strip()
     row = dbq('SELECT * FROM board_columns WHERE col_key=?', (key,))
@@ -7314,7 +7318,7 @@ async def rename_board(board_id: str, req: BoardRenameReq, username: str = Depen
     return {'ok': True, 'board_id': bid, 'board_name': name, 'changed': True}
 
 
-@app.put('/api/columns/{col_key}/participants')
+@app.put('/api/columns/{col_key:path}/participants')
 async def set_column_participants(col_key: str, req: AclReq, username: str = Depends(require_writer),
                                   request: Request = None):
     # 指派板块参与人（仅管理员 / 板块负责人）。
@@ -7395,7 +7399,7 @@ async def set_card_participants(card_id: str, req: AclReq, username: str = Depen
             'removed': _removed_cc}
 
 
-@app.put('/api/columns/{col_key}/acl')
+@app.put('/api/columns/{col_key:path}/acl')
 async def set_column_acl(col_key: str, req: AclReq, username: str = Depends(require_writer),
                          request: Request = None):
     """设置板块负责人（仅管理员）。
