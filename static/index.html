@@ -1231,6 +1231,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .tp-arrow{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);font-size:10px;flex-shrink:0;border-radius:3px}
 .tp-arrow:hover{background:rgba(47,128,237,.12);color:var(--primary)}
 .tp-label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--text);flex:1;position:relative;outline:none;border-radius:3px}
+/* #205aa（2026-11-18）：负责人/参与人筛选树人员行（及「无负责人」行）尾部的板块数量徽标。
+   视觉与口径同 #205v 状态/性质下拉的 .opt-count（灰字胶囊、右对齐）；
+   margin-left:auto 在 .tp-label（inline-flex、flex:1）内把徽标推到行右端。 */
+.tp-cnt{margin-left:auto;font-size:11px;color:var(--text3);background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:0 8px;flex-shrink:0;white-space:nowrap}
 .tp-label:focus-visible{box-shadow:0 0 0 2px var(--primary)}
 .tp-box-na{opacity:.35;cursor:default}
 /* person 模式的节点框：可点击（级联勾选下属人员），用「半选」表达部分选中 */
@@ -6167,7 +6171,7 @@ async function _openPersonFilterPicker(anchor){
     paintFilterCombos();
     reload(1);
   },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolOrgShapeTree(_cand,'板块负责人'),
-            showNoneOwner:true, clearable:true, keyword:''});
+            showNoneOwner:true, clearable:true, keyword:'', countKind:'owner'});   // #205aa：人员行带板块计数
   if(TREE_PICK)TREE_PICK.srcAnchor=anchor;
 }
 // T-0189 参与人筛选：与负责人同款；#205x 改板块维度 → 候选 = 各板块**参与人**
@@ -6192,7 +6196,7 @@ async function _openCcFilterPicker(anchor){
     reload(1);
   }, {mode:'filter', pickMode:'person', width:360, height:460,
       tree:poolOrgShapeTree(_candCc,'板块参与人'),
-      clearable:true, keyword:''});
+      clearable:true, keyword:'', countKind:'cc'});   // #205aa：人员行带板块计数
   if(TREE_PICK)TREE_PICK.srcAnchor=anchor;
 }
 function applyPersonFilter(kind, persons){
@@ -6844,6 +6848,49 @@ function attrCounts(){        // {专项:n, 日常:n}
   const out={};
   ATTR_OPTS.forEach(function(o){out[o[0]]=0;});
   _facetBase('attr').forEach(function(m){const k=m.nature||'日常';out[k]=(out[k]||0)+1;});
+  return out;
+}
+// ---------- 人员筛选计数（#205aa 2026-11-18） ----------
+// 负责人/参与人选人树每个人员行右侧追加「当前筛选范围内该人员担任负责人/参与人的板块数」
+// （截图需求；样式与逻辑参照 #205v 状态/性质下拉的 .opt-count）。
+// 统计口径与 #205v 同构（分面）：计入年份 / 状态 / 性质 / **另一人员维度**的已选，
+// 排除自身维度已选 —— 否则勾选某人后他自己的计数会变 0，数字失去导航意义。
+// 周数/到期筛选作用于板块内**事项**、不改变板块行可见性 → 与 #205v 一致不参与统计。
+function _facetPeopleBase(excludeDim){   // excludeDim: 'person' | 'cc' | ''（参与统计的板块行）
+  return (window.COLS_META||[]).filter(function(m){
+    if(curYears&&curYears.size&&!curYears.has(m.year||''))return false;
+    if(excludeDim!=='status'&&COL_STATUS_SEL&&COL_STATUS_SEL.size&&!COL_STATUS_SEL.has(m.completion||'open'))return false;
+    if(excludeDim!=='attr'&&ATTR_SEL&&ATTR_SEL.size&&!ATTR_SEL.has(m.nature||'日常'))return false;
+    if(excludeDim!=='person'&&PERSON_SEL&&PERSON_SEL.size&&!_colPeopleHit(PERSON_SEL,m.owner))return false;
+    if(excludeDim!=='cc'&&CC_SEL&&CC_SEL.size&&!_colPeopleHit(CC_SEL,m.participants))return false;
+    return true;
+  });
+}
+// 账号→姓名（与 colOwnerNames 同口径：BC_ACL_MEMBERS 查不到时回退账号直比）
+function _acctName(a){
+  const m0=BC_ACL_MEMBERS.filter(function(x){return x.account===a})[0];
+  return m0?(m0.name||a):a;
+}
+function colOwnerCounts(){   // {姓名:n, [OWNER_NONE]:n（负责人为空的板块数）}
+  const out={};
+  _facetPeopleBase('person').forEach(function(m){
+    const o=String(m.owner||'').trim();
+    if(!o){out[OWNER_NONE]=(out[OWNER_NONE]||0)+1;return;}
+    const nm=_acctName(o);
+    out[nm]=(out[nm]||0)+1;
+  });
+  return out;
+}
+function colCcCounts(){      // {姓名:n}（参与人为空的板块无对应选项行 → 不产出条目）
+  const out={};
+  _facetPeopleBase('cc').forEach(function(m){
+    String(m.participants||'').split(',').forEach(function(a){
+      a=String(a||'').trim();
+      if(!a)return;
+      const nm=_acctName(a);
+      out[nm]=(out[nm]||0)+1;
+    });
+  });
   return out;
 }
 // 纯重绘：chips + 计数 + 面板（模式与周数/归属年份 combo 一致）
@@ -9432,7 +9479,16 @@ function openTreePick(anchorEl, selected, onConfirm, opts){
   //   没账号的人没法登录，配成负责人等于配了个空）。
   //   名单来自 BC_ACL_MEMBERS（由 /api/team 拉取，含 account）。
   const requireAccount=!!(opts&&opts.requireAccount);
-  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, clearable: !!opts.clearable, pickMode, personNames, showNoneOwner, noneOwner:false, keyword, keywordRaw:keyword, requireAccount};
+  // countKind（#205aa 2026-11-18）：'owner'|'cc' → 人员行右侧追加「当前范围内的板块数量」
+  // 计数徽标（样式与口径参照 #205v 状态/性质下拉的 .opt-count）。仅筛选栏的
+  // 负责人/参与人两个选人弹窗传入；其他 openTreePick 使用方（看板管理选人等）不带此参、不受影响。
+  // 计数在打开时一次算好存 TREE_PICK.peopleCounts —— 面板生命周期内筛选条件不变；
+  // 树内搜索/勾选只改显示与选中态，不重算。
+  const countKind=(opts&&opts.countKind)||'';
+  TREE_PICK={panel, selected:[...(selected||[])].filter(okSel), onConfirm, expanded, mode, tree: treeSource, showSelectAll: !!opts.showSelectAll, clearable: !!opts.clearable, pickMode, personNames, showNoneOwner, noneOwner:false, keyword, keywordRaw:keyword, requireAccount, countKind};
+  TREE_PICK.peopleCounts = countKind==='owner' ? colOwnerCounts()
+                         : countKind==='cc'    ? colCcCounts()
+                         : null;
   // 「无负责人」若已在选中集合里（从筛选条件回填），则同步点亮该选项
   if(showNoneOwner&&TREE_PICK.selected.includes(OWNER_NONE))TREE_PICK.noneOwner=true;
   renderTreePick();
@@ -9550,10 +9606,13 @@ function renderTreePickBody(){
   const body=document.getElementById('tp_body');
   if(!body)return;
   // 「无负责人」节点：独立的一行标签（不混入树的层级结构，保持层级不变）
+  // #205aa：行尾追加「负责人为空」的板块数量（仅负责人筛选树带计数）
+  const noneCnt=(TREE_PICK.peopleCounts&&TREE_PICK.countKind==='owner')?(TREE_PICK.peopleCounts[OWNER_NONE]||0):null;
   const noneNode=TREE_PICK.showNoneOwner&&TREE_PICK.noneOwner?`
     <div class="tp-none-node">
       <span class="tn-tag">无负责人</span>
       <span class="tn-desc">负责人为空的成员</span>
+      ${noneCnt!==null?`<span class="tp-cnt" title="当前范围内负责人为空的板块数量">${noneCnt}</span>`:''}
       <button type="button" class="tn-clear" onclick="tpToggleNoneOwner()" title="取消「无负责人」筛选">✕</button>
     </div>`:'';
   const treeHtml=treePickNodes(TREE_PICK.tree,0);
@@ -9704,9 +9763,11 @@ function treePickNodes(nodes,dep){
       const keydown=noAcct?'':`onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault();tpPersonClick('${esc(m.name)}')}"`;
       const roleTag=m.role_name?`<span style="color:var(--text3);font-size:11px">（${esc(m.role_name)}）</span>`:'';
       const noAcctTag=noAcct?`<span style="color:var(--text3);font-size:11px">（未开通账号）</span>`:'';
+      // #205aa：该人员在当前筛选范围内担任负责人/参与人的板块数量（打开时一次算好）
+      const pc=TREE_PICK.peopleCounts?(TREE_PICK.peopleCounts[m.name]||0):null;
       return `<div class="tp-node tp-person" style="padding-left:${(dep+1)*16}px">
         <span class="tp-arrow" style="visibility:hidden">▶</span>
-        <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择人员 ${esc(m.name)}" ${click} ${keydown} style="${noAcct?'opacity:.45;cursor:not-allowed':''}"><span class="tp-box${on?' on':''}" data-pbox="${esc(m.name)}"></span><span>👤 ${esc(m.name)}${roleTag}${noAcctTag}</span></label>
+        <label class="tp-label" tabindex="0" role="checkbox" aria-label="选择人员 ${esc(m.name)}" ${click} ${keydown} style="${noAcct?'opacity:.45;cursor:not-allowed':''}"><span class="tp-box${on?' on':''}" data-pbox="${esc(m.name)}"></span><span>👤 ${esc(m.name)}${roleTag}${noAcctTag}</span>${pc!==null?`<span class="tp-cnt" title="当前范围内的板块数量">${pc}</span>`:''}</label>
       </div>`;
     }).join('');
     return `<div class="tp-node" style="padding-left:${dep*16}px">
