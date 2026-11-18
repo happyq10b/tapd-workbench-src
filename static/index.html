@@ -1822,28 +1822,31 @@ function goLogin(){
         </span>
         <div class="cf-drop" id="attrFilterDrop" hidden></div>
       </span>
-      <!-- 负责人筛选（T-0189 由「人员」更名）：锚定事项 owner 字段 -->
+      <!-- 负责人筛选（T-0189 由「人员」更名；#205x 2026-11-18 改**板块维度**）：
+           按**板块负责人**（board_columns.owner，存账号）客户端过滤板块行，
+           候选 = 当前看板各板块负责人的姓名（架构树 + 「无负责人」选项）。 -->
       <span class="combo-filter" id="personFilterWrap">
         <span class="cf-label">👤 负责人</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="personFilterInput" autocomplete="off" readonly
                  placeholder="" onclick="openPersonFilterPicker(this)"
-                 onfocus="openPersonFilterPicker(this)" title="打开组织架构树：搜索人员、勾选「无负责人」"
-                 aria-label="负责人筛选，点击从组织架构树选择人员">
+                 onfocus="openPersonFilterPicker(this)" title="打开组织架构树：筛选板块负责人，勾选「无负责人」（#205x 板块维度）"
+                 aria-label="板块负责人筛选，点击从组织架构树选择人员">
           <span class="cf-count" id="personFilterCount" role="button" tabindex="0" title="已选负责人（点击打开架构树）"
                 onclick="openPersonFilterPicker(document.getElementById('personFilterInput'))"
                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openPersonFilterPicker(document.getElementById('personFilterInput'))}"></span>
           <span class="cf-chips" id="personFilterChips"></span>
         </span>
       </span>
-      <!-- 参与人筛选（T-0189 新增）：与负责人框同款样式，锚定事项 cc 字段
-           （后端 /api/cards 的 cc 参数已支持，按姓名匹配）。 -->
+      <!-- 参与人筛选（T-0189 新增；#205x 2026-11-18 改**板块维度**）：
+           按**板块参与人**（board_columns.participants，逗号分隔账号）客户端过滤板块行，
+           候选 = 当前看板各板块参与人的姓名（架构树）。 -->
       <span class="combo-filter" id="ccFilterWrap">
         <span class="cf-label">👥 参与人</span>
         <span class="cf-field">
           <input type="text" class="cf-input" id="ccFilterInput" autocomplete="off" readonly
                  placeholder="" onclick="openCcFilterPicker(this)"
-                 onfocus="openCcFilterPicker(this)" title="打开组织架构树：搜索并勾选参与人"
+                 onfocus="openCcFilterPicker(this)" title="打开组织架构树：筛选**板块参与人**（#205x 板块维度）"
                  aria-label="参与人筛选，点击从组织架构树选择人员">
           <span class="cf-count" id="ccFilterCount" role="button" tabindex="0" title="已选参与人（点击打开架构树）"
                 onclick="openCcFilterPicker(document.getElementById('ccFilterInput'))"
@@ -5513,22 +5516,21 @@ function buildFilterParams(extra){
   const q=document.getElementById('searchInput').value.trim();
   // 状态筛选：来自统计卡片的点击多选（2026-11-04，状态下拉已移除）
   const st=[...STATUS_SEL].join(',');
-  const cc=window._ccFilter||'';
   // 创建日期区间（T-0189 该筛选项已从 UI 移除）：元素不存在时按未筛选处理
   const dsEl=document.getElementById('createdStart'),deEl=document.getElementById('createdEnd');
   const ds=dsEl?dsEl.value:'',de=deEl?deEl.value:'';
   // 多看板：board_ids 逗号分隔（单个时也走 board_ids，后端同一处理）
   if(curBoards.size)ps.set('board_ids',[...curBoards].join(','));
   if(st)ps.set('status',st);if(q)ps.set('q',q);
-  if(cc)ps.set('cc',cc);
   // 到期筛选（T-191）：已选截止日期逗号串 → 后端 due 参数任一命中
   if(window._dueFilter)ps.set('due_dates',window._dueFilter);
   if(ds)ps.set('created_start',ds);
   if(de)ps.set('created_end',de);
   // 周数多选（任一命中）
   if(WEEK_SEL.size)ps.set('week',[...WEEK_SEL].join(','));
-  // 人员多选（锚定 owner 字段 —— 见后端 /api/cards 的 person 分支）
-  if(PERSON_SEL.size)ps.set('person',[...PERSON_SEL].join(','));
+  // #205x（2026-11-18 用户需求）：【负责人】【参与人】改为**板块维度**筛选
+  // （板块的 owner / participants，客户端过滤，与板块状态/性质筛选同模式）——
+  // 不再下发事项级 person/cc 参数（否则板块内他人的事项会被误过滤）。
   // 归属年份（#46：与列表同一口径）
   if(typeof curYears!=='undefined'&&curYears&&curYears.size)ps.set('years',[...curYears].join(','));
   if(extra)Object.keys(extra).forEach(function(k){ps.set(k,extra[k])});
@@ -5570,13 +5572,54 @@ async function reload(page){
 //  ③ 候选来源都是接口返回的**权限可见范围**内的数据，越权数据不出现在候选里。
 let WEEK_OPTIONS=[];      // 当前筛选结果下存在事项的周数（接口返回，联动口径，renderWeekFilter 维护）
 let WEEK_SEL=new Set();   // 已选周数（多选，任一命中）
-let PERSON_SEL=new Set();  // 已选人员（多选；锚定 owner 字段）—— T-0189 更名「负责人」筛选
-let CC_SEL=new Set();      // T-0189 参与人筛选已选人员（锚定 cc 字段；window._ccFilter 为其逗号串形态）
+let PERSON_SEL=new Set();  // #205x：负责人筛选已选姓名（板块维度，过滤 board_columns.owner）—— T-0189 更名「负责人」筛选
+let CC_SEL=new Set();      // #205x：参与人筛选已选姓名（板块维度，过滤 board_columns.participants）
 let FILTER_COMBO=null;    // 当前展开的候选面板：'person' | 'week' | null
 // 「无负责人」的特殊值（与后端 OWNER_NONE 一致）
 const OWNER_NONE='__no_owner__';
 // 人员筛选值的显示文案：特殊值翻译成「无负责人」，其余原样
 function personLabel(v){return v===OWNER_NONE?'无负责人':v}
+// ---------- 板块维度人员匹配（#205x 2026-11-18） ----------
+// 板块的 owner（单账号）/ participants（逗号分隔账号）与姓名选择集比对；
+// 账号→姓名经 BC_ACL_MEMBERS（/api/team），查不到时回退账号直比（存量兜底）。
+// 「无负责人/无参与人」= 对应字段为空。
+function _colPeopleHit(sel,raw){
+  const accts=String(raw||'').split(',').map(x=>x.trim()).filter(Boolean);
+  const names=accts.map(function(a){
+    const m0=BC_ACL_MEMBERS.filter(function(x){return x.account===a})[0];
+    return m0?(m0.name||a):a;
+  });
+  let hit=false,none=false;
+  sel.forEach(function(v){
+    if(v===OWNER_NONE){none=true;return;}
+    if(names.indexOf(v)>=0)hit=true;
+  });
+  return hit||(none&&!accts.length);
+}
+// 板块负责人候选（姓名集，去重）：当前载荷各板块 owner 的姓名
+function colOwnerNames(){
+  const s=new Set();
+  (window.COLS_META||[]).forEach(function(m){
+    const o=String(m.owner||'').trim();
+    if(!o)return;
+    const m0=BC_ACL_MEMBERS.filter(function(x){return x.account===o})[0];
+    s.add(m0?(m0.name||o):o);
+  });
+  return [...s];
+}
+// 板块参与人候选（姓名集，去重）：当前载荷各板块 participants 的姓名
+function colParticipantNames(){
+  const s=new Set();
+  (window.COLS_META||[]).forEach(function(m){
+    String(m.participants||'').split(',').forEach(function(a){
+      a=a.trim();
+      if(!a)return;
+      const m0=BC_ACL_MEMBERS.filter(function(x){return x.account===a})[0];
+      s.add(m0?(m0.name||a):a);
+    });
+  });
+  return [...s];
+}
 
 // ---------- 周数归一化 ----------
 // 2026-11-04 用户要求：输入格式统一为「年份-周数」，移除纯周数「41」的支持。
@@ -5872,7 +5915,7 @@ function onFilterOptionClick(kind,val){
   reload(1);
 }
 function removeFilterChip(kind,val){
-  if(kind==='cc'){CC_SEL.delete(val);window._ccFilter=[...CC_SEL].join(',');}
+  if(kind==='cc'){CC_SEL.delete(val);}
   else{
     const set=(kind==='person')?PERSON_SEL:WEEK_SEL;
     set.delete(val);
@@ -5887,7 +5930,6 @@ function clearAllRowFilters(){
   if(q)q.value='';
   PERSON_SEL=new Set();
   CC_SEL=new Set();
-  window._ccFilter='';
   WEEK_SEL=new Set();
   curYears=new Set();
   COL_STATUS_SEL=new Set();
@@ -5969,7 +6011,7 @@ function syncFilterHint(){
   if(typeof curYears!=='undefined'&&curYears.size)
     parts.push('年份：'+[...curYears].map(y=>y+' 年').join('、'));
   if(WEEK_SEL.size)parts.push('周数：'+[...WEEK_SEL].map(weekLabelOf).join('、'));
-  if(window._ccFilter)parts.push('参与人：'+window._ccFilter.split(',').join('、'));
+  if(CC_SEL&&CC_SEL.size)parts.push('参与人：'+[...CC_SEL].map(personLabel).join('、'));
   // 到期筛选（T-191）：超 3 天折叠展示，完整清单在日历弹窗
   if(typeof DUE_SEL!=='undefined'&&DUE_SEL.size){
     const ds=[...DUE_SEL].sort();
@@ -6075,15 +6117,10 @@ function openPersonFilterPicker(anchor){
 async function _openPersonFilterPicker(anchor){
   // 强制刷新架构数据：人员筛选要反映最新的任命（免职/任命后立即生效），
   // 同时让「数据刷新后展开状态同步」这条路径被真正走到。
-  // 候选联动（2026-11-17）：树改为「当前所选看板的负责人+参与人」池
-  // （boardFilterCandidates），不再展示全量架构 —— 看板切换后选项随之刷新。
   try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
-  const _poolNames=await boardFilterCandidates();
-  if(!_poolNames.length){ toast('当前所选看板未配置负责人/参与人，无筛选候选'); return; }
-  // #205i 级联：池收缩到「当前筛选结果事项」中出现过的负责人——
-  // 名单之外的人员树里不渲染，全选不得包含；筛选结果为空 → 无可选
-  const _cand=await cascadePersonCandidates('owner', _poolNames);
-  if(!_cand.length){ toast('当前筛选范围内没有可选负责人'); return; }
+  // #205x：筛选改为**板块维度** → 候选 = 当前看板各板块**负责人**（原事项级候选池废弃）
+  const _cand=colOwnerNames();
+  if(!_cand.length){ toast('当前所选看板的板块均未配置负责人，无筛选候选'); return; }
   // 已选人员回填进树（避免每次打开都从零开始）。
   // ⚠️ 特殊值「无负责人」不是架构里的真实人员，**不带** __P__ 前缀回填
   //    （否则永远匹配不上）—— 它由树上的独立「无负责人」选项承载，
@@ -6097,11 +6134,11 @@ async function _openPersonFilterPicker(anchor){
     if(wantNone)PERSON_SEL.add(OWNER_NONE);
     paintFilterCombos();
     reload(1);
-  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolOrgShapeTree(_cand,'当前看板负责人/参与人'),
+  },       {mode:'filter', pickMode:'person', width:360, height:460, tree:poolOrgShapeTree(_cand,'板块负责人'),
             showNoneOwner:true, clearable:true, keyword:''});
   if(TREE_PICK)TREE_PICK.srcAnchor=anchor;
 }
-// T-0189 参与人筛选：与负责人同款（2026-11-17 候选联动：仅当前所选看板的负责人+参与人）
+// T-0189 参与人筛选：与负责人同款；#205x 改板块维度 → 候选 = 各板块**参与人**
 // cc 同款防跳闪（与 openPersonFilterPicker 同一并发去重方案）
 var _ccPickBusy=null;
 function openCcFilterPicker(anchor){
@@ -6112,20 +6149,17 @@ function openCcFilterPicker(anchor){
 }
 async function _openCcFilterPicker(anchor){
   try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
-  const _poolCc=await boardFilterCandidates();
-  if(!_poolCc.length){ toast('当前所选看板未配置负责人/参与人，无筛选候选'); return; }
-  // #205i 级联：池收缩到「当前筛选结果事项」中出现过的参与人
-  const _candCc=await cascadePersonCandidates('cc', _poolCc);
-  if(!_candCc.length){ toast('当前筛选范围内没有可选参与人'); return; }
+  // #205x：候选 = 当前看板各板块**参与人**（原事项级候选池废弃）
+  const _candCc=colParticipantNames();
+  if(!_candCc.length){ toast('当前所选看板的板块均未配置参与人，无筛选候选'); return; }
   const cur=[...CC_SEL].map(n=>ORG_PERSON_PREFIX+n);
   openTreePick(anchor, cur, (persons)=>{
     // 全部取消勾选后点确定 → 视为清空该筛选（与负责人同口径）
     CC_SEL=new Set(persons||[]);
-    window._ccFilter=[...CC_SEL].join(',');
     paintFilterCombos();
     reload(1);
   }, {mode:'filter', pickMode:'person', width:360, height:460,
-      tree:poolOrgShapeTree(_candCc,'当前看板负责人/参与人'),
+      tree:poolOrgShapeTree(_candCc,'板块参与人'),
       clearable:true, keyword:''});
   if(TREE_PICK)TREE_PICK.srcAnchor=anchor;
 }
@@ -6317,7 +6351,7 @@ function syncDateFilterUI(){
 function filtersActive(q){
   if(q)return true;
   if(STATUS_SEL&&STATUS_SEL.size)return true;   // 统计卡片点击筛选（2026-11-04 起）
-  if(window._ccFilter)return true;
+  if(CC_SEL&&CC_SEL.size)return true;   // #205x：参与人筛选改为板块维度
   if(document.getElementById('createdStart')&&document.getElementById('createdStart').value)return true;
   if(document.getElementById('createdEnd')&&document.getElementById('createdEnd').value)return true;
   if(WEEK_SEL&&WEEK_SEL.size)return true;
@@ -6393,6 +6427,24 @@ function renderBoard(cards,cols,q,colHits){
     names=names.filter(k=>{const m=cmeta[k];return !!m&&ATTR_SEL.has(m.nature||'日常')});
     if(!names.length){
       c.innerHTML='<div class="empty">没有符合性质条件的板块</div>';
+      return;
+    }
+  }
+  // #205x（2026-11-18 用户需求）：【负责人】【参与人】改为**板块维度**筛选——
+  // 分别按板块的 owner（单账号）/ participants（逗号分隔账号）匹配；
+  // 选择集存**姓名**（架构树勾选），经 BC_ACL_MEMBERS 账号→姓名映射比对（空映射回退账号直比）；
+  // 「无负责人」（OWNER_NONE）= 板块负责人/参与人为空。原事项级 person/cc API 过滤停用。
+  if(PERSON_SEL&&PERSON_SEL.size){
+    names=names.filter(k=>{const m=cmeta[k];return !!m&&_colPeopleHit(PERSON_SEL,m.owner);});
+    if(!names.length){
+      c.innerHTML='<div class="empty">没有符合负责人条件的板块</div>';
+      return;
+    }
+  }
+  if(CC_SEL&&CC_SEL.size){
+    names=names.filter(k=>{const m=cmeta[k];return !!m&&_colPeopleHit(CC_SEL,m.participants);});
+    if(!names.length){
+      c.innerHTML='<div class="empty">没有符合参与人条件的板块</div>';
       return;
     }
   }
