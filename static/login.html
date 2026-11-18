@@ -10,7 +10,11 @@ body{min-height:100vh;display:flex;align-items:center;justify-content:center;bac
 .card{background:#fff;border-radius:12px;padding:40px 36px;width:360px;box-shadow:0 2px 8px rgba(0,0,0,.08);position:relative}
 /* 登录页小精灵挂件（T-013）：趴在卡片左下角提示行旁；纯装饰不挡点击。
    drop-shadow 沿像素剪影投影（比 box-shadow 更贴形），提升立体感 */
-.pet{position:absolute;left:30px;bottom:28px;width:56px;height:56px;
+/* bottom 与通知区对齐（#147 用户反馈「重新保存后位置回到原样」）：
+   精灵原 bottom:28px 钉死卡片底角，通知区下移 1.5 行后精灵掉到通知下方错位。
+   改为锚定通知块垂直中心：卡片 padding-bottom 40 + (通知块 63px - 精灵 56px)/2 ≈ 44px，
+   通知行数变化时精灵保持与通知并排 */
+.pet{position:absolute;left:30px;bottom:44px;width:56px;height:56px;
   pointer-events:none;z-index:1;
   filter:drop-shadow(0 3px 4px rgba(0,0,0,.28))}
 .pet img{width:100%;height:100%;image-rendering:pixelated}
