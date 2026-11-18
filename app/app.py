@@ -9514,8 +9514,14 @@ def _index_resp():
     )
 
 def _login_resp():
-    return FileResponse(
-        os.path.join(STATIC_DIR, 'login.html'),
+    # 直读磁盘 + 注入构建戳（与 _index_resp 同款）：即使浏览器/中间层忽略
+    # no-cache 头，页面内容也随每次响应更新，杜绝「改了 CSS 刷新不生效」（#147 反馈）
+    p = os.path.join(STATIC_DIR, 'login.html')
+    with open(p, 'r', encoding='utf-8') as f:
+        html = f.read()
+    html = html.replace('</head>', f'<meta name="build" content="{int(_time.time())}">\n</head>', 1)
+    return Response(
+        content=html, media_type='text/html',
         headers={'Cache-Control': 'no-cache, no-store, must-revalidate',
                  'Pragma': 'no-cache', 'Expires': '0'}
     )
