@@ -4175,7 +4175,13 @@ async def archive_board(board_id: str, req: BoardArchiveReq,
     to_arch = 1 if req.archived else 0
     if (row['archived'] or 0) == to_arch:
         return {'ok': True, 'board_id': board_id, 'archived': to_arch, 'noop': True}
-    dbe('UPDATE boards SET archived=? WHERE board_id=?', (to_arch, board_id))
+    # #205ad-bis-3：封存写入时间与操作人（元数据）；启用清空（历史查审计日志）
+    if to_arch:
+        dbe('UPDATE boards SET archived=1, archived_at=?, archived_by=? WHERE board_id=?',
+            (time.strftime('%Y-%m-%d %H:%M:%S'), username, board_id))
+    else:
+        dbe('UPDATE boards SET archived=0, archived_at=NULL, archived_by=NULL WHERE board_id=?',
+            (board_id,))
     verb = '封存' if to_arch else '启用'
     log_action(board_id, username, verb, f'{verb}看板：{row["board_name"]}')
     audit_log(username, client_ip(request), 'board_archive', f'看板 {board_id}',
@@ -5895,9 +5901,11 @@ def _all_boards():
     此前最终 sorted 又按 board_id 重排 → sort 完全失效，本版修正。"""
     pairs = {}          # board_id -> dict，保插入序（boards 先按 sort 序插入）
     seen = []
-    for r in dbq('SELECT board_id, board_name, workspace_id FROM boards ORDER BY sort, board_id'):
+    for r in dbq('SELECT board_id, board_name, workspace_id, archived_at, archived_by FROM boards ORDER BY sort, board_id'):
         d = dict(r)
-        pairs[d['board_id']] = {'board_id': d['board_id'], 'board_name': d['board_name'], 'workspace_id': d.get('workspace_id', '')}
+        pairs[d['board_id']] = {'board_id': d['board_id'], 'board_name': d['board_name'],
+                                'workspace_id': d.get('workspace_id', ''),
+                                'archived_at': d.get('archived_at') or '', 'archived_by': d.get('archived_by') or ''}
         seen.append(d['board_id'])
     derived = []
     for r in dbq('SELECT DISTINCT board_id, board_name, workspace_id FROM cards WHERE deleted=0'):
@@ -7503,6 +7511,8 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
         out.append({
             'board_id': bid,
             'archived': 1 if bid in _arch_set else 0,
+            'archived_at': b.get('archived_at') or '',
+            'archived_by': b.get('archived_by') or '',
             'board_name': b['board_name'],
             'workspace_id': b.get('workspace_id', ''),
             'card_count': counts.get(bid, 0),

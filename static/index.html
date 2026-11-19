@@ -13941,7 +13941,7 @@ function renderBoardList(){
     // #205ad-bis（用户确认）：不再展示 board_config.status 的「启用/封存」文本徽标 ——
     // 它与封存操作按钮并排被误读为「两个按钮」。列表只保留：真封存 →「已封存」徽标；
     // 未登记配置 →「未配置」徽标（常态「启用」不占视觉位）。
-    const st = b.archived ? '<span class="badge-archived">已封存</span>'
+    const st = b.archived ? '<span class="badge-archived" title="封存于 '+esc(b.archived_at||'?')+' · 操作人 '+esc(b.archived_by||'?')+'">已封存</span>'
             : (b.status ? '' : '<span class="badge-muted">未配置</span>');
     // #205ad/#205ad-bis 封存/启用：看板级能力位 can_archive（后端下发，口径=该看板
     // 归属部门的架构负责人；管理员恒 True）—— 看板负责人/范围外架构负责人不渲染按钮；

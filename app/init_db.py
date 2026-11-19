@@ -104,7 +104,9 @@ CREATE TABLE IF NOT EXISTS boards (
     sort          INTEGER NOT NULL DEFAULT 0,  -- 排序权重（小在前）
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     copy_from     TEXT NOT NULL DEFAULT '',    -- 复制来源 board_id（空 = 非副本）
-    archived      INTEGER NOT NULL DEFAULT 0   -- #205ad 封存标记（1=已封存：不对外展示，仅看板管理可见）
+    archived      INTEGER NOT NULL DEFAULT 0,  -- #205ad 封存标记（1=已封存：不对外展示，仅看板管理可见）
+    archived_at   TEXT,                        -- #205ad-bis-3 最近一次封存时间（启用后清空，历史查审计日志）
+    archived_by   TEXT                         -- #205ad-bis-3 最近一次封存操作人（启用后清空）
 );
 CREATE INDEX IF NOT EXISTS idx_boards_sort ON boards(sort, board_id);
 
@@ -527,9 +529,13 @@ def _migrate_schema(conn):
                        SELECT board_id, board_name, workspace_id, owner, sort, created_at FROM boards_bak""")
         conn.execute('DROP TABLE boards_bak')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_boards_sort ON boards(sort, board_id)')
-    # ---- boards：#205ad 封存标记 ----
+    # ---- boards：#205ad 封存标记 + #205ad-bis-3 封存元数据 ----
     if 'archived' not in bcols:
         conn.execute('ALTER TABLE boards ADD COLUMN archived INTEGER NOT NULL DEFAULT 0')
+    if 'archived_at' not in bcols:
+        conn.execute('ALTER TABLE boards ADD COLUMN archived_at TEXT')
+    if 'archived_by' not in bcols:
+        conn.execute('ALTER TABLE boards ADD COLUMN archived_by TEXT')
     # ---- board_config：重构为按 board_id 关联真实看板 ----
     ccols = [r[1] for r in conn.execute('PRAGMA table_info(board_config)').fetchall()]
     csql = (conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='board_config'")
