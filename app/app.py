@@ -4421,6 +4421,26 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
             'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks}
 
 
+def _topo_order_cards(cards):
+    """卡片按层级拓扑排序：主卡在前，子卡逐波后置 —— 保证插入时 parent_id 重映射一定就绪。
+
+    ⚠️ 不能用 ORDER BY card_id：存量 id 格式混杂（TAPD 迁移 '116…' / 系统新建 'CD…'/'NC…'
+    等多代格式），字典序不保证「父先于子」—— 孙卡 id 若排在子卡前，重映射时
+    card_id_map 里还没有它的 parent → parent_id 落空 → 层级断裂（#205ab-bis）。
+    parent 不在本集合的孤儿卡（异常数据）视同顶层插入。"""
+    ids = {c['card_id'] for c in cards}
+    out, seen = [], set()
+    wave = [c for c in cards if not (c.get('parent_id') or '') or c['parent_id'] not in ids]
+    while wave:
+        for c in wave:
+            seen.add(c['card_id'])
+            out.append(c)
+        wave = [c for c in cards
+                if c['card_id'] not in seen and (c.get('parent_id') or '') in seen]
+    out += [c for c in cards if c['card_id'] not in seen]   # 兜底：环等异常 → 按顶层插入
+    return out
+
+
 def _deep_copy_column_cards(src_col, dst_board_id, dst_col_name, dst_column_id):
     """#205ab：板块复制的正文部分 —— 该板块下全部事项（主 + 子层级）+ 勾选清单。
 
@@ -4446,10 +4466,24 @@ def _deep_copy_column_cards(src_col, dst_board_id, dst_col_name, dst_column_id):
         "SELECT * FROM cards WHERE board_id=? AND deleted=0"
         " AND (column_id=? OR (column_id='' AND column_name=?))"
         ' ORDER BY card_id', (src_col['board_id'], src_col.get('column_id') or '', src_col['column_name']))]
+    # ⚠️ #205ab-bis（用户反馈「子事项未同步复制」）：存量子事项的 column_id 与
+    # column_name **可能双双为空**（TAPD 迁移真实数据 10 条里 8 条如此，界面靠
+    # parent_id 挂载展示）→ 仅按 column 字段捞卡会**整批漏掉子事项**。
+    # 修复：在板块匹配的基础上，按 parent_id **逐层把全部后代捞入**（去重）。
+    collected = {c['card_id']: c for c in src_cards}
+    frontier = list(collected.keys())
+    while frontier:
+        marks = ','.join('?' * len(frontier))
+        kids = [dict(r) for r in dbq(
+            'SELECT * FROM cards WHERE deleted=0 AND parent_id IN (%s)' % marks, frontier)]
+        frontier = []
+        for k in kids:
+            if k['card_id'] not in collected:
+                collected[k['card_id']] = k
+                frontier.append(k['card_id'])
+    # 拓扑序插入：父卡一定先于子卡就位（card_id 字典序不可靠，见 _topo_order_cards）
+    ordered = _topo_order_cards(list(collected.values()))
     card_id_map = {}          # 原 card_id → 新 card_id
-    # 先建主事项（parent_id 空），再建子事项（parent_id 指向新主事项，保持层级）
-    ordered = [c for c in src_cards if not (c.get('parent_id') or '')]
-    ordered += [c for c in src_cards if (c.get('parent_id') or '')]
     # 身份与归属字段重映射；其余字段保真原样
     REMAP = {'card_id': None, 'board_id': dst_board_id, 'board_name': dst_board_name,
              'column_id': dst_column_id, 'column_name': dst_col_name,
@@ -4552,9 +4586,8 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
     src_cards = [dict(r) for r in dbq(
         'SELECT * FROM cards WHERE board_id=? AND deleted=0 ORDER BY card_id', (src_board_id,))]
     card_id_map = {}         # 原 card_id → 新 card_id
-    # 先建主事项（parent_id 为空），再建子事项（parent_id 指向新主事项）
-    ordered = [c for c in src_cards if not (c.get('parent_id') or '')]
-    ordered += [c for c in src_cards if (c.get('parent_id') or '')]
+    # #205ab-bis：插入顺序改拓扑序（card_id 字典序在混合 id 格式下不保证父先于子）
+    ordered = _topo_order_cards(src_cards)
     for i, c in enumerate(ordered):
         new_cid = 'CDP' + stamp + str(i)
         new_col_id = col_id_map.get(c['column_id'], '')
