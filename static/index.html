@@ -2906,6 +2906,9 @@ function goLogin(){
 .badge-archived{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff1f0;color:var(--danger);border:1px solid #ffa39e;flex-shrink:0;white-space:nowrap}
 .bc-arch-btn{padding:1px 9px;border-radius:10px;font-size:11px;border:1px solid var(--border);background:#fff;color:var(--text2);cursor:pointer;flex-shrink:0;white-space:nowrap;transition:border-color .15s,color .15s}
 .bc-arch-btn:hover{border-color:var(--primary);color:var(--primary)}
+/* 已封存看板的「启用」按钮：主色实底，与未封存的「封存」白底形成切换对比 */
+.bc-arch-btn.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.bc-arch-btn.on:hover{opacity:.88;color:#fff}
 .badge-muted{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:var(--bg);color:var(--text3);border:1px solid var(--border)}
 </style>
 
@@ -13935,19 +13938,19 @@ function renderBoardList(){
   const box=document.getElementById('bcList');
   if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';bcPaintPick();return}
   box.innerHTML=list.map(function(b){
-    // #205ad：真封存（boards.archived=1，可见性已被后端切换）优先展示；
-    // board_config.status 的「封存」只是配置登记的文本标记，不改变可见性
+    // #205ad-bis（用户确认）：不再展示 board_config.status 的「启用/封存」文本徽标 ——
+    // 它与封存操作按钮并排被误读为「两个按钮」。列表只保留：真封存 →「已封存」徽标；
+    // 未登记配置 →「未配置」徽标（常态「启用」不占视觉位）。
     const st = b.archived ? '<span class="badge-archived">已封存</span>'
-            : b.status==='封存' ? '<span class="badge-locked">封存</span>'
-            : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
+            : (b.status ? '' : '<span class="badge-muted">未配置</span>');
     // #205ad/#205ad-bis 封存/启用：看板级能力位 can_archive（后端下发，口径=该看板
     // 归属部门的架构负责人；管理员恒 True）—— 看板负责人/范围外架构负责人不渲染按钮；
     // 后端 archive 端点仍兜底 403 拦截
     const canArch=!!b.can_archive;
     const archBtn=canArch
-      ?'<button class="bc-arch-btn" data-arch=\''+esc(JSON.stringify({bid:b.board_id,to:b.archived?0:1}))+'\' onclick="event.stopPropagation();bcArchive(JSON.parse(this.dataset.arch).bid,JSON.parse(this.dataset.arch).to)" title="'
+      ?'<button class="bc-arch-btn'+(b.archived?' on':'')+'" data-arch=\''+esc(JSON.stringify({bid:b.board_id,to:b.archived?0:1}))+'\' onclick="event.stopPropagation();bcArchive(JSON.parse(this.dataset.arch).bid,JSON.parse(this.dataset.arch).to)" title="'
         +(b.archived?'启用该看板（恢复对外展示）':'封存该看板（不再对外展示，仅看板管理可见）')+'">'
-        +(b.archived?'🔓 启用':'📦 封存')+'</button>'
+        +(b.archived?'启用':'封存')+'</button>'
       :'';
     // 身份徽标已按用户要求移除（2026-11-03）：「超级管理员」等身份标签在列表里
     // 每人都是同一个，重复 N 次没有信息量，还把看板名称挤成两行。
