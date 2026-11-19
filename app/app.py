@@ -4108,11 +4108,11 @@ class BoardArchiveReq(BaseModel):
 @app.post('/api/boards/{board_id}/archive')
 async def archive_board(board_id: str, req: BoardArchiveReq,
                         username: str = Depends(require_writer), request: Request = None):
-    """封存 / 启用看板（#205ad 2026-11-19 用户需求）。
+    """封存 / 启用看板（#205ad 2026-11-19 用户需求；#205ab-2 收窄）。
 
-    权限：**仅架构负责人角色**（任一架构节点负责人；管理员/超管放行）——
-    与「新增看板」同一口径（perm_check_arch_scope）。其他角色（看板负责人 /
-    板块负责人 / 参与人 / 普通成员）一律 403 拦截。
+    权限：**仅该看板归属部门的架构负责人**（归属部门在操作者的负责范围内；
+    管理员/超管放行任意看板）。看板负责人 / 板块负责人 / 参与人 / 普通成员
+    一律 403 拦截；未配置归属部门的看板仅管理员/超管可操作（fail-closed）。
 
     封存后：普通视图（看板 tabs / 事项列表 / 搜索 / 导出 / 统计）一律不可见
     （user_allowed 默认过滤 archived=1），仅【看板管理】页可见
@@ -4123,8 +4123,19 @@ async def archive_board(board_id: str, req: BoardArchiveReq,
     if not rows:
         raise HTTPException(404, '看板不存在')
     row = rows[0]
-    perm_check_arch_scope(username, OP_UPDATE, 'board:' + board_id,
-                          action_desc='封存或启用看板')
+    # #205ad-bis 权限收窄（用户确认）：仅**该看板归属部门的架构负责人**可封存/启用 ——
+    # 归属部门取 board_config.dept_node_id；未配置归属部门的看板 fail-closed：
+    # 仅超级管理员/管理员可操作（架构负责人角色本身不足以封存无归属看板）。
+    # 看板负责人（boards.owner）无此权限 —— 负责人=管理权，不放大到封存级。
+    cfg = dbq('SELECT dept_node_id FROM board_config WHERE board_id=?', (board_id,))
+    node_id = (cfg[0]['dept_node_id'] or 0) if cfg else 0
+    if username == SUPER_ADMIN or is_admin(username):
+        pass                       # 管理员/超管放行（任意看板）
+    elif not node_id:
+        raise HTTPException(403, '该看板未配置归属部门，仅超级管理员/管理员可封存或启用')
+    else:
+        perm_check_arch_scope(username, OP_UPDATE, 'board:' + board_id, node_id=node_id,
+                              action_desc='封存或启用该看板（不在你负责的架构范围内）')
     to_arch = 1 if req.archived else 0
     if (row['archived'] or 0) == to_arch:
         return {'ok': True, 'board_id': board_id, 'archived': to_arch, 'noop': True}
@@ -7397,6 +7408,8 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
     _arch_set = _archived_board_ids()
     if not include_archived and _arch_set:
         boards = [b for b in boards if b['board_id'] not in _arch_set]
+    # #205ad-bis：can_archive 能力位的判定基础（非管理员才需要算负责范围）
+    _arch_scope_set = set() if (username == SUPER_ADMIN or is_admin(username))         else _arch_scope_nodes(dbq, username)
     # 【看板管理】列表 = 可见看板 ∪ **可管理看板**（2026-11-03）
     # ⚠️ 原因：负责人 = 管理权，但**不放大可见性** →
     #    若某人只靠「负责人」身份拿到管理权，他负责的看板可能不在可见集里，
@@ -7488,6 +7501,16 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
         #   min_level 显式给 LV_BOARD_OWNER → 与 DELETE /api/boards/{id} 的后端校验完全同口径。
         item['can_delete'] = perm_check_pass(username, chain, OP_DELETE, LV_BOARD_OWNER,
                                              min_level=LV_BOARD_OWNER)
+        # can_archive = 能否封存/启用该看板（#205ad；#205ad-bis 收窄为看板级能力位）：
+        #   管理员/超管恒 True；架构负责人 = 看板归属部门在其负责范围内；
+        #   未配置归属部门 → 仅管理员/超管。与 archive 端点后端校验**完全同口径**。
+        _an = (cfgs.get(bid, {}) or {}).get('dept_node_id') or 0
+        if username == SUPER_ADMIN or is_admin(username):
+            item['can_archive'] = True
+        elif not _an:
+            item['can_archive'] = False
+        else:
+            item['can_archive'] = _an in _arch_scope_set
     return {'boards': out, 'depts': _dept_options()}
 
 @app.get('/api/board-config')

@@ -13937,8 +13937,10 @@ function renderBoardList(){
     const st = b.archived ? '<span class="badge-archived">已封存</span>'
             : b.status==='封存' ? '<span class="badge-locked">封存</span>'
             : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
-    // #205ad 封存/启用：仅架构负责人角色（或管理员）可见入口；后端 perm_check_arch_scope 兜底拦截
-    const canArch=!!(ME&&(ME.is_admin||ME.arch_owner));
+    // #205ad/#205ad-bis 封存/启用：看板级能力位 can_archive（后端下发，口径=该看板
+    // 归属部门的架构负责人；管理员恒 True）—— 看板负责人/范围外架构负责人不渲染按钮；
+    // 后端 archive 端点仍兜底 403 拦截
+    const canArch=!!b.can_archive;
     const archBtn=canArch
       ?'<button class="bc-arch-btn" data-arch=\''+esc(JSON.stringify({bid:b.board_id,to:b.archived?0:1}))+'\' onclick="event.stopPropagation();bcArchive(JSON.parse(this.dataset.arch).bid,JSON.parse(this.dataset.arch).to)" title="'
         +(b.archived?'启用该看板（恢复对外展示）':'封存该看板（不再对外展示，仅看板管理可见）')+'">'
@@ -14208,7 +14210,6 @@ function renderEditArea(){
   }
   const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FORM.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>';}).join('');
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
-  const statusPills=['启用','封存'].map(function(s){const on=BC_FORM.status===s;return '<span class="bc-pill'+(on?' on':'')+(on&&s==='封存'?' warn':'')+'" data-dim="status" data-val="'+s+'" onclick="bcPick(\'status\',\''+s+'\')">'+s+'</span>';}).join('');
   // 逐项按后端能力位控制（2026-11-03）：
   //   can_edit         → 能改基本信息（归属部门/属性/状态/备注）并保存
   //   can_delete       → 能**删除看板本身**（2026-11-04：删配置已下线）
@@ -14244,7 +14245,10 @@ function renderEditArea(){
     +'</div>'
     +'<div class="bc-hint" id="bc_dept_hint">'+esc(bcDeptHint(BC_FORM.dept))+(bcIsCenterDept(BC_FORM.dept)&&bcCollabLabel()?'；协作部门负责人可见此看板（仅可见，不进参与人名单）':'')+'</div></div>'
     +'<div class="bc-section"><div class="lab"><span class="req">*</span>属性</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+attrPills+'</div></div>'
-    +'<div class="bc-section"><div class="lab">状态</div><div class="bc-pills'+(canEdit?'':' bc-ro')+'">'+statusPills+'</div></div>'
+    // #205ad-bis 用户确认：右侧配置面板移除「状态（启用/封存）」胶囊 ——
+    // 那是 board_config.status 的文本标记（无可见性联动），与真封存（boards.archived）
+    // 混淆；封存/启用入口只保留在左侧目录卡片（bcArchive，看板级权限位）。
+    // status 字段保留：新建/编辑保存时按 BC_FORM.status 原值回传（新建默认「启用」）。
     +'<div class="bc-hint" style="margin-top:-4px">归属年份在【板块】层单独配置 —— 每个板块绑定唯一归属年份（点板块标题即可编辑），看板本身不再有年份。</div>'
     +'<div class="bc-section"><div class="lab">备注（可选）</div><textarea class="form-textarea" id="bc_remark" rows="2" placeholder="如：年度预算看板" oninput="BC_FORM.remark=this.value"'+roAttr+'>'+esc(BC_FORM.remark||'')+'</textarea></div>'
     +permNote
