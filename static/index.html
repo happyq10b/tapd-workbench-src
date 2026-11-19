@@ -3498,8 +3498,11 @@ function renderPermissionEntries(){
   // 负责人（arch_scope 非空）——对应后端 POST /api/boards 的
   // perm_check_arch_scope（管理员豁免 + 任一架构负责人放行，fail-closed）。
   // 无权限用户整个入口槽 display:none（按钮不渲染可见形态）。
+  // #205ad-cis（2026-11-19 用户确认）：新建看板口径收窄为**部门负责人及以上** ——
+  // 小组组长（如成本组组长）不算架构负责人，不显示入口；
+  // ME.can_create_board 由 /api/me 下发，与 POST /api/boards 的 _arch_head_nodes 同口径
   const bnEntry=document.getElementById('boardNewEntry');
-  if(bnEntry)bnEntry.style.display=(ME.is_admin||(ME.arch_scope||[]).length>0)?'':'none';
+  if(bnEntry)bnEntry.style.display=(ME.is_admin||ME.can_create_board)?'':'none';
 }
 function applyPermissionUI(){
   if(!ME)return;
@@ -13696,11 +13699,11 @@ async function bcPrepModal(){
   await loadBoardConfig();
   await bcLoadAclMembers();          // 负责人回显用的账号 → 姓名映射
   renderOwnerFilterBtn();           // 映射到手后，控件可能从「降级下拉」切回「树弹窗按钮」
-  // 新建看板：后端口径 = 架构负责人及以上（POST /api/boards 走 perm_check_arch_scope），
-  // 前端按 /api/me 下发的 arch_scope 能力位显隐（2026-11-05：原写死 is_admin，
-  // 导致架构负责人看不到「+ 新建看板」按钮）
+  // 新建看板：#205ad-cis 收窄为部门负责人及以上（组长排除）——
+  // ME.can_create_board 由 /api/me 下发，与 POST /api/boards 的 _arch_head_nodes 同口径
+  // （2026-11-05：原写死 is_admin，导致架构负责人看不到该按钮 —— 已由能力位解决）
   const nb=document.getElementById('bcNewBoardBtn');
-  if(nb)nb.style.display=(ME.is_admin||(ME.arch_scope||[]).length>0)?'':'none';
+  if(nb)nb.style.display=(ME.is_admin||ME.can_create_board)?'':'none';
   const db=document.getElementById('bcDelBtn');
   if(db)db.style.display=ME.is_admin?'':'none';
   // 批量复制（2026-11-03 修订）：对该账号**可管理的看板集合**非空即可用

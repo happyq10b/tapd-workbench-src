@@ -1242,6 +1242,22 @@ def _collab_dept_boards(username):
     return out
 
 
+def _arch_head_nodes(dbq, username):
+    """#205ad-cis 新建看板口径：**部门负责人及以上**的负责节点（排除小组组长）。
+
+    来源与 perm._arch_leader_nodes 相同（org_appointments 负责岗位 + org_nodes.owner
+    显式配置），但排除小组节点 —— 组长（group_leader）不视为「架构负责人」，
+    无新建看板权限（2026-11-19 用户确认：林姝言[成本组组长]不应看到「＋ 新建看板」）。
+    注意：perm 体系里组长仍是 LV_ARCH_OWNER（板块/事项等架构层判定不变），本收窄
+    仅作用于新建看板这一项。
+    """
+    nodes = _arch_leader_nodes(dbq, username)
+    if not nodes:
+        return set()
+    nmap = {r['id']: dict(r) for r in dbq('SELECT id, node_type FROM org_nodes')}
+    return {nid for nid in nodes if nmap.get(nid, {}).get('node_type') != 'group'}
+
+
 def _archived_board_ids():
     """#205ad 封存看板集合（boards.archived=1）。
 
@@ -2746,10 +2762,15 @@ def me(username: str = Depends(require_auth)):
     #   权限体系关闭（PERM_ENABLED=False）时后端放行所有人 → 这里恒 True 保持一致。
     arch_owner = True if not PERM_ENABLED else (
         username == SUPER_ADMIN or is_admin(username) or bool(leader_nodes))
+    # #205ad-cis：「＋ 新建看板」入口显隐 = 部门负责人及以上（组长排除），
+    # 与 POST /api/boards 的 _arch_head_nodes 校验完全同口径
+    can_create_board = True if not PERM_ENABLED else (
+        username == SUPER_ADMIN or is_admin(username) or bool(_arch_head_nodes(dbq, username)))
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
             'arch_owner': arch_owner,              # #205ad 封存/启用看板入口显隐
+            'can_create_board': can_create_board,  # #205ad-cis 新建看板入口显隐（部门负责人及以上）
             'can_manage_staff': _sp[0],            # T-191d 人员管理入口显隐（部门负责人及以上）
             'staff_scope_all': _sp[1],             # T-191d True=全部部门 / False=仅本部门
             'login_notice': _get_setting('login_notice', ''),  # T-013b：超管「登入通知」字段回显（个人状态不受影响）
@@ -4092,8 +4113,12 @@ def create_board(req: BoardCreateReq, username: str = Depends(require_writer), r
         raise HTTPException(400, '看板名称不能为空')
     bid = 'B' + str(int(time.time() * 1000))
     # 分级权限（2026-11-02）：新增看板 = 架构负责人及以上
-    # 作用域：该账号所辖架构节点（含后代）。架构未配置时由管理员/超管创建。
-    perm_check_arch_scope(username, OP_CREATE, 'board:' + bid)
+    # #205ad-cis（2026-11-19 用户确认）：收窄为**部门负责人及以上** ——
+    # 小组组长（group_leader）不算架构负责人、无新建看板权（例：成本组组长林姝言）。
+    # 管理员/超管放行；PERM_ENABLED=False 放行（与 arch_owner 口径一致）。
+    if PERM_ENABLED and username != SUPER_ADMIN and not is_admin(username):
+        if not _arch_head_nodes(dbq, username):
+            raise HTTPException(403, '只有部门负责人及以上才能新建看板（小组组长无此权限）')
     dbe('INSERT OR REPLACE INTO boards (board_id, board_name, workspace_id, owner, sort, created_at) VALUES (?,?,?,?,?,?)',
         (bid, name, (req.workspace_id or '').strip(), (req.owner or username).strip(), req.sort, time.strftime('%Y-%m-%d %H:%M:%S')))
     audit_log(username, client_ip(request), 'board_create', f'看板 {bid}', f'新建看板：{name}', 'success')
