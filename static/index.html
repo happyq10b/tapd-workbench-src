@@ -2902,6 +2902,10 @@ function goLogin(){
 .cf-tree-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
 .badge-active{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:rgba(0,45,116,.10);color:#002D74;border:1px solid rgba(0,45,116,.30)}
 .badge-locked{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff7e6;color:var(--warning);border:1px solid #ffd591}
+/* #205ad 真封存徽标（boards.archived=1）与列表上的封存/启用按钮 */
+.badge-archived{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:#fff1f0;color:var(--danger);border:1px solid #ffa39e;flex-shrink:0;white-space:nowrap}
+.bc-arch-btn{padding:1px 9px;border-radius:10px;font-size:11px;border:1px solid var(--border);background:#fff;color:var(--text2);cursor:pointer;flex-shrink:0;white-space:nowrap;transition:border-color .15s,color .15s}
+.bc-arch-btn:hover{border-color:var(--primary);color:var(--primary)}
 .badge-muted{display:inline-block;padding:1px 9px;border-radius:10px;font-size:11px;background:var(--bg);color:var(--text3);border:1px solid var(--border)}
 </style>
 
@@ -13755,7 +13759,8 @@ async function bandNewBoard(){
   if(okOpen)openBoardModal();
 }
 async function loadBoardConfig(){
-  const res=await api('/api/boards');
+  // #205ad：看板管理带 include_archived=1 —— 封存看板只在这里可见（普通视图 tabs 由 /api/me 自动过滤）
+  const res=await api('/api/boards?include_archived=1');
   BC_BOARDS=res.boards||[];
   // 归属部门选项：来自【架构管理】的部门层级（中心 + 部门）
   BC_DEPTS=(res.depts||[]).slice();
@@ -13927,8 +13932,18 @@ function renderBoardList(){
   const box=document.getElementById('bcList');
   if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';bcPaintPick();return}
   box.innerHTML=list.map(function(b){
-    const st = b.status==='封存' ? '<span class="badge-locked">封存</span>'
+    // #205ad：真封存（boards.archived=1，可见性已被后端切换）优先展示；
+    // board_config.status 的「封存」只是配置登记的文本标记，不改变可见性
+    const st = b.archived ? '<span class="badge-archived">已封存</span>'
+            : b.status==='封存' ? '<span class="badge-locked">封存</span>'
             : (b.status ? '<span class="badge-active">启用</span>' : '<span class="badge-muted">未配置</span>');
+    // #205ad 封存/启用：仅架构负责人角色（或管理员）可见入口；后端 perm_check_arch_scope 兜底拦截
+    const canArch=!!(ME&&(ME.is_admin||ME.arch_owner));
+    const archBtn=canArch
+      ?'<button class="bc-arch-btn" data-arch=\''+esc(JSON.stringify({bid:b.board_id,to:b.archived?0:1}))+'\' onclick="event.stopPropagation();bcArchive(JSON.parse(this.dataset.arch).bid,JSON.parse(this.dataset.arch).to)" title="'
+        +(b.archived?'启用该看板（恢复对外展示）':'封存该看板（不再对外展示，仅看板管理可见）')+'">'
+        +(b.archived?'🔓 启用':'📦 封存')+'</button>'
+      :'';
     // 身份徽标已按用户要求移除（2026-11-03）：「超级管理员」等身份标签在列表里
     // 每人都是同一个，重复 N 次没有信息量，还把看板名称挤成两行。
     // 需要确认身份的地方仍在【看板管理】右侧面板（permNote）里，不丢信息。
@@ -13952,7 +13967,7 @@ function renderBoardList(){
     //   点击看板卡片本身即进入右侧配置面板（bcSelect），跳转文字是冗余的。
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span class="bc-name" title="'+esc(b.board_name||b.board_id)+'">'+esc(b.board_name||b.board_id)+'</span>'+st+copyBtn+'</div>'
+      +'<span class="bc-name" title="'+esc(b.board_name||b.board_id)+'">'+esc(b.board_name||b.board_id)+'</span>'+st+archBtn+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+colTxt+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
       +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span></div>'
@@ -14005,6 +14020,29 @@ function bcWireDrag(){
       if(BC_DRAG&&bid&&bid!==BC_DRAG)bcApplyDrag(BC_DRAG,bid);
     });
   });
+}
+// ---------- 看板封存 / 启用（#205ad 2026-11-19）----------
+// 仅架构负责人角色（或管理员）可见入口（ME.arch_owner / ME.is_admin）；
+// 后端 perm_check_arch_scope 兜底拦截（403），前端不重复判定权限细节。
+// 封存 = boards.archived=1：普通视图（tabs/列表/搜索/导出）一律不再下发，
+// 仅【看板管理】页可见；启用 = 恢复。写操作在服务端，各端经 WS 广播自动刷新。
+async function bcArchive(bid,toArch){
+  const name=((BC_BOARDS||[]).find(function(b){return b.board_id===bid;})||{}).board_name||bid;
+  const verb=toArch?'封存':'启用';
+  if(!confirm('确定'+verb+'看板「'+name+'」？'
+    +(toArch?'\n封存后该看板不再对外展示（仅在「看板管理」中可见）。':'\n启用后该看板恢复对外展示。')))return;
+  try{
+    const r=await api('/api/boards/'+encodeURIComponent(bid)+'/archive',
+      {method:'POST',body:JSON.stringify({archived:!!toArch})});
+    if(!r.ok)throw new Error(r.detail||r.message||(verb+'失败'));
+    toast(r.noop?(verb+'：该看板已是该状态，未变更'):(verb+'成功'));
+    ME=await api('/api/me');                    // boards 集合已变（封存的看板被移出普通视图）
+    if(toArch&&curBoard===bid){                 // 封存的是当前打开的看板 → 兜底切走
+      if(ME.boards&&ME.boards.length)pickBoard(ME.boards[0].board_id);
+      else{curBoard='';renderTabs();}
+    }else renderTabs();
+    await loadBoardConfig();
+  }catch(e){toast(e.message||verb+'失败')}
 }
 async function bcApplyDrag(bid,targetBid){
   const orig=BC_BOARDS.map(function(b){return b.board_id;});

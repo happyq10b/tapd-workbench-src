@@ -224,11 +224,13 @@ def perm_check_pass(username, chain, op, resource_level, min_level=None):
     return bool(ok)
 
 
-def perm_check_arch_scope(username, op, resource_desc='', node_id=None):
+def perm_check_arch_scope(username, op, resource_desc='', node_id=None,
+                          action_desc='在该架构下新增看板'):
     # 「在所属架构下新增看板」这类**没有具体目标资源**的操作。
     # 判定：操作者是否是**任一架构节点**的负责人（架构负责人及以上）。
     # ⚠️ 边界：若操作者不是任何架构的负责人 → 拒绝（fail-closed）。
     #   管理员/超管超脱本体系，直接放行。
+    #   action_desc：报错文案里的动作描述（#205ad 封存/启用看板复用本判定）。
     if not PERM_ENABLED:
         return
     if username == SUPER_ADMIN or is_admin(username):
@@ -236,7 +238,7 @@ def perm_check_arch_scope(username, op, resource_desc='', node_id=None):
     scope = _arch_scope_nodes(dbq, username)
     if not scope:
         raise PermError(E_NOT_OWNER,
-                        '只有架构负责人才能在该架构下新增看板',
+                        '只有架构负责人才能' + action_desc,
                         need_level=LV_ARCH_OWNER, have_level=LV_NONE,
                         resource=resource_desc, op=op)
     if node_id and node_id not in scope:
@@ -1240,7 +1242,20 @@ def _collab_dept_boards(username):
     return out
 
 
-def user_allowed(username: str, arch_only: bool = False):
+def _archived_board_ids():
+    """#205ad 封存看板集合（boards.archived=1）。
+
+    封存语义：不对外展示（普通视图 / tabs / 搜索 / 导出 / 统计一律不可见），
+    仅【看板管理】页可见（GET /api/boards?include_archived=1 与
+    GET /api/board-config）。数据操作仍受既有权限体系约束。
+    """
+    try:
+        return {r['board_id'] for r in dbq('SELECT board_id FROM boards WHERE archived=1')}
+    except Exception:
+        return set()   # 库尚未迁移（无 archived 列）时按「无封存」处理
+
+
+def user_allowed(username: str, arch_only: bool = False, include_archived: bool = False):
     """返回 (boards, columns)：
     boards=None=全部看板，否则 set(board_id)（普通用户**永远**是显式集合）
     columns=None=全部板块，否则 dict {board_id: set(column_id)}（缺省=该看板全部板块）
@@ -1278,6 +1293,13 @@ def user_allowed(username: str, arch_only: bool = False):
     #    超级管理员 vs 管理员的区分见 is_admin docstring（仅 admin 账号受
     #    不可删/改密/改角色保护），可见性行为两者一致。
     if is_admin(username) and not arch_only:
+        # #205ad：管理员普通视图同样不展示封存看板（仅看板管理页可见）；
+        # 无封存看板时保持 (None, None) 语义（未来新增看板自动可见）不受影响
+        if not include_archived:
+            arch = _archived_board_ids()
+            if arch:
+                allb = {r['board_id'] for r in dbq('SELECT board_id FROM boards')}
+                return allb - arch, {}
         return None, None
     # ① 架构授权集
     dept_boards = _dept_stage_boards(username)
@@ -1338,6 +1360,13 @@ def user_allowed(username: str, arch_only: bool = False):
                 cols[b] = cols[b] & vis.get(b, set())
             else:
                 cols[b] = vis.get(b, set())
+    # #205ad：封存看板对普通视图隐藏（看板管理页经 include_archived=True 保留）
+    if not include_archived:
+        arch = _archived_board_ids()
+        if arch:
+            boards -= arch
+            if cols is not None:
+                cols = {k: v for k, v in cols.items() if k not in arch}
     return boards, cols
 
 
@@ -2712,9 +2741,15 @@ def me(username: str = Depends(require_auth)):
     # 人员管理权限位（T-191d）：部门负责人及以上可见入口；
     # staff_scope_all = True（总经理/中心负责人/管理员）→ 全部人员，False → 仅本部门。
     _sp = _staff_perm(username)
+    # #205ad 封存/启用看板入口显隐：架构负责人角色（任一节点任命）或管理员/超管。
+    # ⚠️ 与后端 archive 端点的 perm_check_arch_scope 口径一致；
+    #   权限体系关闭（PERM_ENABLED=False）时后端放行所有人 → 这里恒 True 保持一致。
+    arch_owner = True if not PERM_ENABLED else (
+        username == SUPER_ADMIN or is_admin(username) or bool(leader_nodes))
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
+            'arch_owner': arch_owner,              # #205ad 封存/启用看板入口显隐
             'can_manage_staff': _sp[0],            # T-191d 人员管理入口显隐（部门负责人及以上）
             'staff_scope_all': _sp[1],             # T-191d True=全部部门 / False=仅本部门
             'login_notice': _get_setting('login_notice', ''),  # T-013b：超管「登入通知」字段回显（个人状态不受影响）
@@ -4063,6 +4098,44 @@ def create_board(req: BoardCreateReq, username: str = Depends(require_writer), r
         (bid, name, (req.workspace_id or '').strip(), (req.owner or username).strip(), req.sort, time.strftime('%Y-%m-%d %H:%M:%S')))
     audit_log(username, client_ip(request), 'board_create', f'看板 {bid}', f'新建看板：{name}', 'success')
     return {'ok': True, 'board_id': bid, 'board_name': name, 'workspace_id': (req.workspace_id or '').strip()}
+
+
+class BoardArchiveReq(BaseModel):
+    """#205ad 封存/启用看板：true=封存（不对外展示），false=启用（恢复）"""
+    archived: bool
+
+
+@app.post('/api/boards/{board_id}/archive')
+async def archive_board(board_id: str, req: BoardArchiveReq,
+                        username: str = Depends(require_writer), request: Request = None):
+    """封存 / 启用看板（#205ad 2026-11-19 用户需求）。
+
+    权限：**仅架构负责人角色**（任一架构节点负责人；管理员/超管放行）——
+    与「新增看板」同一口径（perm_check_arch_scope）。其他角色（看板负责人 /
+    板块负责人 / 参与人 / 普通成员）一律 403 拦截。
+
+    封存后：普通视图（看板 tabs / 事项列表 / 搜索 / 导出 / 统计）一律不可见
+    （user_allowed 默认过滤 archived=1），仅【看板管理】页可见
+    （GET /api/boards?include_archived=1）。
+    幂等：重复封存/重复启用直接返回成功，不写库。
+    """
+    rows = dbq('SELECT board_id, board_name, archived FROM boards WHERE board_id=?', (board_id,))
+    if not rows:
+        raise HTTPException(404, '看板不存在')
+    row = rows[0]
+    perm_check_arch_scope(username, OP_UPDATE, 'board:' + board_id,
+                          action_desc='封存或启用看板')
+    to_arch = 1 if req.archived else 0
+    if (row['archived'] or 0) == to_arch:
+        return {'ok': True, 'board_id': board_id, 'archived': to_arch, 'noop': True}
+    dbe('UPDATE boards SET archived=? WHERE board_id=?', (to_arch, board_id))
+    verb = '封存' if to_arch else '启用'
+    log_action(board_id, username, verb, f'{verb}看板：{row["board_name"]}')
+    audit_log(username, client_ip(request), 'board_archive', f'看板 {board_id}',
+              f'{verb}看板「{row["board_name"]}」（{"对外隐藏" if to_arch else "恢复对外展示"}）', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'board_id': board_id, 'board_name': row['board_name'],
+            'archived': to_arch}
 
 
 # ---------------- API：复制（看板 / 板块 / 主事项 / 子事项） ----------------
@@ -7304,7 +7377,7 @@ def reorder_board(req: BoardReorderReq, username: str = Depends(require_auth), r
 
 
 @app.get('/api/boards')
-def list_boards(username: str = Depends(require_auth)):
+def list_boards(username: str = Depends(require_auth), include_archived: int = 0):
     """看板管理列表：真实看板（boards ∪ cards 派生）+ 卡片数 + 关联配置。
     看板管理功能直接作用于当前在用的真实看板，通过 board_id 与 board_config 关联。
 
@@ -7316,9 +7389,14 @@ def list_boards(username: str = Depends(require_auth)):
        「所属板块年份」。
     """
     boards = _all_boards()
-    visible, cols_perm = user_allowed(username)
+    visible, cols_perm = user_allowed(username, include_archived=bool(include_archived))
     if visible is not None:
         boards = [b for b in boards if b['board_id'] in visible]
+    # #205ad：默认（include_archived=0）剔除封存看板 —— 管理员的 visible=None
+    # 不会过滤，这里显式剔除；include_archived=1（看板管理页）保留并下发 archived 标记
+    _arch_set = _archived_board_ids()
+    if not include_archived and _arch_set:
+        boards = [b for b in boards if b['board_id'] not in _arch_set]
     # 【看板管理】列表 = 可见看板 ∪ **可管理看板**（2026-11-03）
     # ⚠️ 原因：负责人 = 管理权，但**不放大可见性** →
     #    若某人只靠「负责人」身份拿到管理权，他负责的看板可能不在可见集里，
@@ -7375,6 +7453,7 @@ def list_boards(username: str = Depends(require_auth)):
         a = acl.get(bid, {'owner': ''})
         out.append({
             'board_id': bid,
+            'archived': 1 if bid in _arch_set else 0,
             'board_name': b['board_name'],
             'workspace_id': b.get('workspace_id', ''),
             'card_count': counts.get(bid, 0),
