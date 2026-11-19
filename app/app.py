@@ -1271,6 +1271,15 @@ def _archived_board_ids():
         return set()   # 库尚未迁移（无 archived 列）时按「无封存」处理
 
 
+def _ensure_board_not_archived(board_id: str):
+    """#205ad-bis-2（用户需求）：封存看板的**配置编辑一并锁定** ——
+    配置保存（PUT board-config）与负责人/参与人变更（PUT boards/{bid}/acl）
+    在封存状态下一律 403，启用后才能再编辑。管理员同样受限（封存=冻结编辑）。"""
+    row = dbq('SELECT archived FROM boards WHERE board_id=?', (board_id,))
+    if row and (row[0]['archived'] or 0) == 1:
+        raise HTTPException(403, '看板已封存，启用后才能编辑配置')
+
+
 def user_allowed(username: str, arch_only: bool = False, include_archived: bool = False):
     """返回 (boards, columns)：
     boards=None=全部看板，否则 set(board_id)（普通用户**永远**是显式集合）
@@ -1310,12 +1319,14 @@ def user_allowed(username: str, arch_only: bool = False, include_archived: bool 
     #    不可删/改密/改角色保护），可见性行为两者一致。
     if is_admin(username) and not arch_only:
         # #205ad：管理员普通视图同样不展示封存看板（仅看板管理页可见）；
-        # 无封存看板时保持 (None, None) 语义（未来新增看板自动可见）不受影响
+        # 无封存看板时保持 (None, None) 语义（未来新增看板自动可见）不受影响。
+        # ⚠️ cols 必须返回 None（=可见看板的全部板块）—— 返回 {} 会被板块过滤
+        # 判成「无任何可见板块」把全部卡剔光（verify 冒烟翻车实录）
         if not include_archived:
             arch = _archived_board_ids()
             if arch:
                 allb = {r['board_id'] for r in dbq('SELECT board_id FROM boards')}
-                return allb - arch, {}
+                return allb - arch, None
         return None, None
     # ① 架构授权集
     dept_boards = _dept_stage_boards(username)
@@ -7520,8 +7531,10 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
         can_update = perm_check_pass(username, chain, OP_UPDATE, LV_BOARD_OWNER)
         can_assign = perm_check_pass(username, chain, OP_ASSIGN_OWNER, LV_BOARD_OWNER,
                                       min_level=LV_ARCH_OWNER)
-        item['can_edit'] = can_update          # 能否改基本信息（归属部门/属性/状态/备注）
-        item['can_assign_owner'] = can_assign  # 能否指定/变更看板负责人（架构负责人及以上）
+        # #205ad-bis-2：封存看板配置编辑一并锁定 → 能力位置 False（前端表单只读 +
+        # 保存按钮不渲染；后端 PUT 端点另有 403 硬拦截）
+        item['can_edit'] = can_update and not item['archived']
+        item['can_assign_owner'] = can_assign and not item['archived']
         # can_delete = 能否**删除看板本身**（2026-11-04：删除配置已下线）
         #   min_level 显式给 LV_BOARD_OWNER → 与 DELETE /api/boards/{id} 的后端校验完全同口径。
         item['can_delete'] = perm_check_pass(username, chain, OP_DELETE, LV_BOARD_OWNER,
@@ -7650,6 +7663,7 @@ async def set_board_acl(board_id: str, req: AclReq, username: str = Depends(requ
     bid = (board_id or '').strip()
     if not dbq('SELECT 1 FROM boards WHERE board_id=? LIMIT 1', (bid,)):
         raise HTTPException(404, '看板不存在')
+    _ensure_board_not_archived(bid)   # #205ad-bis-2：封存看板锁定负责人/参与人变更
     # 分级权限（2026-11-02）：指派看板负责人 = 架构负责人及以上
     # ⚠️ 权限校验必须在认锁之前 —— 否则 403 后锁泄漏（持有到超时，挡住真正在编辑的人）
     perm_check(username, perm_chain(board_id=bid), OP_ASSIGN_OWNER, LV_BOARD_OWNER,
@@ -7894,6 +7908,7 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     row = dbq('SELECT board_id FROM board_config WHERE id=?', (cid,))
     if not row:
         raise HTTPException(404, '配置不存在')
+    _ensure_board_not_archived(row[0]['board_id'])   # #205ad-bis-2：封存看板锁定配置编辑
     # 编辑锁（2026-11-12）：看板基本信息与看板编辑弹窗同锁（board:<board_id>）
     _lk = 'board:' + row[0]['board_id']
     _fresh = _lock_oneshot(_lk, username, '看板', '保存配置')

@@ -14050,6 +14050,9 @@ async function bcArchive(bid,toArch){
       else{curBoard='';renderTabs();}
     }else renderTabs();
     await loadBoardConfig();
+    // #205ad-bis-2：封存/启用的是当前选中的看板 → 能力位（can_edit/can_archive）已变，
+    // 重绘右侧面板（封存 → 表单只读 + 锁定提示；启用 → 恢复可编辑）
+    if(BC_SELECTED&&BC_SELECTED.board_id===bid)bcSelect(bid);
   }catch(e){toast(e.message||verb+'失败')}
 }
 async function bcApplyDrag(bid,targetBid){
@@ -14229,8 +14232,11 @@ function renderEditArea(){
   footer+='<button class="btn-secondary" onclick="resetBoardConfigForm()">取消</button></div>';
   // 无权编辑时：表单整体只读（置灰不可改），并给出身份说明
   const roAttr=canEdit?'':' disabled';
+  // #205ad-bis-2：封存看板配置编辑锁定 —— can_edit/can_assign_owner 后端已置 False
+  //（表单只读 + 保存按钮不渲染），此处给出明确原因提示
+  const archNote=b.archived?'<div class="bc-hint" style="color:var(--danger)">🔒 看板已封存：配置与负责人均不可编辑，点左侧卡片上的「启用」按钮恢复后再编辑。</div>':'';
   const permNote='<div class="bc-hint" style="margin-top:-2px">你在该看板的身份：<b>'+esc(b.perm_role||'无权限')+'</b>'
-    +(canEdit?(canAssign?' · 可改基本信息并指定负责人':' · 可改基本信息'):' · 仅可查看，不可修改')+'</div>';
+    +(canEdit?(canAssign?' · 可改基本信息并指定负责人':' · 可改基本信息'):' · 仅可查看，不可修改')+'</div>'+archNote;
   area.innerHTML='<div class="bc-edit">'
     +'<div class="bc-edit-title">'+(isEdit?'✏️ 编辑看板配置':'➕ 新建看板配置')+'<span class="sub">'+(isEdit?'修改该看板的维度属性':'为真实看板登记维度属性')+'</span></div>'
     +boardBlock
