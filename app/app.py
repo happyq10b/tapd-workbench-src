@@ -4152,20 +4152,21 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
         conn.rollback()
         raise
     # ── 整套复制（deep）：连带板块 + 事项 + 子事项（2026-11-03）──
-    copied_cols = copied_cards = 0
+    copied_cols = copied_cards = copied_todos = 0
     if getattr(req, 'deep', False):
-        copied_cols, copied_cards = _deep_copy_board_content(
+        copied_cols, copied_cards, copied_todos = _deep_copy_board_content(
             board_id, new_bid, name, username, src.get('workspace_id') or '')
     log_action('__board__', username, 'copy', f'复制看板 {name}')
     audit_log(username, client_ip(request), 'board_copy', f'看板 {board_id}',
               f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，属性 {attr}'
-              + (f'；整套复制：板块 {copied_cols} 个、事项 {copied_cards} 条'
+              + (f'；整套复制：板块 {copied_cols} 个、事项 {copied_cards} 条、待办 {copied_todos} 条'
                  if getattr(req, 'deep', False) else '') + '）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'board_id': new_bid, 'board_name': name, 'copy_from': board_id,
             'dept': dept, 'dept_node_id': dept_node_id, 'attr': attr, 'status': status,
             'deep': bool(getattr(req, 'deep', False)),
-            'copied_columns': copied_cols, 'copied_cards': copied_cards}
+            'copied_columns': copied_cols, 'copied_cards': copied_cards,
+            'copied_todos': copied_todos}
 
 
 # ---------------- API：删除看板（连同其板块与事项） ----------------
@@ -4394,13 +4395,27 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     #（不会留下「空板块副本」）—— 因此这里用 conn.execute 而不是 dbe（dbe 逐句提交）
     conn = get_conn()
     copied_cards = copied_subtasks = 0
+    copied_todos = 0
     try:
         conn.execute(
             'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
-            ' creator, nature, year, pinned, copy_from, completion, owner, participants)'
-            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)',
+            ' creator, nature, year, pinned, copy_from, completion, owner, participants,'
+            ' description, due_date, overdue_days)'
+            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)',
             (key, new_cid, req.board_id, name, created, username, nature, year, src['col_key'],
-             _src_completion, src.get('owner') or '', src.get('participants') or ''))
+             _src_completion, src.get('owner') or '', src.get('participants') or '',
+             src.get('description') or '', src.get('due_date') or '', src.get('overdue_days')))
+        # #205ab-cis（用户反馈「板块的代办和截止时间没有一并复制」）：板块行补随附
+        # description（板块说明/代办说明）/ due_date（截止时间/倒计时）/ overdue_days
+        # （逾期结算，T-191j），并整张复制**板块待办清单**（column_todos：
+        # name/done/sort/created_by/created_at 原样）—— 原实现这三列一列都没带。
+        src_todos = dbq('SELECT name, done, sort, created_by, created_at FROM column_todos'
+                        " WHERE col_key=? ORDER BY sort, id", (src['col_key'],))
+        for t in src_todos:
+            conn.execute('INSERT INTO column_todos (col_key, name, done, sort, created_by, created_at)'
+                         ' VALUES (?,?,?,?,?,?)',
+                         (key, t['name'], t['done'], t['sort'], t['created_by'], t['created_at']))
+        copied_todos = len(src_todos)
         copied_cards, copied_subtasks = _deep_copy_column_cards(
             src, req.board_id, name, new_cid)
         conn.commit()
@@ -4410,7 +4425,7 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
         except Exception:
             pass
         raise
-    log_action('__column__', username, 'copy', f'复制板块 {name}（含事项 {copied_cards} 条、勾选 {copied_subtasks} 条）')
+    log_action('__column__', username, 'copy', f'复制板块 {name}（含事项 {copied_cards} 条、勾选 {copied_subtasks} 条、待办 {copied_todos} 条）')
     audit_log(username, client_ip(request), 'column_copy', f'板块 {src["col_key"]}',
               f'复制板块「{src["column_name"]}」→「{name}」（目标看板 {req.board_id}，'
               f'连带事项 {copied_cards} / 勾选 {copied_subtasks}）', 'success')
@@ -4418,7 +4433,8 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'board_id': req.board_id, 'copy_from': src['col_key'],
             'created_at': created, 'creator': username, 'nature': nature, 'year': year,
-            'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks}
+            'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks,
+            'copied_todos': copied_todos}
 
 
 def _topo_order_cards(cards):
@@ -4551,7 +4567,7 @@ CARD_COPY_FIELDS = ['owner', 'cc', 'follower', 'begin', 'due', 'description', 'p
 def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, username, workspace_id):
     """看板**整套复制**的正文部分（2026-11-03）：板块 + 事项 + 子事项。
 
-    返回 (板块数, 事项数)。
+    返回 (板块数, 事项数, 待办数)。
 
     口径与既有 copy_column / copy_card 保持一致：
       · 板块：col_key = board_id::column_name → 新板块用新 board_id 前缀；
@@ -4573,14 +4589,28 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
         new_key = new_board_id + '::' + c['column_name']
         conn.execute(
             'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
-            ' creator, nature, pinned, year, copy_from, owner, participants, completion)'
-            ' VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?)',
+            ' creator, nature, pinned, year, copy_from, owner, participants, completion,'
+            ' description, due_date, overdue_days)'
+            ' VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)',
             (new_key, new_cid, new_board_id, c['column_name'], c['created_at'],
              username, c['nature'], c['year'], c['col_key'],
              c.get('owner') or '', c.get('participants') or '',
-             (c.get('completion') or '').strip() or 'progressing'))
+             (c.get('completion') or '').strip() or 'progressing',
+             c.get('description') or '', c.get('due_date') or '', c.get('overdue_days')))
         col_id_map[c['column_id']] = new_cid
         key_map[c['col_key']] = new_key
+    # ── ①-bis 板块待办清单（#205ab-cis：column_todos 按 col_key 关联，整表随附）──
+    src_keys = list(key_map.keys())
+    copied_todos = 0
+    if src_keys:
+        marks = ','.join('?' * len(src_keys))
+        for t in dbq('SELECT col_key, name, done, sort, created_by, created_at FROM column_todos'
+                     ' WHERE col_key IN (%s) ORDER BY sort, id' % marks, src_keys):
+            conn.execute('INSERT INTO column_todos (col_key, name, done, sort, created_by, created_at)'
+                         ' VALUES (?,?,?,?,?,?)',
+                         (key_map[t['col_key']], t['name'], t['done'], t['sort'],
+                          t['created_by'], t['created_at']))
+            copied_todos += 1
     # ── ② 事项（主事项 + 子事项）──
     # ⚠️ cards 表**没有 id 列**（主键是 card_id）→ ORDER BY card_id
     src_cards = [dict(r) for r in dbq(
@@ -4642,7 +4672,7 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
         conn.execute('INSERT INTO cards (%s) VALUES (%s)' % (','.join(cols), marks),
                      [vals[k] for k in cols])
         card_id_map[c['card_id']] = new_cid
-    return len(col_id_map), len(card_id_map)
+    return len(col_id_map), len(card_id_map), copied_todos
 
 
 @app.post('/api/cards/copy')
