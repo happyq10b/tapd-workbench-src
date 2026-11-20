@@ -8188,7 +8188,7 @@ async function createCard(){
     };
     // 周数（#205p 多选）：收集多周，「;」连接提交（留空 = 后端按创建日期自动算）
     const nw=weekGather('n').join(';');
-    const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',workspace_id:board?board.workspace_id:'',fields:fields,week_no:nw};
+    const body={board_id,column_id:'',card_name,board_name:board?board.board_name:'',fields:fields,week_no:nw};
     if(NEW_CARD_COL){
       body.column_id=NEW_CARD_COL.column_id||'';
       fields.column_name=NEW_CARD_COL.column_name;
@@ -14295,7 +14295,7 @@ function renderEditArea(){
   let boardBlock;
   if(isEdit){
     boardBlock='<div class="bc-boardcard"><div><div class="bi-name">'+esc(b.board_name||b.board_id)+'</div>'
-      +'<div class="bi-meta">工作空间 '+esc(b.workspace_id||'-')+' · '+(b.card_count||0)+' 张卡片</div></div>'
+      +'<div class="bi-meta">'+(b.card_count||0)+' 张卡片</div></div>'
       +'<span class="badge-active">已配置</span></div>';
   }else{
     const unconf=BC_BOARDS.filter(function(x){return !x.config_id;});

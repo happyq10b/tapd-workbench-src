@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS workgroups (
 CREATE TABLE IF NOT EXISTS boards (
     board_id      TEXT PRIMARY KEY,
     board_name    TEXT NOT NULL DEFAULT '',
-    workspace_id  TEXT NOT NULL DEFAULT '',   -- TAPD 工作空间 ID（可空）
+    workspace_id  TEXT NOT NULL DEFAULT '',   -- ⚠️ 已废弃（#207-bis 2026-11-20）：boards 级 TAPD 工作空间 ID 无业务依赖，应用层停读写；列保留 = 20+ 夹具测试显式列名 INSERT 兼容 + /api/import 备份恢复兼容
     owner         TEXT NOT NULL DEFAULT '',    -- 看板负责人（ACL：owner + participants 命中才可见）
     creator       TEXT NOT NULL DEFAULT '',    -- #206 看板创建人（账号；新建/复制时写入，历史由迁移回填）
     participants  TEXT NOT NULL DEFAULT '',    -- 看板参与人（ACL，逗号分隔的账号）

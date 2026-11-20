@@ -3816,7 +3816,6 @@ class CardCreate(BaseModel):
     fields: dict = {}
     parent_id: str = ''
     board_name: str = ''      # 全新看板（尚无卡片）建首卡时由前端传入
-    workspace_id: str = ''    # 同上，携带看板工作空间
     week_no: str = ''         # 周数维度（如 2026年第41周）；留空 = 按创建日期自动计算
 
 class CommentReq(BaseModel):
@@ -4009,18 +4008,17 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
             raise HTTPException(400, f'子事项截止时间不能晚于父事项（父截止 {p_due}）')
         if s_begin and s_due and s_begin > s_due:
             raise HTTPException(400, '子事项起始时间不能晚于截止时间')
-    # 仅继承看板元数据（board_name/workspace_id），业务字段（含日期/状态/负责人等）不继承——
+    # 仅继承看板元数据（board_name），业务字段（含日期/状态/负责人等）不继承——
     # 否则新建的"无时间父卡"会悄悄带上同看板第一张卡的 begin/due，导致子事项时间校验误判
+    # （#207-bis：boards.workspace_id 已下线，不再随卡继承）
     base = dbq('SELECT * FROM cards WHERE board_id=? AND deleted=0 LIMIT 1', (req.board_id,))
     vals = {}
     if base:
         b = dict(base[0])
-        for k in ('board_name', 'workspace_id'):
-            vals[k] = b.get(k, '')
+        vals['board_name'] = b.get('board_name', '')
     else:
-        # 全新看板（尚无任何卡片）：使用建卡请求传入的看板元数据，保证首卡正确带出 board_name/workspace_id
+        # 全新看板（尚无任何卡片）：使用建卡请求传入的看板名，保证首卡正确带出
         vals['board_name'] = (req.board_name or req.board_id).strip()
-        vals['workspace_id'] = (req.workspace_id or '').strip()
     # 分级权限（2026-11-02）：新增事项 = 板块负责人及以上（看板/架构负责人继承）
     # ⚠️ 权限内核先于可见性校验（与 create_column 同款理由）
     perm_check(username, perm_chain(board_id=req.board_id, column_id=req.column_id),
@@ -4111,7 +4109,7 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
 # ---------------- API：看板管理（新建看板） ----------------
 class BoardCreateReq(BaseModel):
     board_name: str
-    workspace_id: str = ''
+    workspace_id: str = ''    # ⚠️ 已废弃（#207-bis）：boards.workspace_id 下线，本字段仅兼容旧客户端 payload（忽略）
     owner: str = ''
     sort: int = 0
     # #206 归属部门（必选）：新建即配置，去掉前端工作空间/负责人编辑
@@ -4165,9 +4163,9 @@ def create_board(req: BoardCreateReq, username: str = Depends(require_writer), r
     _validate_board_config(dept, '日常', '启用')   # 部门名必须在架构中真实存在
     if not _can_assign_board_dept(username, dept_node_id):
         raise HTTPException(403, '你无权将看板归属到「%s」（仅超级管理员/管理员/该部门负责人可设置）' % dept)
-    dbe('INSERT OR REPLACE INTO boards (board_id, board_name, workspace_id, owner, creator, sort, created_at)'
-        ' VALUES (?,?,?,?,?,?,?)',
-        (bid, name, '', (req.owner or username).strip(), username, req.sort,
+    dbe('INSERT OR REPLACE INTO boards (board_id, board_name, owner, creator, sort, created_at)'
+        ' VALUES (?,?,?,?,?,?)',
+        (bid, name, (req.owner or username).strip(), username, req.sort,
          time.strftime('%Y-%m-%d %H:%M:%S')))
     # 归属部门同步落配置（#206：新建即配置，看板不再出现「未配置」游离态）
     try:
@@ -4312,9 +4310,9 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
     now = time.strftime('%Y-%m-%d %H:%M:%S')
     conn = get_conn()
     try:
-        conn.execute('INSERT INTO boards (board_id, board_name, workspace_id, owner, creator, sort, created_at, copy_from)'
-                     ' VALUES (?,?,?,?,?,?,?,?)',
-                     (new_bid, name, src['workspace_id'], username, username, src['sort'], now, board_id))
+        conn.execute('INSERT INTO boards (board_id, board_name, owner, creator, sort, created_at, copy_from)'
+                     ' VALUES (?,?,?,?,?,?,?)',
+                     (new_bid, name, username, username, src['sort'], now, board_id))
         conn.execute('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark, created_at)'
                      ' VALUES (?,?,?,?,?,?,?)',
                      (new_bid, dept, dept_node_id, attr, status, remark, now))
@@ -4326,7 +4324,7 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
     copied_cols = copied_cards = copied_todos = 0
     if getattr(req, 'deep', False):
         copied_cols, copied_cards, copied_todos = _deep_copy_board_content(
-            board_id, new_bid, name, username, src.get('workspace_id') or '')
+            board_id, new_bid, name, username)
     log_action('__board__', username, 'copy', f'复制看板 {name}')
     audit_log(username, client_ip(request), 'board_copy', f'看板 {board_id}',
               f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，属性 {attr}'
@@ -4515,9 +4513,10 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
       事项字段**保真复制**（状态、完成时间、创建人/创建时间、开始/截止/周数、
       负责人/参与人/描述/优先级/标签、逾期结算 overdue_days 等一律原样），
       仅重映射身份与归属：card_id 新生成、board_id / board_name / column_id /
-      column_name / workspace_id 指向副本板块、parent_id 指向新主事项、
+      column_name 指向副本板块、parent_id 指向新主事项、
       copy_from 记录来源、pinned=0（置顶是**个人级**配置，真源在 user_prefs
       'pins'，不属于板块内容）。副本与原板块**不共享任何数据**（全部新 ID）。
+      （#207-bis：workspace_id 不再指向副本 —— boards 级已下线，cards 级随原卡保真）
     · 不复制：评论（历史讨论 —— 与 copy_card / 看板整套复制既有口径一致）、
       个人级置顶、系统留痕（actions / audit_logs / state_history / messages）。
     · 权限三重校验：
@@ -4634,8 +4633,9 @@ def _deep_copy_column_cards(src_col, dst_board_id, dst_col_name, dst_column_id):
     保真口径（用户需求「完整复制、不得遗漏，副本与原板块完全一致」）：
       · cards **全字段原样**（含状态/完成时间/创建人/创建时间/日期/周数/逾期结算），
         仅重映射：card_id 新生成（CPC 前缀）、board_id / board_name / column_id /
-        column_name / workspace_id 指向副本、parent_id 指向新主事项（保持主→子结构）、
+        column_name 指向副本、parent_id 指向新主事项（保持主→子结构）、
         copy_from 记录来源、pinned=0（置顶真源在 user_prefs 'pins'，个人级不随附）。
+        （#207-bis：workspace_id 随原卡保真，不再指向副本 —— boards 级已下线）
       · card_subtasks 全量复制：title / done / sort / done_by / done_at /
         created_by / created_at 原样；子任务层级（parent_id）按新 id 重映射。
       · 兼容存量：cards 可能存在 column_id 为空、仅靠 column_name 归属的旧数据
@@ -4674,7 +4674,7 @@ def _deep_copy_column_cards(src_col, dst_board_id, dst_col_name, dst_column_id):
     # 身份与归属字段重映射；其余字段保真原样
     REMAP = {'card_id': None, 'board_id': dst_board_id, 'board_name': dst_board_name,
              'column_id': dst_column_id, 'column_name': dst_col_name,
-             'workspace_id': '', 'parent_id': '', 'copy_from': '', 'pinned': 0}
+             'parent_id': '', 'copy_from': '', 'pinned': 0}
     for i, c in enumerate(ordered):
         orig_cid = c['card_id']
         new_cid = 'CPC' + stamp + str(i)
@@ -4735,7 +4735,7 @@ CARD_COPY_FIELDS = ['owner', 'cc', 'follower', 'begin', 'due', 'description', 'p
                      'column_sort', 'board_status', 'board_creator', 'workspace_id']
 
 
-def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, username, workspace_id):
+def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, username):
     """看板**整套复制**的正文部分（2026-11-03）：板块 + 事项 + 子事项。
 
     返回 (板块数, 事项数, 待办数)。
@@ -4805,7 +4805,7 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
             'board_name': new_board_name,
             'column_id': new_col_id,
             'column_name': new_col_name,
-            'workspace_id': workspace_id,
+            'workspace_id': c.get('workspace_id') or '',   # cards 级 TAPD 源字段：随原卡继承（#207-bis boards 级已下线）
             'card_name': c['card_name'],
             'status': 'todo',
             'status_name': '未完成',
@@ -4835,8 +4835,6 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
             'copy_from': c['card_id'],
         }
         for f in CARD_COPY_FIELDS:
-            if f == 'workspace_id':
-                continue
             vals[f] = c.get(f) or ''
         cols = list(vals.keys())
         marks = ','.join('?' * len(cols))
@@ -5946,17 +5944,16 @@ def _all_boards():
     此前最终 sorted 又按 board_id 重排 → sort 完全失效，本版修正。"""
     pairs = {}          # board_id -> dict，保插入序（boards 先按 sort 序插入）
     seen = []
-    for r in dbq('SELECT board_id, board_name, workspace_id, creator, archived_at, archived_by FROM boards ORDER BY sort, board_id'):
+    for r in dbq('SELECT board_id, board_name, creator, archived_at, archived_by FROM boards ORDER BY sort, board_id'):
         d = dict(r)
         pairs[d['board_id']] = {'board_id': d['board_id'], 'board_name': d['board_name'],
-                                'workspace_id': d.get('workspace_id', ''),
                                 'creator': d.get('creator') or '',
                                 'archived_at': d.get('archived_at') or '', 'archived_by': d.get('archived_by') or ''}
         seen.append(d['board_id'])
     derived = []
-    for r in dbq('SELECT DISTINCT board_id, board_name, workspace_id FROM cards WHERE deleted=0'):
+    for r in dbq('SELECT DISTINCT board_id, board_name FROM cards WHERE deleted=0'):
         if r['board_id'] not in pairs:
-            derived.append({'board_id': r['board_id'], 'board_name': r['board_name'], 'workspace_id': r.get('workspace_id', '')})
+            derived.append({'board_id': r['board_id'], 'board_name': r['board_name']})
     derived.sort(key=lambda x: x['board_id'])
     return [pairs[b] for b in seen] + derived
 
@@ -7619,7 +7616,6 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
             'archived_at': b.get('archived_at') or '',
             'archived_by': b.get('archived_by') or '',
             'board_name': b['board_name'],
-            'workspace_id': b.get('workspace_id', ''),
             'card_count': counts.get(bid, 0),
             'config_id': c.get('id'),
             'creator': b.get('creator') or '',   # #206 看板创建人（替代原「板块年份」展示位）
@@ -10053,9 +10049,9 @@ async def import_xlsx(request: Request, username: str = Depends(require_super)):
                     board_id = existing[0]['board_id']
                 else:
                     board_id = 'B' + str(int(time.time() * 1000000)) + str(len(new_boards))
-                    dbe('INSERT OR IGNORE INTO boards (board_id, board_name, workspace_id, owner, sort, created_at) '
-                        'VALUES (?,?,?,?,?,?)',
-                        (board_id, board_name, '', cell('board_creator') or username, 0,
+                    dbe('INSERT OR IGNORE INTO boards (board_id, board_name, owner, sort, created_at) '
+                        'VALUES (?,?,?,?,?)',
+                        (board_id, board_name, cell('board_creator') or username, 0,
                          time.strftime('%Y-%m-%d %H:%M:%S')))
                 new_boards[board_name] = board_id
             # ── 事项编号一律系统生成（#86：仅新增，文件内的 card_id 列被忽略）──
