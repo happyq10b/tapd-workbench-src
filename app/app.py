@@ -6919,6 +6919,10 @@ def get_org_tree(username: str = Depends(require_auth)):
                             else _role_scope_nodes(username, ('center_head', 'gm')))
     appt_scope_group = (None if is_admin(username)
                         else _role_scope_nodes(username, ('dept_head',)))
+    # 分级删除能力位（2026-11-20 用户需求）：center 禁删 / dept 仅超管 /
+    # group 超管·管理员·部门负责人及以上（祖先链判定）。端点与能力位同口径。
+    _del_heads = set() if is_admin(username) else _arch_head_nodes(dbq, username)
+    _del_nmap = _org_node_map()
 
     def build(pid):
         out = []
@@ -6948,6 +6952,8 @@ def get_org_tree(username: str = Depends(require_auth)):
                                              if any(d['role_key'] == k for d in roles_by_type.get(n['node_type'], []))]
             node['is_leader'] = (n['id'] in leader_ids)
             node['in_my_scope'] = bool(in_scope)
+            # 分级删除能力位（2026-11-20）：前端按此渲染/隐藏「删除」键
+            node['can_delete_node'] = _org_can_delete_node(username, n, _del_nmap, _del_heads)
             # 「架构下所有看板」（2026-11-03）：本节点归属的 + 全部后代小组已绑定的。
             # → 部门长/组长在板块绑定里能看到本部门架构下的全部看板。
             _arch_boards = sorted(_node_arch_boards(n, owned=owned, wg_by_id=wg_by_id, nmap=nmap))
@@ -6966,8 +6972,27 @@ def get_org_tree(username: str = Depends(require_auth)):
             out.append(node)
         return out
 
+    # 【未配置架构】（2026-11-20 用户需求）：归属部门缺失/失效的看板集中下发，
+    # 架构管理界面以【未配置架构】分组集中展示，便于识别与删除。
+    # 判定口径与看板侧栏「未配置」分组一致：board_config.dept_node_id 为 0/缺失，
+    # 或指向不存在的架构节点。删除走 DELETE /api/boards/{bid}（看板负责人及以上，
+    # 后端强校验），此处 can_delete 与 /api/board-config 能力位完全同口径。
+    _valid_dept_ids = {n['id'] for n in nodes if n['node_type'] in ('center', 'dept')}
+    _cfg_dept = {r['board_id']: r['dept_node_id']
+                 for r in dbq('SELECT board_id, dept_node_id FROM board_config')}
+    _unassigned = []
+    for r in dbq('SELECT board_id, board_name FROM boards WHERE archived=0 ORDER BY board_name'):
+        _dn = _cfg_dept.get(r['board_id'], 0)
+        if _dn and _dn in _valid_dept_ids:
+            continue
+        if visible is not None and r['board_id'] not in visible:
+            continue    # 普通用户不下发不可见看板（防名称泄露）
+        _unassigned.append({
+            'board_id': r['board_id'], 'board_name': r['board_name'],
+            'can_delete': perm_check_pass(username, perm_chain(board_id=r['board_id']),
+                                          OP_DELETE, LV_BOARD_OWNER, min_level=LV_BOARD_OWNER)})
     return {'tree': build(0), 'roles_by_type': roles_by_type,
-            'type_names': ORG_TYPE_NAMES}
+            'type_names': ORG_TYPE_NAMES, 'unassigned_boards': _unassigned}
 
 @app.post('/api/org/nodes')
 def create_org_node(req: OrgNodeReq, username: str = Depends(require_auth), request: Request = None):
@@ -7103,14 +7128,53 @@ def update_node_boards(nid: int, req: NodeBoardsReq, username: str = Depends(req
     return {'ok': True, 'boards': boards, 'cascade': cascade}
 
 
+def _org_can_delete_node(username: str, node, nmap, head_nodes) -> bool:
+    """架构节点**分级删除**判定（2026-11-20 用户需求，delete 端点与 tree 能力位同口径）：
+
+    · center（顶层架构，如财务中心）：任何角色均不可删除（前端亦不渲染删除键）；
+    · dept（部门层大架构）：仅超级管理员（SUPER_ADMIN）可删 —— 其他任何角色
+      （含普通管理员 role='admin'）均无权限；
+    · group（小组层）：超级管理员 / 管理员（is_admin 全量权限惯例），
+      或**部门负责人及以上** —— 目标节点祖先链（不含自身）上存在其负责节点
+      （_arch_head_nodes：负责岗位任命 + org_nodes.owner 显式配置，排除小组）。
+      → 各负责人只能删除自己管辖的下级架构，无权删除其他部门的架构；
+      → 组长（group_leader）不视为架构负责人，不可删除任何节点。
+    """
+    if node['node_type'] == 'center':
+        return False
+    if username == SUPER_ADMIN:
+        return True
+    if node['node_type'] == 'dept':
+        return False            # 部门层仅超级管理员
+    if is_admin(username):
+        return True             # 小组层：管理员全量（与全局权限惯例一致）
+    cur = nmap.get(node.get('parent_id'))
+    guard = 0
+    while cur and guard < 20:
+        guard += 1
+        if cur['id'] in head_nodes:
+            return True
+        cur = nmap.get(cur['parent_id']) if cur.get('parent_id') else None
+    return False
+
+
 @app.delete('/api/org/nodes/{nid}')
-def delete_org_node(nid: int, username: str = Depends(require_admin), request: Request = None):
-    """删除节点：级联删除其任职关系与子节点；节点有关联看板时拒绝。"""
+def delete_org_node(nid: int, username: str = Depends(require_auth), request: Request = None):
+    """删除节点：级联删除其任职关系与子节点；节点有关联看板时拒绝。
+       分级权限（2026-11-20 用户需求）：center 禁删 / dept 仅超管 /
+       group 超管·管理员·该架构的部门负责人（祖先链判定，防跨部门越权）。"""
     node = _org_node(nid)
     if not node:
         raise HTTPException(404, '节点不存在')
     if node['node_type'] == 'center':
         raise HTTPException(403, '中心节点不可删除')
+    # 分级删除判定（2026-11-20）：dept 仅超管；group 需超管/管理员/部门负责人及以上。
+    # ⚠️ 放宽 require_admin → require_auth 后，此判定是唯一的越权防线。
+    _heads = set() if is_admin(username) else _arch_head_nodes(dbq, username)
+    if not _org_can_delete_node(username, dict(node), _org_node_map(), _heads):
+        if node['node_type'] == 'dept':
+            raise HTTPException(403, '部门层架构仅超级管理员可删除')
+        raise HTTPException(403, '仅超级管理员或该架构的部门负责人可删除')
     # 编辑锁（2026-11-12）：节点被编辑中 → 409
     _lk = 'org:' + str(nid)
     _fresh = _lock_oneshot(_lk, username, '节点', '删除')

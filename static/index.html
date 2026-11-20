@@ -12033,6 +12033,7 @@ var WG_COLLAPSED=new Set();
 // ---------- 组织架构（新模型） ----------
 var ORG_TREE=[];        // 新模型的节点树（含 roles / appointments）
 var ORG_FLAT=[];        // 新模型平铺
+var ORG_UNASSIGNED=[];  // 【未配置架构】（2026-11-20）：归属部门缺失/失效的看板清单（含 can_delete 能力位）
 var ORG_ROLES_BY_TYPE={}; // {node_type:[{role_key,role_name,unique_slot}]}
 var ORG_TYPE_NAMES={};  // {node_type:'中心'|'部门'|'常规小组'|'专项小组'}
 var ORG_PERSON_NAMES=new Set();  // 架构中出现的全部人员姓名（用于区分「手动输入」与「架构选人」）
@@ -12645,6 +12646,7 @@ async function ensureOrgTree(force){
     const od=await api('/api/org/tree');
     ORG_TREE=od.tree||[];
     ORG_FLAT=wgFlat(ORG_TREE);
+    ORG_UNASSIGNED=od.unassigned_boards||[];
     ORG_ROLES_BY_TYPE=od.roles_by_type||ORG_ROLES_BY_TYPE;
     ORG_TYPE_NAMES=od.type_names||ORG_TYPE_NAMES;
     // 汇总架构里的全部人员姓名
@@ -12771,7 +12773,7 @@ function renderWgList(){
           return `<button class="icon-btn" onclick="event.stopPropagation();orgMoveNode(${n.id},'up')" title="上移（同级交换，不跨层级）"${up?'':' disabled style="opacity:.4"'}>↑</button>`
                 +`<button class="icon-btn" onclick="event.stopPropagation();orgMoveNode(${n.id},'down')" title="下移（同级交换，不跨层级）"${down?'':' disabled style="opacity:.4"'}>↓</button>`;})():''}
         <button class="icon-btn" onclick="addWgChild(${n.id})" title="${addTip}"${canAdd?'':' disabled'}>+ 子节点</button>
-        ${(canEdit&&canNode&&n.node_type!=='center')?`<button class="icon-btn delete" onclick="removeWg(${n.id})">删除</button>`:''}
+        ${(n.node_type!=='center'&&n.can_delete_node===true)?`<button class="icon-btn delete" onclick="removeWg(${n.id})" title="删除节点（分级权限：部门层仅超级管理员；小组层为超级管理员/管理员/所属部门负责人）">删除</button>`:''}
       </span>
     </div>
     ${(n.children&&!WG_COLLAPSED.has(n.id))?n.children.map(c=>row(c,dep+1,n.children)).join(''):''}
@@ -12785,6 +12787,7 @@ function renderWgList(){
     return c>1;
   }).length;
   box.innerHTML=ORG_TREE.map(n=>row(n,0,ORG_TREE)).join('')+
+    orgUnassignedHtml()+
     // 底部说明仅保留统计行（2026-11-10 #127 用户要求：「层级/唯一岗位」两行说明删除）
     `<div style="margin-top:10px;font-size:12px;color:var(--text2);padding:0 10px;line-height:1.7">
       共 ${total} 个节点 · ${apptTotal} 条任职 · ${multi} 人跨组织任职
@@ -12794,6 +12797,52 @@ function renderWgList(){
 function toggleWg(id){
   WG_COLLAPSED.has(id)?WG_COLLAPSED.delete(id):WG_COLLAPSED.add(id);
   renderWgList();
+}
+// ---------- 【未配置架构】（2026-11-20 用户需求） ----------
+// 归属部门缺失/失效的看板在架构管理界面集中展示（与看板侧栏「未配置」分组同源
+// 口径：board_config.dept_node_id 为 0/缺失或指向不存在的架构节点）。
+// 样式仿照侧栏「未配置」节点：虚线边框 + ▼ 折叠 + 计数徽标。
+// 删除 = 删除看板本身（连带板块/事项，不可逆），走 DELETE /api/boards/{bid}，
+// 后端按「看板负责人及以上」强校验，can_delete 能力位与 /api/board-config 同口径。
+function orgUnassignedHtml(){
+  const unb=ORG_UNASSIGNED||[];
+  if(!unb.length)return '';
+  const KEY='__unassigned__';
+  const open=!WG_COLLAPSED.has(KEY);
+  const rows=open?unb.map(b=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 14px 7px 34px;border-top:1px dashed var(--border);font-size:12.5px">
+      <span style="color:var(--text2);flex-shrink:0">🗂</span>
+      <span style="font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.board_name)}</span>
+      <span style="font-size:10.5px;color:var(--text3);background:var(--bg);border:1px dashed var(--border);border-radius:3px;padding:0 5px;flex-shrink:0">未配置归属部门</span>
+      <span style="flex:1"></span>
+      ${b.can_delete?`<button class="icon-btn delete" onclick="removeUnassignedBoard('${esc(b.board_id)}','${esc(b.board_name)}')" title="删除看板本身（连带全部板块与事项，不可逆）">删除</button>`
+        :'<span style="font-size:11px;color:var(--text3)">无删除权限</span>'}
+    </div>`).join(''):'';
+  return `<div style="margin:10px 10px 0;border:1.5px dashed var(--border);border-radius:var(--radius);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;user-select:none"
+         onclick="toggleUnassigned()" title="未在【看板管理】配置归属部门的看板（单击展开/收起）">
+      <span style="color:var(--text2);font-size:11px;transition:transform .2s;transform:rotate(${open?'90deg':'0deg'})">▶</span>
+      <span style="font-size:12.5px;font-weight:500;color:var(--text2)">未配置架构</span>
+      <span style="font-size:11px;color:var(--text3);background:var(--bg);border-radius:9px;padding:0 7px">${unb.length}</span>
+      <span style="flex:1"></span>
+      <span style="font-size:11px;color:var(--text3)">看板未在「看板管理」中配置归属部门 · 可在此识别与删除</span>
+    </div>${rows}</div>`;
+}
+function toggleUnassigned(){
+  const KEY='__unassigned__';
+  WG_COLLAPSED.has(KEY)?WG_COLLAPSED.delete(KEY):WG_COLLAPSED.add(KEY);
+  renderWgList();
+}
+async function removeUnassignedBoard(bid,bname){
+  if(!confirm(`删除看板「${bname}」？\n\n该看板未配置归属部门，删除将连带其下全部板块与事项（不可逆，事项为软删可由备份找回）。`))return;
+  try{
+    const r=await api('/api/boards/'+encodeURIComponent(bid),{method:'DELETE'});
+    toast('看板「'+(r&&r.board_name||bname)+'」已删除');
+    await ensureOrgTree(true);
+    renderWgList();
+    ME=await api('/api/me');   // 看板清单变化 → 侧栏分组/顶部统计同步
+    renderTabs();
+  }catch(e){toast(e.message)}
 }
 // 架构节点排序（2026-11-09 #103）：上移/下移与同级兄弟交换（后端限制不跨层级），
 // 持久化 org_nodes.sort。架构管理界面顺序 = /api/org/tree（ORDER BY sort,id）；
