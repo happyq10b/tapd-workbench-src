@@ -14251,8 +14251,11 @@ function bcSetDept(name){
 }
 // ---------- 协作部门（T-013d，仅中心级归属可配）----------
 function bcIsCenterDept(name){
+  // 双保险（2026-11-20 #207 加固）：BC_DEPTS 异常/未加载时按架构树中心节点名兜底，
+  // 避免把中心级归属误判成部门级 → 协作部门按钮丢失（用户实测反馈「没了」）
   const d=BC_DEPTS.find(function(x){return x.name===name;});
-  return !!(d&&d.is_center);
+  if(d&&d.is_center)return true;
+  return (ORG_TREE||[]).some(function(n){return n.node_type==='center'&&n.name===name;});
 }
 function bcCollabLabel(){
   return (BC_FORM.collab_depts||[]).map(function(id){
