@@ -14226,14 +14226,21 @@ function configBoard(){
   renderEditArea();
 }
 function bcChangeBoard(bid){
+  // #207-bis 修复（用户实测：左侧「归属：商务部」右侧表单却是默认资金部的差异）：
+  // 本函数原本**无条件走新建配置分支**（BC_EDIT_ID=0 + 表单重置为默认部门）——
+  // #206 起「新建看板」创建即落配置，createBoard 成功后回调本函数时目标看板
+  // **已有配置** → 被误判成新建配置模式：右侧表单显示默认部门而非真实归属，
+  // 且此时保存会把真实归属**覆盖成默认部门**（数据隐患）。
+  // → 按 config_id 正确分流：已有配置走 bcSelect（编辑模式读原值）；
+  //   未配置保持新建配置模式（默认部门 = 第一个可设置部门）。
   const b=BC_BOARDS.find(function(x){return x.board_id===bid;});
-  if(b){
-    BC_SELECTED=b;BC_EDIT_ID=0;
-    bcSwitchLock(b);   // 编辑锁随选切换（未配置 = 释放）
-    BC_FORM={board_name:b.board_name||'',dept:(bcDefaultDept().dept||''),dept_node_id:(bcDefaultDept().dept_node_id||0),attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
-    renderBoardList();
-    renderEditArea();
-  }
+  if(!b)return;
+  if(b.config_id){bcSelect(bid);return;}
+  BC_SELECTED=b;BC_EDIT_ID=0;
+  bcSwitchLock(b);   // 未配置看板：无编辑锁，换选即释放上一把
+  BC_FORM={board_name:b.board_name||'',dept:(bcDefaultDept().dept||''),dept_node_id:(bcDefaultDept().dept_node_id||0),attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
+  renderBoardList();
+  renderEditArea();
 }
 // 归属部门变更：同步部门节点 id（看板管理 ↔ 架构管理层级联动）
 function bcSetDept(name){
