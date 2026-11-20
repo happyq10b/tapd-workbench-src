@@ -2243,15 +2243,17 @@ function goLogin(){
   </div>
 </div>
 
-<!-- 新建看板弹窗（仅管理员） -->
+<!-- 新建看板弹窗（#205ad-cis 部门负责人及以上；#206 归属部门必选） -->
 <div class="modal-overlay" id="boardModal" style="display:none">
   <div class="modal" style="width:min(520px,94vw)">
     <div class="modal-header"><h2>🗂️ 新建看板</h2><button class="modal-close" onclick="closeModal('boardModal')">✕</button></div>
     <div class="modal-body">
       <div class="form-group"><label>看板名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="b_name" placeholder="例如：2026 预算执行看板"></div>
-      <div class="form-group"><label>工作空间 ID</label><input type="text" class="form-input" id="b_ws" placeholder="TAPD 工作空间 ID（可选，留空亦可）"></div>
-      <div class="form-group"><label>负责人</label><input type="text" class="form-input" id="b_owner" placeholder="留空默认为当前账号"></div>
-      <div style="font-size:12px;color:var(--text3)">新建后该看板会出现在上方标签页（初始为空），可立即向其添加工作事项；其他成员的可见性由其账号「可见看板」权限决定。</div>
+      <div class="form-group"><label>归属部门 <span style="color:var(--danger)">*</span></label>
+        <select class="form-select" id="b_dept" onchange="window.__nb_dept=this.value"></select>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px">仅可选择你有权设置的部门（#206：超管/管理员全部；财务中心仅中心负责人/总经理/管理员；部门级仅本部门负责人）。</div>
+      </div>
+      <div style="font-size:12px;color:var(--text3)">新建后看板立即归属所选部门（部门成员按架构授权可见），并出现在上方标签页（初始为空），可立即向其添加工作事项。工作空间 ID 与负责人不再在此填写（负责人默认为创建人，可稍后在看板管理中调整）。</div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('boardModal')">取消</button><button class="btn-primary" onclick="createBoard()">创建看板</button></div>
   </div>
@@ -9206,11 +9208,19 @@ async function submitCopy(){
   }catch(e){toast(e.message)}
   finally{btn.disabled=false}
 }
-// ---------- 新建看板（管理员） ----------
-function openBoardModal(){
+// ---------- 新建看板（#205ad-cis 部门负责人及以上；#206 归属部门必选） ----------
+async function openBoardModal(){
   document.getElementById('b_name').value='';
-  document.getElementById('b_ws').value='';
-  document.getElementById('b_owner').value=ME.username||'';
+  // #206：归属部门必选下拉 —— 选项 = 可设置的部门（后端 can_assign 同口径下发）
+  if(!BC_DEPTS.length){
+    try{ const res=await api('/api/boards?include_archived=1'); BC_DEPTS=(res.depts||[]).slice(); }catch(e){}
+  }
+  const sel=document.getElementById('b_dept');
+  const asg=bcAssignableDepts();
+  sel.innerHTML=asg.length
+    ?asg.map(function(d){return '<option value="'+esc(d.name)+'" data-nid="'+esc(d.id)+'">'+esc(bcDeptLabel(d))+'</option>';}).join('')
+    :'<option value="">（你无可设置的部门）</option>';
+  window.__nb_dept=asg.length?asg[0].name:'';
   openModal('boardModal');
   const m=document.getElementById('boardModal');
   // 「新建看板」现在从「看板管理」弹窗里唤起，必须盖在其之上
@@ -9220,20 +9230,22 @@ function openBoardModal(){
 async function createBoard(){
   const board_name=document.getElementById('b_name').value.trim();
   if(!board_name){toast('看板名称不能为空');return}
-  const workspace_id=document.getElementById('b_ws').value.trim();
-  const owner=document.getElementById('b_owner').value.trim();
+  // #206：归属部门必选 + 前置校验（后端仍有同口径硬拦截）
+  const dept=document.getElementById('b_dept').value;
+  if(!dept){toast('归属部门必选（或你无可设置的部门，请联系管理员）');return}
+  const dn=BC_DEPTS.find(function(x){return x.name===dept;})||{};
+  if(dn.can_assign===false){toast('你无权将看板归属到「'+dept+'」');return}
   try{
-    const r=await api('/api/boards',{method:'POST',body:JSON.stringify({board_name,workspace_id,owner})});
-    toast('看板已创建：'+board_name);
+    const r=await api('/api/boards',{method:'POST',body:JSON.stringify({board_name,dept:dept,dept_node_id:dn.id||0})});
+    toast('看板已创建：'+board_name+'（归属 '+dept+'）');
     closeModal('boardModal');
     ME=await api('/api/me');           // 刷新看板列表（含新建看板）
     curBoard=r.board_id;               // 自动切换到新看板（初始为空）
     curBoards=new Set([r.board_id]);   // ⚠️ 同步集合（curBoards 才是权威选择，见 saveColumn 同款注释）
-    ensureDeptOpen(r.board_id);        // 新建板块尚未配置归属部门，自动展开「未配置」节点
     renderTabs();updateNewBtn();
     reload(1);renderProgress();
-    // 新建入口已移入「看板管理」弹窗：刷新其列表并选中新看板，
-    // 让管理员可以立即给它配置归属部门（否则它只能待在「未配置」节点里）
+    // #206：新建即已配置归属部门 → 无需再引导去「看板管理」补配置；
+    // 刷新其列表并选中新看板（保持原有联动体验）
     if(document.getElementById('boardConfigModal').style.display!=='none'){
       await loadBoardConfig();
       // 先设选中，再重绘列表 —— active 样式由 renderBoardList 依据 BC_SELECTED 渲染
@@ -13597,6 +13609,17 @@ function bcDeptNodeId(name){
   const d=BC_DEPTS.find(x=>x.name===name);
   return d?d.id:0;
 }
+// ---- 归属部门设置分级权限（#206 2026-11-20 用户需求）----
+// 可设置的部门 = BC_DEPTS 中 can_assign===true 的项（/api/boards 按与写端点
+// 完全相同的口径下发：超管/管理员全部；中心级需中心负责人/总经理；部门级仅本部门负责人）
+function bcAssignableDepts(){
+  return BC_DEPTS.filter(function(d){return d.can_assign===true;});
+}
+// 新建/新建配置场景的归属部门默认值：第一个可设置的部门；无可设部门 → 空（必填校验拦截）
+function bcDefaultDept(){
+  const l=bcAssignableDepts();
+  return l.length?{dept:l[0].name,dept_node_id:l[0].id}:{dept:'',dept_node_id:0};
+}
 // 看板负责人/参与人的部门约束（2026-11-12）：
 //   归属部门 = 财务中心（中心级）→ 候选 = 全部成员；未配置归属 → 不限；
 //   其他部门 → 候选 = 该部门成员（team_members.departments 单一来源，#165 口径）。
@@ -13795,7 +13818,7 @@ async function openBoardConfigModalFor(bid){
     bcSelect(bid);                 // 回填该看板现有信息并渲染右侧编辑区
   }else{
     BC_SELECTED=null; BC_EDIT_ID=0;
-    BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[],collab_depts:[]};
+    BC_FORM={board_name:'',dept:(bcDefaultDept().dept||''),dept_node_id:(bcDefaultDept().dept_node_id||0),attr:'日常',status:'启用',remark:'',owner:'',participants:[],collab_depts:[]};
     renderBoardList();
     renderEditArea();
     toast('看板不存在或不在你的可见范围内');
@@ -13806,7 +13829,7 @@ async function openBoardConfigModal(){
   BC_FROM_CARD=false;
   bcReleaseLock();   // 2026-11-12：进入看板管理先清残留编辑锁
   BC_SELECTED=null; BC_EDIT_ID=0;
-  BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',
+  BC_FORM={board_name:'',dept:(bcDefaultDept().dept||''),dept_node_id:(bcDefaultDept().dept_node_id||0),attr:'日常',status:'启用',remark:'',
             owner:'',participants:[],collab_depts:[]};
   // 默认不选中：进入看板管理时所有**看板**均未勾选（需用户主动勾选）
   BC_SEL=new Set();
@@ -14019,9 +14042,9 @@ function renderBoardList(){
     // 需要确认身份的地方仍在【看板管理】右侧面板（permNote）里，不丢信息。
     const sel = (BC_SELECTED && BC_SELECTED.board_id===b.board_id) ? ' active':'';
     const deptTip = b.dept?('归属：'+esc(b.dept)):'';
-    // 所属板块年份：年份在【板块】层，看板只是容器 → 展示该看板下各板块的年份集合
-    const years=(b.col_years||[]);
-    const yearTip=years.length?('板块年份：'+esc(years.join('、'))+'年'):'板块年份：未配置';
+    // 所属板块年份已下线（#206 用户需求：看板本身不设定年份，年份在板块层）
+    // → 该展示位改为「看板创建人」（boards.creator，账号经成员映射显示姓名）
+    const creatorTip=b.creator?('创建人：'+esc(bcMemberName(b.creator)||b.creator)):'创建人：—';
     // 复制入口（2026-11-03 修订）：**对该看板有管理权（can_edit）即可复制** ——
     //   看板负责人 / 架构负责人（范围内）/ 管理员，与后端 copy 接口同一口径。
     //   原来写死 ME.is_admin → 架构负责人、看板负责人看不到复制入口（用户反馈）。
@@ -14040,7 +14063,7 @@ function renderBoardList(){
       +'<span class="bc-name" title="'+esc(b.board_name||b.board_id)+'">'+esc(b.board_name||b.board_id)+'</span>'+st+archBtn+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+colTxt+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
-      +'<span title="该看板下各板块绑定的归属年份">'+yearTip+'</span></div>'
+      +'<span title="看板创建人">'+creatorTip+'</span></div>'
       +'</div>';
   }).join('');
   bcWireDrag();
@@ -14200,7 +14223,7 @@ function configBoard(){
   BC_SELECTED=unconf[0];
   BC_EDIT_ID=0;
   bcSwitchLock(unconf[0]);   // 未配置看板：无编辑锁，换选即释放上一把
-  BC_FORM={board_name:unconf[0].board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',owner:'',participants:[],collab_depts:[]};
+  BC_FORM={board_name:unconf[0].board_name||'',dept:(bcDefaultDept().dept||''),dept_node_id:(bcDefaultDept().dept_node_id||0),attr:'日常',status:'启用',remark:'',owner:'',participants:[],collab_depts:[]};
   renderBoardList();
   renderEditArea();
 }
@@ -14209,7 +14232,7 @@ function bcChangeBoard(bid){
   if(b){
     BC_SELECTED=b;BC_EDIT_ID=0;
     bcSwitchLock(b);   // 编辑锁随选切换（未配置 = 释放）
-    BC_FORM={board_name:b.board_name||'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
+    BC_FORM={board_name:b.board_name||'',dept:(bcDefaultDept().dept||''),dept_node_id:(bcDefaultDept().dept_node_id||0),attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
     renderBoardList();
     renderEditArea();
   }
@@ -14247,6 +14270,8 @@ function openBcCollabPick(btn){
   },{title:'选择协作部门（可多选 · 被选部门负责人自动可见该看板）',options:opts});
 }
 function bcDeptHint(name){
+  // #206：无可设置部门时明确告知（下拉里仅剩当前值可选）
+  if(!bcAssignableDepts().length)return '你无权设置归属部门（仅超级管理员/管理员/各部门负责人可设置；财务中心仅中心负责人/总经理/管理员）';
   if(!name)return '归属部门取自【架构管理】的部门层级';
   const d=BC_DEPTS.find(function(x){return x.name===name;});
   if(d&&d.is_center)return '中心级归属：该看板对全员展示（全部看板）';
@@ -14279,7 +14304,15 @@ function renderEditArea(){
       +'<div class="bi-meta">为以下真实看板新建配置</div>'
       +'<select class="form-select" id="bc_board" onchange="bcChangeBoard(this.value)">'+opts+'</select></div>';
   }
-  const deptOpts=BC_DEPTS.map(function(d){return '<option value="'+esc(d.name)+'"'+(BC_FORM.dept===d.name?' selected':'')+'>'+esc(bcDeptLabel(d))+'</option>';}).join('');
+  // 归属部门设置分级权限（#206 2026-11-20 用户需求）：下拉仅放开「自己管理的部门」——
+  // 超管/管理员全部；中心级（财务中心）需中心负责人/总经理；部门级仅本部门负责人。
+  // 当前已配置的归属始终可选（保留原值不算变更，后端同口径不拦截）。
+  // 选项来源 BC_DEPTS[].can_assign 由 /api/boards 按与写端点完全相同的口径下发。
+  const deptOpts=BC_DEPTS.map(function(d){
+    const _ok=d.can_assign===true||d.name===BC_FORM.dept;
+    return '<option value="'+esc(d.name)+'"'+(BC_FORM.dept===d.name?' selected':'')+(_ok?'':' disabled')
+      +' title="'+(_ok?'':'你无权设置该归属部门（仅超级管理员/管理员/该部门负责人；财务中心仅中心负责人/总经理/管理员）')+'">'+esc(bcDeptLabel(d))+'</option>';
+  }).join('');
   const attrPills=['日常','专项'].map(function(a){return '<span class="bc-pill'+(BC_FORM.attr===a?' on':'')+'" data-dim="attr" data-val="'+a+'" onclick="bcPick(\'attr\',\''+a+'\')">'+a+'</span>';}).join('');
   // 逐项按后端能力位控制（2026-11-03）：
   //   can_edit         → 能改基本信息（归属部门/属性/状态/备注）并保存
@@ -14567,7 +14600,7 @@ function resetBoardConfigForm(){
     return;
   }
   BC_EDIT_ID=0; BC_SELECTED=null;
-  BC_FORM={board_name:'',dept:BC_DEPTS.length?BC_DEPTS[0].name:'',dept_node_id:BC_DEPTS.length?BC_DEPTS[0].id:0,attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
+  BC_FORM={board_name:'',dept:(bcDefaultDept().dept||''),dept_node_id:(bcDefaultDept().dept_node_id||0),attr:'日常',status:'启用',remark:'',participants:[],collab_depts:[]};
   renderBoardList();
   renderEditArea();
 }

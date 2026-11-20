@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS boards (
     board_name    TEXT NOT NULL DEFAULT '',
     workspace_id  TEXT NOT NULL DEFAULT '',   -- TAPD 工作空间 ID（可空）
     owner         TEXT NOT NULL DEFAULT '',    -- 看板负责人（ACL：owner + participants 命中才可见）
+    creator       TEXT NOT NULL DEFAULT '',    -- #206 看板创建人（账号；新建/复制时写入，历史由迁移回填）
     participants  TEXT NOT NULL DEFAULT '',    -- 看板参与人（ACL，逗号分隔的账号）
     sort          INTEGER NOT NULL DEFAULT 0,  -- 排序权重（小在前）
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -536,6 +537,26 @@ def _migrate_schema(conn):
         conn.execute('ALTER TABLE boards ADD COLUMN archived_at TEXT')
     if 'archived_by' not in bcols:
         conn.execute('ALTER TABLE boards ADD COLUMN archived_by TEXT')
+    # ---- boards：#206 看板创建人（迁移 + 历史回填）----
+    if 'creator' not in bcols:
+        conn.execute("ALTER TABLE boards ADD COLUMN creator TEXT NOT NULL DEFAULT ''")
+        # 回填策略：优先审计日志 board_create（target='看板 Bxxx'，含唯一看板 id）；
+        # 无审计记录的看板回退 owner（boards.owner 在创建/复制时均写入操作者账号，
+        # 是创建人的最佳历史近似）。异常（audit_logs 缺失等）不阻断迁移。
+        try:
+            import re as _re
+            _cmap = {}
+            for _t, _u in conn.execute(
+                    "SELECT target, username FROM audit_logs WHERE action='board_create' ORDER BY id").fetchall():
+                _mt = _re.search(r'(B\d{10,})', _t or '')
+                if _mt:
+                    _cmap[_mt.group(1)] = _u
+            for _bid, _u in _cmap.items():
+                conn.execute("UPDATE boards SET creator=? WHERE board_id=? AND IFNULL(creator,'')=''",
+                             (_u, _bid))
+            conn.execute("UPDATE boards SET creator=owner WHERE IFNULL(creator,'')='' AND IFNULL(owner,'')!=''")
+        except Exception:
+            pass
     # ---- board_config：重构为按 board_id 关联真实看板 ----
     ccols = [r[1] for r in conn.execute('PRAGMA table_info(board_config)').fetchall()]
     csql = (conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='board_config'")

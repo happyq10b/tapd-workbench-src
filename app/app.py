@@ -4114,10 +4114,38 @@ class BoardCreateReq(BaseModel):
     workspace_id: str = ''
     owner: str = ''
     sort: int = 0
+    # #206 归属部门（必选）：新建即配置，去掉前端工作空间/负责人编辑
+    dept: str = ''
+    dept_node_id: int = 0
+
+def _can_assign_board_dept(username: str, target_node_id) -> bool:
+    """归属部门**设置权限**分级判定（2026-11-20 用户需求）。
+
+    · 超级管理员 / 管理员 → 任意部门（含中心级「财务中心」）；
+    · 中心级归属（dept_node_id 指向 center 节点）→ 仅 **中心负责人 / 总经理**
+      （在该 center 节点担任负责岗位 → center 节点 ∈ _arch_owner_nodes）；
+    · 部门级归属 → 仅**该部门自身**的负责人（目标节点 ∈ _arch_owner_nodes）——
+      部门负责人不能把看板设到别的部门，更不能设为财务中心。
+    PERM_ENABLED=False 时放行（与架构层其余门槛口径一致）。
+    target_node_id 为 0/None（未配置归属）时不收紧（编辑保留原值场景）。
+    """
+    if username == SUPER_ADMIN or is_admin(username):
+        return True
+    if not PERM_ENABLED:
+        return True
+    try:
+        nid = int(target_node_id or 0)
+    except (TypeError, ValueError):
+        nid = 0
+    if not nid:
+        return True
+    return nid in _arch_owner_nodes(username)
+
 
 @app.post('/api/boards')
 def create_board(req: BoardCreateReq, username: str = Depends(require_writer), request: Request = None):
-    """新建看板（架构负责人及以上，2026-11-02 分级）。写入 boards 表，立即可在标签页看到空看板。"""
+    """新建看板（部门负责人及以上，2026-11-02 分级；#206 归属部门改为必选）。
+    创建时同步写入 board_config（归属部门），不再需要二次配置。"""
     import time
     name = (req.board_name or '').strip()
     if not name:
@@ -4130,10 +4158,27 @@ def create_board(req: BoardCreateReq, username: str = Depends(require_writer), r
     if PERM_ENABLED and username != SUPER_ADMIN and not is_admin(username):
         if not _arch_head_nodes(dbq, username):
             raise HTTPException(403, '只有部门负责人及以上才能新建看板（小组组长无此权限）')
-    dbe('INSERT OR REPLACE INTO boards (board_id, board_name, workspace_id, owner, sort, created_at) VALUES (?,?,?,?,?,?)',
-        (bid, name, (req.workspace_id or '').strip(), (req.owner or username).strip(), req.sort, time.strftime('%Y-%m-%d %H:%M:%S')))
-    audit_log(username, client_ip(request), 'board_create', f'看板 {bid}', f'新建看板：{name}', 'success')
-    return {'ok': True, 'board_id': bid, 'board_name': name, 'workspace_id': (req.workspace_id or '').strip()}
+    # #206 归属部门必选 + 分级设置权限（只能设自己管理的部门；财务中心仅中心负责人/总经理/管理员）
+    dept_node_id, dept, _is_center = _resolve_dept_node(req.dept, req.dept_node_id)
+    if not dept:
+        raise HTTPException(400, '归属部门必选（取自【架构管理】的部门层级）')
+    _validate_board_config(dept, '日常', '启用')   # 部门名必须在架构中真实存在
+    if not _can_assign_board_dept(username, dept_node_id):
+        raise HTTPException(403, '你无权将看板归属到「%s」（仅超级管理员/管理员/该部门负责人可设置）' % dept)
+    dbe('INSERT OR REPLACE INTO boards (board_id, board_name, workspace_id, owner, creator, sort, created_at)'
+        ' VALUES (?,?,?,?,?,?,?)',
+        (bid, name, '', (req.owner or username).strip(), username, req.sort,
+         time.strftime('%Y-%m-%d %H:%M:%S')))
+    # 归属部门同步落配置（#206：新建即配置，看板不再出现「未配置」游离态）
+    try:
+        dbe('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark, created_at)'
+            ' VALUES (?,?,?,?,?,?,datetime(\'now\',\'localtime\'))',
+            (bid, dept, dept_node_id, '日常', '启用', ''))
+    except sqlite3.IntegrityError:
+        pass    # 并发重复创建等场景：配置已存在则沿用
+    audit_log(username, client_ip(request), 'board_create', f'看板 {bid}',
+              f'新建看板：{name}（归属部门 {dept}）', 'success')
+    return {'ok': True, 'board_id': bid, 'board_name': name, 'dept': dept, 'dept_node_id': dept_node_id}
 
 
 class BoardArchiveReq(BaseModel):
@@ -4267,9 +4312,9 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
     now = time.strftime('%Y-%m-%d %H:%M:%S')
     conn = get_conn()
     try:
-        conn.execute('INSERT INTO boards (board_id, board_name, workspace_id, owner, sort, created_at, copy_from)'
-                     ' VALUES (?,?,?,?,?,?,?)',
-                     (new_bid, name, src['workspace_id'], username, src['sort'], now, board_id))
+        conn.execute('INSERT INTO boards (board_id, board_name, workspace_id, owner, creator, sort, created_at, copy_from)'
+                     ' VALUES (?,?,?,?,?,?,?,?)',
+                     (new_bid, name, src['workspace_id'], username, username, src['sort'], now, board_id))
         conn.execute('INSERT INTO board_config (board_id, dept, dept_node_id, attr, status, remark, created_at)'
                      ' VALUES (?,?,?,?,?,?,?)',
                      (new_bid, dept, dept_node_id, attr, status, remark, now))
@@ -5901,10 +5946,11 @@ def _all_boards():
     此前最终 sorted 又按 board_id 重排 → sort 完全失效，本版修正。"""
     pairs = {}          # board_id -> dict，保插入序（boards 先按 sort 序插入）
     seen = []
-    for r in dbq('SELECT board_id, board_name, workspace_id, archived_at, archived_by FROM boards ORDER BY sort, board_id'):
+    for r in dbq('SELECT board_id, board_name, workspace_id, creator, archived_at, archived_by FROM boards ORDER BY sort, board_id'):
         d = dict(r)
         pairs[d['board_id']] = {'board_id': d['board_id'], 'board_name': d['board_name'],
                                 'workspace_id': d.get('workspace_id', ''),
+                                'creator': d.get('creator') or '',
                                 'archived_at': d.get('archived_at') or '', 'archived_by': d.get('archived_by') or ''}
         seen.append(d['board_id'])
     derived = []
@@ -7503,9 +7549,8 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
     可见性：管理员返回全部看板；普通用户只返回其架构授权范围内的看板
     （与 /api/me 的看板集合一致，避免「前端只隐藏、后端仍全量下发」）。
 
-    ⚠️ 看板**不再有归属年份** —— 年份下沉到板块层：
-       `col_years` = 该看板下各板块的归属年份集合（去重、倒序），供列表展示
-       「所属板块年份」。
+    ⚠️ 「所属板块年份」展示位已下线（#206 2026-11-20 用户需求：看板本身不设定
+       年份，年份在板块层）→ 列表改展示「看板创建人」（boards.creator）。
     """
     boards = _all_boards()
     visible, cols_perm = user_allowed(username, include_archived=bool(include_archived))
@@ -7549,12 +7594,8 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
     for r in filter_rows(dbq('SELECT board_id, column_id FROM cards WHERE deleted=0'),
                           visible, cols_perm):
         counts[r['board_id']] += 1
-    # 所属板块年份（年份在板块层，看板只是容器）
-    # ⚠️ 同样要按**可见板块**算 —— 越权板块的年份不该出现在列表里。
-    col_years = defaultdict(set)
-    for r in visible_columns(username, visible, cols_perm):
-        if r.get('year'):
-            col_years[r['board_id']].add(r['year'])
+    # 【板块年份】字段已下线（#206 用户需求：看板本身不设定年份，年份在板块层）——
+    # 列表改展示「看板创建人」（boards.creator，迁移时从审计日志/owner 回填）
     cfgs = {}
     for r in dbq('SELECT id, board_id, dept, dept_node_id, attr, status, remark, collab_depts, created_at'
                  ' FROM board_config'):
@@ -7581,7 +7622,7 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
             'workspace_id': b.get('workspace_id', ''),
             'card_count': counts.get(bid, 0),
             'config_id': c.get('id'),
-            'col_years': sorted(col_years.get(bid, set()), reverse=True),
+            'creator': b.get('creator') or '',   # #206 看板创建人（替代原「板块年份」展示位）
             'dept': c.get('dept', ''),
             'dept_node_id': c.get('dept_node_id', 0) or 0,
             'attr': c.get('attr', ''),
@@ -7623,7 +7664,12 @@ def list_boards(username: str = Depends(require_auth), include_archived: int = 0
             item['can_archive'] = False
         else:
             item['can_archive'] = _an in _arch_scope_set
-    return {'boards': out, 'depts': _dept_options()}
+    # 归属部门选项：附 can_assign 能力位（#206 归属部门设置分级权限，与写端点同口径）——
+    # 前端新建看板/编辑归属部门的下拉按此禁用越权选项
+    _depts = []
+    for d in _dept_options():
+        _depts.append({**d, 'can_assign': _can_assign_board_dept(username, d['id'])})
+    return {'boards': out, 'depts': _depts}
 
 @app.get('/api/board-config')
 def list_board_config(username: str = Depends(require_auth)):
@@ -7662,6 +7708,9 @@ def create_board_config(req: BoardConfigReq, username: str = Depends(require_aut
     if not (dept and attr):
         raise HTTPException(400, '归属部门 / 属性 均必填')
     _validate_board_config(dept, attr, status)
+    # #206 归属部门设置分级权限（新建配置 = 首次设定归属，一律校验）
+    if not _can_assign_board_dept(username, dept_node_id):
+        raise HTTPException(403, '你无权将看板归属到「%s」（仅超级管理员/管理员/该部门负责人可设置；财务中心仅中心负责人/总经理/管理员）' % dept)
     collab_str = _clean_collab_depts(dept_node_id, req.collab_depts if _is_center else []) or ''
     if dbq('SELECT 1 FROM board_config WHERE board_id=?', (bid,)):
         raise HTTPException(409, '该看板已存在配置，请勿重复添加')
@@ -7983,9 +8032,6 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     if not row:
         raise HTTPException(404, '配置不存在')
     _ensure_board_not_archived(row[0]['board_id'])   # #205ad-bis-2：封存看板锁定配置编辑
-    # 编辑锁（2026-11-12）：看板基本信息与看板编辑弹窗同锁（board:<board_id>）
-    _lk = 'board:' + row[0]['board_id']
-    _fresh = _lock_oneshot(_lk, username, '看板', '保存配置')
     # 分级权限（2026-11-02）：修改看板基本信息 = 看板负责人及以上
     perm_check(username, perm_chain(board_id=row[0]['board_id']),
                OP_UPDATE, LV_BOARD_OWNER, 'board:' + row[0]['board_id'])
@@ -7995,11 +8041,23 @@ def update_board_config(cid: int, req: BoardConfigReq, username: str = Depends(r
     if not (dept and attr):
         raise HTTPException(400, '归属部门 / 属性 均必填')
     _validate_board_config(dept, attr, status)
+    # #206 归属部门**变更**分级权限（2026-11-20 用户需求）：只能设置自己管理的部门；
+    # 财务中心（中心级）仅 中心负责人/总经理/管理员/超管。未变更（保留原值）不收紧 ——
+    # 有看板基本信息编辑权但无归属设置权的用户仍可改属性/备注。
+    _old_cfg = dbq('SELECT dept_node_id FROM board_config WHERE id=?', (cid,))
+    _old_nid = (_old_cfg[0]['dept_node_id'] or 0) if _old_cfg else 0
+    if int(dept_node_id or 0) != int(_old_nid or 0) and not _can_assign_board_dept(username, dept_node_id):
+        raise HTTPException(403, '你无权将看板归属到「%s」（仅超级管理员/管理员/该部门负责人可设置；财务中心仅中心负责人/总经理/管理员）' % dept)
     # T-013d 协作部门：仅中心级归属可配（非中心一律清空）；None=保留原值（旧客户端兼容）
     collab_str = _clean_collab_depts(dept_node_id, req.collab_depts if _is_center else [])
     if collab_str is None:   # 未提交该字段 → 保留库中现值
         old = dbq('SELECT collab_depts FROM board_config WHERE id=?', (cid,))
         collab_str = (old[0]['collab_depts'] or '') if old else ''
+    # ⚠️ 编辑锁必须放在**全部校验之后**获取（2026-11-20 T-207 实测踩坑）：
+    #    此前锁先取、校验后做 → 校验失败的 403/400 路径不释放锁，
+    #    看板被自己的失败请求锁死（后续任何人保存均 409「已被 xx 编辑中」）。
+    _lk = 'board:' + row[0]['board_id']
+    _fresh = _lock_oneshot(_lk, username, '看板', '保存配置')
     dbe('UPDATE board_config SET dept=?, dept_node_id=?, attr=?, status=?, remark=?, collab_depts=? WHERE id=?',
         (dept, dept_node_id, attr, status, remark, collab_str, cid))
     audit_log(username, client_ip(request), 'board_config_update', f'id={cid}',
@@ -8015,12 +8073,13 @@ def delete_board_config(cid: int, username: str = Depends(require_auth), request
     r = dbq('SELECT board_id, dept, attr FROM board_config WHERE id=?', (cid,))
     if not r:
         raise HTTPException(404, '配置不存在')
+    # 分级权限（2026-11-02）：删除看板配置 = 看板负责人及以上
+    # ⚠️ 校验全部前置，编辑锁最后取（同 update_board_config 的锁泄漏修复）
+    perm_check(username, perm_chain(board_id=r[0]['board_id']),
+               OP_DELETE, LV_BOARD_OWNER, 'board:' + r[0]['board_id'])
     # 编辑锁（2026-11-12 补缺）：与看板编辑弹窗同锁（board:<board_id>）
     _lk = 'board:' + r[0]['board_id']
     _fresh = _lock_oneshot(_lk, username, '看板', '删除配置')
-    # 分级权限（2026-11-02）：删除看板配置 = 看板负责人及以上
-    perm_check(username, perm_chain(board_id=r[0]['board_id']),
-               OP_DELETE, LV_BOARD_OWNER, 'board:' + r[0]['board_id'])
     dbe('DELETE FROM board_config WHERE id=?', (cid,))
     row = r[0]
     audit_log(username, client_ip(request), 'board_config_delete',
