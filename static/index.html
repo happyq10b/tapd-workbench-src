@@ -3812,7 +3812,11 @@ function saveDeptOpen(){
 //    此前的硬编码视觉顺序 DEPT_VISUAL_ORDER（需求1，按部门名排序）已删除 ——
 //    它会把架构排序的结果整个覆盖掉（用户反馈：架构排序后目录顺序不更新）。
 // 部门内看板顺序 = ME.boards 原顺序（含看板手工/个人排序），保持一致。
-// 未配置归属部门的看板单独归入「未配置」节点，不丢失、不混入其他部门。
+// 未配置归属部门的看板单独归入「未配置」分组（不丢失、不混入其他部门）；
+// ⚠️ #207-bis（2026-11-20 用户需求）：**主界面架构区不再展示该分组** ——
+//    未配置看板的识别 / 归属配置 / 删除已收敛到【架构管理】的【未配置架构】
+//    区块与【看板管理】（归属部门必选后新建也不会产生游离态）。分组数据
+//    仍由 groupBoardsByDept 计算（toggleDept / openDeptPage 等 key 逻辑共用）。
 function groupBoardsByDept(){
   const depts=(ME.depts&&ME.depts.length)?ME.depts.slice():[];
   const map={}; depts.forEach(d=>{map[d]=[];});
@@ -3882,12 +3886,8 @@ function renderTabs(){
       +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">主页</span>`
       +`</span>`;
   });
-  if(g.unassigned.length){
-    const open=!!DEPT_OPEN[UNASSIGNED_KEY];
-    const sel=ARCH_SEL.has(UNASSIGNED_KEY);
-    dhtml+=`<button class="tree-dept${open?' open':''}${sel?' sel':''} empty" onclick="toggleDept('${UNASSIGNED_KEY}')" title="未在「看板管理」中配置归属部门的看板（单击选中 / 再次单击取消，可多选）" aria-expanded="${open}">`
-      +`<span class="chev">▶</span><span class="dept-name">未配置</span><span class="dept-count tab-col-count">${g.unassigned.length}</span></button>`;
-  }
+  // #207-bis：未配置分组不再对外渲染（见 groupBoardsByDept 注释）——
+  // 原节点/看板 tab 两段渲染移除，识别与删除入口收敛到【架构管理】
   deptBox.innerHTML=dhtml;
   // ── 带 2：板块（展开的部门下的看板 tab，同样三列小栅格）
   let bhtml='';
@@ -3897,9 +3897,7 @@ function renderTabs(){
       ? d.boards.map(b=>boardTabHtml(b,d.name)).join('')
       : `<span class="tree-empty-tip">「${esc(d.name)}」下暂无看板 — 可在「看板管理」中把看板挂载到该部门</span>`;
   });
-  if(g.unassigned.length&&DEPT_OPEN[UNASSIGNED_KEY]){
-    bhtml+=g.unassigned.map(b=>boardTabHtml(b,'')).join('');
-  }
+  // #207-bis：未配置看板 tab 不再对外渲染（同上，入口收敛到【架构管理】）
   // 空状态：账号在【架构管理】里没有任何授权（未被任命到任何节点 / 所属部门未挂载看板）
   // → 明确提示原因，避免用户以为"看板丢了"。可见范围由后端按架构权限计算。
   if(!(ME.boards||[]).length){
