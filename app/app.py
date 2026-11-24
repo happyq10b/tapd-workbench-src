@@ -1189,9 +1189,8 @@ def cleanup_empty_columns_and_boards() -> dict:
     deleted_cols = 0
     for c in dead_cols:
         dbe('DELETE FROM board_columns WHERE col_key=?', (c['col_key'],))
-        # 板块评论/待办/操作记录随板块清除（T-0188；操作记录 2026-11-13）
+        # 板块评论/操作记录随板块清除（T-0188；操作记录 2026-11-13）
         dbe('DELETE FROM column_comments WHERE col_key=?', (c['col_key'],))
-        dbe('DELETE FROM column_todos WHERE col_key=?', (c['col_key'],))
         dbe('DELETE FROM column_actions WHERE col_key=?', (c['col_key'],))
         deleted_cols += 1
 
@@ -1211,7 +1210,6 @@ def cleanup_empty_columns_and_boards() -> dict:
     deleted_boards = 0
     for bid, bname in dead_boards:
         dbe('DELETE FROM column_comments WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
-        dbe('DELETE FROM column_todos WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         dbe('DELETE FROM column_actions WHERE col_key IN (SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         dbe('DELETE FROM board_columns WHERE board_id=?', (bid,))
         dbe('DELETE FROM board_config WHERE board_id=?', (bid,))
@@ -1726,18 +1724,6 @@ def visible_columns(username, boards, columns, board_id=None, counts=None, board
         except Exception:
             pass
         out.append(d)
-    # 板块待办计数（T-0190）：目录板块行显示【待办：已完成/总数】（与事项行代办槽位对齐）
-    if out:
-        tmap = {}
-        for r in dbq('SELECT col_key, done, COUNT(*) n FROM column_todos GROUP BY col_key, done'):
-            t = tmap.setdefault(r['col_key'], [0, 0])
-            t[0] += r['n']
-            if r['done']:
-                t[1] = r['n']
-        for d in out:
-            t = tmap.get(d['col_key'])
-            d['todo_total'] = t[0] if t else 0
-            d['todo_done'] = t[1] if t else 0
     # 排序：置顶优先；置顶项内部与普通项各自按创建时间降序
     out.sort(key=lambda d: (0 if d['pinned'] else 1, -_ts(d.get('created_at')), d['column_name']))
     return out
@@ -3470,10 +3456,9 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     if old and name != old_name:
         dbe('UPDATE cards SET column_name=? WHERE board_id=? AND column_name=? AND deleted=0',
             (name, board_id, old_name))
-        # 板块评论/待办/操作记录挂在 col_key 上（T-0188；操作记录 2026-11-13）
+        # 板块评论/操作记录挂在 col_key 上（T-0188；操作记录 2026-11-13）
         # —— 改名换 key 必须随迁，否则数据失联
         dbe('UPDATE column_comments SET col_key=? WHERE col_key=?', (new_key, req.col_key))
-        dbe('UPDATE column_todos SET col_key=? WHERE col_key=?', (new_key, req.col_key))
         dbe('UPDATE column_actions SET col_key=? WHERE col_key=?', (new_key, req.col_key))
     if old:
         if new_owner is not None:
@@ -3611,16 +3596,6 @@ class ColumnCommentReq(BaseModel):
     mentions: list[str] = []      # 被 @ 的成员姓名列表（与事项评论同口径，2026-11-13）
 
 
-class ColumnTodoReq(BaseModel):
-    col_key: str
-    name: str
-
-
-class ColumnTodoToggleReq(BaseModel):
-    done: bool
-    name: str = ''          # 传值 = 顺带改名
-
-
 @app.get('/api/columns/comments')
 def column_comments_list(col_key: str, username: str = Depends(require_auth)):
     _column_for_access(col_key, username)
@@ -3702,85 +3677,6 @@ def get_column_actions(col_key: str, username: str = Depends(require_auth)):
     return {'actions': [dict(r) for r in rows]}
 
 
-@app.get('/api/columns/todos')
-def column_todos_list(col_key: str, username: str = Depends(require_auth)):
-    _column_for_access(col_key, username)
-    rows = dbq('SELECT id, name, done, sort, created_by, created_at FROM column_todos'
-               ' WHERE col_key=? ORDER BY done, sort, id', (col_key,))
-    return {'todos': [dict(r) for r in rows]}
-
-
-def _todo_guard(col_key: str, username: str):
-    """待办写操作的公共校验：板块可见 + 板块未被**他人**锁定（编辑互斥）。"""
-    _column_for_access(col_key, username)
-    holder = lock_mgr.who('column:' + col_key)
-    if holder and holder != username:
-        raise HTTPException(409, f'板块已被 {_lock_holder_name(holder)} 锁定，无法修改待办')
-
-
-@app.post('/api/columns/todos')
-async def add_column_todo(req: ColumnTodoReq, username: str = Depends(require_writer),
-                          request: Request = None):
-    _todo_guard(req.col_key, username)
-    # 2026-11-13（用户口径）：板块待办只能由**板块负责人及以上**追加 ——
-    # 板块负责人 / 看板负责人 / 架构负责人 / 管理员放行（has_role = effective_level
-    # ≥ LV_COLUMN_OWNER，上级角色天然继承）；参与人与普通可见用户 403。
-    # 与事项待办 #130 的 LV_CARD_OWNER 门槛同构；此前只做 require_writer 粗闸门，
-    # 任何登录账号直调 API 都能加 → 越权口子，本处收紧。
-    if PERM_ENABLED and not (is_admin(username) or username == SUPER_ADMIN):
-        _crow = dbq('SELECT column_id FROM board_columns WHERE col_key=?', (req.col_key,))
-        if not _crow:
-            raise HTTPException(404, '板块不存在')
-        if not has_role(dbq, username,
-                        perm_chain(column_id=_crow[0]['column_id']), LV_COLUMN_OWNER):
-            raise HTTPException(403, '仅板块负责人及以上可添加板块待办，如需新增请联系板块负责人或管理员')
-    name = (req.name or '').strip()[:200]
-    if not name:
-        raise HTTPException(400, '待办内容不能为空')
-    mx = dbq('SELECT COALESCE(MAX(sort),0) m FROM column_todos WHERE col_key=?',
-             (req.col_key,))[0]['m']
-    dbe('INSERT INTO column_todos (col_key, name, sort, created_by) VALUES (?,?,?,?)',
-        (req.col_key, name, mx + 1, username))
-    log_column_action(req.col_key, username, 'todo_add', name)
-    audit_log(username, client_ip(request), 'subtask_add', f'板块 {req.col_key}',
-              '新增板块待办', 'success')
-    await _ws_column_change(req.col_key, username)
-    return {'ok': True}
-
-
-@app.put('/api/columns/todos/{tid}')
-async def update_column_todo(tid: int, req: ColumnTodoToggleReq, username: str = Depends(require_writer),
-                             request: Request = None):
-    row = dbq('SELECT col_key FROM column_todos WHERE id=?', (tid,))
-    if not row:
-        raise HTTPException(404, '待办不存在')
-    _todo_guard(row[0]['col_key'], username)
-    if req.name.strip():
-        dbe('UPDATE column_todos SET done=?, name=? WHERE id=?',
-            (1 if req.done else 0, req.name.strip()[:200], tid))
-    else:
-        dbe('UPDATE column_todos SET done=? WHERE id=?', (1 if req.done else 0, tid))
-    log_column_action(row[0]['col_key'], username, 'todo_update',
-                      f'{req.name.strip()[:120]}（{"完成" if req.done else "取消完成"}）')
-    await _ws_column_change(row[0]['col_key'], username)
-    return {'ok': True}
-
-
-@app.delete('/api/columns/todos/{tid}')
-async def delete_column_todo(tid: int, username: str = Depends(require_writer),
-                             request: Request = None):
-    row = dbq('SELECT col_key, name FROM column_todos WHERE id=?', (tid,))
-    if not row:
-        raise HTTPException(404, '待办不存在')
-    _todo_guard(row[0]['col_key'], username)
-    dbe('DELETE FROM column_todos WHERE id=?', (tid,))
-    log_column_action(row[0]['col_key'], username, 'todo_delete', row[0]['name'])
-    audit_log(username, client_ip(request), 'subtask_delete', f'板块 {row[0]["col_key"]}',
-              '删除板块待办', 'success')
-    await _ws_column_change(row[0]['col_key'], username)
-    return {'ok': True}
-
-
 @app.delete('/api/columns/{col_key:path}')
 async def delete_column(col_key: str, username: str = Depends(require_writer), request: Request = None):
     """删除单个板块（#158 批量删除的执行单元）。
@@ -3832,9 +3728,8 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
             conn.execute(f'DELETE FROM card_subtasks WHERE card_id IN ({ph})', ids)
         # ③ 板块元信息
         conn.execute('DELETE FROM board_columns WHERE col_key=?', (key,))
-        # ④ 板块评论/待办/操作记录随板块删除（T-0188；操作记录 2026-11-13）
+        # ④ 板块评论/操作记录随板块删除（T-0188；操作记录 2026-11-13）
         conn.execute('DELETE FROM column_comments WHERE col_key=?', (key,))
-        conn.execute('DELETE FROM column_todos WHERE col_key=?', (key,))
         conn.execute('DELETE FROM column_actions WHERE col_key=?', (key,))
         conn.commit()
     except Exception:
@@ -4475,21 +4370,20 @@ async def copy_board(board_id: str, req: CopyBoardReq, username: str = Depends(r
         conn.rollback()
         raise
     # ── 整套复制（deep）：连带板块 + 事项 + 子事项（2026-11-03）──
-    copied_cols = copied_cards = copied_todos = 0
+    copied_cols = copied_cards = 0
     if getattr(req, 'deep', False):
-        copied_cols, copied_cards, copied_todos = _deep_copy_board_content(
+        copied_cols, copied_cards = _deep_copy_board_content(
             board_id, new_bid, name, username)
     log_action('__board__', username, 'copy', f'复制看板 {name}')
     audit_log(username, client_ip(request), 'board_copy', f'看板 {board_id}',
               f'复制看板「{src["board_name"]}」→「{name}」（归属部门 {dept or "未配置"}，属性 {attr}'
-              + (f'；整套复制：板块 {copied_cols} 个、事项 {copied_cards} 条、待办 {copied_todos} 条'
+              + (f'；整套复制：板块 {copied_cols} 个、事项 {copied_cards} 条'
                  if getattr(req, 'deep', False) else '') + '）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'board_id': new_bid, 'board_name': name, 'copy_from': board_id,
             'dept': dept, 'dept_node_id': dept_node_id, 'attr': attr, 'status': status,
             'deep': bool(getattr(req, 'deep', False)),
-            'copied_columns': copied_cols, 'copied_cards': copied_cards,
-            'copied_todos': copied_todos}
+            'copied_columns': copied_cols, 'copied_cards': copied_cards}
 
 
 # ---------------- API：删除看板（连同其板块与事项） ----------------
@@ -4525,10 +4419,8 @@ def _purge_board(bid: str) -> dict:
         # ② 子事项清单（card_subtasks）与评论/操作记录随事项失效
         conn.execute('DELETE FROM card_subtasks WHERE card_id IN '
                      '(SELECT card_id FROM cards WHERE board_id=?)', (bid,))
-        # ③ 板块 / 配置 / 看板本体（板块评论/待办/操作记录随板块一并清除，T-0188；操作记录 2026-11-13）
+        # ③ 板块 / 配置 / 看板本体（板块评论/操作记录随板块一并清除，T-0188；操作记录 2026-11-13）
         conn.execute('DELETE FROM column_comments WHERE col_key IN '
-                     '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
-        conn.execute('DELETE FROM column_todos WHERE col_key IN '
                      '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
         conn.execute('DELETE FROM column_actions WHERE col_key IN '
                      '(SELECT col_key FROM board_columns WHERE board_id=?)', (bid,))
@@ -4724,7 +4616,6 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     #（不会留下「空板块副本」）—— 因此这里用 conn.execute 而不是 dbe（dbe 逐句提交）
     conn = get_conn()
     copied_cards = copied_subtasks = 0
-    copied_todos = 0
     try:
         conn.execute(
             'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
@@ -4734,17 +4625,8 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
             (key, new_cid, req.board_id, name, created, username, nature, category, year, src['col_key'],
              _src_completion, src.get('owner') or '', src.get('participants') or '',
              src.get('description') or '', src.get('due_date') or '', src.get('overdue_days')))
-        # #205ab-cis（用户反馈「板块的代办和截止时间没有一并复制」）：板块行补随附
-        # description（板块说明/代办说明）/ due_date（截止时间/倒计时）/ overdue_days
-        # （逾期结算，T-191j），并整张复制**板块待办清单**（column_todos：
-        # name/done/sort/created_by/created_at 原样）—— 原实现这三列一列都没带。
-        src_todos = dbq('SELECT name, done, sort, created_by, created_at FROM column_todos'
-                        " WHERE col_key=? ORDER BY sort, id", (src['col_key'],))
-        for t in src_todos:
-            conn.execute('INSERT INTO column_todos (col_key, name, done, sort, created_by, created_at)'
-                         ' VALUES (?,?,?,?,?,?)',
-                         (key, t['name'], t['done'], t['sort'], t['created_by'], t['created_at']))
-        copied_todos = len(src_todos)
+        # #205ab-cis（用户反馈「板块的待办和截止时间没有一并复制」）：板块行补随附
+        # description（板块说明）/ due_date（截止时间/倒计时）/ overdue_days（逾期结算，T-191j）
         copied_cards, copied_subtasks = _deep_copy_column_cards(
             src, req.board_id, name, new_cid)
         conn.commit()
@@ -4754,7 +4636,7 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
         except Exception:
             pass
         raise
-    log_action('__column__', username, 'copy', f'复制板块 {name}（含事项 {copied_cards} 条、勾选 {copied_subtasks} 条、待办 {copied_todos} 条）')
+    log_action('__column__', username, 'copy', f'复制板块 {name}（含事项 {copied_cards} 条、勾选 {copied_subtasks} 条）')
     audit_log(username, client_ip(request), 'column_copy', f'板块 {src["col_key"]}',
               f'复制板块「{src["column_name"]}」→「{name}」（目标看板 {req.board_id}，'
               f'连带事项 {copied_cards} / 勾选 {copied_subtasks}）', 'success')
@@ -4762,8 +4644,7 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'board_id': req.board_id, 'copy_from': src['col_key'],
             'created_at': created, 'creator': username, 'nature': nature, 'category': category, 'year': year,
-            'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks,
-            'copied_todos': copied_todos}
+            'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks}
 
 
 def _topo_order_cards(cards):
@@ -4929,18 +4810,6 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
              c.get('description') or '', c.get('due_date') or '', c.get('overdue_days')))
         col_id_map[c['column_id']] = new_cid
         key_map[c['col_key']] = new_key
-    # ── ①-bis 板块待办清单（#205ab-cis：column_todos 按 col_key 关联，整表随附）──
-    src_keys = list(key_map.keys())
-    copied_todos = 0
-    if src_keys:
-        marks = ','.join('?' * len(src_keys))
-        for t in dbq('SELECT col_key, name, done, sort, created_by, created_at FROM column_todos'
-                     ' WHERE col_key IN (%s) ORDER BY sort, id' % marks, src_keys):
-            conn.execute('INSERT INTO column_todos (col_key, name, done, sort, created_by, created_at)'
-                         ' VALUES (?,?,?,?,?,?)',
-                         (key_map[t['col_key']], t['name'], t['done'], t['sort'],
-                          t['created_by'], t['created_at']))
-            copied_todos += 1
     # ── ② 事项（主事项 + 子事项）──
     # ⚠️ cards 表**没有 id 列**（主键是 card_id）→ ORDER BY card_id
     src_cards = [dict(r) for r in dbq(
@@ -5000,7 +4869,7 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
         conn.execute('INSERT INTO cards (%s) VALUES (%s)' % (','.join(cols), marks),
                      [vals[k] for k in cols])
         card_id_map[c['card_id']] = new_cid
-    return len(col_id_map), len(card_id_map), copied_todos
+    return len(col_id_map), len(card_id_map)
 
 
 @app.post('/api/cards/copy')
@@ -5172,7 +5041,7 @@ def _delete_card_core(card_id: str, username: str, request=None) -> int:
         res = dbe('UPDATE cards SET deleted=1 WHERE card_id=? AND deleted=0', (card_id,))
         if res.rowcount == 0:
             raise HTTPException(404, '卡片不存在或已删除')
-        # 级联：删除子事项（递归，含孙级）及其代办任务
+        # 级联：删除子事项（递归，含孙级）及其待办任务
         # ⚠️ 原查询带 parent_id!=card_id 条件，恰好把**直接子事项**排除在图之外，
         #    导致级联永远传播不到子事项（历史 bug，#161 修复）：改为全量取图。
         allsubs = dbq('SELECT card_id, parent_id FROM cards WHERE deleted=0')
@@ -5662,7 +5531,7 @@ def get_card_children(card_id: str, username: str = Depends(require_auth)):
         total += 1
         ids.append(n['card_id'])
         stack.extend(n.get('children') or [])
-    # 子事项代办统计（2026-11-09 #94）：与主事项列表同款口径 → 目录子行显示【代办：n/N】
+    # 子事项待办统计（2026-11-09 #94）：与主事项列表同款口径 → 目录子行显示【待办：n/N】
     st = subtask_stats(ids) if ids else {}
     stack = list(tree)
     while stack:
@@ -9602,8 +9471,8 @@ XLSX_COLUMNS = [
     ('结算情况',   '_settle_text', 12),
     ('创建人',     'creator',      12),
     ('描述',       'description',  50),
-    # 2026-11-17 #143 新增：代办任务（编辑弹窗「代办任务」，card_subtasks 表明细）
-    ('代办任务',   '_subtasks_text', 40),
+    # 2026-11-17 #143 新增：待办任务（编辑弹窗「待办任务」，card_subtasks 表明细）
+    ('待办任务',   '_subtasks_text', 40),
     ('是否子事项', '_is_sub',      10),
     ('父事项名称', '_parent_name', 24),
 ]
@@ -9843,7 +9712,7 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
         _marks = ','.join('?' * len(_pids))
         for r in dbq('SELECT card_id, card_name FROM cards WHERE card_id IN (%s)' % _marks, _pids):
             _pmap[r['card_id']] = r['card_name']
-    # 代办任务明细（2026-11-17 #143：编辑弹窗「代办任务」，card_subtasks 表）
+    # 待办任务明细（2026-11-17 #143：编辑弹窗「待办任务」，card_subtasks 表）
     _stmap = {}
     _cids = [c.get('card_id') for c in cards]
     if _cids:
@@ -9870,7 +9739,7 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
                 c['_settle_text'] = ('逾期%d天' % _n) if _n > 0 else (('提前%d天' % -_n) if _n < 0 else '按时完成')
             except (TypeError, ValueError):
                 c['_settle_text'] = ''
-        # 代办任务明细：√ 已完成 / □ 未完成，换行分隔
+        # 待办任务明细：√ 已完成 / □ 未完成，换行分隔
         _sts = _stmap.get(c.get('card_id') or '', [])
         c['_subtasks_text'] = '\n'.join(
             ('√ ' if r['done'] else '□ ') + (r['title'] or '') for r in _sts)
@@ -10046,10 +9915,9 @@ async def import_data(req: ImportReq, username: str = Depends(require_admin), re
                 conn.execute(f'INSERT OR REPLACE INTO board_columns ({",".join(cols)}) '
                              f'VALUES ({",".join("?"*len(cols))})',
                              [c[k] for k in cols])
-            # 板块评论/待办/操作记录按 col_key 挂靠（T-0188；操作记录 2026-11-13）
+            # 板块评论/操作记录按 col_key 挂靠（T-0188；操作记录 2026-11-13）
             # —— 导入替换后清掉失联数据
             conn.execute('DELETE FROM column_comments WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
-            conn.execute('DELETE FROM column_todos WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
             conn.execute('DELETE FROM column_actions WHERE col_key NOT IN (SELECT col_key FROM board_columns)')
         # ---- 板块配置 ----
         if req.board_config:

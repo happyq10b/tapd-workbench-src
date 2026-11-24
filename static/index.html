@@ -983,7 +983,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .copy-btn{border:1px solid var(--border);background:#fff;color:var(--text2);padding:3px 9px;
   font-size:11.5px;border-radius:12px;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
 .copy-btn:hover{border-color:var(--primary);color:var(--primary);background:#f0f5ff}
-/* 行尾固定槽位：可选元素（代办 / 状态 / 置顶 / 子事项）无论有无都占同样宽度，
+/* 行尾固定槽位：可选元素（待办 / 状态 / 置顶 / 子事项）无论有无都占同样宽度，
    行内结构恒定 → 字段列的起始位置在所有行上完全一致（纵向对齐）。
    display:inline-block + 定宽，空内容时也保留占位宽度。
    （「逾期」槽位已于 2026-11-13 移除 —— 空间让给标题列，标题 flex:1 自动吸收） */
@@ -1159,13 +1159,13 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 @keyframes overlayIn{from{opacity:0}to{opacity:1}}
 .modal-overlay.closing .modal{opacity:0;translate:0 8px;transition:opacity .16s ease,translate .16s ease}
 .modal{background:#fff;border-radius:12px;width:640px;max-width:94vw;max-height:94vh;overflow:auto;padding:20px 24px;box-shadow:0 8px 24px rgba(0,0,0,.15)}
-/* 宽版弹窗：详情弹窗（描述 + 评论 + 操作记录 + 代办任务）内容多，
+/* 宽版弹窗：详情弹窗（描述 + 评论 + 操作记录 + 待办任务）内容多，
    默认 640px 显得拥挤（用户反馈「目录进入后的弹窗太小」）。
    改为 900px，并把左右留白收窄，让内容区更舒展。 */
 .modal-wide{width:900px;max-width:96vw;padding:22px 28px}
 .modal-wide .modal-body{gap:14px}
 /* ===== 详情弹窗重排（T-215 2026-11-24）：后续主要编辑界面 =====
-   1180px 双栏 —— 左主列（元信息/描述/每周进展/代办/评论）+ 右侧栏（操作记录）。
+   1180px 双栏 —— 左主列（元信息/描述/每周进展/待办/评论）+ 右侧栏（操作记录）。
    右栏用左边框分隔而非卡片盒，保持轻量；窄屏(<1024px)退化为单列（布局锁定约定
    不适用于弹窗内部 —— 弹窗本身就有 96vw 上限的自适应）。 */
 .modal-detail{width:min(1180px,96vw);padding:22px 28px;
@@ -1181,19 +1181,19 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .dg-main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:18px;
   overflow-y:auto;overscroll-behavior:contain}
 .dg-main .comment-box{margin-top:12px}
-/* T-215-4 右栏三盒等比例（代办 / 最近评论 / 操作记录）：各占 1/3 高度、区内滚动 */
+/* T-215-4 右栏三盒等比例（待办 / 最近评论 / 操作记录）：各占 1/3 高度、区内滚动 */
 .dg-side{min-width:0;min-height:0;border-left:1px solid var(--border);padding-left:18px;
   display:flex;flex-direction:column;overflow:hidden}
 .dg-side .side-box{flex:0 0 auto;height:33.333%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;
   padding:10px 0 0;border-top:1px solid var(--border)}
-/* 代办无内容隐藏时（openDetail 加 .sub2）：剩余两盒各占一半 */
+/* 待办无内容隐藏时（openDetail 加 .sub2）：剩余两盒各占一半 */
 .dg-side.sub2 .side-box{height:50%}
 .dg-side .side-box:first-child{border-top:none;padding-top:0}
 .dg-side .side-box h4{color:var(--text);font-weight:600;font-size:13px;margin-bottom:8px;flex-shrink:0}
 .dg-side .side-box .subtask-head{flex-shrink:0;margin-bottom:8px}
 .dg-side .side-box .comment-list,.dg-side .side-box #d_actions,
 .dg-side .side-box .subtask-list{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto}
-/* 代办展示向评论靠齐（T-215-4）：同为 12.5px 行 + 虚线分隔，弱化底色与圆角 */
+/* 待办展示向评论靠齐（T-215-4）：同为 12.5px 行 + 虚线分隔，弱化底色与圆角 */
 .dg-side #d_subtask_list .subtask-item{font-size:12.5px;padding:5px 0;border-radius:0;
   border-bottom:1px dashed var(--border);background:transparent;gap:6px}
 .dg-side #d_subtask_list .subtask-item:hover{background:transparent}
@@ -1216,7 +1216,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
   .dg-main{padding-right:0}
   .dg-side{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:12px;margin-top:12px}
 }
-/* 每周进展（T-215）：与代办任务盒同一视觉语言（浅底描边卡）；
+/* 每周进展（T-215）：与待办任务盒同一视觉语言（浅底描边卡）；
    每周一行 = 周数徽标（主色描边胶囊）+ 自增高 textarea。
    未保存改动 → 琥珀描边浅底（.dirty），保存按钮同步点亮。 */
 .wp-box{border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;background:#fafcff;margin-top:12px}
@@ -1588,7 +1588,7 @@ body{
 .week-group:hover{box-shadow:var(--shadow-md)}
 /* T-0190：水平内边距 = .item-card（14px）+ .week-body（8px）= 22px —— 事项行
    嵌在 .week-body（8px 内边距）里，标题行不补这 8px 行尾槽位就会整体错位 8px，
-   板块行【待办】与事项行【代办】无法纵向同列 */
+   板块行【待办】与事项行【待办】无法纵向同列 */
 .week-header{padding:14px 22px}
 .week-header:hover{background:#f7f9fc}
 .week-title{font-size:15px}
@@ -2205,13 +2205,13 @@ function goLogin(){
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="e_desc" style="min-height:147px"></textarea></div>
       <div class="subtask-box">
         <div class="subtask-head">
-          <span class="subtask-title">代办任务</span>
+          <span class="subtask-title">待办任务</span>
           <span class="subtask-count" id="e_subtask_count"></span>
         </div>
         <div id="e_subtask_list" class="subtask-list"></div>
         <div class="subtask-add">
           <div id="e_subtask_add_row" style="display:flex;gap:8px;flex:1;min-width:0">
-            <input type="text" class="form-input" id="e_subtask_new" placeholder="添加代办任务，回车确认…" onkeydown="if(event.key==='Enter')addSubtask()">
+            <input type="text" class="form-input" id="e_subtask_new" placeholder="添加待办任务，回车确认…" onkeydown="if(event.key==='Enter')addSubtask()">
             <button class="btn-default" onclick="addSubtask()" style="flex-shrink:0">添加</button>
           </div>
         </div>
@@ -2320,19 +2320,6 @@ function goLogin(){
         </select>
       </div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="c_desc" style="min-height:147px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
-      <!-- 待办管理（T-0190）：待办的**设置入口只在编辑板块弹窗**（浏览界面只展示和勾选）；
-           勾选/增/删即时落库（板块锁由编辑弹窗持有，待办写校验放行本人） -->
-      <div class="form-group" id="c_todos_group" style="display:none"><label>待办</label>
-        <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
-          <div id="c_todos_list" class="subtask-list" style="max-height:160px;overflow:auto"></div>
-          <!-- 添加行（2026-11-13）：仅板块负责人及以上可见（chkColOwnerOf，与后端同口径） -->
-          <div style="display:flex;gap:8px;margin-top:8px" id="c_todo_add_row">
-            <input type="text" class="form-input" id="c_todo_new" placeholder="添加待办，回车确认…" style="flex:1"
-                   onkeydown="if(event.key==='Enter'){event.preventDefault();colAddTodo()}">
-            <button class="btn-default" onclick="colAddTodo()" style="flex-shrink:0">添加</button>
-          </div>
-        </div>
-      </div>
       <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项。</div>
     </div>
     <div class="modal-footer" style="display:flex;align-items:center">
@@ -2359,11 +2346,6 @@ function goLogin(){
     <div class="modal-body">
       <div class="detail-meta" id="cd_meta"></div>
       <div class="detail-desc" id="cd_desc" style="display:none"></div>
-      <!-- 待办（T-0190）：浏览界面**只展示和勾选**，设置入口（增/删）在编辑板块弹窗 -->
-      <div class="subtask-box">
-        <div class="subtask-head"><span class="subtask-title">待办</span><span class="subtask-count" id="cd_todo_count"></span></div>
-        <div id="cd_todos" class="subtask-list"></div>
-      </div>
       <!-- 评论（T-0188 → 2026-11-13 复刻事项评论）：可见即可评；
            @ 提及 / 全部评论按钮 / 预览限最近 10 条，与事项评论同一套交互 -->
       <div class="comment-box"><h4>评论</h4><div id="cd_comments" class="comment-list"></div>
@@ -2600,7 +2582,7 @@ function goLogin(){
 </div>
 
 <!-- 事项详情 / 父子事项预览（T-215 2026-11-24 重排）：
-     拉宽 1180px 双栏 —— 左主列（元信息 / 描述 / 每周进展 / 代办任务 / 评论）+
+     拉宽 1180px 双栏 —— 左主列（元信息 / 描述 / 每周进展 / 待办任务 / 评论）+
      右侧栏（操作记录）。这是后续主要编辑界面。
      ⚠️ 全部元素 id 保持不变（d_meta / d_desc / d_wp_* / d_subtask_* / d_comments /
      d_new_comment / d_mention_* / d_actions）→ openDetail 与事件委托零改动。 -->
@@ -2629,7 +2611,7 @@ function goLogin(){
           </div>
           <div id="d_wp_list" class="wp-list"></div>
         </div>
-      <!-- 评论输入留左底（T-215 用户定稿）；T-215-4：右栏等比例三段 = 代办/最近评论/操作记录 -->
+      <!-- 评论输入留左底（T-215 用户定稿）；T-215-4：右栏等比例三段 = 待办/最近评论/操作记录 -->
       <div class="comment-box comment-input-box"><h4>评论</h4>
         <div class="comment-form">
           <input id="d_new_comment" placeholder="写评论…（输入 @ 可提及成员）" oninput="onCommentInput(this)" autocomplete="off">
@@ -2645,7 +2627,7 @@ function goLogin(){
       <aside class="dg-side">
         <div class="side-box" id="d_subtask_box" style="display:none">
           <!-- T-216：标题用 h4 → 与「最近评论 / 操作记录」字体样式完全一致 -->
-          <div class="subtask-head"><h4 style="margin:0 8px 0 0">代办任务</h4><span class="subtask-count" id="d_subtask_count"></span></div>
+          <div class="subtask-head"><h4 style="margin:0 8px 0 0">待办任务</h4><span class="subtask-count" id="d_subtask_count"></span></div>
           <div id="d_subtask_list" class="subtask-list"></div>
         </div>
         <div class="side-box"><h4>最近评论</h4><div id="d_comments" class="comment-list"></div></div>
@@ -6254,7 +6236,7 @@ function buildFilterParams(extra){
 async function reload(page){
   curPage=page;
   // 子事项目录缓存清空（2026-11-09 #96b）：子树展开后数据可能已被编辑
-  // （周数/代办/标题），不清缓存会让目录继续显示旧值——「改了没生效」的观感根因。
+  // （周数/待办/标题），不清缓存会让目录继续显示旧值——「改了没生效」的观感根因。
   if(typeof SUBTREE_CACHE!=='undefined')Object.keys(SUBTREE_CACHE).forEach(k=>delete SUBTREE_CACHE[k]);
   // ⚠️ 未选板块（curBoard 为空）→ **不拉数据**，直接渲染空状态。
   //    否则会把全部可见板块的事项一次性灌进来（需求3：初始内容区应为空）。
@@ -7291,7 +7273,7 @@ function renderBoard(cards,cols,q,colHits,allCols){
         ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
         ${_colFcols}
         <span class="item-tail">
-          <span class="slot-subtask">${(meta?meta.todo_total:0)>0?`<span class="st-mini ${meta.todo_done===meta.todo_total?'all':''}" title="板块待办完成进度（勾选在板块编辑界面或浏览界面进行）">【待办：${meta.todo_done}/${meta.todo_total}】</span>`:''}</span>
+          <span class="slot-subtask">${(meta?meta.card_count:0)>0?`<span class="st-mini ${meta.done_count===meta.card_count?'all':''}" title="板块下事项完成情况（已完成/总数）">【完成：${meta.done_count}/${meta.card_count}】</span>`:''}</span>
           <span class="slot-status">${_compTag}</span>
           <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_colOpsId}')" title="新建事项 / 置顶 / 复制">操作 ▾</button></span>
         </span>
@@ -8129,7 +8111,7 @@ function cardItem(c,seq){
     <span class="item-title" onclick="openDetail('${c.card_id}')" title="${esc(c.card_name)}">${esc(c.card_name)}</span>${lockHtml}
     <span class="fcols"${fcolsGridStyle(_fo)}>${colsHtml}</span>
     <span class="item-tail">
-      <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">【代办：${c.subtask_done}/${c.subtask_total}】</span>`:''}</span>
+      <span class="slot-subtask">${c.subtask_total>0?`<span class="st-mini ${c.subtask_total===c.subtask_done?'all':''}">【待办：${c.subtask_done}/${c.subtask_total}】</span>`:''}</span>
       <span class="slot-status">${statusTag(c.card_id,c.status)}</span>
       <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${opsId}')" title="置顶 / 复制 / 子事项">操作 ▾</button></span>
     </span>
@@ -8242,7 +8224,7 @@ function subNodeHtml(n,level,parentId){
     <span class="s-title" onclick="openSubModal('${n.card_id}')" title="点击打开子事项弹窗">${esc(n.card_name)}</span>${_subLockHtml}
     <span class="fcols"${fcolsGridStyle(_fo)}>${colsHtml}</span>
     <span class="sub-tail">
-      <span class="slot-subtask">${n.subtask_total>0?`<span class="st-mini ${n.subtask_total===n.subtask_done?'all':''}">【代办：${n.subtask_done}/${n.subtask_total}】</span>`:''}</span>
+      <span class="slot-subtask">${n.subtask_total>0?`<span class="st-mini ${n.subtask_total===n.subtask_done?'all':''}">【待办：${n.subtask_done}/${n.subtask_total}】</span>`:''}</span>
       <span class="slot-status">${statusTag(n.card_id,n.status,'padding:1px 8px;font-size:11px',true)}</span>
       <span class="slot-ops"><button class="ops-btn" onclick="event.stopPropagation();rowOpsShow(event,'${_opsId}')" title="置顶 / 复制">操作 ▾</button></span>
     </span>
@@ -8719,7 +8701,7 @@ async function openSubModal(id){
     const d=await api('/api/cards?card_id='+id);
     const c=d.cards&&d.cards[0];
     if(!c){toast('子事项不存在或已删除');closeModal('detailModal');return}
-    // 子事项与主事项统一：点开先进**详情弹窗**（评论 / 操作记录 / 状态 / 代办任务全部可用），
+    // 子事项与主事项统一：点开先进**详情弹窗**（评论 / 操作记录 / 状态 / 待办任务全部可用），
     // 需要修改时再由详情弹窗里的「✏️ 编辑」进入独立的编辑弹窗 —— 编辑流程不与详情功能混杂。
     await openDetail(id);
   }catch(e){toast(e.message)}
@@ -9303,11 +9285,9 @@ function openColumnModal(){
   document.getElementById('c_submit').textContent='创建板块';
   const _tipNew=document.getElementById('c_tip');
   if(_tipNew){_tipNew.style.display='';_tipNew.textContent='创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项。';}
-  // 新建模式：无板块可删、无既有待办（T-0190：待办要在板块创建后才有归属）
+  // 新建模式：无板块可删
   const delBtn=document.getElementById('c_delete_btn');
   if(delBtn)delBtn.style.display='none';
-  const tg=document.getElementById('c_todos_group');
-  if(tg)tg.style.display='none';
   openModal('columnModal');
 }
 // 编辑板块：从板块浏览界面的「✏️ 编辑」进入（T-0183）。
@@ -9364,10 +9344,6 @@ async function openColumnEdit(d,fromDetail){
   //    会让无板块责任的普通编辑也看到删除按钮（后端必 403）。
   const delBtn=document.getElementById('c_delete_btn');
   if(delBtn)delBtn.style.display=(colCanDelete(COLUMN_EDIT_KEY,COLUMN_EDIT_BOARD)?'':'none');
-  // 待办管理（T-0190）：设置入口只在编辑弹窗 —— 加载当前板块待办清单
-  const tg=document.getElementById('c_todos_group');
-  if(tg)tg.style.display='';
-  colLoadTodos(COLUMN_EDIT_KEY);
   COLUMN_EDIT_FROM_DETAIL=!!fromDetail;   // 标记来源：关闭编辑后回浏览界面
   openModal('columnModal');
   return true;
@@ -9440,142 +9416,8 @@ function renderColumnDetail(d){
   // ⚠️ 操作记录必须挂在 renderColumnDetail 里（而不是只在 openColumnDetail）——
   // 「编辑 → 保存 → 回到预览」走 backToColumnDetail → renderColumnDetail，
   // 若不在此刷新，刚保存的记录不会出现（T-204b 用户报告「操作记录没有生效」根因）
-  cdLoadTodos(d.colkey||'');
   cdLoadComments(d.colkey||'');
   cdLoadActions(d.colkey||'');
-}
-// ---------- 板块待办（T-0188）：结构与事项「代办任务」一致 ----------
-var CD_TODOS=[];   // 当前浏览板块的待办清单
-async function cdLoadTodos(colkey){
-  const box=document.getElementById('cd_todos');
-  if(!box)return;
-  box.innerHTML='<div style="color:var(--text3);font-size:12px;padding:4px">加载中…</div>';
-  document.getElementById('cd_todo_count').textContent='';
-  try{
-    const res=await api('/api/columns/todos?col_key='+encodeURIComponent(colkey));
-    CD_TODOS=res.todos||[];
-    renderCdTodos();
-  }catch(e){
-    box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:4px">待办加载失败：'+esc(e.message||'')+'</div>';
-  }
-}
-function renderCdTodos(){
-  // T-0190（用户口径）：浏览界面（预览）对待办**只展示和勾选**，不做任何设置入口
-  //  —— 增/删在【编辑板块】弹窗里进行；待办项**不显示创建人账号**。
-  const box=document.getElementById('cd_todos');
-  const canEdit=!!(ME&&ME.can_edit);
-  document.getElementById('cd_todo_count').textContent=CD_TODOS.length?String(CD_TODOS.length):'';
-  const done=CD_TODOS.filter(x=>x.done).length;
-  if(!CD_TODOS.length){
-    box.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px">暂无待办</div>';
-    return;
-  }
-  box.innerHTML=CD_TODOS.map(function(t){
-    return `<div class="subtask-item" data-todo="${t.id}">`
-      +`<input type="checkbox" ${t.done?'checked':''} ${canEdit?'':'disabled'}`
-      +` onclick="cdToggleTodo(${t.id},this.checked);event.stopPropagation()" title="${canEdit?'勾选/取消待办':'仅编辑权限可勾选待办'}">`
-      +`<span class="subtask-name ${t.done?'done':''}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.name||'')}</span>`
-      +`</div>`;
-  }).join('')
-  +`<div style="padding:5px 4px 0;font-size:11.5px;color:var(--text3)">已完成 ${done}/${CD_TODOS.length}</div>`;
-}
-async function cdAddTodo(){
-  const d=COLUMN_DETAIL||{};
-  const inp=document.getElementById('cd_todo_new');
-  const name=(inp.value||'').trim();
-  if(!name){toast('请输入待办内容');return}
-  try{
-    await api('/api/columns/todos',{method:'POST',body:JSON.stringify({col_key:d.colkey||'',name:name})});
-    inp.value='';
-    await cdLoadTodos(d.colkey||'');
-  }catch(e){toast(e.message||'添加失败')}
-}
-async function cdToggleTodo(id,done){
-  try{
-    await api('/api/columns/todos/'+id,{method:'PUT',body:JSON.stringify({done:!!done})});
-    const t=CD_TODOS.find(x=>x.id===id);
-    if(t)t.done=done?1:0;
-    renderCdTodos();
-    // 勾选待办也写入操作记录（todo_update）→ 同步刷新（T-204d：操作记录实时性）
-    const _ck=(COLUMN_DETAIL||{}).colkey||'';
-    if(_ck)cdLoadActions(_ck);
-  }catch(e){toast(e.message||'更新失败');cdLoadTodos((COLUMN_DETAIL||{}).colkey||'')}
-}
-async function cdDeleteTodo(id){
-  if(!confirm('确定删除该待办吗？'))return;
-  try{
-    await api('/api/columns/todos/'+id,{method:'DELETE'});
-    CD_TODOS=CD_TODOS.filter(x=>x.id!==id);
-    renderCdTodos();
-  }catch(e){toast(e.message||'删除失败')}
-}
-// ---------- 板块待办管理（T-0190）：设置入口**只在编辑板块弹窗** ----------
-// 浏览界面只展示和勾选（renderCdTodos 已去增删）；这里增/删/勾即时落库。
-// 编辑弹窗持有板块锁 → 待办写校验（_todo_guard）对本人放行。
-var COL_TODOS=[];   // 编辑弹窗里的待办清单
-async function colLoadTodos(colkey){
-  const list=document.getElementById('c_todos_list');
-  if(!list)return;
-  COL_TODOS=[];
-  if(!colkey){list.innerHTML='';return}
-  try{
-    const res=await api('/api/columns/todos?col_key='+encodeURIComponent(colkey));
-    COL_TODOS=res.todos||[];
-  }catch(e){COL_TODOS=[]}
-  // 添加入口按权限显隐（2026-11-13）：仅板块负责人及以上可追加板块待办
-  //（与后端 add_column_todo 的 LV_COLUMN_OWNER 门槛同口径），其他成员只读浏览
-  const _addRow=document.getElementById('c_todo_add_row');
-  if(_addRow)_addRow.style.display=chkColOwnerOf(colkey,COLUMN_EDIT_BOARD||'')?'':'none';
-  colRenderTodos();
-}
-function colRenderTodos(){
-  const list=document.getElementById('c_todos_list');
-  if(!list)return;
-  const _canAdd=chkColOwnerOf(COLUMN_EDIT_KEY||'',COLUMN_EDIT_BOARD||'');
-  if(!COL_TODOS.length){
-    list.innerHTML=_canAdd
-      ?'<div style="color:var(--text2);font-size:12px;padding:4px 2px">暂无待办，在下方输入后回车添加</div>'
-      :'<div style="color:var(--text2);font-size:12px;padding:4px 2px">暂无待办</div>';
-    return;
-  }
-  list.innerHTML=COL_TODOS.map(function(t){
-    return `<div class="subtask-item" data-todo="${t.id}">`
-      +`<input type="checkbox" ${t.done?'checked':''}`
-      +` onclick="colToggleTodo(${t.id},this.checked);event.stopPropagation()" title="勾选/取消待办">`
-      +`<span class="subtask-name ${t.done?'done':''}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${t.done?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.name||'')}</span>`
-      +(_canAdd?`<button class="subtask-del" title="删除该待办" onclick="colDeleteTodo(${t.id});event.stopPropagation()"`
-      +` style="border:1px solid var(--border);background:#fff;border-radius:4px;width:20px;height:20px;line-height:17px;padding:0;font-size:11px;cursor:pointer;color:var(--text2);flex-shrink:0">✕</button>`:'')
-      +`</div>`;
-  }).join('');
-}
-async function colAddTodo(){
-  const key=COLUMN_MODE==='edit'?COLUMN_EDIT_KEY:'';
-  const inp=document.getElementById('c_todo_new');
-  const name=((inp||{}).value||'').trim();
-  if(!name){toast('请输入待办内容');return}
-  // 板块待办仅板块负责人及以上可追加（2026-11-13；后端 LV_COLUMN_OWNER 同口径兜底）
-  if(!chkColOwnerOf(key,COLUMN_EDIT_BOARD||'')){toast('仅板块负责人及以上可添加板块待办，如需新增请联系板块负责人或管理员');return}
-  try{
-    await api('/api/columns/todos',{method:'POST',body:JSON.stringify({col_key:key,name:name})});
-    if(inp)inp.value='';
-    await colLoadTodos(key);
-  }catch(e){toast(e.message||'添加失败')}
-}
-async function colToggleTodo(id,done){
-  try{
-    await api('/api/columns/todos/'+id,{method:'PUT',body:JSON.stringify({done:!!done})});
-    const t=COL_TODOS.find(x=>x.id===id);
-    if(t)t.done=done?1:0;
-    colRenderTodos();
-  }catch(e){toast(e.message||'更新失败');colLoadTodos(COLUMN_MODE==='edit'?COLUMN_EDIT_KEY:'')}
-}
-async function colDeleteTodo(id){
-  if(!confirm('确定删除该待办吗？'))return;
-  try{
-    await api('/api/columns/todos/'+id,{method:'DELETE'});
-    COL_TODOS=COL_TODOS.filter(x=>x.id!==id);
-    colRenderTodos();
-  }catch(e){toast(e.message||'删除失败')}
 }
 // ---------- 删除板块（T-0190）：编辑弹窗内按钮，仅板块负责人及以上可见 ----------
 async function colDeleteFromEdit(){
@@ -10042,7 +9884,7 @@ var EDIT_SUBTASKS=[];
 function renderSubtasks(list,listEl,countEl,editable,cardId){
   const done=list.filter(s=>s.done).length;
   countEl.textContent=`${done}/${list.length} 已完成`;
-  if(!list.length){listEl.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px 0">暂无代办任务</div>';return}
+  if(!list.length){listEl.innerHTML='<div style="color:var(--text2);font-size:12px;padding:4px 0">暂无待办任务</div>';return}
   listEl.innerHTML=list.map(s=>{
     const who=s.done_by?`<span class="st-who">✓ ${esc(s.done_by)}</span>`:'';
     const del=editable?`<button class="st-del" onclick="delSubtask(${s.id},'${cardId||''}')" title="删除">✕</button>`:'';
@@ -10086,7 +9928,7 @@ function isCardOwnerOf(ownerStr){
 const CARD_OWNER_TIP='仅事项负责人及以上可操作，如需调整请联系负责人或管理员';
 async function addSubtask(){
   const title=document.getElementById('e_subtask_new').value.trim();
-  if(!title){toast('请输入代办任务内容');return}
+  if(!title){toast('请输入待办任务内容');return}
   // 待办任务仅事项负责人及以上可发起（2026-11-10 #130；2026-11-13 修订「及以上」；后端同口径兜底）
   if(!canManageCardTodos(window._editCard||{})){toast(CARD_OWNER_TIP.replace('可操作','可发起待办任务'));return}
   try{
@@ -10102,11 +9944,11 @@ async function toggleSubtask(sid,checked,cardId){
   try{
     await api('/api/cards/'+cardId+'/subtasks/'+sid,{method:'PUT',body:JSON.stringify({done:checked?1:0})});
     await loadEditSubtasks(cardId);
-    debounceReload();   // 同步外部目录的代办计数/勾选态（2026-11-09 #93）
+    debounceReload();   // 同步外部目录的待办计数/勾选态（2026-11-09 #93）
   }catch(e){toast(e.message);loadEditSubtasks(cardId)}
 }
 async function delSubtask(sid,cardId){
-  if(!confirm('删除该代办任务？'))return;
+  if(!confirm('删除该待办任务？'))return;
   cardId=cardId||editing;
   if(!cardId)return;
   try{
@@ -10892,7 +10734,7 @@ function ppRemove(containerId,n){
 // ---------- 详情 + 评论 ----------
 // 操作记录动作 → 中文（2026-11-09：用户不是程序员，看不懂 subtask_update/update）
 const ACT_CN={create:'新建事项',update:'修改事项',copy:'复制事项',delete:'删除事项',
-  pin:'置顶 / 取消置顶',subtask_add:'新增代办',subtask_update:'更新代办',
+  pin:'置顶 / 取消置顶',subtask_add:'新增待办',subtask_update:'更新待办',
   comment:'发表评论',move:'移动看板',import:'导入事项',
   user_create:'新建账号',user_update:'修改账号',user_delete:'删除账号'};
 function actCn(a){return ACT_CN[a]||a;}
@@ -10995,8 +10837,8 @@ async function openDetail(id){
   // 切换事项时清空上一次残留的提及（否则会把上一条评论的 @ 提到新事项上）
   MENTION_CTXS.d.arr=[];
   renderMentionBar('d');
-  // 详情弹窗子事项（只读展示；editor 可勾选）—— T-215-4：代办盒在右栏三等分段，
-  // 无代办隐藏时给侧栏加 .sub2 → 剩余两盒各占一半
+  // 详情弹窗子事项（只读展示；editor 可勾选）—— T-215-4：待办盒在右栏三等分段，
+  // 无待办隐藏时给侧栏加 .sub2 → 剩余两盒各占一半
   const st=await api('/api/cards/'+id+'/subtasks');
   const box=document.getElementById('d_subtask_box');
   const _side=document.querySelector('#detailModal .dg-side');
@@ -14450,13 +14292,13 @@ function connectWS(){
       if(document.getElementById('columnDetailModal').style.display==='flex'&&COLUMN_DETAIL){
         if(m.prev_col_key&&m.prev_col_key===COLUMN_DETAIL.colkey)COLUMN_DETAIL.colkey=m.col_key;
         if(COLUMN_DETAIL.colkey===m.col_key){
-          cdLoadTodos(m.col_key);cdLoadComments(m.col_key);cdLoadActions(m.col_key);
+          cdLoadComments(m.col_key);cdLoadActions(m.col_key);
         }
       }
     }
     if(m.type==='lock'||m.type==='unlock'||m.type==='card_update'||m.type==='card_create'||m.type==='card_delete'){
       reload(curPage);renderProgress();
-      // 编辑/详情弹窗开着且是同一张卡 → 刷新代办任务
+      // 编辑/详情弹窗开着且是同一张卡 → 刷新待办任务
       const cid=m.card_id;
       if(cid&&cid!=='*'&&(editing===cid||DETAIL_ID===cid)){
         if(editing===cid)loadEditSubtasks(cid);
