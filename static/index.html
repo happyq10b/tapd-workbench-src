@@ -1172,6 +1172,10 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
   height:min(92vh,920px);max-height:94vh;display:flex;flex-direction:column;overflow:hidden}
 /* T-215-bis 弹窗本体不滚：header 固定、内容区各自滚动 */
 .modal-detail .modal-header{flex-shrink:0;margin-bottom:12px}
+/* 头部倒计时（T-216）：紧贴【状态】按钮左侧，沿用行内倒计时配色（fcol-cd/-over） */
+.d-cd{font-size:12.5px;color:var(--text2);white-space:nowrap;display:inline-flex;align-items:center}
+.d-cd .fcol-cd{font-weight:600}
+.d-cd .fcol-cd-over{color:var(--danger)}
 .detail-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);gap:0;align-items:stretch;
   flex:1;min-height:0;overflow:hidden}
 .dg-main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:18px;
@@ -1185,7 +1189,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 代办无内容隐藏时（openDetail 加 .sub2）：剩余两盒各占一半 */
 .dg-side.sub2 .side-box{height:50%}
 .dg-side .side-box:first-child{border-top:none;padding-top:0}
-.dg-side .side-box h4{color:var(--text);font-weight:600;margin-bottom:8px;flex-shrink:0}
+.dg-side .side-box h4{color:var(--text);font-weight:600;font-size:13px;margin-bottom:8px;flex-shrink:0}
 .dg-side .side-box .subtask-head{flex-shrink:0;margin-bottom:8px}
 .dg-side .side-box .comment-list,.dg-side .side-box #d_actions,
 .dg-side .side-box .subtask-list{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto}
@@ -2167,15 +2171,16 @@ function goLogin(){
     <div class="modal-body">
       <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
       <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" class="parent-box"></div></div>
-      <div class="form-row" id="e_meta_row">
+      <!-- T-216：完成时间编辑入编辑弹窗；周数框收窄腾位（grid 1.5fr/1fr） -->
+      <div class="form-row" id="e_meta_row" style="grid-template-columns:1.5fr 1fr">
         <!-- 所属看板选择框已移除（T-191l 用户口径）：权限控制下不该在编辑界面改归属；
              事项保存时 board_id 保持原值不变 -->
-        <div class="form-group" id="e_week_group" style="grid-column:span 2">
+        <div class="form-group" id="e_week_group" style="grid-column:span 1">
           <!-- #205s（2026-11-18 需求3）：自动回填勾选移入「周数」标题行（不换行、留间距） -->
           <div class="week-label-row">
             <label>周数</label>
             <label class="week-auto-line" title="勾选后禁用手动选择周数（已手选的周数会被清空）；系统按开始日期到截止日期自动计算并回填全部周数（保存时按当前表单日期执行）">
-              <input type="checkbox" id="e_week_auto" onchange="onWeekAutoToggle('e')">自动回填周数（按开始 ～ 截止日期计算）
+              <input type="checkbox" id="e_week_auto" onchange="onWeekAutoToggle('e')">自动回填周数（按开始 ～ 截止日期）
             </label>
           </div>
           <div style="position:relative">
@@ -2183,6 +2188,10 @@ function goLogin(){
                    placeholder="" title="周数维度（自然周：周一~周日）；默认按开始日期计算，可下拉多选或直接输入多个（、分隔）" onfocus="openWeekCombo('e')" onclick="openWeekCombo('e')" oninput="weekComboInput('e')" onkeydown="weekComboKeydown('e',event)">
             <div class="cf-drop" id="e_week_drop" hidden></div>
           </div>
+        </div>
+        <div class="form-group" id="e_completed_group">
+          <label>完成时间<span style="color:var(--text3)">（仅事项负责人可改）</span></label>
+          <input type="datetime-local" class="form-input" id="e_completed" title="留空 = 未完成记录；切为「已完成」时后端自动填充（已有值则保留）">
         </div>
       </div>
       <div class="form-row">
@@ -2599,6 +2608,8 @@ function goLogin(){
   <div class="modal modal-detail">
     <div class="modal-header"><h2 id="d_title"></h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <!-- T-216：倒计时上移到【状态】按钮左侧（原在元信息第三行） -->
+        <span id="d_cd" class="d-cd" title="倒计时"></span>
         <span id="d_ops" style="display:flex;gap:6px;align-items:center"></span>
         <button class="modal-close" onclick="closeModal('detailModal')">✕</button>
       </div>
@@ -2633,7 +2644,8 @@ function goLogin(){
       </div>
       <aside class="dg-side">
         <div class="side-box" id="d_subtask_box" style="display:none">
-          <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count" id="d_subtask_count"></span></div>
+          <!-- T-216：标题用 h4 → 与「最近评论 / 操作记录」字体样式完全一致 -->
+          <div class="subtask-head"><h4 style="margin:0 8px 0 0">代办任务</h4><span class="subtask-count" id="d_subtask_count"></span></div>
           <div id="d_subtask_list" class="subtask-list"></div>
         </div>
         <div class="side-box"><h4>最近评论</h4><div id="d_comments" class="comment-list"></div></div>
@@ -8645,6 +8657,14 @@ async function openEdit(id,preloaded){
   if(esOps)esOps.innerHTML=statusPickerHtml(curStatus,'e');
   document.getElementById('e_begin').value=c.begin||'';
   document.getElementById('e_due').value=c.due||'';
+  // T-216 完成时间：仅事项负责人（或管理员）可改，其余禁用提示
+  {
+    const _inp=document.getElementById('e_completed');
+    const _can=ME&&(isCardOwnerOf(c.owner)||ME.is_admin||ME.username==='admin');
+    _inp.value=(c.completed||'').slice(0,16).replace(' ','T');
+    _inp.disabled=!_can;
+    _inp.title=_can?'留空 = 清除完成时间；切为「已完成」时后端自动填充（已有值保留）':'仅事项负责人可修改完成时间';
+  }
   document.getElementById('e_desc').value=c.description||'';
   // #205p：周数多选——存量单值拆进勾选集，输入框显示「、」连接串；自动回填勾选复位
   E_WEEK_SEL=new Set(String(c.week_no||'').split(';').filter(Boolean));
@@ -8747,6 +8767,14 @@ async function saveEdit(){
   fields.week_no=weekGather('e').join(';');
   // 参与人：主事项与子事项都有（对标主事项，cc 是 cards 表的标准字段）
   fields.cc=(window._editCc||[]).join(';');
+  // T-216 完成时间：仅事项负责人（或管理员）提交该字段（后端同权限档兜底 403）
+  {
+    const _ecOwner=(window._editCard||{}).owner||'';
+    if(ME&&(isCardOwnerOf(_ecOwner)||ME.is_admin||ME.username==='admin')){
+      const _cv=(document.getElementById('e_completed').value||'').trim();
+      fields.completed=_cv?_cv.replace('T',' ')+':00':'';
+    }
+  }
   // 提交守卫（2026-11-17）：**新增**的负责人/参与人必须 ⊆ 上级池
   // （子事项=父事项名单、主事项=板块池；卡片原有人员放行——存量指派可原样保存）
   {
@@ -10919,15 +10947,23 @@ async function openDetail(id){
   //          已完成未结算（无截止日期/历史存量）→ 已完成 · 倒计时停用；未完成 → 倒计时数字
   const _dSettle=(c.status==='done')?settleHtml(c.overdue_days):null;
   const _dCd=_dSettle?_dSettle:(c.status==='done'?'已完成 · 倒计时停用':`<span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span>`);
+  // T-216：倒计时上移到头部【状态】按钮左侧；元信息第三行原位改「完成时间」
+  //（编辑入口在【编辑事项】弹窗，此处仅展示）
+  document.getElementById('d_cd').innerHTML=_dCd;
+  // T-216 完成时间：无值时切为「已完成」由后端自动填充；已有值保留
+  const _dComp=fmtDT(c.completed)||'';
+  const _dCompHtml=_dComp
+    ?`<span id="d_completed_val" title="完成时间：${esc(c.completed)}">${esc(_dComp)}</span>`
+    :'<span id="d_completed_val" style="color:var(--text3)">—</span>';
   // T-215-ter（2026-11-24 用户定稿）元信息三行：
-  //   ① 看板 / 板块（子事项为父事项）/ 周数 / 倒计时
+  //   ① 看板 / 板块（子事项为父事项）/ 周数
   //   ② 创建人 / 负责人 / 参与人（cc 分号拆人名；无 → 「-」）
-  //   ③ 创建时间 / 开始时间（begin 空回退 created，存量口径）/ 截止时间
+  //   ③ 创建时间 / 开始时间（begin 空回退 created，存量口径）/ 截止时间 / 完成时间
   const _dCc=String(c.cc||'').split(';').map(x=>x.trim()).filter(Boolean);
   document.getElementById('d_meta').innerHTML=
     `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b>　周数：<b>${esc(String(c.week_no||'').split(';').join('、')||'—')}</b><br>`+
     `创建人：<b>${esc(c.creator||'-')}</b>　负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'-')}</b></span>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${_dCc.length?esc(_dCc.join('、')):'-'}</b></span><br>`+
-    `创建时间：<b>${esc(fmtDate(c.created)||'-')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'-')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'-')}</b>　倒计时：<b>${_dCd}</b>`;
+    `创建时间：<b>${esc(fmtDate(c.created)||'-')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'-')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'-')}</b>　完成时间：<b>${_dCompHtml}</b>`;
   metaClampTitles('d_meta');
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}

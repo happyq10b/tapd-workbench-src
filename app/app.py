@@ -3901,7 +3901,8 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
     if not fields:
         raise HTTPException(400, '没有可更新的字段')
     # 乐观锁：先取当前 version + board_id
-    cur = dbq('SELECT version, parent_id, begin, due, board_id, column_id, column_name, owner, cc FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    cur = dbq('SELECT version, parent_id, begin, due, board_id, column_id, column_name, owner, cc, status, completed '
+              'FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur:
         raise HTTPException(404, '卡片不存在或已删除')
     # 分级权限（2026-11-02）：修改事项分两档 ——
@@ -3924,6 +3925,10 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
         status_fields['status'] = fields.pop('status')
     if 'status_name' in fields:
         status_fields['status_name'] = fields.pop('status_name')
+    # T-216 完成时间：与状态同一权限档（仅事项负责人）——它是「切为已完成」的
+    # 落点字段，能改状态的人才能改它，避免参与人代填完成时间。
+    if 'completed' in fields:
+        status_fields['completed'] = fields.pop('completed')
     _chain = perm_chain(card_id=card_id)
     if fields:
         perm_check(username, _chain, OP_EDIT_CONTENT, LV_CARD_OWNER, 'card:' + card_id,
@@ -4036,6 +4041,15 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
         if _srow and _srow[0]['status'] == 'done':
             dbe('UPDATE cards SET overdue_days=? WHERE card_id=?',
                 (_settle_days(_srow[0]['due']), card_id))
+    # T-216 完成时间自动填充：**首次转入「已完成」**且未显式提供 completed 且原值为空
+    #   → 按切换日期填充。已有值保留（用户改过）；离开 done 不清空（留档）。
+    #   与倒计时联动：倒计时展示由 status/due/overdue_days 驱动，本字段只作记录，
+    #   互不覆盖 —— completed 仅在本分支与用户显式保存两条路径写入。
+    if 'status' in fields and fields.get('status') == 'done' \
+            and (cur[0]['status'] or '') != 'done' and 'completed' not in fields \
+            and not (cur[0]['completed'] or ''):
+        dbe('UPDATE cards SET completed=? WHERE card_id=?',
+            (time.strftime('%Y-%m-%d %H:%M:%S'), card_id))
     log_action(card_id, username, 'update', json.dumps(fields, ensure_ascii=False)[:500])
     audit_log(username, client_ip(request), 'update', f'卡片 {card_id}', '更新字段：' + '、'.join(fields.keys()), 'success')
     # 释放锁 + 广播
