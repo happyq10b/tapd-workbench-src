@@ -3603,17 +3603,24 @@ function applySynBtn(){
     if(ed)ed.style.display='none';
   }
 }
-function toggleSynMode(){
+async function toggleSynMode(){
   if(SYN_MODE){exitSynMode();return}
   // 锚定部门：架构区恰好选中一个部门 → 用它；否则提示先选
   if(!ARCH_SEL||ARCH_SEL.size!==1){
     toast('请先在上方架构区单击选中一个部门（再次单击进入该部门的综合看板）');return;
   }
   var dname=[...ARCH_SEL][0];
-  // 架构名 → 节点 id（ORG_FLAT 平铺，wgFlat 摊平 ORG_TREE）
+  // 架构名 → 节点 id（ORG_FLAT 平铺，wgFlat 摊平 ORG_TREE）。
+  // ⚠️ ORG_FLAT 是懒加载（主界面不拉架构树）→ 先 ensureOrgTree，否则恒为空数组
+  //    必然报「未找到该部门的架构节点」（用户实测 bug，T-211-bis）。
+  try{ await ensureOrgTree(false); }catch(e){}
   var node=(typeof ORG_FLAT!=='undefined'?ORG_FLAT:[]).find(function(x){return x.name===dname;});
   var nid=node?node.id:null;
-  if(nid===null){toast('未找到该部门的架构节点');return}
+  if(nid===null){
+    var avail=(typeof ORG_FLAT!=='undefined'?ORG_FLAT:[]).filter(function(x){return x.node_type==='dept'||x.node_type==='center';}).map(function(x){return x.name;});
+    toast('未找到「'+dname+'」的架构节点（架构树部门：'+(avail.join('、')||'无')+'）；若刚改过部门名请刷新页面后重试');
+    return;
+  }
   if(!(ME&&ME.syn_depts&&ME.syn_depts.indexOf(nid)>=0)){
     toast('你无权查看「'+dname+'」的综合看板');return;
   }
