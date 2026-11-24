@@ -1176,6 +1176,33 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .d-cd{font-size:12.5px;color:var(--text2);white-space:nowrap;display:inline-flex;align-items:center}
 .d-cd .fcol-cd{font-weight:600}
 .d-cd .fcol-cd-over{color:var(--danger)}
+/* ===== 编辑事项弹窗（T-218 2026-11-24 排版优化）=====
+   1080px 双栏镜像预览界面：左主列（标题/日期三联/周数/描述）+
+   右侧栏（负责人/参与人纵排 + 待办任务）。间距 14px、侧栏左边框分隔 ——
+   与预览（.modal-detail/.detail-grid）同一视觉语言。
+   ⚠️ eg-main 用 block（不开 flex）：openEdit 里有 e_week_group.style.flex 遗留
+   赋值，flex 容器下会让周数组异常伸展。 */
+.modal-edit{width:min(1080px,96vw);padding:22px 28px}
+.modal-edit .modal-body{gap:14px}
+.edit-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,1fr);gap:0;align-items:start}
+.eg-main{min-width:0;padding-right:20px}
+.eg-main>.form-group,.eg-main>.form-row{margin-bottom:14px}
+.eg-main>.form-group:last-child{margin-bottom:0}
+.eg-main .form-input{padding:8px 12px}
+.eg-side{min-width:0;border-left:1px solid var(--border);padding-left:20px;
+  display:flex;flex-direction:column;gap:14px}
+.eg-side .form-row{margin-bottom:0;gap:12px}
+.eg-side .form-group{margin-bottom:0}
+/* 待办任务盒：向预览右栏看齐 —— h4 标题 + 虚线分行 */
+.eg-subtask{margin-bottom:0;background:#fafcff}
+.eg-subtask .subtask-item{font-size:12.5px;padding:5px 0;border-radius:0;
+  border-bottom:1px dashed var(--border);background:transparent;gap:6px}
+.eg-subtask .subtask-item:hover{background:transparent}
+@media(max-width:1024px){
+  .edit-grid{grid-template-columns:1fr}
+  .eg-main{padding-right:0}
+  .eg-side{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:14px;margin-top:14px}
+}
 .detail-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);gap:0;align-items:stretch;
   flex:1;min-height:0;overflow:hidden}
 .dg-main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:18px;
@@ -2159,23 +2186,33 @@ function goLogin(){
   </div>
 </div>
 
-<!-- 编辑弹窗 -->
+<!-- 编辑弹窗（T-218 排版优化）：1080px 双栏镜像预览界面 ——
+     左主列 = 标题/日期(含完成时间)/周数/描述；右侧栏 = 负责人/参与人/待办任务。
+     全部元素 id 不变（e_name/e_begin/e_due/e_completed/e_week_*/e_owner*/e_cc*/e_desc/e_subtask_*）。
+     状态仍由头部状态按钮承载（e_status_ops）。 -->
 <div class="modal-overlay" id="editModal" style="display:none">
-  <div class="modal">
+  <div class="modal modal-edit">
     <div class="modal-header"><h2 id="editTitle">编辑事项</h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
         <span id="e_status_ops" style="display:flex;gap:6px;align-items:center"></span>
         <button class="modal-close" onclick="closeEdit()">✕</button>
       </div>
     </div>
-    <div class="modal-body">
-      <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
-      <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" class="parent-box"></div></div>
-      <!-- T-216：完成时间编辑入编辑弹窗；周数框收窄腾位（grid 1.5fr/1fr） -->
-      <div class="form-row" id="e_meta_row" style="grid-template-columns:1.5fr 1fr">
+    <div class="edit-grid">
+      <div class="eg-main">
+        <div class="form-group" id="e_parent_wrap" style="display:none"><label>父事项</label><div id="e_parent_info" class="parent-box"></div></div>
+        <div class="form-group"><label>标题</label><input type="text" class="form-input" id="e_name"></div>
         <!-- 所属看板选择框已移除（T-191l 用户口径）：权限控制下不该在编辑界面改归属；
              事项保存时 board_id 保持原值不变 -->
-        <div class="form-group" id="e_week_group" style="grid-column:span 1">
+        <div class="form-row" style="grid-template-columns:1fr 1fr 1.2fr">
+          <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin" oninput="weekAutoRefresh('e')" onchange="weekAutoRefresh('e')"></div>
+          <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due" oninput="weekAutoRefresh('e')" onchange="weekAutoRefresh('e')"></div>
+          <div class="form-group" id="e_completed_group">
+            <label>完成时间<span style="color:var(--text3)">（仅事项负责人可改）</span></label>
+            <input type="datetime-local" class="form-input" id="e_completed" title="留空 = 未完成记录；切为「已完成」时后端自动填充（已有值则保留）">
+          </div>
+        </div>
+        <div class="form-group" id="e_week_group">
           <!-- #205s（2026-11-18 需求3）：自动回填勾选移入「周数」标题行（不换行、留间距） -->
           <div class="week-label-row">
             <label>周数</label>
@@ -2189,37 +2226,31 @@ function goLogin(){
             <div class="cf-drop" id="e_week_drop" hidden></div>
           </div>
         </div>
-        <div class="form-group" id="e_completed_group">
-          <label>完成时间<span style="color:var(--text3)">（仅事项负责人可改）</span></label>
-          <input type="datetime-local" class="form-input" id="e_completed" title="留空 = 未完成记录；切为「已完成」时后端自动填充（已有值则保留）">
+        <div class="form-group"><label>描述</label><textarea class="form-textarea" id="e_desc" style="min-height:147px"></textarea></div>
+      </div>
+      <aside class="eg-side">
+        <div class="form-row" id="e_owner_row" style="grid-template-columns:1fr">
+          <div class="form-group" id="e_owner_group"><label>负责人<span id="e_owner_opt" style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="e_owner"></div></div>
+          <div class="form-group" id="e_cc_wrap"><label>参与人</label><div class="member-picker" id="e_cc"></div></div>
         </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="e_begin" oninput="weekAutoRefresh('e')" onchange="weekAutoRefresh('e')"></div>
-        <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due" oninput="weekAutoRefresh('e')" onchange="weekAutoRefresh('e')"></div>
-      </div>
-      <div class="form-row" id="e_owner_row">
-        <div class="form-group" id="e_owner_group"><label>负责人<span id="e_owner_opt" style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="e_owner"></div></div>
-        <div class="form-group" id="e_cc_wrap"><label>参与人</label><div class="member-picker" id="e_cc"></div></div>
-      </div>
-      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="e_desc" style="min-height:147px"></textarea></div>
-      <div class="subtask-box">
-        <div class="subtask-head">
-          <span class="subtask-title">待办任务</span>
-          <span class="subtask-count" id="e_subtask_count"></span>
-        </div>
-        <div id="e_subtask_list" class="subtask-list"></div>
-        <div class="subtask-add">
-          <div id="e_subtask_add_row" style="display:flex;gap:8px;flex:1;min-width:0">
-            <input type="text" class="form-input" id="e_subtask_new" placeholder="添加待办任务，回车确认…" onkeydown="if(event.key==='Enter')addSubtask()">
-            <button class="btn-default" onclick="addSubtask()" style="flex-shrink:0">添加</button>
+        <div class="subtask-box eg-subtask">
+          <div class="subtask-head">
+            <h4 style="margin:0 8px 0 0">待办任务</h4>
+            <span class="subtask-count" id="e_subtask_count"></span>
+          </div>
+          <div id="e_subtask_list" class="subtask-list"></div>
+          <div class="subtask-add">
+            <div id="e_subtask_add_row" style="display:flex;gap:8px;flex:1;min-width:0">
+              <input type="text" class="form-input" id="e_subtask_new" placeholder="添加待办任务，回车确认…" onkeydown="if(event.key==='Enter')addSubtask()">
+              <button class="btn-default" onclick="addSubtask()" style="flex-shrink:0">添加</button>
+            </div>
           </div>
         </div>
-      </div>
+      </aside>
     </div>
     <div class="modal-footer">
       <!-- 复制按钮已移除（T-191k 用户口径）：目录行「操作 ▾」已有复制入口，编辑界面不再重复 -->
-      <button class="btn-default" style="color:var(--danger);border-color:var(--danger)" onclick="deleteCard()">删除</button>
+      <button class="btn-default" style="color:var(--danger);border-color:var(--danger);margin-right:auto" onclick="deleteCard()">删除</button>
       <button class="btn-default" onclick="closeEdit()">取消</button>
       <button class="btn-primary" onclick="saveEdit()">保存</button>
     </div>
