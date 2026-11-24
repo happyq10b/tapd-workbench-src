@@ -1217,6 +1217,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .dg-side.sub2 .side-box{height:50%}
 .dg-side .side-box:first-child{border-top:none;padding-top:0}
 .dg-side .side-box h4{color:var(--text);font-weight:600;font-size:13px;margin-bottom:8px;flex-shrink:0}
+/* 板块预览（T-220）：右栏仅两盒（最近评论/操作记录）→ 各占一半 */
+.dg-side.side2 .side-box{height:50%}
+.dg-side .side-box #cd_actions{max-height:none}
 .dg-side .side-box .subtask-head{flex-shrink:0;margin-bottom:8px}
 .dg-side .side-box .comment-list,.dg-side .side-box #d_actions,
 .dg-side .side-box .subtask-list{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto}
@@ -2313,9 +2316,13 @@ function goLogin(){
 </div>
 
 <!-- 板块弹窗：新建 / 编辑共用 -->
-<div class="modal-overlay" id="columnModal" style="display:none">
-  <!-- T-191l：尺寸/布局对齐编辑事项弹窗（同为默认 .modal 640px，不再单独收窄） -->
-  <div class="modal">
+<!-- T-220 排版优化：与编辑事项（T-218）同一 1080px 双栏结构 ——
+     左主列 = 名称/年份+性质+类别/创建·截止日期/板块说明；右侧栏 = 所属看板/负责人/参与人。
+     全部元素 id 不变（c_board*/c_name/c_year/c_created/c_due/c_owner*/c_parts*/c_nature/c_category/c_desc/c_tip/c_delete_btn/c_submit）。 -->
+<!-- T-220：z-index 105 —— DOM 序在 columnDetailModal 之前，同为 100 时会被预览盖住
+     （预览开着时点「＋ 新建板块」→ 新建弹窗被遮）；提到 105 保证任何入口都在预览之上 -->
+<div class="modal-overlay" id="columnModal" style="display:none;z-index:105">
+  <div class="modal modal-edit">
     <div class="modal-header"><h2 id="c_modal_title">🗂️ 新建板块</h2>
       <!-- 完成情况按钮（T-191j 界面统一）：与事项编辑弹窗的 e_status_ops 同位同款，
            状态/完成情况的设置统一收敛到弹窗头部，表单区内不再出现下拉 -->
@@ -2324,48 +2331,48 @@ function goLogin(){
         <button class="modal-close" onclick="closeModal('columnModal')">✕</button>
       </div>
     </div>
-    <div class="modal-body">
-      <div class="form-group" id="c_board_wrap"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
-      <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
-      <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，必填；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
-      <!-- 归属年份说明段已删（2026-11-04 用户反馈），布局上移 -->
-      <div class="form-row">
-        <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
-        <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="c_due" title="板块截止日期（选填）；目录【倒计时】列按此日期与今天自动计算"></div>
+    <div class="edit-grid">
+      <div class="eg-main">
+        <div class="form-group"><label>板块名称 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_name" placeholder="例如：成本组（第34周）"></div>
+        <div class="form-row" style="grid-template-columns:1fr 1fr 1.3fr">
+          <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，必填；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
+          <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
+            <div class="radio-group">
+              <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
+              <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
+            </div>
+          </div>
+          <div class="form-group"><label>类别 <span style="color:var(--danger)">*</span></label>
+            <select class="form-select" id="c_category" title="板块类别（必选，默认年度重点工作）">
+              <option value="年度重点工作" selected>年度重点工作</option>
+              <option value="业财融合工作">业财融合工作</option>
+              <option value="财务数智化工作">财务数智化工作</option>
+              <option value="其他重点工作">其他重点工作</option>
+              <option value="文化及团队建设">文化及团队建设</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>创建日期 <span style="color:var(--danger)">*</span></label><input type="date" class="form-input" id="c_created" title="创建日期（必填）" onchange="syncYearFromDate()"></div>
+          <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="c_due" title="板块截止日期（选填）；目录【倒计时】列按此日期与今天自动计算"></div>
+        </div>
+        <div class="form-group"><label>板块说明</label><textarea class="form-textarea" id="c_desc" style="min-height:147px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
+        <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项。</div>
       </div>
-      <!-- 创建人字段已移除（T-191l）：编辑界面不展示/不可改（创建人由系统按登录账号锁定），
-           仅在板块浏览界面的元信息中展示 -->
-      <!-- 负责人/参与人（T-191l）：与事项编辑弹窗同款 member-picker（form-row 两列） -->
-      <div class="form-row">
+      <aside class="eg-side">
+        <!-- 所属看板放右栏首位（T-191l 口径：编辑态不改归属，仅新建可选） -->
+        <div class="form-group" id="c_board_wrap"><label>所属看板 <span style="color:var(--danger)">*</span></label><select class="form-select" id="c_board"></select></div>
+        <!-- 负责人/参与人（T-191l）：与事项编辑弹窗同款 member-picker（纵排） -->
         <div class="form-group" id="c_owner_wrap"><label>板块负责人<span id="c_owner_opt" style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="c_owner"></div></div>
         <div class="form-group" id="c_parts_wrap"><label>板块参与人</label><div class="member-picker" id="c_parts"></div></div>
-      </div>
-      <!-- 板块「完成情况」（2026-11-04 需求3）→ T-191j 移出表单：与事项状态一致，
-           设置入口统一收敛到弹窗头部状态按钮（#c_status_ops），表单区内不再有下拉 -->
-      <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
-        <div class="radio-group">
-          <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
-          <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
-        </div>
-      </div>
-      <!-- 板块类别（T-209 2026-11-24）：必选下拉，默认「年度重点工作」；
-           五大类别枚举与后端 COLUMN_CATEGORIES 同源（顺序一致） -->
-      <div class="form-group"><label>类别 <span style="color:var(--danger)">*</span></label>
-        <select class="form-select" id="c_category" title="板块类别（必选，默认年度重点工作）">
-          <option value="年度重点工作" selected>年度重点工作</option>
-          <option value="业财融合工作">业财融合工作</option>
-          <option value="财务数智化工作">财务数智化工作</option>
-          <option value="其他重点工作">其他重点工作</option>
-          <option value="文化及团队建设">文化及团队建设</option>
-        </select>
-      </div>
-      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="c_desc" style="min-height:147px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
-      <div id="c_tip" style="font-size:12px;color:var(--text3)">创建后该板块会出现在当前看板的板块列表中，可立即向其添加事项。</div>
+        <!-- 板块「完成情况」（2026-11-04 需求3）→ T-191j 移出表单：与事项状态一致，
+             设置入口统一收敛到弹窗头部状态按钮（#c_status_ops），表单区内不再有下拉 -->
+      </aside>
     </div>
     <div class="modal-footer" style="display:flex;align-items:center">
       <!-- 删除板块（T-0190；T-191k 样式对齐编辑事项的「删除」按钮）：仅编辑态且**板块负责人及以上**可见
            （chkColOwnerOf 口径，与后端 DELETE /api/columns 的 LV_COLUMN_OWNER 门槛一致）；确认后删除 -->
-      <button class="btn-default" id="c_delete_btn" style="display:none;color:var(--danger);border-color:var(--danger)"
+      <button class="btn-default" id="c_delete_btn" style="display:none;color:var(--danger);border-color:var(--danger);margin-right:auto"
               onclick="colDeleteFromEdit()" title="删除该板块（其下事项与子事项一并删除，可用全局备份找回）">删除</button>
       <button class="btn-default" onclick="closeModal('columnModal')">取消</button><button class="btn-primary" id="c_submit" onclick="saveColumn()">创建板块</button></div>
   </div>
@@ -2376,30 +2383,36 @@ function goLogin(){
      ⚠️ 必须排在 detailModal 之前：两个弹窗同为 z-index:100，靠后声明者在上层，
      浏览界面里点击事项要打开事项详情弹窗盖在本弹窗之上。 -->
 <div class="modal-overlay" id="columnDetailModal" style="display:none">
-  <div class="modal modal-wide">
+  <!-- T-220 排版优化：与事项预览（detailModal）同一 1080px 双栏结构 ——
+       左主列 = 元信息/板块说明/评论输入（压底）；右栏两等分 = 最近评论/操作记录。
+       全部元素 id 不变（cd_title/cd_ops/cd_meta/cd_desc/cd_comments/cd_new_comment/cd_mention_*/cd_actions）。 -->
+  <div class="modal modal-detail">
     <div class="modal-header"><h2 id="cd_title"></h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
         <span id="cd_ops" style="display:flex;gap:6px;align-items:center"></span>
         <button class="modal-close" onclick="closeModal('columnDetailModal')">✕</button>
       </div>
     </div>
-    <div class="modal-body">
-      <div class="detail-meta" id="cd_meta"></div>
-      <div class="detail-desc" id="cd_desc" style="display:none"></div>
-      <!-- 评论（T-0188 → 2026-11-13 复刻事项评论）：可见即可评；
-           @ 提及 / 全部评论按钮 / 预览限最近 10 条，与事项评论同一套交互 -->
-      <div class="comment-box"><h4>评论</h4><div id="cd_comments" class="comment-list"></div>
-        <div class="comment-form">
-          <input id="cd_new_comment" placeholder="写评论…（输入 @ 可提及成员）" autocomplete="off" oninput="onCommentInput(this,'cd')" onkeydown="if(event.key==='Enter')cdAddComment()">
-          <button class="btn-default" onclick="toggleMentionMenu('cd')" title="提及成员">@</button>
-          <button class="btn-default" onclick="cdAddComment()">发送</button>
-          <button class="btn-default" onclick="openAllComments('column')" title="查看本板块的全部评论">全部评论</button>
+    <div class="detail-grid">
+      <div class="dg-main">
+        <div class="detail-meta" id="cd_meta"></div>
+        <div class="detail-desc" id="cd_desc" style="display:none"></div>
+        <!-- 评论输入留左底（与事项预览同款）：预览列表与操作记录放右栏 -->
+        <div class="comment-box comment-input-box"><h4>评论</h4>
+          <div class="comment-form">
+            <input id="cd_new_comment" placeholder="写评论…（输入 @ 可提及成员）" autocomplete="off" oninput="onCommentInput(this,'cd')" onkeydown="if(event.key==='Enter')cdAddComment()">
+            <button class="btn-default" onclick="toggleMentionMenu('cd')" title="提及成员">@</button>
+            <button class="btn-default" onclick="cdAddComment()">发送</button>
+            <button class="btn-default" onclick="openAllComments('column')" title="查看本板块的全部评论">全部评论</button>
+          </div>
+          <div class="mention-bar" id="cd_mention_bar"></div>
+          <div class="mention-drop" id="cd_mention_drop" hidden></div>
         </div>
-        <div class="mention-bar" id="cd_mention_bar"></div>
-        <div class="mention-drop" id="cd_mention_drop" hidden></div>
       </div>
-      <!-- 操作记录（2026-11-13）：复刻事项详情「操作记录」（最近 12 条 + 提示） -->
-      <div class="comment-box"><h4>操作记录</h4><div id="cd_actions"></div></div>
+      <aside class="dg-side side2">
+        <div class="side-box"><h4>最近评论</h4><div id="cd_comments" class="comment-list"></div></div>
+        <div class="side-box"><h4>操作记录</h4><div id="cd_actions" class="comment-list"></div></div>
+      </aside>
     </div>
   </div>
 </div>
@@ -9294,6 +9307,8 @@ function bcDeptShapeTree(dept){
 function openColumnModal(){
   releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 新建模式无编辑锁
   COLUMN_MODE='create';COLUMN_EDIT_KEY='';COLUMN_EDIT_BOARD='';YEAR_TOUCHED=false;
+  // T-220：标题复位 —— 编辑态曾把标题改为「✏️ 编辑板块」，新建时不重置会残留
+  document.getElementById('c_modal_title').textContent='🗂️ 新建板块';
   COL_PARTS=[];          // 新建板块：无参与人
   const boards=ME.boards;
   document.getElementById('c_board').innerHTML=boards.map(b=>`<option value="${b.board_id}"${curBoard===b.board_id?' selected':''}>${esc(b.board_name)}</option>`).join('');
