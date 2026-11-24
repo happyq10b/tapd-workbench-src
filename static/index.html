@@ -2347,7 +2347,9 @@ function goLogin(){
 </div>
 
 <!-- T-213 板块结存弹窗：勾选=结存（不可见+不可编辑），取消勾选=解封；仅架构负责人/管理员 -->
-<div class="modal-overlay" id="colSealModal" style="display:none">
+<!-- z-index:130 —— 从【看板管理】弹窗内打开，须压过其层级（所有 modal-overlay 默认 100，
+     结存弹窗在 DOM 中位于看板管理之前 → 同层级时被盖住，表现为「弹窗打开后无法操作」） -->
+<div class="modal-overlay" id="colSealModal" style="display:none;z-index:130">
   <div class="modal" style="width:min(620px,94vw)">
     <div class="modal-header"><h2 style="white-space:nowrap">📦 结存板块 <span id="col_seal_board" style="font-size:13px;color:var(--text2)"></span></h2>
       <button class="modal-close" onclick="closeModal('colSealModal')">✕</button></div>
