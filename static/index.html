@@ -1168,21 +1168,38 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    1180px 双栏 —— 左主列（元信息/描述/每周进展/代办/评论）+ 右侧栏（操作记录）。
    右栏用左边框分隔而非卡片盒，保持轻量；窄屏(<1024px)退化为单列（布局锁定约定
    不适用于弹窗内部 —— 弹窗本身就有 96vw 上限的自适应）。 */
-.modal-detail{width:min(1180px,96vw);padding:22px 28px}
-.detail-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);gap:0;align-items:start}
-.dg-main{display:flex;flex-direction:column;min-width:0;padding-right:18px}
+.modal-detail{width:min(1180px,96vw);padding:22px 28px;
+  height:min(92vh,920px);max-height:94vh;display:flex;flex-direction:column;overflow:hidden}
+/* T-215-bis 弹窗本体不滚：header 固定、内容区各自滚动 */
+.modal-detail .modal-header{flex-shrink:0;margin-bottom:12px}
+.detail-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);gap:0;align-items:stretch;
+  flex:1;min-height:0;overflow:hidden}
+.dg-main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:18px;
+  overflow-y:auto;overscroll-behavior:contain}
 .dg-main .comment-box{margin-top:12px}
-.dg-side{min-width:0;border-left:1px solid var(--border);padding-left:18px;
-  display:flex;flex-direction:column;gap:14px}
 /* 右栏两盒（最近评论 / 操作记录）标题统一加重 */
 .dg-side .comment-box h4{color:var(--text);font-weight:600;margin-bottom:8px}
-.dg-side .side-comments{margin-top:0}
-.dg-side .side-comments .comment-list{max-height:220px}
-/* 评论输入留左底：输入盒与上方内容拉开距离（flex 列 + margin-top:auto 兜底空态） */
+.dg-side{min-width:0;min-height:0;border-left:1px solid var(--border);padding-left:18px;
+  display:flex;flex-direction:column;gap:14px;overflow-y:auto;overscroll-behavior:contain}
+.dg-side .comment-box{flex-shrink:0}
+/* 统一细滚动条（T-215-bis）：评论区样式为基准 → 弹窗内全部滚动区同款
+   （6px 细条 + 透明轨道 + var(--border) 圆角滑块，与看板带 .tb-grid 同语言） */
+.modal-detail *{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+.modal-detail ::-webkit-scrollbar{width:6px;height:6px}
+.modal-detail ::-webkit-scrollbar-track{background:transparent}
+.modal-detail ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.modal-detail ::-webkit-scrollbar-thumb:hover{background:#d0d3d8}
+/* 区域限高（T-215-bis）：描述 / 右栏两盒固定限高；每周进展区弹性填充剩余
+   高度（min-height 保底防挤压，超出区内滚动）→ 左列无大片空档、版面紧凑 */
+.modal-detail .detail-desc{flex-shrink:0;max-height:132px;overflow-y:auto}
+.modal-detail .wp-box{flex:1 1 auto;min-height:150px;display:flex;flex-direction:column}
+.modal-detail .wp-list{flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:4px}
 .dg-main .comment-input-box{margin-top:auto;padding-top:12px}
 .dg-main .comment-input-box .comment-form{margin-top:2px}
-/* 右栏操作记录放宽限高（主编辑界面里它是常看区） */
-.dg-side #d_actions{max-height:420px}
+/* 右栏两盒：操作记录按评论区同款限高（200px + 区内滚动） */
+.dg-side .side-comments{margin-top:0}
+.dg-side .side-comments .comment-list{max-height:200px}
+.dg-side #d_actions{max-height:200px}
 @media(max-width:1024px){
   .detail-grid{grid-template-columns:1fr}
   .dg-main{padding-right:0}
