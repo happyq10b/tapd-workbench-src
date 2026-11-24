@@ -10925,9 +10925,9 @@ async function openDetail(id){
   //   ③ 创建时间 / 开始时间（begin 空回退 created，存量口径）/ 截止时间
   const _dCc=String(c.cc||'').split(';').map(x=>x.trim()).filter(Boolean);
   document.getElementById('d_meta').innerHTML=
-    `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b>　周数：<b>${esc(String(c.week_no||'').split(';').join('、')||'—')}</b>　倒计时：<b>${_dCd}</b><br>`+
+    `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b>　周数：<b>${esc(String(c.week_no||'').split(';').join('、')||'—')}</b><br>`+
     `创建人：<b>${esc(c.creator||'-')}</b>　负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'-')}</b></span>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${_dCc.length?esc(_dCc.join('、')):'-'}</b></span><br>`+
-    `创建时间：<b>${esc(fmtDate(c.created)||'-')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'-')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'-')}</b>`;
+    `创建时间：<b>${esc(fmtDate(c.created)||'-')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'-')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'-')}</b>　倒计时：<b>${_dCd}</b>`;
   metaClampTitles('d_meta');
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
