@@ -2259,45 +2259,54 @@ function goLogin(){
 
 <!-- 新建弹窗：主事项与子事项共用（NEW_CARD_MODE='card' 主事项 / 'sub' 子事项）
      两种模式的字段、样式与校验完全一致，只有「所属看板 / 所属板块」的取值来源不同 -->
+<!-- 新建弹窗：主事项与子事项共用（NEW_CARD_MODE='card' 主事项 / 'sub' 子事项）
+     两种模式的字段、样式与校验完全一致，只有「所属看板 / 所属板块」的取值来源不同。
+     T-219 排版优化：与编辑弹窗（T-218）同一 1080px 双栏结构 ——
+     左主列 = 标题/看板+周数/板块/日期/描述；右侧栏 = 负责人/参与人。
+     全部元素 id 不变（n_name/n_board*/n_week*/n_col*/n_begin/n_due/n_owner*/n_cc*/n_desc/n_parent_*）。 -->
 <div class="modal-overlay" id="newModal" style="display:none">
-  <div class="modal">
+  <div class="modal modal-edit">
     <div class="modal-header"><h2 id="n_title">新建事项</h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
         <span id="n_status_ops" style="display:flex;gap:6px;align-items:center"></span>
         <button class="modal-close" onclick="closeModal('newModal')">✕</button>
       </div>
     </div>
-    <div class="modal-body">
-      <div class="form-group"><label>标题</label><input type="text" class="form-input" id="n_name" placeholder="请输入工作标题"></div>
-      <div class="form-group" id="n_parent_wrap" style="display:none"><label>父事项</label><div id="n_parent_info" class="parent-box"></div></div>
-      <div class="form-row" id="n_meta_row">
-        <div class="form-group" id="n_board_wrap"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
-        <div class="form-group" id="n_week_group">
-          <!-- #205s（2026-11-18 需求3）：自动回填勾选移入「周数」标题行（不换行、留间距）；
-               新建时勾选不立即回显周数（需求4）—— 保存时按开始/截止日期统一回填 -->
-          <div class="week-label-row">
-            <label>周数</label>
-            <label class="week-auto-line" title="勾选后禁用手动选择周数（已手选的周数会被清空）；保存时按开始日期到截止日期自动计算并回填全部周数">
-              <input type="checkbox" id="n_week_auto" onchange="onWeekAutoToggle('n')">自动回填周数（按开始 ～ 截止日期计算）
-            </label>
-          </div>
-          <div style="position:relative">
-            <input type="text" class="form-input" id="n_week" autocomplete="off"
-                     placeholder="" title="周数维度（自然周：周一~周日）；默认按开始日期计算，可下拉多选或直接输入多个（、分隔）" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="weekComboInput('n')" onkeydown="weekComboKeydown('n',event)">
-            <div class="cf-drop" id="n_week_drop" hidden></div>
+    <div class="edit-grid">
+      <div class="eg-main">
+        <div class="form-group"><label>标题</label><input type="text" class="form-input" id="n_name" placeholder="请输入工作标题"></div>
+        <div class="form-group" id="n_parent_wrap" style="display:none"><label>父事项</label><div id="n_parent_info" class="parent-box"></div></div>
+        <div class="form-row" id="n_meta_row" style="grid-template-columns:1fr 1.4fr">
+          <div class="form-group" id="n_board_wrap"><label>所属看板</label><select class="form-select" id="n_board"></select></div>
+          <div class="form-group" id="n_week_group">
+            <!-- #205s（2026-11-18 需求3）：自动回填勾选移入「周数」标题行（不换行、留间距）；
+                 新建时勾选不立即回显周数（需求4）—— 保存时按开始/截止日期统一回填 -->
+            <div class="week-label-row">
+              <label>周数</label>
+              <label class="week-auto-line" title="勾选后禁用手动选择周数（已手选的周数会被清空）；保存时按开始日期到截止日期自动计算并回填全部周数">
+                <input type="checkbox" id="n_week_auto" onchange="onWeekAutoToggle('n')">自动回填周数（按开始 ～ 截止日期）
+              </label>
+            </div>
+            <div style="position:relative">
+              <input type="text" class="form-input" id="n_week" autocomplete="off"
+                       placeholder="" title="周数维度（自然周：周一~周日）；默认按开始日期计算，可下拉多选或直接输入多个（、分隔）" onfocus="openWeekCombo('n')" onclick="openWeekCombo('n')" oninput="weekComboInput('n')" onkeydown="weekComboKeydown('n',event)">
+              <div class="cf-drop" id="n_week_drop" hidden></div>
+            </div>
           </div>
         </div>
+        <div class="form-group" id="n_col_wrap" style="display:none"><label>所属板块</label><input type="text" class="form-input" id="n_col" readonly></div>
+        <div class="form-row">
+          <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="n_begin"></div>
+          <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="n_due" oninput="weekAutoRefresh('n')" onchange="weekAutoRefresh('n')"></div>
+        </div>
+        <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
       </div>
-      <div class="form-group" id="n_col_wrap" style="display:none"><label>所属板块</label><input type="text" class="form-input" id="n_col" readonly></div>
-      <div class="form-row">
-        <div class="form-group"><label>开始日期</label><input type="date" class="form-input" id="n_begin"></div>
-        <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="n_due" oninput="weekAutoRefresh('n')" onchange="weekAutoRefresh('n')"></div>
-      </div>
-      <div class="form-row" id="n_people_row">
-        <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
-        <div class="form-group" id="n_cc_group"><label>参与人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_cc"></div></div>
-      </div>
-      <div class="form-group"><label>描述</label><textarea class="form-textarea" id="n_desc" placeholder="请输入工作内容简述…"></textarea></div>
+      <aside class="eg-side">
+        <div class="form-row" id="n_people_row" style="grid-template-columns:1fr">
+          <div class="form-group" id="n_owner_group"><label>负责人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_owner"></div></div>
+          <div class="form-group" id="n_cc_group"><label>参与人<span style="color:var(--text3)">（选填）</span></label><div class="member-picker" id="n_cc"></div></div>
+        </div>
+      </aside>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('newModal')">取消</button><button class="btn-primary" onclick="createCard()">创建</button></div>
   </div>
