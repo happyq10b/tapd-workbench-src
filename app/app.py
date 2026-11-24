@@ -2759,6 +2759,12 @@ def me(username: str = Depends(require_auth)):
     #    管理员（boards=None=全部）仍看到全部部门。
     if boards is None:
         dept_list = _dept_order()
+    elif is_admin(username):
+        # T-213-bis-2（2026-11-24）：管理员**恒显示全部部门**——#205ad 后 admin 的
+        # boards 在存在封存看板时变为显式集合（allb-arch），会落入下方"有可见看板
+        # 才显示"的过滤 → 无看板部门（管理部等）从目录树消失（用户实测截图反馈）。
+        # 管理员权限独立于架构外，与 boards=None 同语义。
+        dept_list = _dept_order()
     else:
         seen = {item.get('dept') for item in boards_out if item.get('dept')}
         # 2026-11-05 用户规则：中心（财务中心）在目录树**恒显示** ——
