@@ -299,6 +299,8 @@ CREATE TABLE IF NOT EXISTS board_columns (
     -- 板块类别（T-209 2026-11-24）：五大类别，必选；应用层校验枚举（此处只锁默认值，
     --   CHECK 不加——历史遗留脏值不该让整表写入炸掉，与 nature 的差异见 T-209）
     category    TEXT NOT NULL DEFAULT '年度重点工作',
+    -- 板块结存（T-213）：1=结存（不可见+不可编辑，徽标不计）；应用层校验
+    sealed      INTEGER NOT NULL DEFAULT 0,
     year        TEXT NOT NULL DEFAULT '',
     pinned      INTEGER NOT NULL DEFAULT 0,
     copy_from   TEXT NOT NULL DEFAULT '',
@@ -637,6 +639,11 @@ def _migrate_schema(conn):
     # 已有 226 个板块自动回填「年度重点工作」，无需显式 UPDATE。
     if bcols and 'category' not in bcols:
         conn.execute("ALTER TABLE board_columns ADD COLUMN category TEXT NOT NULL DEFAULT '年度重点工作'")
+
+    # ---- 板块结存（T-213 2026-11-24）：结存=板块级封存，不可见+不可编辑 ----
+    #   与看板级封存（boards.archived）独立；结存板块不计入徽标 n/N。
+    if bcols and 'sealed' not in bcols:
+        conn.execute('ALTER TABLE board_columns ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0')
 
     # ---- 逾期天数（T-191j 结算）：旧库幂等加列 ----
     # ⚠️ 不回填存量已完成行：系统未记录历史完成时间（completed 恒为空），

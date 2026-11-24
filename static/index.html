@@ -2346,6 +2346,30 @@ function goLogin(){
   </div>
 </div>
 
+<!-- T-213 板块结存弹窗：勾选=结存（不可见+不可编辑），取消勾选=解封；仅架构负责人/管理员 -->
+<div class="modal-overlay" id="colSealModal" style="display:none">
+  <div class="modal" style="width:min(620px,94vw)">
+    <div class="modal-header"><h2 style="white-space:nowrap">📦 结存板块 <span id="col_seal_board" style="font-size:13px;color:var(--text2)"></span></h2>
+      <button class="modal-close" onclick="closeModal('colSealModal')">✕</button></div>
+    <div class="modal-body" style="padding-top:12px">
+      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="background:var(--bg);padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
+          <span class="syn-cnt" id="col_seal_cnt" style="font-size:11.5px;color:var(--text2);white-space:nowrap"></span>
+          <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-shrink:0">
+            <input type="text" id="col_seal_search" class="form-input" placeholder="🔍 搜索板块" autocomplete="off"
+                   style="width:150px;padding:3px 8px;font-size:12px" oninput="sealPaint()">
+            <button class="icon-btn" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="sealSelectAll(true)">全选</button>
+            <button class="icon-btn" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="sealSelectAll(false)">全不选</button>
+          </span>
+        </div>
+        <div id="col_seal_list" style="height:300px;overflow:auto;padding:6px 10px"></div>
+        <div style="padding:6px 12px;font-size:11.5px;color:var(--text3);border-top:1px solid var(--border)">勾选的板块将结存：<b>不可见、不可编辑、不计入徽标</b>；取消勾选（含全不选）= 解封恢复。</div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('colSealModal')">取消</button><button class="btn-primary" onclick="saveColSeal()">保存</button></div>
+  </div>
+</div>
+
 <!-- 新建看板弹窗（#205ad-cis 部门负责人及以上；#206 归属部门必选） -->
 <div class="modal-overlay" id="boardModal" style="display:none">
   <div class="modal" style="width:min(520px,94vw)">
@@ -3881,6 +3905,60 @@ async function saveSynConfig(){
     closeModal('synConfigModal');
     if(SYN_MODE)enterSynMode(SYN_MODE.name,SYN_MODE.nodeId);   // 立即按新白名单刷新
   }catch(e){toast(e.message||'保存失败')}
+}
+// ---------- T-213 板块结存弹窗（2026-11-24）：勾选=结存，取消勾选=解封 ----------
+var SEAL_CFG=null;              // {board_id, board_name, columns:[{col_key,column_name,category,sealed}]}
+var SEAL_CHECKED=new Set();     // 勾选态（col_key；集合驱动防重绘丢状态）
+async function openColSealModal(bid, bname){
+  try{
+    SEAL_CFG=await api('/api/columns-seal?board_id='+encodeURIComponent(bid));
+    if(!SEAL_CFG.can_seal){toast('仅该看板归属部门的架构负责人/管理员可以结存板块');return}
+    document.getElementById('col_seal_board').textContent='— '+SEAL_CFG.board_name;
+    document.getElementById('col_seal_search').value='';
+    SEAL_CHECKED=new Set((SEAL_CFG.columns||[]).filter(c=>c.sealed).map(c=>c.col_key));
+    sealPaint();
+    openModal('colSealModal');
+  }catch(e){toast(e.message||'结存数据读取失败')}
+}
+function sealPaint(){
+  var box=document.getElementById('col_seal_list');
+  if(!box||!SEAL_CFG)return;
+  var q=(document.getElementById('col_seal_search').value||'').trim().toLowerCase();
+  var cols=(SEAL_CFG.columns||[]).filter(function(c){return !q||c.column_name.toLowerCase().indexOf(q)>=0;});
+  box.innerHTML=cols.map(function(c){
+    var on=SEAL_CHECKED.has(c.col_key);
+    var ci=CAT_OPTS.findIndex(function(o){return o[0]===c.category});
+    return '<label style="display:flex;gap:8px;align-items:center;padding:3px 6px;font-size:12.5px;cursor:pointer;border-radius:6px;'+(on?'background:#fdf0f5':'')+'">'
+      +'<input type="checkbox" data-seal-col="'+esc(c.col_key)+'"'+(on?' checked':'')+' onchange="sealToggle(this)">'
+      +'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(c.column_name)+'</span>'
+      +'<span class="cat-dot cat-dot'+(ci>=0?ci+1:1)+'" title="'+esc(c.category)+'"></span>'
+      +(c.sealed?'<span style="font-size:11px;color:var(--danger);flex-shrink:0">已结存</span>':'')
+      +'</label>';
+  }).join('')||'<div style="padding:12px;font-size:12px;color:var(--text3)">该看板下暂无板块</div>';
+  var cnt=document.getElementById('col_seal_cnt');
+  if(cnt)cnt.textContent='已勾选 '+SEAL_CHECKED.size+' / '+(SEAL_CFG.columns||[]).length+' 个板块';
+}
+function sealToggle(inp){
+  var k=inp.getAttribute('data-seal-col');
+  SEAL_CHECKED.has(k)?SEAL_CHECKED.delete(k):SEAL_CHECKED.add(k);
+  var cnt=document.getElementById('col_seal_cnt');
+  if(cnt)cnt.textContent='已勾选 '+SEAL_CHECKED.size+' / '+(SEAL_CFG.columns||[]).length+' 个板块';
+}
+function sealSelectAll(on){
+  (SEAL_CFG.columns||[]).forEach(function(c){
+    on?SEAL_CHECKED.add(c.col_key):SEAL_CHECKED.delete(c.col_key);
+  });
+  sealPaint();
+}
+async function saveColSeal(){
+  if(!SEAL_CFG)return;
+  try{
+    var r=await api('/api/columns-seal/'+encodeURIComponent(SEAL_CFG.board_id),
+      {method:'POST',body:JSON.stringify({sealed:[...SEAL_CHECKED]})});
+    toast('结存已保存：新结存 '+r.sealed_on+' 个、解封 '+r.sealed_off+' 个（当前结存 '+r.sealed_total+' 个）');
+    closeModal('colSealModal');
+    reload(1);renderProgress();   // 板块可见性/徽标即时刷新
+  }catch(e){toast(e.message||'结存保存失败')}
 }
 function applyPermissionUI(){
   if(!ME)return;
@@ -14563,14 +14641,18 @@ function renderBoardList(){
   if(!list.length){box.innerHTML='<div class="empty">没有匹配的看板。</div>';bcPaintPick();return}
   box.innerHTML=list.map(function(b){
     // #205ad-bis（用户确认）：不再展示 board_config.status 的「启用/封存」文本徽标 ——
-    // 它与封存操作按钮并排被误读为「两个按钮」。列表只保留：真封存 →「已封存」徽标；
-    // 未登记配置 →「未配置」徽标（常态「启用」不占视觉位）。
-    const st = b.archived ? '<span class="badge-archived" title="封存于 '+esc(b.archived_at||'?')+' · 操作人 '+esc(b.archived_by||'?')+'">已封存</span>'
-            : (b.status ? '' : '<span class="badge-muted">未配置</span>');
+    // 它与封存操作按钮并排被误读为「两个按钮」。列表只保留：未登记配置 →「未配置」徽标。
+    // T-213（2026-11-24 用户需求）：「已封存」标识取消（封存态由【启用】按钮形态自明）。
+    const st = b.status ? '' : '<span class="badge-muted">未配置</span>';
     // #205ad/#205ad-bis 封存/启用：看板级能力位 can_archive（后端下发，口径=该看板
     // 归属部门的架构负责人；管理员恒 True）—— 看板负责人/范围外架构负责人不渲染按钮；
     // 后端 archive 端点仍兜底 403 拦截
     const canArch=!!b.can_archive;
+    // T-213 结存按钮（封存左边）：板块级封存（结存后板块不可见+不可编辑，徽标不计）；
+    // 同 can_arch 口径渲染。点击 → 结存筛选弹窗（勾选=结存，取消勾选=解封）。
+    const sealBtn=canArch
+      ?'<button class="bc-arch-btn" data-seal-bid="'+esc(b.board_id)+'" onclick="event.stopPropagation();openColSealModal(this.dataset.sealBid,\''+esc(b.board_name).replace(/'/g,'&#39;')+'\')" title="结存该看板下的板块（结存后板块不可见且不可编辑；取消勾选即解封）">结存</button>'
+      :'';
     const archBtn=canArch
       ?'<button class="bc-arch-btn'+(b.archived?' on':'')+'" data-arch=\''+esc(JSON.stringify({bid:b.board_id,to:b.archived?0:1}))+'\' onclick="event.stopPropagation();bcArchive(JSON.parse(this.dataset.arch).bid,JSON.parse(this.dataset.arch).to)" title="'
         +(b.archived?'启用该看板（恢复对外展示）':'封存该看板（不再对外展示，仅看板管理可见）')+'">'
@@ -14599,7 +14681,7 @@ function renderBoardList(){
     //   点击看板卡片本身即进入右侧配置面板（bcSelect），跳转文字是冗余的。
     return '<div class="bc-item'+sel+'" data-bid="'+esc(b.board_id)+'">'
       +'<div class="nm"><label class="bc-pick-wrap" title="勾选以批量设置"><input type="checkbox" class="bc-pick" data-bid="'+esc(b.board_id)+'" '+(BC_SEL.has(b.board_id)?'checked':'')+'></label>'
-      +'<span class="bc-name" title="'+esc(b.board_name||b.board_id)+'">'+esc(b.board_name||b.board_id)+'</span>'+st+archBtn+copyBtn+'</div>'
+      +'<span class="bc-name" title="'+esc(b.board_name||b.board_id)+'">'+esc(b.board_name||b.board_id)+'</span>'+st+sealBtn+archBtn+copyBtn+'</div>'
       +'<div class="meta"><span class="cnt">'+colTxt+'</span>'
       +(deptTip?'<span>'+deptTip+'</span>':'')
       +'<span title="看板创建人">'+creatorTip+'</span></div>'

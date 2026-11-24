@@ -1690,6 +1690,9 @@ def visible_columns(username, boards, columns, board_id=None, counts=None, board
     out = []
     for r in rows:
         d = dict(r)
+        # T-213 板块结存：结存板块不可见（tabs/内容区/徽标全链路排除）
+        if d.get('sealed'):
+            continue
         d['attr'] = _attr_map.get(d['board_id'], '')
         if boards is not None and d['board_id'] not in boards:
             continue
@@ -2685,8 +2688,10 @@ def me(username: str = Depends(require_auth)):
                 for r in dbq('SELECT board_id, owner, participants FROM boards')}
     # #205r（2026-11-18）：看板 tab 标题后的「板块数量」徽标 —— 一次分组查询，
     # 每看板下发 col_count（板块总数口径；数量徽标非权限边界。board_columns 无 deleted 列）
+    # T-213：结存板块不计入徽标 n/N（sealed=0）
     _col_counts = {r['board_id']: r['n']
-                   for r in dbq('SELECT board_id, COUNT(*) AS n FROM board_columns GROUP BY board_id')}
+                   for r in dbq('SELECT board_id, COUNT(*) AS n FROM board_columns '
+                                'WHERE IFNULL(sealed,0)=0 GROUP BY board_id')}
     boards_out = []
     for b in allb:
         item = dict(b)
@@ -2981,6 +2986,12 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
         pool = [dict(r) for r in dbq('SELECT * FROM cards WHERE ' + ' AND '.join(w), p)]
     else:
         pool = [dict(r) for r in dbq('SELECT * FROM cards WHERE deleted=0')]
+    # T-213 板块结存：结存板块下的事项一并隐藏（板块不可见 → 事项无处展示）
+    _sealed_keys = {(r['board_id'] + '::' + r['column_name'])
+                    for r in dbq('SELECT board_id, column_name FROM board_columns '
+                                 'WHERE IFNULL(sealed,0)=1')}
+    if _sealed_keys:
+        pool = [r for r in pool if (r['board_id'] + '::' + (r['column_name'] or '')) not in _sealed_keys]
     mine = filter_rows(pool, boards, columns)
     # 事项级身份过滤（#113 严格口径）：非管理员用户仅展示满足**任一**身份的事项
     #   —— 事项负责人 / 事项参与人 / 上级板块负责人 / 上级看板负责人 / 架构负责人。
@@ -2989,7 +3000,12 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
     # ⚠️ 身份按**数据归属**判定（负责人/参与人名单含我，分号分隔比对账号与姓名）；
     #    管理员（boards=None 全量）不受此过滤。严格不放宽、无特例 ——
     #    板块无负责人/参与人但事项有属数据问题，由数据修正解决（用户确认）。
-    if boards is not None:
+    #    T-213-bis 修复（2026-11-24）：#205ad 起 admin 的 boards 改为**显式集合**
+    #    （allb-arch，排除封存看板）——「boards is not None」不再等价于「普通用户」，
+    #    管理员也会落进本过滤且身份不命中真实看板（owner 是各部门负责人）→
+    #    admin 视角事项全空（本地 verify 端到端 0 条实录）。补 is_admin 豁免，
+    #    与原注释「管理员不受此过滤」的语义对齐。
+    if boards is not None and not is_admin(username):
         _bowners = {r['board_id']: (r['owner'] or '').strip()
                     for r in dbq('SELECT board_id, owner FROM boards')}
         _cowners = {}
@@ -3378,6 +3394,9 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     row = dbq('SELECT * FROM board_columns WHERE col_key=?', (req.col_key,))
     old = dict(row[0]) if row else None
     if old:
+        # T-213 结存板块冻结：不可编辑（先在【结存】弹窗取消勾选解封）
+        if old.get('sealed'):
+            raise HTTPException(403, '该板块已结存（不可编辑）；如需操作请先在【结存】中取消勾选解封')
         board_id = old['board_id']
         old_name = old['column_name']
     else:
@@ -3773,7 +3792,10 @@ async def delete_column(col_key: str, username: str = Depends(require_writer), r
     row = dbq('SELECT * FROM board_columns WHERE col_key=?', (key,))
     if not row:
         raise HTTPException(404, '板块不存在或已删除')
-    col = row[0]
+    col = dict(row[0])
+    # T-213 结存板块冻结：不可编辑也不可删除（先在【结存】弹窗取消勾选解封后再操作）
+    if col.get('sealed'):
+        raise HTTPException(403, '该板块已结存（不可编辑/删除）；如需操作请先在【结存】中取消勾选解封')
     bid, cname, cid = col['board_id'], col['column_name'], col['column_id']
     # 分级权限先于可见性校验（与 create_column 同款理由）
     perm_check(username, perm_chain(board_id=bid, column_id=cid), OP_DELETE, LV_COLUMN_OWNER,
@@ -4057,6 +4079,11 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
         vals['board_name'] = (req.board_name or req.board_id).strip()
     # 分级权限（2026-11-02）：新增事项 = 板块负责人及以上（看板/架构负责人继承）
     # ⚠️ 权限内核先于可见性校验（与 create_column 同款理由）
+    # T-213 结存板块：禁止新增事项（结存板块冻结，前端板块下拉已排除，此处兜底）
+    _tgt_col = dbq('SELECT sealed FROM board_columns WHERE board_id=? AND column_id=?',
+                   (req.board_id, req.column_id or ''))
+    if _tgt_col and (_tgt_col[0]['sealed'] or 0):
+        raise HTTPException(403, '该板块已结存，不能新增事项；如需操作请先在【结存】中解封')
     perm_check(username, perm_chain(board_id=req.board_id, column_id=req.column_id),
                OP_CREATE, LV_COLUMN_OWNER, 'board:' + req.board_id, min_level=LV_COLUMN_OWNER)
     check_board_access(req.board_id, username)
@@ -4218,6 +4245,77 @@ def create_board(req: BoardCreateReq, username: str = Depends(require_writer), r
 class BoardArchiveReq(BaseModel):
     """#205ad 封存/启用看板：true=封存（不对外展示），false=启用（恢复）"""
     archived: bool
+
+
+# ---------------- T-213 板块结存（2026-11-24 用户需求）----------------
+def _can_seal_board(username: str, board_id: str) -> bool:
+    """结存权限 = 看板封存同口径：该看板归属部门的架构负责人（管理员/超管放行任意；
+    未配置归属部门 fail-closed 仅管理员/超管）。"""
+    if username == SUPER_ADMIN or is_admin(username):
+        return True
+    cfg = dbq('SELECT dept_node_id FROM board_config WHERE board_id=?', (board_id,))
+    node_id = (cfg[0]['dept_node_id'] or 0) if cfg else 0
+    if not node_id:
+        return False
+    try:
+        perm_check_arch_scope(username, OP_UPDATE, 'board:' + board_id, node_id=node_id,
+                              action_desc='结存或解封该看板下的板块（不在你负责的架构范围内）')
+        return True
+    except HTTPException:
+        return False
+
+
+@app.get('/api/columns-seal')
+def get_columns_seal(board_id: str, username: str = Depends(require_writer)):
+    """结存弹窗数据：该看板下全部板块（含结存态）。can_seal = 看板封存同口径。"""
+    rows = dbq('SELECT board_id, board_name, archived FROM boards WHERE board_id=?', (board_id,))
+    if not rows:
+        raise HTTPException(404, '看板不存在')
+    can_seal = _can_seal_board(username, board_id)
+    cols = [{'col_key': c['col_key'], 'column_name': c['column_name'],
+             'category': c['category'] or COLUMN_CATEGORY_DEFAULT,
+             'sealed': bool(c['sealed'])}
+            for c in dbq('SELECT col_key, column_name, category, sealed FROM board_columns '
+                         'WHERE board_id=? ORDER BY rowid', (board_id,))]
+    return {'board_id': board_id, 'board_name': rows[0]['board_name'],
+            'can_seal': can_seal, 'columns': cols}
+
+
+class ColumnsSealReq(BaseModel):
+    """T-213 结存保存：sealed = 全量勾选态（col_key 列表；列表外板块 = 解封）"""
+    sealed: list = []
+
+
+@app.post('/api/columns-seal/{board_id}')
+async def save_columns_seal(board_id: str, req: ColumnsSealReq,
+                            username: str = Depends(require_writer), request: Request = None):
+    """保存板块结存态（全量勾选态提交，与该看板现有板块做差量 UPDATE）。
+
+    权限：看板封存同口径（_can_seal_board）。结存板块：不可见+不可编辑，
+    徽标 n/N 不计；取消勾选 = 解封。
+    """
+    if not _can_seal_board(username, board_id):
+        raise HTTPException(403, '仅该看板归属部门的架构负责人/管理员可以结存板块')
+    rows = dbq('SELECT board_id FROM boards WHERE board_id=?', (board_id,))
+    if not rows:
+        raise HTTPException(404, '看板不存在')
+    want = {x.strip() for x in (req.sealed or []) if x.strip()}
+    cols = dbq('SELECT col_key, column_name, sealed FROM board_columns WHERE board_id=?', (board_id,))
+    unknown = [k for k in want if k not in {c['col_key'] for c in cols}]
+    if unknown:
+        raise HTTPException(400, '板块不属于该看板：%s' % '、'.join(unknown[:5]))
+    on = off = 0
+    for c in cols:
+        to = 1 if c['col_key'] in want else 0
+        if (c['sealed'] or 0) != to:
+            dbe('UPDATE board_columns SET sealed=? WHERE col_key=?', (to, c['col_key']))
+            on += to
+            off += (1 - to)
+    audit_log(username, client_ip(request), 'update', f'看板 {board_id} 板块结存',
+              f'板块结存：结存 {on} 个、解封 {off} 个（勾选态 {len(want)}/{len(cols)}）', 'success')
+    await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
+    return {'ok': True, 'sealed_on': on, 'sealed_off': off,
+            'sealed_total': len(want)}
 
 
 @app.post('/api/boards/{board_id}/archive')
