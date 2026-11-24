@@ -842,7 +842,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .week-header .chev{transition:transform .2s;color:var(--text2);font-size:12px;cursor:pointer;flex-shrink:0}
 .week-group.open .chev{transform:rotate(90deg)}
 .week-title{font-size:14px;font-weight:600}
-/* 2026-11-04 需求2：进度条不再弹性伸缩 → 剩余空间全部留给标题区域 */
+/* 2026-11-04 需求2：第一格（原进度条位，T-210 起为类别位）不做弹性伸缩 → 剩余空间全部留给标题区域 */
 .week-header .week-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 标题可点击 = 打开板块编辑界面；展开/收起只由左侧三角控制 */
 .week-title.edit{cursor:pointer}
@@ -851,7 +851,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    （.pin-btn.on / .item-seq.pin：#fff7e6 底 / #d46b08 字），视觉语言统一。
    ⚠️ 标题为 flex:1 弹性占满剩余宽度（列对齐约束，见下方 #205u 注释），
    底色做成向右淡出的渐变带而非实心胶囊 —— 改 fit-content 会让整行后续
-   字段（年份/负责人/进度条…）左移，与普通板块行纵向错位。
+   字段（年份/负责人/类别/倒计时…）左移，与普通板块行纵向错位。
    半透明色值在浅色主题及深色背景下均可读；仅改标题自身外观，不动行布局。 */
 .week-header.col-pinned .week-title{
   background:linear-gradient(90deg,rgba(255,247,230,.95) 0%,rgba(255,247,230,.5) 55%,rgba(255,247,230,0) 100%);
@@ -862,17 +862,23 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .week-header.col-pinned .week-title.edit:hover{color:#b45309}
 /* 归属年份徽标 */
 .week-year{font-size:11.5px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;flex-shrink:0;white-space:nowrap}
-/* .week-meta 已移除（#205u 2026-11-18）：n/N 前缀并入进度条格（.fcol-bar .bar-count） */
-/* ⚠️ 进度条向左溢出 8px 进入列间距 → 「n/N 完成」与条起点只差 4px（紧靠）。
-   meta 不加任何 margin；标题 flex:1 仍吸收全部剩余空间。 */
-/* 2026-11-04 需求2：板块进度条**宽度固定**（≈ 两个周数列的宽度），不做伸缩。
-   它现在是板块行字段网格的**第一格**（原为独立的弹性元素）：
-     板块行 fcols = [进度条 192px][负责人 118][创建 104][截止 104][倒计时 72]
-   → 进度条右端 = 负责人列起点（对齐），而板块行 fcols 比事项行宽 96px，
-     两者右端都锚在 item-tail 前 → 负责人/创建/截止/倒计时四列**仍纵向对齐**。 */
-/* ⚠️ display:block —— 进度条是 <span>（行内元素），行内元素的 width:100% 不生效 → 宽度会是 0 */
-.week-bar{display:block;width:100%;height:6px;background:var(--bg);border-radius:3px;overflow:hidden}
-.week-bar i{display:block;height:100%;background:var(--success)}
+/* 类别徽标（T-210 2026-11-24）：板块行第一格原「n/N + 进度条」移除（#205u 结构退役），
+   改为类别徽标。格宽仍 204px（列对齐约束不变，见下方 .fcols.week-fcols 注释）。
+   五类配色 = 浅色底 + 同系深字 + 细边框（与 .week-year 徽标的描边语言统一，
+   色底与 600 字重带来「略微突出」效果，不喧宾夺主）；悬停 title 说明设置入口。 */
+.fcols.week-fcols .fcol-cat{display:flex;align-items:center;min-width:0;box-sizing:border-box}
+.cat-badge{display:inline-flex;align-items:center;max-width:100%;
+  padding:2px 10px;border-radius:11px;font-size:11.5px;font-weight:600;line-height:18px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;box-sizing:border-box}
+/* 五类配色：c1 主蓝 / c2 绿 / c3 紫 / c4 琥珀（与置顶暖金同系）/ c5 粉 */
+.cat-badge.cat-c1{background:#e8f1fb;border:1px solid #b5d4f4;color:#185fa5}
+.cat-badge.cat-c2{background:#f0f9eb;border:1px solid #b7e1a1;color:#2e7d32}
+.cat-badge.cat-c3{background:#f3f0ff;border:1px solid #d3c9f5;color:#6b4fc3}
+.cat-badge.cat-c4{background:#fff7e6;border:1px solid #ffd591;color:#d46b08}
+.cat-badge.cat-c5{background:#fdf0f5;border:1px solid #f2b8cf;color:#c2185b}
+/* 响应式适配（T-210）：格宽/行布局锁定（本站「需求5」约定：窄屏元素大小位置不变），
+   窄屏时由 .cat-badge 的 max-width:100% + ellipsis 自然截断（不溢出不破版），
+   完整类别名经父格 title 悬停可读。 */
 .week-body{display:none;border-top:1px solid var(--border);padding:8px}
 .week-group.open .week-body{display:block}
 /* ---- 板块头部右侧操作区：创建日期 / 折叠事项 / 展开事项 / 板块置顶 / 事项+ ---- */
@@ -907,19 +913,9 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 板块行的字段网格（2026-11-04 需求2）：第一格是**固定宽度的进度条**（192px ≈ 两个周数列），
    后面几格与事项行同宽同序 → 负责人列起点与事项行完全一致。 */
 /* 板块行字段网格：**与事项行完全同构**（204/118/104/104/72 = 634px，#205s 需求5 同步加宽）
-   → 板块的「负责人/开始/截止/倒计时」四列与事项行的对应列**像素级一一对齐**。
-   板块本身没有周数 → 第一格（周数位）复用为**进度条位**。
-   ⚠️ 两行 fcols 宽度必须相同（都 634px），否则右端锚点相同但左端错位。 */
+   → 板块的「类别/负责人/开始/截止/倒计时」与事项行的对应列**像素级一一对齐**
+   （第一格原为进度条位，T-210 起为类别位——格宽不变，对齐约束保持）。 */
 .fcols.week-fcols{grid-template-columns:204px 118px 104px 104px 72px;width:634px;flex:0 0 634px}
-/* 进度条位（#205u 2026-11-18 压缩）：前缀 n/N 移入格内与进度条同行，
-   组合整体宽度 = 204px 周数列宽（与下方事项行「周数」文本对齐）；
-   进度条本体 flex:1 吃掉前缀之外的剩余宽度，随 n/N 位数自适应。
-   - margin-left:-8px / margin-right:8px 沿用原左溢出列间距的锚点设计。 */
-.fcols.week-fcols .fcol-bar{display:flex;align-items:center;gap:6px;
-  padding-right:0;margin-left:-8px;margin-right:8px;box-sizing:border-box;overflow:visible}
-.fcols.week-fcols .fcol-bar .bar-count{font-size:11.5px;color:var(--text2);
-  white-space:nowrap;flex-shrink:0;font-variant-numeric:tabular-nums}
-.fcols.week-fcols .fcol-bar .week-bar{flex:1;min-width:0;width:auto}
 /* 2026-11-04 #55：列宽 648→446（-202px 全部让给标题）——
    周数值压缩为「2026·W32」、列序调整为 周数/负责人/创建/截止。 */
 .fcol{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -1479,8 +1475,7 @@ body{
 .week-header{padding:14px 22px}
 .week-header:hover{background:#f7f9fc}
 .week-title{font-size:15px}
-.week-bar{background:#eef1f6;border-radius:6px}
-.week-bar i{background:linear-gradient(90deg,#52c41a,#22c55e);box-shadow:0 0 8px rgba(34,197,94,.4)}
+/* .week-bar 进度条样式已移除（T-210 2026-11-24）：板块行 n/N + 进度条下线，改类别徽标 */
 
 /* Item cards */
 /* 事项行内边距（2026-11-10 #129 用户反馈「间距略大」）：上下 11 → 8px，行更紧凑；
@@ -6566,9 +6561,7 @@ function renderBoard(cards,cols,q,colHits){
     const meta=cmeta[k];
     // 板块内事项排序：置顶优先，其余按创建时间降序
     list.sort(cmpCard);
-    const total=meta?meta.card_count:list.length;
-    const done=meta?meta.done_count:list.filter(x=>x.status==='done').length;
-    const rate=total?Math.round(done/total*100):0;
+    // （T-210：原 total/done/rate 进度统计变量随进度条展示一并移除）
     const created=meta?(String(meta.created_at||'').slice(0,10)||'—'):'—';
     const colKey=meta?meta.col_key:(curBoard+'::'+k);
     CHK_COL_CARDS[colKey]=(groups[k]||[]).map(x=>x.card_id);   // #159 供板块聚合勾选
@@ -6597,20 +6590,19 @@ function renderBoard(cards,cols,q,colHits){
       ?`<span class="lock-tag col-lock-tag" title="${esc(_lockDisp)} 正在编辑该板块">🔒 ${esc(_lockDisp)} 已锁定</span>`
       :'';
     // ── 板块行布局（2026-11-04 #55）：与事项行同构 → 字段列纵向对齐 ──
-    // 字段：负责人 / 创建 / 截止 / 倒计时（板块无周数 → 周数列复用为进度条位）
+    // 字段：类别 / 负责人 / 创建 / 截止 / 倒计时（板块无周数 → 周数列复用为类别位）
     // 截止日期（T-0188）：板块编辑弹窗可配置；倒计时按截止日期与今天自动计算
     const _ownerName=bcMemberName(meta?(meta.owner||''):'');
     const _colDue=meta?(meta.due_date||''):'';
     const _cdStop=(meta?(meta.completion||''):'')==='done';   // T-191i：板块已完成 → 倒计时停用
-    //  ① 第一格 = 进度条位（#205u 2026-11-18 压缩）：**前缀 n/N 移入格内**，与进度条
-    //     组合后的整体宽度 = 204px 周数列宽 → 与下方事项行的「周数」文本对齐；
-    //     可见文案去掉「完成」二字（悬停提示其余文案不变）。
-    //  ② 板块「完成情况」= 负责人手动声明的独立字段（completion），
-    //     与进度条（done/total 自动统计）**并存且互不覆盖**
+    //  ① 第一格 = 类别位（T-210 2026-11-24 替换原进度条位）：原「n/N + 进度条」移除，
+    //     改为类别徽标（五类配色，见 .cat-badge-*）——格宽仍 204px（列对齐约束不变，
+    //     与下方事项行的「周数」文本对齐）。
+    //  ② 板块「完成情况」= 负责人手动声明的独立字段（completion），仍在尾部标签位。
+    const _catName=meta?(meta.category||'年度重点工作'):'年度重点工作';
     const _colFcols='<span class="fcols week-fcols">'
-      +`<span class="fcol fcol-bar" title="板块完成进度（按事项完成数自动统计）：${done}/${total}">`
-      +`<span class="bar-count">${done}/${total}</span>`
-      +`<span class="week-bar"><i style="width:${rate}%"></i></span></span>`
+      +`<span class="fcol fcol-cat" title="板块类别（在板块编辑弹窗中设置）">`
+      +`<span class="cat-badge ${catBadgeCls(_catName)}">${esc(_catName)}</span></span>`
       +(_ownerName?`<span class="fcol fcol-owner" title="板块负责人">负责人 ${esc(_ownerName)}</span>`
                   :'<span class="fcol fcol-owner fcol-empty" title="未设置板块负责人">负责人 —</span>')
       +`<span class="fcol fcol-created" title="板块开始时间（板块创建即开始）">开始 ${esc(created||'—')}</span>`
@@ -6625,7 +6617,7 @@ function renderBoard(cards,cols,q,colHits){
       +'</span>';
     // 板块完成情况标签（与事项的状态标签同一形态，只读展示）
     const _comp=meta?(meta.completion||'open'):'open';
-    const _compTag=`<span class="status-tag ${statusCls(_comp)}" title="板块完成情况（由板块负责人及以上在编辑板块时手动选择；与左侧进度条的自动统计相互独立）">${statusText(_comp)}</span>`;
+    const _compTag=`<span class="status-tag ${statusCls(_comp)}" title="板块完成情况（由板块负责人及以上在编辑板块时手动选择，仅作整体完成度声明）">${statusText(_comp)}</span>`;
     // 置顶 / 复制合并为「操作 ▾」（tail 槽位与事项行同构 → 纵向对齐）
     // 「折叠/展开子事项」已上收到工具栏【操作 ▾】（2026-11-13 用户需求）：
     // 单个板块不再提供该选项，全局按钮一键操作当前所有可见板块
@@ -6648,7 +6640,6 @@ function renderBoard(cards,cols,q,colHits){
         ${titleHtml}
         ${_lockTag}
         ${year?`<span class="week-year" title="板块归属年份（年份绑定在板块层；板块下事项的周数与它不做强制校验）">${esc(year)}年</span>`:''}
-        <!-- #205u：前缀 n/N 移入进度条格内（原 week-meta「n/N 完成」独立 span 移除） -->
         ${_colFcols}
         <span class="item-tail">
           <span class="slot-subtask">${(meta?meta.todo_total:0)>0?`<span class="st-mini ${meta.todo_done===meta.todo_total?'all':''}" title="板块待办完成进度（勾选在板块编辑界面或浏览界面进行）">【待办：${meta.todo_done}/${meta.todo_total}】</span>`:''}</span>
@@ -6890,6 +6881,12 @@ function closeAttrDrop(){
 const CAT_OPTS=[['年度重点工作','年度重点工作'],['业财融合工作','业财融合工作'],
                 ['财务数智化工作','财务数智化工作'],['其他重点工作','其他重点工作'],
                 ['文化及团队建设','文化及团队建设']];
+// 类别徽标配色映射（T-210）：按枚举序 → cat-c1..c5 五个 CSS 配色类；
+// 未知值（异常数据）回退 c1（年度重点）。function 声明提升 → renderBoard 可前置使用。
+function catBadgeCls(name){
+  const i=CAT_OPTS.findIndex(function(o){return o[0]===name;});
+  return 'cat-c'+(i>=0?i+1:1);
+}
 let CAT_SEL=new Set();            // 已选类别（空 = 全部）
 let _catDropOpen=false;
 function paintCat(){
