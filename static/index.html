@@ -31,6 +31,35 @@ button{font-family:inherit}
    否则「财务综合事务平台 FISP」会被拆成两行。 */
 .header-left h1 .abbr{display:inline-block;font-size:11px;font-weight:600;color:var(--text2);
   letter-spacing:.6px;margin-left:6px;vertical-align:2px}
+/* ===== 页面切换标签（T-214 2026-11-24）=====
+   分段控件：浅灰胶囊底座 + 两枚标签；激活页 = 主色（--primary 深蓝）实底白字 +
+   轻投影，与【启用勾选】(.chk-mode-btn.on) 同一激活视觉语言。
+   精致感来自细节：3px 内衬的胶囊底座、7px 圆角（底座 10px 圆角的视觉内缩）、
+   180ms 过渡、hover 主色淡染、图标与文字 4px 呼吸间距。
+   ⚠️ .header-left 是 flex-shrink:0 —— 标签页必须允许收缩（min-width:0），
+   否则窄屏时把右侧按钮挤出视口。 */
+.page-tabs{display:inline-flex;align-items:stretch;gap:2px;margin-left:14px;
+  background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:3px;min-width:0}
+.page-tab{border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:500;
+  padding:4px 16px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;
+  gap:5px;transition:color .18s,background-color .18s,box-shadow .18s;white-space:nowrap}
+.page-tab .pt-ico{font-size:13px;line-height:1;transform:translateY(-.5px)}
+.page-tab:hover{color:var(--primary);background:rgba(0,45,116,.06)}
+.page-tab.on{background:var(--primary);color:#fff;
+  box-shadow:0 1px 4px rgba(0,45,116,.28),inset 0 1px 0 rgba(255,255,255,.12)}
+.page-tab.on:hover{background:var(--primary);color:#fff}
+.page-tab:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+/* 周报集成空页（T-214）：满屏高度居中的空态卡片，延续站内卡片视觉
+   （白卡 + var(--border) 描边 + var(--shadow) 投影 + 12px 圆角）。
+   min-height 用视口剩余高度近似（顶栏 ~64px + 状态栏余量），
+   不依赖 JS 测量 → 任何窗口尺寸都居中。 */
+.weekly-empty{display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 150px);padding:40px 20px}
+.weekly-empty-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  box-shadow:var(--shadow);padding:56px 72px;text-align:center;max-width:460px}
+.weekly-empty-card .we-ico{font-size:44px;line-height:1;margin-bottom:18px;
+  filter:grayscale(.15);opacity:.9}
+.weekly-empty-card .we-title{font-size:18px;font-weight:600;color:var(--text);letter-spacing:.5px}
+.weekly-empty-card .we-sub{font-size:13px;color:var(--text2);margin-top:8px}
 /* 年份筛选器（多选）：替代原来的年份徽标，按归属年份筛选当前看板下的板块。
    形态：chips 标签组 —— 每个已选年份是一个可 ✕ 移除的标签，右侧「全部年份」一键清空。
    下拉已废弃（多选下拉在窄屏里难以表达"已选哪些"，chips 一眼可见且逐个可移除）。 */
@@ -1638,6 +1667,18 @@ function goLogin(){
   <div class="app-header-inner">
   <div class="header-left">
     <h1>财务综合事务平台<span class="abbr">FISP</span></h1>
+    <!-- 页面切换标签（T-214 2026-11-24）：事项工作台 = 现有全部界面；周报集成 = 预留空页。
+         形态 = 分段控件（segmented control）：浅灰胶囊底 + 激活页主色实底，与
+         【启用勾选】(chk-mode-btn.on) 同一激活语言；切换只做 display 切换，
+         工作台 DOM 常驻 → 状态（选中看板/筛选/滚动位置）零丢失。 -->
+    <nav class="page-tabs" id="pageTabs" role="tablist" aria-label="页面切换">
+      <button class="page-tab on" id="ptabWorkbench" role="tab" aria-selected="true"
+              onclick="switchPage('workbench')" title="事项工作台：架构 / 看板 / 事项管理（当前全部功能）">
+        <span class="pt-ico">📋</span>事项工作台</button>
+      <button class="page-tab" id="ptabWeekly" role="tab" aria-selected="false"
+              onclick="switchPage('weekly')" title="周报集成：建设中，敬请期待">
+        <span class="pt-ico">📊</span>周报集成</button>
+    </nav>
   </div>
   <div class="header-actions">
     <span class="header-user" id="headerUser" role="button" tabindex="0"
@@ -1713,6 +1754,10 @@ function goLogin(){
   </div>
   <div class="msg-list" id="msgList"></div>
 </aside>
+<!-- ═══ 页面容器（T-214 2026-11-24）═══
+     pageWorkbench = 现有全部界面（架构/看板/统计/公告/筛选/事项/部门主页/看板列表）；
+     pageWeekly    = 周报集成预留空页。切换 = display 切换，DOM 常驻零状态丢失。 -->
+<div id="pageWorkbench">
 <!-- 顶部栏：左右分栏
      左半 = 部门 / 看板 / 统计卡片（三列多行栅格）；右半 = 公告区（独立展示空间）。
      栅格：.topbar 两列（1fr + 固定宽公告列），左半内部三列（部门带 / 看板带 / 统计带各一行）。 -->
@@ -1976,6 +2021,20 @@ function goLogin(){
     </div>
   </div>
   <main class="board-content" id="boardContent"></main>
+</div>
+</div><!-- /pageWorkbench -->
+
+<!-- ═══ 周报集成（T-214 预留空页）：后续新板块的开发入口。
+     空态设计：居中卡片 + 大图标 + 主标题/副标题双行，延续站内卡片语言；
+     后续开发时替换 .weekly-empty 内容即可，容器与切换逻辑不变。 -->
+<div class="wrap" id="pageWeekly" hidden>
+  <div class="weekly-empty">
+    <div class="weekly-empty-card">
+      <div class="we-ico">📊</div>
+      <div class="we-title">周报集成</div>
+      <div class="we-sub">该板块正在建设中 · 敬请期待</div>
+    </div>
+  </div>
 </div>
 
 <!-- 部门文化编辑弹窗（仅管理员）：标语 / 职能介绍 / 团队合照 / 标杆与模范 -->
@@ -11058,6 +11117,22 @@ function toggleHeaderMore(ev,menuId){
 }
 function closeHeaderMore(){
   document.querySelectorAll('.header-more-menu').forEach(function(x){x.hidden=true;});
+}
+// ===== 页面切换（T-214 2026-11-24）=====
+// workbench = 现有全部界面（DOM 常驻，display 切换 → 状态零丢失）
+// weekly    = 周报集成预留空页
+var CUR_PAGE='workbench';
+function switchPage(name){
+  if(CUR_PAGE===name)return;
+  CUR_PAGE=name;
+  var wb=document.getElementById('pageWorkbench'), wk=document.getElementById('pageWeekly');
+  if(wb)wb.style.display=(name==='workbench')?'':'none';
+  if(wk)wk.hidden=(name!=='weekly');
+  var t1=document.getElementById('ptabWorkbench'), t2=document.getElementById('ptabWeekly');
+  if(t1){t1.classList.toggle('on',name==='workbench');t1.setAttribute('aria-selected',name==='workbench');}
+  if(t2){t2.classList.toggle('on',name==='weekly');t2.setAttribute('aria-selected',name==='weekly');}
+  // 回到工作台：隐藏期间若有数据刷新，弹性高度（看板带/统计带对齐）需重算
+  if(name==='workbench'&&typeof syncBoardBandHeight==='function')syncBoardBandHeight();
 }
 // 年份筛选 chips 的点击（移除单个年份 / 展开可选列表 / 清空全部）—— 事件委托到 document，
 // 因为 chips 是 innerHTML 重建的，直接绑在元素上会在重建后失效
