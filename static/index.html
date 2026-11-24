@@ -208,7 +208,7 @@ button{font-family:inherit}
 .ss-row{display:flex;align-items:center;gap:10px;padding:5px 4px;border-radius:6px}
 .ss-row.on{background:#f5f8ff}
 .ss-row+.ss-row{border-top:1px dashed var(--border)}
-.ss-check{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:12.5px;color:var(--text);flex:0 0 auto}
+.ss-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px;color:var(--text);flex:0 0 auto}
 .ss-check input{cursor:pointer;accent-color:var(--primary)}
 .ss-pri{flex-shrink:0;font-size:11px;padding:1px 8px;border-radius:10px;background:#e6f7ff;color:var(--primary);font-weight:600;min-width:56px;text-align:center}
 .ss-pri-off{background:var(--border);color:#8a93a6;font-weight:400}
@@ -236,7 +236,7 @@ button{font-family:inherit}
    实测列轨被顶到 98px 导致日历横向溢出（T-191e）；minmax(0,1fr) 显式钳到 0 */
 .due-cell{position:relative;height:46px;min-width:0;border:1px solid var(--border);border-radius:8px;
   display:flex;align-items:center;justify-content:center;font-size:13.5px;cursor:pointer;
-  background:#fff;-webkit-user-select:none;user-select:none;transition:border-color .12s,box-shadow .12s}
+  background:#fff;-webkit-transition:border-color .12s,box-shadow .12s}
 .due-cell:hover{border-color:var(--primary)}
 .due-cell.empty{visibility:hidden;cursor:default}
 .due-cell.empty:hover{border-color:var(--border)}
@@ -607,7 +607,7 @@ button{font-family:inherit}
 .date-filter.active{border-style:solid;border-color:var(--primary);background:#f2f7fc}
 .filter-date{box-sizing:border-box;height:31px;padding:0 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;outline:none;background:#fff;color:var(--text);font-family:inherit;width:122px}
 .filter-date:focus{border-color:var(--primary);box-shadow:var(--ring)}
-.date-sep{color:var(--text2);font-size:12px;-webkit-user-select:none;user-select:none}
+.date-sep{color:var(--text2);font-size:12px;-webkit-}
 .filter-clear{width:24px;height:24px;border:1px solid var(--border);background:#fff;color:var(--text2);border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
 .filter-clear:hover{border-color:var(--danger);color:var(--danger)}
 /* [hidden] 的浏览器默认 display:none 会被上面的 inline-flex 覆盖，必须显式兜底 */
@@ -795,7 +795,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .dept-stat .ds-value.blue{color:var(--primary)}.dept-stat .ds-value.green{color:var(--success)}
 .dept-stat .ds-value.orange{color:var(--warning)}.dept-stat .ds-value.red{color:var(--danger)}
 /* 「更多」折叠区 */
-.dept-more-toggle{margin-top:10px;font-size:12.5px;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;-webkit-user-select:none;user-select:none}
+.dept-more-toggle{margin-top:10px;font-size:12.5px;color:var(--primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;-webkit-}
 .dept-more-toggle:hover{text-decoration:underline}
 .dept-more{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin-top:10px}
 .dept-more[hidden]{display:none}
@@ -860,7 +860,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 /* 板块卡片之间间距（2026-11-10 #129 用户反馈「各行事项间间距略大」）：12 → 8px */
 .board-content{display:flex;flex-direction:column;gap:8px}
 .week-group{background:#fff;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
-.week-header{display:flex;align-items:center;gap:12px;padding:12px 22px;cursor:default;-webkit-user-select:none;user-select:none;transition:background .15s}
+.week-header{display:flex;align-items:center;gap:12px;padding:12px 22px;cursor:default;-webkit-transition:background .15s}
 /* 板块勾选框（#158）：位于 ▶ 三角与标题之间 —— 各自独立不重叠；勾选状态按用户隔离 */
 .week-header .col-chk{width:14px;height:14px;flex-shrink:0;cursor:pointer;accent-color:var(--primary);margin:0}
 /* 勾选模式（#159）：事项/子事项勾选框；开关按钮两态 */
@@ -1105,7 +1105,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    同一色系，目录列表（status-tag）与预览/弹窗（status-btn）内外一致 */
 .status-tag.notstarted{background:#f0f2f5;color:#6b7280;border:1px solid #d5dbe3}
 /* 状态标签同时是行内唯一的状态切换入口：可点击，带按压态与涟漪反馈 */
-.status-tag-act{cursor:pointer;-webkit-user-select:none;user-select:none;transition:transform .12s,box-shadow .15s,filter .15s}
+.status-tag-act{cursor:pointer;-webkit-transition:transform .12s,box-shadow .15s,filter .15s}
 .status-tag-act:hover{box-shadow:0 0 0 2px rgba(22,119,255,.16);filter:brightness(.97)}
 .status-tag-act:active{transform:scale(.93)}
 /* 详情弹窗的状态按钮：当前状态的唯一呈现，也是本弹窗里唯一的状态设置入口。
@@ -1289,7 +1289,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .form-textarea{min-height:100px;resize:vertical}
 /* ---- 单选组（新建板块的「性质」）---- */
 .radio-group{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
-.radio-item{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;-webkit-user-select:none;user-select:none}
+.radio-item{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;-webkit-}
 .radio-item input{width:15px;height:15px;margin:0;accent-color:var(--primary);cursor:pointer}
 /* 只读字段（创建人）：锁定不可修改 */
 .form-input[readonly]{background:#f5f7fa;color:var(--text2);cursor:not-allowed}
@@ -1640,7 +1640,7 @@ body{
 .pcard{box-shadow:var(--shadow-sm);border-radius:12px}
 
 /* Team modal - group chips (replace inline labels) */
-.tm-grp-opt{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px 3px;border-radius:5px;cursor:pointer;font-size:12.5px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;-webkit-user-select:none;user-select:none;border:1px solid transparent}
+.tm-grp-opt{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px 3px;border-radius:5px;cursor:pointer;font-size:12.5px;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;-webkit-border:1px solid transparent}
 .tm-grp-opt:hover{background:rgba(0,45,116,.06);border-color:rgba(0,45,116,.16)}
 .tm-grp-opt:has(input:checked),.tm-grp-opt.on{background:rgba(0,45,116,.10);border-color:rgba(0,45,116,.30);color:var(--primary);font-weight:500}
 /* 兼容性兜底（2026-11-13 浏览器适配 P0）：:has() 需 Firefox 121+/Safari 15.4+/Chrome 105+，
@@ -3083,7 +3083,7 @@ function goLogin(){
 .bc-section > .lab{font-size:12.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
 .bc-section > .lab .req{color:var(--danger);font-size:12px}
 .bc-pills{display:flex;flex-wrap:wrap;gap:8px}
-.bc-pill{border:1px solid var(--border);background:var(--card);color:var(--text);padding:7px 16px;border-radius:20px;font-size:13px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
+.bc-pill{border:1px solid var(--border);background:var(--card);color:var(--text);padding:7px 16px;border-radius:20px;font-size:13px;cursor:pointer;transition:all .15s;-webkit-}
 .bc-pill:hover{border-color:var(--primary);color:var(--primary)}
 .bc-pill.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(0,45,116,.25)}
 .bc-pill.on.warn{background:var(--warning);border-color:var(--warning);box-shadow:0 2px 8px rgba(250,173,20,.3)}
@@ -3117,7 +3117,7 @@ function goLogin(){
   flex:0 1 auto;min-width:0}
 .combo-filter.active{border-color:var(--primary);background:#f2f7fc}
 .combo-filter:focus-within{border-color:var(--primary);box-shadow:var(--ring)}
-.cf-label{font-size:12.5px;color:var(--text2);white-space:nowrap;padding-top:4px;-webkit-user-select:none;user-select:none;flex-shrink:0}
+.cf-label{font-size:12.5px;color:var(--text2);white-space:nowrap;padding-top:4px;flex-shrink:0}
 .combo-filter.active .cf-label{color:var(--primary)}
 /* 输入区：窄一点（人员/周数两个控件都要给同行其它控件让位），
    已选 chips 增多时可临时撑宽，但整体不超过 220px。
@@ -3216,7 +3216,7 @@ function goLogin(){
 .cf-opt.on{background:#eef5ff;color:var(--primary);font-weight:600}
 /* #205v（2026-11-18）：筛选下拉选项行右侧的板块数量（灰字右对齐，实时分面统计） */
 .cf-opt .opt-count{margin-left:auto;font-size:11px;color:var(--text3);
-  font-variant-numeric:tabular-nums;flex-shrink:0;-webkit-user-select:none;user-select:none}
+  font-variant-numeric:tabular-nums;flex-shrink:0}
 /* #205p（2026-11-18）：事项周数多选下拉——选项带 checkbox（整行可点、勾选行高亮） */
 #e_week_drop .cf-opt input[type=checkbox],#n_week_drop .cf-opt input[type=checkbox]{width:13px;height:13px;margin:0 6px 0 0;accent-color:var(--primary);cursor:pointer;flex-shrink:0;vertical-align:-2px}
 #e_week_drop .cf-opt:has(input:checked),#n_week_drop .cf-opt:has(input:checked){color:var(--primary);font-weight:600}
@@ -3224,7 +3224,7 @@ function goLogin(){
    与标题同行、留 10px 间距、不换行 */
 .week-label-row{display:flex;align-items:center;gap:10px;white-space:nowrap}
 .week-label-row>label{margin-bottom:0;flex-shrink:0}
-.week-auto-line{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text2);cursor:pointer;user-select:none;margin-bottom:0;white-space:nowrap;min-width:0;overflow:hidden}
+.week-auto-line{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--text2);cursor:pointer;margin-bottom:0;white-space:nowrap;min-width:0;overflow:hidden}
 .week-auto-line input[type=checkbox]{width:13px;height:13px;margin:0;accent-color:var(--primary);cursor:pointer}
 .week-auto-line:hover{color:var(--text)}
 /* 周数候选里的「当前周」高亮（2026-11-09 需求4）：#CCB484 + 加粗。
@@ -3730,9 +3730,10 @@ function setupDraggableModals(root){
     modal.dataset.dragInited='1';
     modal.addEventListener('mousedown',e=>{
       if(e.button!==0)return;
-      // 内容区、表单元素、按钮、链接不触发拖拽
+      // T-221（用户口径）：仅按住**顶部标题栏**才可拖动 —— 正文/按钮/输入框不响应。
+      // 标题栏内的按钮/输入/链接（状态按钮、✕ 等）仍不触发拖拽
+      if(!e.target.closest('.modal-header'))return;
       if(e.target.closest('button,input,select,textarea,a,[contenteditable]'))return;
-      if(e.target.closest('.modal-body'))return;
       e.preventDefault();
       closeTreePick();
       const startX=e.clientX,startY=e.clientY;
@@ -8580,6 +8581,11 @@ async function releaseEditLock(key){
   try{await api('/api/locks/release',{method:'POST',body:JSON.stringify({key:key})})}catch(e){}
 }
 // 弹窗关闭 → 释放对应编辑锁（兜底：✕ / 取消 / 保存后关闭统一走 closeModal）
+MODAL_CLOSE_HOOKS.detailModal=function(){
+  // T-221：关闭详情弹窗 → 释放每周进展独立锁（未保存草稿保留在 WP_STATE.local，
+  // 同卡片重开不丢；换卡片由 openDetail 重置）
+  if(WP_LOCK_KEY){releaseEditLock(WP_LOCK_KEY);WP_LOCK_KEY='';}
+};
 MODAL_CLOSE_HOOKS.columnModal=function(){
   releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';
   // 从浏览界面进来的编辑：关闭编辑（保存/取消/✕）后回到浏览界面，保持操作上下文不断
@@ -10909,6 +10915,7 @@ async function openDetail(id){
 //（键=周数原文）→ 编辑弹窗里改周数回来，已填内容不丢；周数减少时输入框随之
 // 减少，但对应内容仍留在服务端与草稿缓存中，重新勾选该周即恢复。
 var WP_STATE={card:'',server:{},local:{}};
+var WP_LOCK_KEY='';   // T-221：每周进展独立编辑锁（week_progress:<card_id>，与事项编辑锁互不影响）
 function renderWeekProgress(c){
   const box=document.getElementById('d_wp_box'),list=document.getElementById('d_wp_list');
   const weeks=cardWeeks(c);
@@ -10939,10 +10946,25 @@ function renderWeekProgress(c){
 function onWpInput(ta){
   const wk=ta.getAttribute('data-wp-week');
   if(!WP_STATE.card)return;
+  // T-221：首次编辑时认领**每周进展独立锁**（week_progress:<card_id>）——
+  // 与事项编辑锁（card:<id>）互不影响；他人持有 → 冲突提示 + 输入区转只读
+  if(!WP_LOCK_KEY&&!WP_LOCK_PENDING){
+    WP_LOCK_PENDING=true;
+    const _k='week_progress:'+WP_STATE.card;
+    acquireEditLock(_k,'每周进展').then(function(ok){
+      WP_LOCK_PENDING=false;
+      if(ok){WP_LOCK_KEY=_k;return}
+      // 认领失败（他人编辑中）：输入区转只读，已输入内容保留可复制
+      WP_LOCK_KEY='';
+      document.querySelectorAll('#d_wp_list textarea').forEach(function(t){t.readOnly=true;});
+      document.getElementById('d_wp_save').style.display='none';
+    });
+  }
   WP_STATE.local[wk]=ta.value;
   ta.classList.toggle('dirty',ta.value!==((WP_STATE.server[wk]||{}).content||''));
   syncWpSaveBtn();
 }
+var WP_LOCK_PENDING=false;   // 锁认领进行中（防重复发起）
 function wpHasDirty(){
   return Object.keys(WP_STATE.local).some(function(wk){
     return WP_STATE.local[wk]!==((WP_STATE.server[wk]||{}).content||'');
@@ -10967,6 +10989,8 @@ async function saveWeekProgress(){
     WP_STATE.local={};
     if(typeof DETAIL_CARD==='object'&&DETAIL_CARD)renderWeekProgress(DETAIL_CARD);
     toast('每周进展已保存');
+    // 保存成功 → 释放每周进展独立锁（下一次编辑会重新认领）
+    if(WP_LOCK_KEY){releaseEditLock(WP_LOCK_KEY);WP_LOCK_KEY='';}
   }catch(e){toast(e.message||'保存失败')}
 }
 async function addComment(){
@@ -12123,7 +12147,7 @@ function initTeamFilterBar(){
     <div class="tm-table-scroll">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--bg)">
-          <th style="padding:6px 10px;text-align:left;width:122px;cursor:pointer;-webkit-user-select:none;user-select:none" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
+          <th style="padding:6px 10px;text-align:left;width:122px;cursor:pointer" ondblclick="tmToggleSort()" title="双击按 ID 排序（升序 / 降序切换）">ID ${TM_SORT_DIR===-1?'↓':'↑'}</th>
           <th style="padding:6px 10px;text-align:left;width:130px">姓名</th>
           <th style="padding:6px 10px;text-align:left;width:230px">部门</th>
           <th style="padding:6px 10px;text-align:left;width:150px">账号</th>
@@ -12396,7 +12420,7 @@ function renderPetZoneTabs(){
     return '<span class="pet-tab'+(act?' pet-tab-act':'')+'" data-zone="'+esc(z.name)+'" '
       +'style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid '
       +(act?'var(--primary)':'var(--border)')+';border-radius:16px;cursor:pointer;font-size:12.5px;'
-      +'background:'+(act?'rgba(0,45,116,.08)':'#fff')+';-webkit-user-select:none;user-select:none">'
+      +'background:'+(act?'rgba(0,45,116,.08)':'#fff')+'">'
       +esc(z.label)+'<b style="font-weight:400;color:var(--text3)">'+z.count+'</b>'+ops+'</span>';
   }).join('')
   +'<button type="button" class="icon-btn" style="padding:2px 10px;font-size:12px" onclick="petNewZone()">＋ 新增分区</button>';
@@ -13640,7 +13664,7 @@ function orgUnassignedHtml(){
         :'<span style="font-size:11px;color:var(--text3)">无删除权限</span>'}
     </div>`).join(''):'';
   return `<div style="margin:10px 10px 0;border:1.5px dashed var(--border);border-radius:var(--radius);overflow:hidden">
-    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;user-select:none"
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer"
          onclick="toggleUnassigned()" title="未在【看板管理】配置归属部门的看板（单击展开/收起）">
       <span style="color:var(--text2);font-size:11px;transition:transform .2s;transform:rotate(${open?'90deg':'0deg'})">▶</span>
       <span style="font-size:12.5px;font-weight:500;color:var(--text2)">未配置架构</span>

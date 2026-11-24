@@ -5154,7 +5154,7 @@ def heartbeat(card_id: str, username: str = Depends(require_writer)):
 #    白名单改为「前缀白名单 + 任意非控制字符 + 长度上限」——key 由服务端按
 #    数据库主键/名称生成，本就不是自由用户输入，字符级白名单只会误伤真实数据。
 import re as _re
-_LOCK_KEY_RE = _re.compile(r'^(card|board|column|org|team|user|notice|dept):[^\x00-\x1f]{1,180}$')
+_LOCK_KEY_RE = _re.compile(r'^(card|board|column|org|team|user|notice|dept|week_progress):[^\x00-\x1f]{1,180}$')
 
 def _check_lock_key(key: str):
     if not _LOCK_KEY_RE.match(key or ''):
@@ -5347,8 +5347,14 @@ async def get_week_progress(card_id: str, username: str = Depends(require_auth))
 
 @app.post('/api/cards/{card_id}/week-progress')
 async def save_week_progress(card_id: str, req: WeekProgressReq,
-                             username: str = Depends(require_auth), request: Request = None):
+                             username: str = Depends(require_writer), request: Request = None):
     check_card_access(card_id, username)
+    # T-221：每周进展**独立编辑锁**护栏（week_progress:<card_id>，与事项编辑锁互不影响）——
+    # check→acquire 一次性认领：他人持有 → 409「已被 <姓名> 编辑中」；
+    # 本人经弹窗认领（/api/locks/acquire）则 fresh=False，写完不释放（交给弹窗生命周期）；
+    # 直调 API 的一次性认领写完即释放。
+    _wp_lk = 'week_progress:' + card_id
+    _wp_fresh = _lock_oneshot(_wp_lk, username, '每周进展', '保存')
     crow = dbq('SELECT card_name, week_no FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not crow:
         raise HTTPException(404, '事项不存在或已删除')
@@ -5374,6 +5380,8 @@ async def save_week_progress(card_id: str, req: WeekProgressReq,
     log_action(card_id, username, 'update', '每周进展保存（%d 周）' % len(items))
     audit_log(username, client_ip(request), 'update', f'事项 {crow[0]["card_name"]}',
               '保存每周进展（%d 周）' % len(items), 'success')
+    if _wp_fresh:
+        _lock_release(_wp_lk, username)
     return {'ok': True}
 
 # ---------------- API：消息中心 ----------------
