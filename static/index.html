@@ -588,6 +588,14 @@ button{font-family:inherit}
 .btn-default{border:1px solid var(--border);background:#fff;color:var(--text);padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;transition:all .15s}
 .btn-default:hover{border-color:var(--primary);color:var(--primary)}
 /* 【清空筛选】蓝色底色（2026-11-04 需求1）：与主操作同色系，但保持工具栏按钮尺寸 */
+/* 综合看板三按钮（T-212-ter）：形态参考【启用勾选】——白底描边常态，
+   综合模式进行中【普通看板】= 蓝底激活态（.on，同 .chk-mode-btn.on）。
+   尺寸沿用原 btn-primary 的 3px 12px / 12px，三颗等宽等距。 */
+.syn-band-btn{background:#fff;color:var(--text);border:1px solid var(--border);
+  padding:3px 12px;border-radius:var(--radius-sm);font-size:12px;cursor:pointer;
+  transition:all .15s;white-space:nowrap;font-family:inherit;font-weight:500}
+.syn-band-btn:hover{border-color:var(--primary);color:var(--primary)}
+.syn-band-btn.on{background:var(--primary);color:#fff;border-color:var(--primary);font-weight:600}
 .btn-clear{background:var(--primary);color:#fff;border:1px solid var(--primary);
   padding:7px 16px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer;
   font-weight:500;transition:all .15s;white-space:nowrap;font-family:inherit}
@@ -1741,15 +1749,18 @@ function goLogin(){
                非综合模式显示【综合看板】（进入该部门综合模式：展示本架构下全部看板的
                全部板块，类别优先于置顶排序）；综合模式下按钮变【普通看板】（退出），
                左侧追加【综合编辑】（仅默认可见人员可见，追加人员不可见）。 -->
-          <span class="tb-band-head-entry" id="synEntry" style="display:none">
-            <button id="bandSynEditBtn" class="btn-primary" style="padding:3px 12px;font-size:12px;display:none"
+          <!-- T-212-ter（2026-11-24 用户反馈）：三按钮统一【启用勾选】形态（白底描边，
+               综合模式进行中【普通看板】= 蓝底激活态 .on）；synEntry 去掉 margin-left:auto
+               （双 auto 把按钮间距撑乱）→ 间距由 .tb-band-head gap 统一。 -->
+          <span class="tb-band-head-entry" id="synEntry" style="display:none;gap:12px;margin-left:0">
+            <button id="bandSynEditBtn" class="syn-band-btn" style="display:none"
               onclick="openSynConfigModal()" title="配置综合看板：可见板块与追加可见人员">综合编辑</button>
-            <button id="bandSynBtn" class="btn-primary" style="padding:3px 12px;font-size:12px"
+            <button id="bandSynBtn" class="syn-band-btn"
               onclick="toggleSynMode()" title="切换至综合看板模式：展示所选部门架构下全部看板中的全部板块">综合看板</button>
           </span>
           <span class="tb-band-head-entry" id="boardNewEntry">
-            <button id="bandNewBoardBtn" class="btn-primary" style="padding:3px 12px;font-size:12px"
-              onclick="bandNewBoard()" title="打开看板管理并新建看板">＋ 新建看板</button>
+            <button id="bandNewBoardBtn" class="syn-band-btn"
+              onclick="bandNewBoard()" title="打开看板管理并新建看板">新建看板</button>
           </span>
           <!-- 归属年份筛选已移入下方筛选工具栏（2026-11-06 #81 用户需求）：
                改为与周数同款的 combo 多选下拉，与本栏解耦。 -->
@@ -3626,12 +3637,14 @@ function applySynBtn(){
   if(SYN_MODE){
     btn.textContent='普通看板';
     btn.title='退出综合看板模式，恢复普通看板选择';
+    btn.classList.add('on');   // T-212-ter：综合模式进行中 = 蓝底激活态（同【启用勾选】开启形态）
     // 综合编辑按钮：仅默认可见人员（syn_edit_depts 含当前部门）；追加人员不可见
     var canEd=ME&&ME.syn_edit_depts&&ME.syn_edit_depts.indexOf(SYN_MODE.nodeId)>=0;
     if(ed)ed.style.display=canEd?'':'none';
   }else{
     btn.textContent='综合看板';
     btn.title='切换至综合看板模式：展示所选部门架构下全部看板中的全部板块';
+    btn.classList.remove('on');
     if(ed)ed.style.display='none';
   }
 }
