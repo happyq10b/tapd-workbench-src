@@ -4193,6 +4193,52 @@ function groupBoardsByDept(){
   return {depts:ordered.map(d=>({name:d,boards:map[d]})),unassigned:unassigned};
 }
 // 单个看板 tab（部门分组内）
+// ---------- 徽标 n/N（T-212-ter-3 2026-11-24）：架构看板数 / 看板板块数 ----------
+// n = 当前筛选后可见；N = 总数。筛选维度与板块行渲染同口径：
+// 年份 / 状态 / 性质 / 类别 / 综合白名单（负责人/参与人同为板块维度一并计入）。
+// 随每次 reload（renderBoard）与 renderTabs 刷新——只改徽标文本，不重建 tab DOM。
+function synCountVisible(m){
+  if(curYears&&curYears.size&&!curYears.has(m.year||''))return false;
+  if(COL_STATUS_SEL&&COL_STATUS_SEL.size&&!COL_STATUS_SEL.has(m.completion||'open'))return false;
+  if(ATTR_SEL&&ATTR_SEL.size&&!ATTR_SEL.has(m.nature||'日常'))return false;
+  if(CAT_SEL&&CAT_SEL.size&&!CAT_SEL.has(m.category||'年度重点工作'))return false;
+  if(typeof SYN_MODE!=='undefined'&&SYN_MODE&&SYN_MODE.cols&&!SYN_MODE.cols.has(m.col_key))return false;
+  if(PERSON_SEL&&PERSON_SEL.size&&!_colPeopleHit(PERSON_SEL,m.owner))return false;
+  if(CC_SEL&&CC_SEL.size&&!_colPeopleHit(CC_SEL,m.participants))return false;
+  return true;
+}
+function syncTabCounts(){
+  var vis={}, tot={};
+  (window.COLS_META||[]).forEach(function(m){
+    tot[m.board_id]=(tot[m.board_id]||0)+1;
+    if(synCountVisible(m))vis[m.board_id]=(vis[m.board_id]||0)+1;
+  });
+  // 看板 tab 徽标：n/N
+  document.querySelectorAll('[data-col-tab]').forEach(function(el){
+    var bid=el.getAttribute('data-col-tab');
+    var N=tot[bid], n=vis[bid]||0;
+    if(N===undefined){
+      // 不在当前载荷（未被选中的看板）：不受筛选影响 → n/N = 总数/总数（/api/me col_count）
+      var mb=((ME||{}).boards||[]).find(function(x){return x.board_id===bid;});
+      N=(mb&&mb.col_count!=null)?mb.col_count:0;
+      el.textContent=N+'/'+N;
+      return;
+    }
+    el.textContent=n+'/'+N;
+  });
+  // 架构节点徽标：n = 筛选后仍有可见板块（或本身无板块）的看板数 / N = 看板总数
+  var g=groupBoardsByDept();
+  g.depts.forEach(function(d){
+    var el=document.querySelector('[data-dept-tab="'+CSS.escape(d.name)+'"]');
+    if(!el)return;
+    var N=(d.boards||[]).length;
+    var n=(d.boards||[]).filter(function(b){
+      var t=tot[b.board_id];
+      return (t===undefined)||((vis[b.board_id]||0)>0);   // 无板块数据的看板（空板/未选中等）恒计入
+    }).length;
+    el.textContent=n+'/'+N;
+  });
+}
 function boardTabHtml(b,deptLabel){
   const base=deptLabel?(deptLabel+' / '+b.board_name):('未配置归属部门 / '+b.board_name);
   const title=base;
@@ -4215,8 +4261,10 @@ function boardTabHtml(b,deptLabel){
     +` title="${esc(title)}（单击选中 / 再次单击取消，可多选）">`
     // #205r（2026-11-18 用户需求5）：看板标题后追加板块数量徽标（参照架构节点的
     // .dept-count 形态；数据 = /api/me 每看板下发的 col_count，板块总数口径）
+    // T-212-ter-3：徽标改【n/N】——N=板块总数；n=当前筛选（年份/状态/性质/类别/负责人/
+    // 参与人/综合白名单）后可见板块数（syncTabCounts 随每次 reload 刷新）
     +`<span class="tab-name">${esc(b.board_name)}</span>`
-    +`<span class="dept-count tab-col-count" title="该看板下的板块数量">${b.col_count!=null?b.col_count:'…'}</span>${editBtn}</span>`;
+    +`<span class="dept-count tab-col-count" data-col-tab="${esc(b.board_id)}" title="板块数：n=筛选后可见 / N=总数">${b.col_count!=null?b.col_count:'…'}</span>${editBtn}</span>`;
 }
 function pickBoardToggle(bid){pickBoard(bid);}   // 兼容旧引用（2026-11-04 起单击即切换）
 function renderTabs(){
@@ -4242,7 +4290,9 @@ function renderTabs(){
     dhtml+=`<span class="tree-dept${open?' open':''}${sel?' sel':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
       // #205u（2026-11-18 用户需求5）：看板数量徽标移到「主页」按钮左侧（名称 flex:1 占满，
       // 徽标与看板行的板块数徽标同款 .tab-col-count 形态），不再紧跟名称
-      +`<span class="chev">▶</span><span class="dept-name">${esc(d.name)}</span><span class="dept-count tab-col-count">${cnt}</span>`
+      // T-212-ter-3：徽标改【n/N】——N=该架构挂载看板总数；n=筛选后仍有可见板块的看板数
+      // （syncTabCounts 随每次 reload 刷新）
+      +`<span class="chev">▶</span><span class="dept-name">${esc(d.name)}</span><span class="dept-count tab-col-count" data-dept-tab="${esc(d.name)}" title="看板总数（n=筛选后可见 / N=总数）">${cnt}</span>`
       +`<span class="dept-home" onclick="event.stopPropagation();openDeptPage('${esc(d.name)}')" title="进入「${esc(d.name)}」部门主页">主页</span>`
       +`</span>`;
   });
@@ -4267,6 +4317,8 @@ function renderTabs(){
   if(!bhtml)bhtml=`<span class="tree-empty-tip" style="grid-column:1/-1">点击上方部门可展开其下的板块</span>`;
   boardBox.innerHTML=bhtml;
   syncBoardBandHeight();
+  // 徽标 n/N（T-212-ter-3）：renderTabs 重建 tab DOM 后按当前筛选同步 n/N
+  if(typeof syncTabCounts==='function')syncTabCounts();
   // 标题后的「已选看板」明细（2026-11-10 #126）：按 ME.boards 顺序列出当前选中项
   //   （选择顺序会随取消/重选漂移，按目录顺序展示更稳定）；全量进悬停提示。
   const selHint=document.getElementById('boardSelHint');
@@ -6796,11 +6848,14 @@ function renderBoard(cards,cols,q,colHits){
   renderYearFilter(cols);
   paintColStatus();   // 板块状态 combo 首绘/重绘（2026-11-06 #81）
   paintAttr();        // 专项/日常 combo 首绘/重绘（#205j）
+  // 徽标 n/N（T-212-ter-3）：COLS_META 赋值后立即刷新（必须在任何提前 return 之前——
+  //   筛选无结果/q 搜索分支会提前 return，末尾调用会被跳过）
+  window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id（提前赋值）
+  if(typeof syncTabCounts==='function')syncTabCounts();
   // 有搜索词时切换到「统一搜索结果」视图
   if(q){renderSearchResults(c,cards,cols,q,colHits||[]);return}
   const cmeta={};
   (cols||[]).forEach(x=>{cmeta[x.column_name]=x});
-  window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id
   CHK_COL_CARDS={};            // #159：板块→主事项映射随每次重绘重建
   CHK_CURRENT_CARDS=(cards||[]).map(x=>x.card_id);   // #161：全选当前的本轮卡片清单
   CHK_CURRENT_CARDS_META={};                          // #161/#163：card_id→{name,owner}
@@ -7009,6 +7064,8 @@ function renderBoard(cards,cols,q,colHits){
       if(SUBTREE_OPEN[k] && document.getElementById('subtree_'+k)) toggleSubTree(k, true);
     });
   }
+  // 徽标 n/N（T-212-ter-3）：筛选变化随每次 reload 同步刷新架构/看板徽标
+  if(typeof syncTabCounts==='function')syncTabCounts();
 }
 // ---------- 年份筛选（多选） ----------
 // 形态：chips 标签组。完整的多选体验包含三个动作：
