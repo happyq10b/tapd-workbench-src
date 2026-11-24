@@ -1954,6 +1954,17 @@ async def ws_endpoint(ws: WebSocket, token: str = None):
             data = await ws.receive_text()
             ws_mgr.touch(ws)
             if data == 'ping':
+                # T-212 安全闭环（2026-11-24）：会话代数变更（强制下线/重登）后，
+                # 存量 WS 不受其影响会一直心跳占位——单点「已在线」判定永不清除。
+                # 每次心跳校验 token 仍有效（verify_token 校验 HMAC/exp/active_seq），
+                # 失效 → 主动断开并从在线表移除。每 25s 一次开销可忽略。
+                if not verify_token(token):
+                    try:
+                        await ws.close(code=4401)
+                    except Exception:
+                        pass
+                    ws_mgr.disconnect(ws, username)
+                    return
                 await ws.send_text('pong')
     except WebSocketDisconnect:
         ws_mgr.disconnect(ws, username)
