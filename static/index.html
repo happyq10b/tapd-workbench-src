@@ -10961,8 +10961,9 @@ async function openDetail(id){
   //   ③ 创建时间 / 开始时间（begin 空回退 created，存量口径）/ 截止时间 / 完成时间
   const _dCc=String(c.cc||'').split(';').map(x=>x.trim()).filter(Boolean);
   document.getElementById('d_meta').innerHTML=
-    // T-216-bis：周数显示参照参与人 —— 单行省略折叠，点击展开全部（多周时常用）
-    `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b>　周数：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(String(c.week_no||'').split(';').join('、')||'—')}</b></span><br>`+
+    // T-216-bis 修订（用户口径）：周数直接完整显示，仅禁止换行（nowrap；
+    // 极端超宽时由左列横向滚动兜底，不用省略折叠）
+    `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b>　周数：<span style="white-space:nowrap"><b>${esc(String(c.week_no||'').split(';').join('、')||'—')}</b></span><br>`+
     `创建人：<b>${esc(c.creator||'-')}</b>　负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'-')}</b></span>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${_dCc.length?esc(_dCc.join('、')):'-'}</b></span><br>`+
     `创建时间：<b>${esc(fmtDate(c.created)||'-')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'-')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'-')}</b>　完成时间：<b>${_dCompHtml}</b>`;
   metaClampTitles('d_meta');
