@@ -1177,11 +1177,22 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .dg-main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:18px;
   overflow-y:auto;overscroll-behavior:contain}
 .dg-main .comment-box{margin-top:12px}
-/* 右栏两盒（最近评论 / 操作记录）标题统一加重 */
-.dg-side .comment-box h4{color:var(--text);font-weight:600;margin-bottom:8px}
+/* T-215-4 右栏三盒等比例（代办 / 最近评论 / 操作记录）：各占 1/3 高度、区内滚动 */
 .dg-side{min-width:0;min-height:0;border-left:1px solid var(--border);padding-left:18px;
-  display:flex;flex-direction:column;gap:14px;overflow-y:auto;overscroll-behavior:contain}
-.dg-side .comment-box{flex-shrink:0}
+  display:flex;flex-direction:column;overflow:hidden}
+.dg-side .side-box{flex:0 0 auto;height:33.333%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;
+  padding:10px 0 0;border-top:1px solid var(--border)}
+/* 代办无内容隐藏时（openDetail 加 .sub2）：剩余两盒各占一半 */
+.dg-side.sub2 .side-box{height:50%}
+.dg-side .side-box:first-child{border-top:none;padding-top:0}
+.dg-side .side-box h4{color:var(--text);font-weight:600;margin-bottom:8px;flex-shrink:0}
+.dg-side .side-box .subtask-head{flex-shrink:0;margin-bottom:8px}
+.dg-side .side-box .comment-list,.dg-side .side-box #d_actions,
+.dg-side .side-box .subtask-list{flex:1 1 0;min-height:0;max-height:none;overflow-y:auto}
+/* 代办展示向评论靠齐（T-215-4）：同为 12.5px 行 + 虚线分隔，弱化底色与圆角 */
+.dg-side #d_subtask_list .subtask-item{font-size:12.5px;padding:5px 0;border-radius:0;
+  border-bottom:1px dashed var(--border);background:transparent;gap:6px}
+.dg-side #d_subtask_list .subtask-item:hover{background:transparent}
 /* 统一细滚动条（T-215-bis）：评论区样式为基准 → 弹窗内全部滚动区同款
    （6px 细条 + 透明轨道 + var(--border) 圆角滑块，与看板带 .tb-grid 同语言） */
 .modal-detail *{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
@@ -1196,10 +1207,6 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .modal-detail .wp-list{flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:4px}
 .dg-main .comment-input-box{margin-top:auto;padding-top:12px}
 .dg-main .comment-input-box .comment-form{margin-top:2px}
-/* 右栏两盒：操作记录按评论区同款限高（200px + 区内滚动） */
-.dg-side .side-comments{margin-top:0}
-.dg-side .side-comments .comment-list{max-height:200px}
-.dg-side #d_actions{max-height:200px}
 @media(max-width:1024px){
   .detail-grid{grid-template-columns:1fr}
   .dg-main{padding-right:0}
@@ -2611,11 +2618,7 @@ function goLogin(){
           </div>
           <div id="d_wp_list" class="wp-list"></div>
         </div>
-        <div class="subtask-box" id="d_subtask_box" style="display:none">
-          <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count" id="d_subtask_count"></span></div>
-          <div id="d_subtask_list" class="subtask-list"></div>
-        </div>
-      <!-- 评论输入留左底（T-215 用户定稿）：预览列表与操作记录一并放右栏 -->
+      <!-- 评论输入留左底（T-215 用户定稿）；T-215-4：右栏等比例三段 = 代办/最近评论/操作记录 -->
       <div class="comment-box comment-input-box"><h4>评论</h4>
         <div class="comment-form">
           <input id="d_new_comment" placeholder="写评论…（输入 @ 可提及成员）" oninput="onCommentInput(this)" autocomplete="off">
@@ -2629,8 +2632,12 @@ function goLogin(){
       </div>
       </div>
       <aside class="dg-side">
-        <div class="comment-box side-comments"><h4>最近评论</h4><div id="d_comments" class="comment-list"></div></div>
-        <div class="comment-box side-actions"><h4>操作记录</h4><div id="d_actions"></div></div>
+        <div class="side-box" id="d_subtask_box" style="display:none">
+          <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count" id="d_subtask_count"></span></div>
+          <div id="d_subtask_list" class="subtask-list"></div>
+        </div>
+        <div class="side-box"><h4>最近评论</h4><div id="d_comments" class="comment-list"></div></div>
+        <div class="side-box"><h4>操作记录</h4><div id="d_actions"></div></div>
       </aside>
     </div>
   </div>
@@ -10941,9 +10948,12 @@ async function openDetail(id){
   // 切换事项时清空上一次残留的提及（否则会把上一条评论的 @ 提到新事项上）
   MENTION_CTXS.d.arr=[];
   renderMentionBar('d');
-  // 详情弹窗子事项（只读展示；editor 可勾选）
+  // 详情弹窗子事项（只读展示；editor 可勾选）—— T-215-4：代办盒在右栏三等分段，
+  // 无代办隐藏时给侧栏加 .sub2 → 剩余两盒各占一半
   const st=await api('/api/cards/'+id+'/subtasks');
   const box=document.getElementById('d_subtask_box');
+  const _side=document.querySelector('#detailModal .dg-side');
+  if(_side)_side.classList.toggle('sub2',!st.subtasks.length);
   if(st.subtasks.length){
     box.style.display='';
     renderSubtasks(st.subtasks,document.getElementById('d_subtask_list'),document.getElementById('d_subtask_count'),ME.can_edit,id);
