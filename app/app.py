@@ -6369,18 +6369,19 @@ def _my_bindable_boards(username: str) -> set:
 
 
 def _syn_default_depts(username: str) -> set:
-    """T-211 综合看板：默认可见（= 可编辑）的**部门节点**集合。
+    """T-211 综合看板：默认可见（= 可编辑）的**架构节点**集合（dept + center）。
 
     默认可见角色（用户需求）：部门长 / 总经理 / 中心负责人 / 管理员 / 超管。
-    · 管理员/超管 或 PERM_ENABLED=False → 全部部门
-    · center 级负责岗位（center_head / gm，任一 center 节点任命）→ 全部部门
+    · 管理员/超管 或 PERM_ENABLED=False → 全部架构节点（含财务中心 center）
+    · center 级负责岗位（center_head / gm，任一 center 节点任命）→ 全部
     · dept_head → 该部门自身
     （追加可见人员走 syn_board_config.extra_members，不含在本集合 —— 追加人员
       不可见【综合编辑】按钮，所以两个集合必须分开维护。）
     """
-    depts = {r['id'] for r in dbq("SELECT id FROM org_nodes WHERE node_type='dept'")}
+    syn_nodes = {r['id'] for r in
+                 dbq("SELECT id FROM org_nodes WHERE node_type IN ('dept','center')")}
     if not PERM_ENABLED or username == SUPER_ADMIN or is_admin(username):
-        return depts
+        return syn_nodes
     rows = dbq("""SELECT DISTINCT a.node_id, n.node_type FROM org_appointments a
                   JOIN team_members m ON m.id=a.member_id
                   JOIN org_nodes n ON n.id=a.node_id
@@ -6388,8 +6389,8 @@ def _syn_default_depts(username: str) -> set:
                (username,))
     appointed = {r['node_id'] for r in rows}
     if any(r['node_type'] == 'center' for r in rows):
-        return depts
-    return appointed & depts
+        return syn_nodes
+    return appointed & syn_nodes
 
 
 def _syn_extra_depts(username: str) -> set:
@@ -6404,12 +6405,16 @@ def _syn_extra_depts(username: str) -> set:
 
 
 def _syn_subtree_member_candidates(nid: int):
-    """T-211：节点子树下的**活跃成员**（账号 → 姓名），追加可见人员的候选池。
+    """T-211：节点子树下的**在职成员**（账号 → 姓名），追加可见人员的候选池。
 
     跨部门约束（用户需求）：除【财务中心】（center 型，综合配置可选全员）外，
-    各部门的追加候选 = 本部门架构子树内的成员。
+    各部门的追加候选 = 本部门架构之下成员。两条来源取并集：
+    · 子树岗位任命（org_appointments —— 部门长/组长等，架构树人员层同源）
+    · team_members.departments / workgroups 命中子树节点名（普通成员绑定）
+    在职判定：status != 'departed'（status 默认空串 = 在职；此前误用 ='active'
+    把 70/71 名成员全筛掉 —— T-211-bis 用户实测「可选人员为空」根因）。
     """
-    rows = [dict(r) for r in dbq('SELECT id, parent_id, node_type FROM org_nodes')]
+    rows = [dict(r) for r in dbq('SELECT id, parent_id, name, node_type FROM org_nodes')]
     nmap = {r['id']: r for r in rows}
     root = nmap.get(nid)
     if not root:
@@ -6424,18 +6429,32 @@ def _syn_subtree_member_candidates(nid: int):
             continue
         subtree.add(x)
         stack.extend(kids.get(x, []))
+    subtree_names = {nmap[x]['name'] for x in subtree}
+    out = {}
     if root['node_type'] == 'center':
+        # 中心级：全员（在职 + 有账号）
+        q = ("SELECT m.account, m.name FROM team_members m "
+             "WHERE IFNULL(m.status,'')!='departed' AND IFNULL(m.account,'')!=''")
+        for r in dbq(q):
+            out[r['account']] = r['name']
+    else:
+        # ① 子树岗位任命成员（架构树人员层同源）
+        marks = ','.join('?' * len(subtree))
         q = ("SELECT DISTINCT m.account, m.name FROM org_appointments a "
              "JOIN team_members m ON m.id=a.member_id "
-             "WHERE IFNULL(m.status,'active')='active' AND IFNULL(m.account,'')!='' "
-             "ORDER BY m.name")
-        return [{'account': r['account'], 'name': r['name']} for r in dbq(q)]
-    marks = ','.join('?' * len(subtree))
-    q = ("SELECT DISTINCT m.account, m.name FROM org_appointments a "
-         "JOIN team_members m ON m.id=a.member_id "
-         f"WHERE a.node_id IN ({marks}) AND IFNULL(m.status,'active')='active' "
-         "AND IFNULL(m.account,'')!='' ORDER BY m.name")
-    return [{'account': r['account'], 'name': r['name']} for r in dbq(q, tuple(subtree))]
+             f"WHERE a.node_id IN ({marks}) "
+             "AND IFNULL(m.status,'')!='departed' AND IFNULL(m.account,'')!=''")
+        for r in dbq(q, tuple(subtree)):
+            out[r['account']] = r['name']
+        # ② departments / workgroups 绑定命中子树节点名的普通成员
+        q = ("SELECT account, name, departments, workgroups FROM team_members "
+             "WHERE IFNULL(status,'')!='departed' AND IFNULL(account,'')!=''")
+        for r in dbq(q):
+            bound = ((r['departments'] or '') + ',' + (r['workgroups'] or '')).split(',')
+            bound = {x.strip() for x in bound if x.strip()}
+            if bound & subtree_names:
+                out.setdefault(r['account'], r['name'])
+    return [{'account': a, 'name': n} for a, n in sorted(out.items(), key=lambda x: x[1])]
 
 
 def _syn_subtree_board_ids(nid: int):
@@ -6477,8 +6496,8 @@ def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
     cfg = dbq('SELECT columns, extra_members, updated_by, updated_at FROM syn_board_config WHERE dept_node_id=?',
               (dept_node_id,))
     can_edit = dept_node_id in default_depts
-    # 弹窗勾选清单 = 子树下挂载 ∩ 当前用户可见 的全部看板（不受白名单过滤 —— 否则
-    # 已配置白名单的用户无法看到/取消勾选未入选看板）
+    # 弹窗勾选清单：子树可见看板 → **板块级**清单（T-211-cis 用户反馈颗粒度：
+    # 看板选项下折叠展开板块，按板块勾选）。columns 白名单语义随之改为 col_key 集合。
     all_boards = []
     if can_edit:
         boards_v, _cv = user_allowed(username)
@@ -6488,7 +6507,12 @@ def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
                 continue
             if boards_v is not None and r['board_id'] not in boards_v:
                 continue
-            all_boards.append({'board_id': r['board_id'], 'board_name': r['board_name']})
+            cols = [{'col_key': c['col_key'], 'column_name': c['column_name'],
+                     'category': c['category'] or COLUMN_CATEGORY_DEFAULT}
+                    for c in dbq('SELECT col_key, column_name, category FROM board_columns '
+                                 'WHERE board_id=? ORDER BY rowid', (r['board_id'],))]
+            all_boards.append({'board_id': r['board_id'], 'board_name': r['board_name'],
+                               'columns': cols})
     return {'dept_node_id': dept_node_id, 'dept_name': node['name'],
             'node_type': node['node_type'],
             'columns': [x for x in ((cfg[0]['columns'] if cfg else '') or '').split(',') if x],
@@ -6520,12 +6544,12 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
     bad = [x for x in extra if x not in cand]
     if bad:
         raise HTTPException(400, '追加人员不在本架构之下：%s' % '、'.join(bad))
-    # 板块白名单校验：看板必须挂载在本架构子树下（防跨部门错配）
+    # 板块白名单校验（T-211-cis 板块级颗粒度）：col_key 必须属于子树看板
     allowed_boards = _syn_subtree_board_ids(nid)
     cols = [x.strip() for x in (req.columns or '').split(',') if x.strip()]
-    bad_cols = [x for x in cols if x not in allowed_boards]
+    bad_cols = [x for x in cols if x.split('::')[0] not in allowed_boards]
     if bad_cols:
-        raise HTTPException(400, '看板不属于本架构：%s' % '、'.join(bad_cols))
+        raise HTTPException(400, '板块不属于本架构：%s' % '、'.join(bad_cols))
     dbe('INSERT INTO syn_board_config (dept_node_id, columns, extra_members, updated_by, updated_at) '
         "VALUES (?,?,?,?,datetime('now','localtime')) "
         'ON CONFLICT(dept_node_id) DO UPDATE SET columns=excluded.columns, '
@@ -6552,17 +6576,18 @@ def syn_boards(dept_node_id: int, username: str = Depends(require_auth)):
     cfg = dbq('SELECT columns FROM syn_board_config WHERE dept_node_id=?', (dept_node_id,))
     whitelist = [x for x in ((cfg[0]['columns'] if cfg else '') or '').split(',') if x]
     boards, _cols = user_allowed(username)
-    rows = dbq('SELECT b.board_id, b.board_name, bc.dept FROM boards b '
-               'LEFT JOIN board_config bc ON bc.board_id=b.board_id '
-               'WHERE b.archived=0')
+    rows = dbq('SELECT b.board_id, b.board_name FROM boards b WHERE b.archived=0')
     out = []
     for r in rows:
         if boards is not None and r['board_id'] not in boards:
             continue   # 数据可见性守门（综合模式不越权）
-        if whitelist and r['board_id'] not in whitelist:
-            continue
         out.append({'board_id': r['board_id'], 'board_name': r['board_name']})
-    return {'dept_name': node['name'], 'boards': out}
+    # T-211-cis：白名单为**板块级**（col_key）→ 派生可见看板集合（白名单板块所属看板）
+    if whitelist:
+        wl_boards = {x.split('::')[0] for x in whitelist}
+        out = [b for b in out if b['board_id'] in wl_boards]
+    return {'dept_name': node['name'], 'boards': out,
+            'col_whitelist': whitelist}   # 空 = 全部板块（前端不过滤）
 
 
 def _arch_owner_nodes(username: str) -> set:
