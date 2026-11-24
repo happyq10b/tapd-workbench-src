@@ -10911,12 +10911,16 @@ async function openDetail(id){
   // T-191j：倒计时位 → 已完成且已结算显示结算结果（逾期n天/提前n天/按时完成）；
   //          已完成未结算（无截止日期/历史存量）→ 已完成 · 倒计时停用；未完成 → 倒计时数字
   const _dSettle=(c.status==='done')?settleHtml(c.overdue_days):null;
+  const _dCd=_dSettle?_dSettle:(c.status==='done'?'已完成 · 倒计时停用':`<span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span>`);
+  // T-215-ter（2026-11-24 用户定稿）元信息三行：
+  //   ① 看板 / 板块（子事项为父事项）/ 周数 / 倒计时
+  //   ② 创建人 / 负责人 / 参与人（cc 分号拆人名；无 → 「-」）
+  //   ③ 创建时间 / 开始时间（begin 空回退 created，存量口径）/ 截止时间
+  const _dCc=String(c.cc||'').split(';').map(x=>x.trim()).filter(Boolean);
   document.getElementById('d_meta').innerHTML=
-    `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b><br>`+
-    `负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'—')}</b></span>　周数：<b>${esc(String(c.week_no||'').split(';').join('、')||'—')}</b><br>`+
-    // #205r（2026-11-18 用户需求3）：追加「创建人」「开始时间」——末行统一为
-    // 「创建人、创建时间、开始时间、截止时间、倒计时」；begin 空回退 created（存量口径）
-    `创建人：<b>${esc(c.creator||'—')}</b>　创建时间：<b>${esc(fmtDate(c.created)||'—')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'—')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'—')}</b>　倒计时：<b>${_dSettle?_dSettle:(c.status==='done'?'已完成 · 倒计时停用':`<span class="${cdText(c.due)?('fcol-cd'+(cdOver(c.due)?' fcol-cd-over':'')):''}">${esc(cdText(c.due)||'—')}</span>`)}</b>`;
+    `看板：<b>${esc(c.board_name)}</b>　${scopeLabel}：<b>${scopeVal}</b>　周数：<b>${esc(String(c.week_no||'').split(';').join('、')||'—')}</b>　倒计时：<b>${_dCd}</b><br>`+
+    `创建人：<b>${esc(c.creator||'-')}</b>　负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'-')}</b></span>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${_dCc.length?esc(_dCc.join('、')):'-'}</b></span><br>`+
+    `创建时间：<b>${esc(fmtDate(c.created)||'-')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'-')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'-')}</b>`;
   metaClampTitles('d_meta');
   const dd=document.getElementById('d_desc');
   if(c.description){dd.style.display='';dd.textContent=c.description}else{dd.style.display='none'}
