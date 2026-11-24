@@ -2297,21 +2297,29 @@ function goLogin(){
 <!-- 综合看板配置弹窗（T-211；T-211-cis 版面重做）：仅默认可见人员；
      左板块树（看板折叠展开板块级勾选）+ 右追加人员，各带工具条（计数/全选/清空/搜索） -->
 <div class="modal-overlay" id="synConfigModal" style="display:none">
-  <div class="modal" style="width:min(860px,96vw)">
-    <div class="modal-header"><h2>⚙️ 综合看板配置 <span id="syn_cfg_dept" style="font-size:13px;color:var(--text2)"></span></h2>
+  <div class="modal" style="width:min(1100px,96vw)">
+    <div class="modal-header"><h2 style="white-space:nowrap">⚙️ 综合看板配置 <span id="syn_cfg_dept" style="font-size:13px;color:var(--text2)"></span></h2>
       <button class="modal-close" onclick="closeModal('synConfigModal')">✕</button></div>
     <div class="modal-body" style="padding-top:12px">
       <div style="display:flex;gap:14px;align-items:stretch">
-        <!-- 左：可见板块（看板折叠 → 板块级勾选） -->
+        <!-- 左：可见板块（看板折叠 → 板块级勾选；类别筛选 T-212-ter） -->
         <div style="flex:1.35;min-width:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden">
-          <div style="background:var(--bg);padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
-            <b style="font-size:13px">可见板块</b>
-            <span class="syn-cnt" id="syn_board_cnt" style="font-size:11.5px;color:var(--text2)"></span>
-            <span style="margin-left:auto;display:flex;gap:4px;align-items:center">
+          <div style="background:var(--bg);padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);flex-wrap:nowrap">
+            <b style="font-size:13px;white-space:nowrap">可见板块</b>
+            <span class="syn-cnt" id="syn_board_cnt" style="font-size:11.5px;color:var(--text2);white-space:nowrap"></span>
+            <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-shrink:0">
+              <select id="syn_board_cat" class="form-select" style="width:auto;padding:3px 6px;font-size:12px" onchange="synPaintBoards()" title="按板块类别过滤显示">
+                <option value="">全部类别</option>
+                <option value="年度重点工作">年度重点工作</option>
+                <option value="业财融合工作">业财融合工作</option>
+                <option value="财务数智化工作">财务数智化工作</option>
+                <option value="其他重点工作">其他重点工作</option>
+                <option value="文化及团队建设">文化及团队建设</option>
+              </select>
               <input type="text" id="syn_board_search" class="form-input" placeholder="🔍 搜索板块 / 看板" autocomplete="off"
-                     style="width:150px;padding:3px 8px;font-size:12px" oninput="synPaintBoards()">
-              <button class="icon-btn" style="padding:2px 8px;font-size:11px" onclick="synSelectAllBoards(true)">全选</button>
-              <button class="icon-btn" style="padding:2px 8px;font-size:11px" onclick="synSelectAllBoards(false)">清空</button>
+                     style="width:140px;padding:3px 8px;font-size:12px" oninput="synPaintBoards()">
+              <button class="icon-btn" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="synSelectAllBoards(true)">全选</button>
+              <button class="icon-btn" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="synSelectAllBoards(false)">清空</button>
             </span>
           </div>
           <div id="syn_cfg_boards" style="height:340px;overflow:auto;padding:6px 10px"></div>
@@ -2319,14 +2327,14 @@ function goLogin(){
         </div>
         <!-- 右：追加可见人员 -->
         <div style="flex:1;min-width:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden">
-          <div style="background:var(--bg);padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
-            <b style="font-size:13px">追加可见人员</b>
-            <span class="syn-cnt" id="syn_member_cnt" style="font-size:11.5px;color:var(--text2)"></span>
-            <span style="margin-left:auto;display:flex;gap:4px;align-items:center">
+          <div style="background:var(--bg);padding:8px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);flex-wrap:nowrap">
+            <b style="font-size:13px;white-space:nowrap">追加可见人员</b>
+            <span class="syn-cnt" id="syn_member_cnt" style="font-size:11.5px;color:var(--text2);white-space:nowrap"></span>
+            <span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-shrink:0">
               <input type="text" id="syn_member_search" class="form-input" placeholder="🔍 搜索姓名 / 账号" autocomplete="off"
                      style="width:120px;padding:3px 8px;font-size:12px" oninput="synPaintMembers()">
-              <button class="icon-btn" style="padding:2px 8px;font-size:11px" onclick="synSelectAllMembers(true)">全选</button>
-              <button class="icon-btn" style="padding:2px 8px;font-size:11px" onclick="synSelectAllMembers(false)">清空</button>
+              <button class="icon-btn" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="synSelectAllMembers(true)">全选</button>
+              <button class="icon-btn" style="padding:2px 8px;font-size:11px;white-space:nowrap" onclick="synSelectAllMembers(false)">清空</button>
             </span>
           </div>
           <div id="syn_cfg_members" style="height:340px;overflow:auto;padding:6px 10px"></div>
@@ -3724,16 +3732,22 @@ function synPaintBoards(){
   var box=document.getElementById('syn_cfg_boards');
   if(!box||!SYN_CFG)return;
   var q=(document.getElementById('syn_board_search').value||'').trim().toLowerCase();
+  // 类别筛选（T-212-ter）：空 = 全部类别
+  var cat=document.getElementById('syn_board_cat').value||'';
   var all=synCollectBoards();
   var html='';
   (SYN_CFG.all_boards||[]).forEach(function(b){
-    // 搜索过滤：看板名或其下任一板块名命中 → 显示该看板（命中时自动展开）
+    // 搜索/类别过滤：看板名或其下命中板块 → 显示该看板（命中时自动展开）
     var hitCols=(b.columns||[]).filter(function(c){
-      return !q||b.board_name.toLowerCase().indexOf(q)>=0||c.column_name.toLowerCase().indexOf(q)>=0;
+      var okCat=!cat||c.category===cat;
+      var okQ=!q||b.board_name.toLowerCase().indexOf(q)>=0||c.column_name.toLowerCase().indexOf(q)>=0;
+      return okCat&&okQ;
     });
-    if(q&&!hitCols.length)return;
+    if(q||cat){
+      if(!hitCols.length)return;   // 该看板无命中板块 → 隐藏
+    }
     var st=synBoardState(b);
-    var open=SYN_BOARD_OPEN.has(b.board_id)||(q&&hitCols.length<(b.columns||[]).length);
+    var open=SYN_BOARD_OPEN.has(b.board_id)||(q&&hitCols.length<(b.columns||[]).length)||!!cat;
     var chk=st==='all'||st==='part'?' checked':'';
     html+='<div class="syn-board-row">'
       +'<label style="display:flex;gap:7px;align-items:center;padding:4px 0;font-weight:600;font-size:12.5px;cursor:pointer;min-width:0">'
@@ -3744,7 +3758,7 @@ function synPaintBoards(){
       +'<span class="dept-count tab-col-count" style="flex-shrink:0">'+(b.columns||[]).length+'</span>'
       +'</label>';
     if(open){
-      var rows=q?hitCols:(b.columns||[]);
+      var rows=q?hitCols:(cat?hitCols:(b.columns||[]));
       html+=rows.map(function(c){
         var on=SYN_CHECKED.has(c.col_key);
         var ci=CAT_OPTS.findIndex(function(o){return o[0]===c.category});
