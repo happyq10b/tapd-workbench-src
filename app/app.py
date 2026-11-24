@@ -3172,6 +3172,10 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
     cols_meta = visible_columns(username, boards, columns, board_id, counts, board_ids=_vc_ids)
     if column:
         cols_meta = [c for c in cols_meta if c['column_name'] == column]
+    # 徽标 n/N 全量板块清单（T-212-ter-4）：cols_meta 受 curBoards 裁剪——未选中看板
+    # 无判定数据，架构/看板徽标的 n 无法联动筛选。额外下发**全量可见板块**（不带
+    # 看板过滤，仅供徽标统计；内容区渲染仍用裁剪后的 cols_meta，行为不变）。
+    all_cols_meta = visible_columns(username, boards, columns, None, None)
     # 板块命中清单（供前端把该板块的事项归到一起展示）
     col_hits = [c for c in cols_meta if c['col_key'] in col_hit_keys] if q else []
     start = (page - 1) * size
@@ -3188,6 +3192,7 @@ def cards(board_id: Optional[str] = None, status: Optional[str] = None,
         out.append(d)
     return {'total': total, 'page': page, 'size': size, 'cards': out,
             'columns': cols_meta, 'column_hits': col_hits, 'q': q,
+            'all_columns': all_cols_meta,   # 徽标 n/N 全量板块清单（T-212-ter-4）
             'weeks': week_options}
 
 # ---------------- API：板块（新建 / 编辑 / 置顶）----------------

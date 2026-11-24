@@ -4209,7 +4209,9 @@ function synCountVisible(m){
 }
 function syncTabCounts(){
   var vis={}, tot={};
-  (window.COLS_META||[]).forEach(function(m){
+  // T-212-ter-4：数据源 = 全量可见板块（SYN_ALL_COLS，不受 curBoards 裁剪）——
+  // 未选中看板也有判定数据，架构/看板徽标的 n 才能真实联动筛选
+  (window.SYN_ALL_COLS||window.COLS_META||[]).forEach(function(m){
     tot[m.board_id]=(tot[m.board_id]||0)+1;
     if(synCountVisible(m))vis[m.board_id]=(vis[m.board_id]||0)+1;
   });
@@ -6034,7 +6036,7 @@ async function reload(page){
   //    判据：请求发出时记下的 board_id 与当前 curBoard 不一致 → 丢弃本次响应。
   if(reqBoard!==[...curBoards].join(',')){return;}
   renderWeekFilter(d.weeks||[]);      // 可选周数来自接口（联动口径：其他筛选结果下存在事项的周数）
-  renderBoard(d.cards,d.columns,q,d.column_hits);
+  renderBoard(d.cards,d.columns,q,d.column_hits,d.all_columns);
   syncFilterHint();
 }
 // ---------- 可输入 + 多选的筛选控件（人员 / 周数） ----------
@@ -6841,7 +6843,7 @@ function filtersActive(q){
   if(typeof DUE_SEL!=='undefined'&&DUE_SEL&&DUE_SEL.size)return true;   // 到期筛选（T-191）
   return false;
 }
-function renderBoard(cards,cols,q,colHits){
+function renderBoard(cards,cols,q,colHits,allCols){
   const c=document.getElementById('boardContent');
   loadSortCfg();   // #205y：排序设定（板块/事项独立多级配置）按账号恢复（#205z：本地缓存先行，服务端 user_prefs 异步覆盖）
   // 年份筛选器：选项 = 当前看板下各板块的归属年份（随看板切换重建）
@@ -6851,6 +6853,9 @@ function renderBoard(cards,cols,q,colHits){
   // 徽标 n/N（T-212-ter-3）：COLS_META 赋值后立即刷新（必须在任何提前 return 之前——
   //   筛选无结果/q 搜索分支会提前 return，末尾调用会被跳过）
   window.COLS_META=cols||[];   // 供「＋ 事项」取板块的 column_id（提前赋值）
+  // T-212-ter-4：徽标数据源换**全量**板块清单（all_columns 不受 curBoards 裁剪）——
+  //   此前用裁剪后的 COLS_META，未选中看板无判定数据恒计入 n，架构徽标不联动筛选
+  window.SYN_ALL_COLS=allCols||cols||[];
   if(typeof syncTabCounts==='function')syncTabCounts();
   // 有搜索词时切换到「统一搜索结果」视图
   if(q){renderSearchResults(c,cards,cols,q,colHits||[]);return}
