@@ -1164,6 +1164,50 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
    改为 900px，并把左右留白收窄，让内容区更舒展。 */
 .modal-wide{width:900px;max-width:96vw;padding:22px 28px}
 .modal-wide .modal-body{gap:14px}
+/* ===== 详情弹窗重排（T-215 2026-11-24）：后续主要编辑界面 =====
+   1180px 双栏 —— 左主列（元信息/描述/每周进展/代办/评论）+ 右侧栏（操作记录）。
+   右栏用左边框分隔而非卡片盒，保持轻量；窄屏(<1024px)退化为单列（布局锁定约定
+   不适用于弹窗内部 —— 弹窗本身就有 96vw 上限的自适应）。 */
+.modal-detail{width:min(1180px,96vw);padding:22px 28px}
+.detail-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(260px,1fr);gap:0;align-items:start}
+.dg-main{display:flex;flex-direction:column;min-width:0;padding-right:18px}
+.dg-main .comment-box{margin-top:12px}
+.dg-side{min-width:0;border-left:1px solid var(--border);padding-left:18px;
+  display:flex;flex-direction:column;gap:14px}
+/* 右栏两盒（最近评论 / 操作记录）标题统一加重 */
+.dg-side .comment-box h4{color:var(--text);font-weight:600;margin-bottom:8px}
+.dg-side .side-comments{margin-top:0}
+.dg-side .side-comments .comment-list{max-height:220px}
+/* 评论输入留左底：输入盒与上方内容拉开距离（flex 列 + margin-top:auto 兜底空态） */
+.dg-main .comment-input-box{margin-top:auto;padding-top:12px}
+.dg-main .comment-input-box .comment-form{margin-top:2px}
+/* 右栏操作记录放宽限高（主编辑界面里它是常看区） */
+.dg-side #d_actions{max-height:420px}
+@media(max-width:1024px){
+  .detail-grid{grid-template-columns:1fr}
+  .dg-main{padding-right:0}
+  .dg-side{border-left:none;padding-left:0;border-top:1px solid var(--border);padding-top:12px;margin-top:12px}
+}
+/* 每周进展（T-215）：与代办任务盒同一视觉语言（浅底描边卡）；
+   每周一行 = 周数徽标（主色描边胶囊）+ 自增高 textarea。
+   未保存改动 → 琥珀描边浅底（.dirty），保存按钮同步点亮。 */
+.wp-box{border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;background:#fafcff;margin-top:12px}
+.wp-hint{font-size:11.5px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;min-width:0;margin-left:6px}
+.wp-list{display:flex;flex-direction:column;gap:10px}
+.wp-item{display:flex;flex-direction:column;gap:4px}
+.wp-item-top{display:flex;gap:10px;align-items:flex-start}
+.wp-week{flex-shrink:0;font-size:12px;font-weight:600;color:var(--primary);
+  background:rgba(0,45,116,.06);border:1px solid rgba(0,45,116,.28);border-radius:6px;
+  padding:6px 10px;white-space:nowrap;letter-spacing:.3px}
+.wp-item textarea{flex:1;min-width:0;resize:vertical;min-height:52px;font-family:inherit;
+  font-size:13px;line-height:1.55;color:var(--text);border:1px solid var(--border);
+  border-radius:6px;padding:6px 10px;background:#fff;transition:border-color .15s,background-color .15s}
+.wp-item textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(0,45,116,.08)}
+.wp-item textarea.dirty{border-color:var(--warning);background:#fffdf5}
+.wp-item textarea.dirty:focus{border-color:var(--warning);box-shadow:0 0 0 2px rgba(250,173,20,.12)}
+.wp-item-meta{font-size:11px;color:var(--text3);padding-left:2px}
+.wp-item-meta b{color:var(--text2);font-weight:500}
 .modal-wide .comment-form input{padding:9px 12px}
 .modal-wide .comment-item{padding:7px 0;font-size:13px}
 .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;cursor:move;-webkit-user-select:none;user-select:none}
@@ -2522,22 +2566,40 @@ function goLogin(){
   </div>
 </div>
 
+<!-- 事项详情 / 父子事项预览（T-215 2026-11-24 重排）：
+     拉宽 1180px 双栏 —— 左主列（元信息 / 描述 / 每周进展 / 代办任务 / 评论）+
+     右侧栏（操作记录）。这是后续主要编辑界面。
+     ⚠️ 全部元素 id 保持不变（d_meta / d_desc / d_wp_* / d_subtask_* / d_comments /
+     d_new_comment / d_mention_* / d_actions）→ openDetail 与事件委托零改动。 -->
 <div class="modal-overlay" id="detailModal" style="display:none">
-  <div class="modal modal-wide">
+  <div class="modal modal-detail">
     <div class="modal-header"><h2 id="d_title"></h2>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
         <span id="d_ops" style="display:flex;gap:6px;align-items:center"></span>
         <button class="modal-close" onclick="closeModal('detailModal')">✕</button>
       </div>
     </div>
-    <div class="modal-body">
-      <div class="detail-meta" id="d_meta"></div>
-      <div class="detail-desc" id="d_desc" style="display:none"></div>
-      <div class="subtask-box" id="d_subtask_box" style="display:none">
-        <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count" id="d_subtask_count"></span></div>
-        <div id="d_subtask_list" class="subtask-list"></div>
-      </div>
-      <div class="comment-box"><h4>评论</h4><div id="d_comments" class="comment-list"></div>
+    <div class="detail-grid">
+      <div class="dg-main">
+        <div class="detail-meta" id="d_meta"></div>
+        <div class="detail-desc" id="d_desc" style="display:none"></div>
+        <!-- 每周进展（T-215）：按事项所选周数逐周登记；周数变更输入框数随之增减，
+             已填内容按周保留（服务端按周存储 + 前端未保存草稿缓存）。 -->
+        <div class="wp-box" id="d_wp_box" style="display:none">
+          <div class="subtask-head">
+            <span class="subtask-title">📅 每周进展</span>
+            <span class="subtask-count" id="d_wp_count"></span>
+            <span class="wp-hint" id="d_wp_hint">按事项周数逐周登记进展；周数变更后已填内容按周保留</span>
+            <button class="btn-primary" id="d_wp_save" onclick="saveWeekProgress()" style="margin-left:auto;padding:3px 14px;font-size:12px;display:none">保存进展</button>
+          </div>
+          <div id="d_wp_list" class="wp-list"></div>
+        </div>
+        <div class="subtask-box" id="d_subtask_box" style="display:none">
+          <div class="subtask-head"><span class="subtask-title">代办任务</span><span class="subtask-count" id="d_subtask_count"></span></div>
+          <div id="d_subtask_list" class="subtask-list"></div>
+        </div>
+      <!-- 评论输入留左底（T-215 用户定稿）：预览列表与操作记录一并放右栏 -->
+      <div class="comment-box comment-input-box"><h4>评论</h4>
         <div class="comment-form">
           <input id="d_new_comment" placeholder="写评论…（输入 @ 可提及成员）" oninput="onCommentInput(this)" autocomplete="off">
           <button class="btn-default" onclick="toggleMentionMenu()" title="提及成员">@</button>
@@ -2548,7 +2610,11 @@ function goLogin(){
         <div class="mention-bar" id="d_mention_bar"></div>
         <div class="mention-drop" id="d_mention_drop" hidden></div>
       </div>
-      <div class="comment-box"><h4>操作记录</h4><div id="d_actions"></div></div>
+      </div>
+      <aside class="dg-side">
+        <div class="comment-box side-comments"><h4>最近评论</h4><div id="d_comments" class="comment-list"></div></div>
+        <div class="comment-box side-actions"><h4>操作记录</h4><div id="d_actions"></div></div>
+      </aside>
     </div>
   </div>
 </div>
@@ -10805,6 +10871,7 @@ async function openDetail(id){
   // 评论 / 操作记录与卡片互不依赖 → 并行拉取（2026-11-09 #98：详情打开提速）
   const cs_p=api('/api/cards/'+id+'/comments');
   const acts_p=api('/api/cards/'+id+'/actions');
+  const wp_p=api('/api/cards/'+id+'/week-progress').catch(()=>({progress:{}}));
   const cs=await cs_p;
   const acts=await acts_p;
   document.getElementById('d_title').textContent=c.card_name||'';
@@ -10841,6 +10908,14 @@ async function openDetail(id){
   renderCardCommentPreview(cs.comments||[]);
   // 操作记录仅显示最近 12 条（#116）；更早的完整日志走【更多→操作日志】（管理员权限）
   renderCardActionsPreview(acts.actions||[]);
+  // 每周进展（T-215）：拉取按周存储的进展，按当前周数渲染输入区。
+  // 同卡片重开（如编辑周数后回来）→ 保留未保存草稿；换卡片 → 草稿重置。
+  try{
+    const wp=await wp_p;
+    if(WP_STATE.card!==id)WP_STATE={card:id,server:{},local:{}};
+    WP_STATE.server=wp.progress||{};
+  }catch(e){WP_STATE={card:id,server:{},local:{}}}
+  renderWeekProgress(c);
   document.getElementById('d_new_comment').value='';
   // 切换事项时清空上一次残留的提及（否则会把上一条评论的 @ 提到新事项上）
   MENTION_CTXS.d.arr=[];
@@ -10853,6 +10928,71 @@ async function openDetail(id){
     renderSubtasks(st.subtasks,document.getElementById('d_subtask_list'),document.getElementById('d_subtask_count'),ME.can_edit,id);
   }else{box.style.display='none'}
   openModal('detailModal');
+}
+// ---------- 每周进展（T-215 2026-11-24）----------
+// 服务端按 (card_id, week) 存储全文；前端 WP_STATE.local 缓存**未保存草稿**
+//（键=周数原文）→ 编辑弹窗里改周数回来，已填内容不丢；周数减少时输入框随之
+// 减少，但对应内容仍留在服务端与草稿缓存中，重新勾选该周即恢复。
+var WP_STATE={card:'',server:{},local:{}};
+function renderWeekProgress(c){
+  const box=document.getElementById('d_wp_box'),list=document.getElementById('d_wp_list');
+  const weeks=cardWeeks(c);
+  if(!weeks.length){box.style.display='none';syncWpSaveBtn();return}
+  box.style.display='';
+  document.getElementById('d_wp_count').textContent=weeks.length+' 周';
+  let html='';
+  weeks.forEach(function(wk){
+    const sv=WP_STATE.server[wk]||{};
+    const hasLocal=WP_STATE.local[wk]!==undefined;
+    const val=hasLocal?WP_STATE.local[wk]:(sv.content||'');
+    const dirty=hasLocal&&WP_STATE.local[wk]!==(sv.content||'');
+    let meta='';
+    if(dirty)meta='<b>未保存的修改</b>';
+    else if(sv.updated_by)meta='最近更新：<b>'+esc(sv.updated_by)+'</b> · '+esc((sv.updated_at||'').slice(0,16));
+    html+='<div class="wp-item">'
+      +'<div class="wp-item-top">'
+      +'<span class="wp-week" title="事项周数">'+esc(wk)+'</span>'
+      +'<textarea data-wp-week="'+esc(wk)+'" placeholder="登记'+esc(wk)+'的进展内容…" '
+      +'oninput="onWpInput(this)" rows="2">'+esc(val)+'</textarea>'
+      +'</div>'
+      +(meta?'<div class="wp-item-meta">'+meta+'</div>':'')
+      +'</div>';
+  });
+  list.innerHTML=html;
+  syncWpSaveBtn();
+}
+function onWpInput(ta){
+  const wk=ta.getAttribute('data-wp-week');
+  if(!WP_STATE.card)return;
+  WP_STATE.local[wk]=ta.value;
+  ta.classList.toggle('dirty',ta.value!==((WP_STATE.server[wk]||{}).content||''));
+  syncWpSaveBtn();
+}
+function wpHasDirty(){
+  return Object.keys(WP_STATE.local).some(function(wk){
+    return WP_STATE.local[wk]!==((WP_STATE.server[wk]||{}).content||'');
+  });
+}
+function syncWpSaveBtn(){
+  const b=document.getElementById('d_wp_save');
+  if(b)b.style.display=(WP_STATE.card&&wpHasDirty())?'':'none';
+}
+async function saveWeekProgress(){
+  if(!WP_STATE.card)return;
+  // 全量提交 = 服务端已有值 + 本地草稿覆盖：
+  // · 未勾选周的已存内容原样带回 → 按「周数变更后内容保留」口径不删除
+  // · 已勾选周清空 → 空串 = 删除该周记录（用户主动清空的意图明确）
+  const items={};
+  Object.keys(WP_STATE.server).forEach(function(wk){items[wk]=WP_STATE.server[wk].content||'';});
+  Object.keys(WP_STATE.local).forEach(function(wk){items[wk]=WP_STATE.local[wk];});
+  try{
+    await api('/api/cards/'+WP_STATE.card+'/week-progress',{method:'POST',body:JSON.stringify({items:items})});
+    const r=await api('/api/cards/'+WP_STATE.card+'/week-progress');
+    WP_STATE.server=r.progress||{};
+    WP_STATE.local={};
+    if(typeof DETAIL_CARD==='object'&&DETAIL_CARD)renderWeekProgress(DETAIL_CARD);
+    toast('每周进展已保存');
+  }catch(e){toast(e.message||'保存失败')}
 }
 async function addComment(){
   const inp=document.getElementById('d_new_comment');

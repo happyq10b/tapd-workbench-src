@@ -341,6 +341,18 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS idx_comments_card ON comments(card_id);
 
+-- 每周进展（T-215 2026-11-24）：父子事项预览界面按所选周数逐周登记进展内容。
+-- PK(card_id, week) 幂等：同周重复保存=覆盖；事项周数变更后未勾选周的记录
+-- 保留在表中（不随渲染丢弃），重新勾选该周即恢复显示。
+CREATE TABLE IF NOT EXISTS card_week_progress (
+    card_id     TEXT NOT NULL,
+    week        TEXT NOT NULL,                 -- 周数原文，如「2026年第47周」（与 cards.week_no 同口径）
+    content     TEXT NOT NULL DEFAULT '',
+    updated_by  TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (card_id, week)
+);
+
 -- 消息中心：@ 提及与相关消息的收件箱
 -- kind: 'mention'（被 @ 提及） / 'system'（系统消息）
 -- 状态：unread 未读 / read 已读
@@ -705,6 +717,16 @@ def _migrate_schema(conn):
         pos        INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
         PRIMARY KEY (username, board_id)
+    )''')
+
+    # ---- 每周进展（T-215 2026-11-24）：旧库幂等建表 ----
+    conn.execute('''CREATE TABLE IF NOT EXISTS card_week_progress (
+        card_id     TEXT NOT NULL,
+        week        TEXT NOT NULL,
+        content     TEXT NOT NULL DEFAULT '',
+        updated_by  TEXT NOT NULL DEFAULT '',
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        PRIMARY KEY (card_id, week)
     )''')
 
     # ---- 综合看板配置（T-211 2026-11-24）：部门级配置，幂等建表 ----

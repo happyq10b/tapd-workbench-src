@@ -5448,6 +5448,51 @@ async def add_comment(card_id: str, req: CommentReq, username: str = Depends(req
         'by': username}, exclude=username)
     return {'ok': True}
 
+# ---------------- API：每周进展（T-215 2026-11-24）----------------
+class WeekProgressReq(BaseModel):
+    """父子事项预览【每周进展】保存：items = {周数原文: 内容}（全量提交，幂等覆盖）"""
+    items: dict = {}
+
+@app.get('/api/cards/{card_id}/week-progress')
+async def get_week_progress(card_id: str, username: str = Depends(require_auth)):
+    check_card_access(card_id, username)
+    rows = dbq('SELECT week, content, updated_by, updated_at FROM card_week_progress WHERE card_id=?',
+               (card_id,))
+    return {'progress': {r['week']: {'content': r['content'],
+                                     'updated_by': r['updated_by'],
+                                     'updated_at': r['updated_at']} for r in rows}}
+
+@app.post('/api/cards/{card_id}/week-progress')
+async def save_week_progress(card_id: str, req: WeekProgressReq,
+                             username: str = Depends(require_auth), request: Request = None):
+    check_card_access(card_id, username)
+    crow = dbq('SELECT card_name, week_no FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+    if not crow:
+        raise HTTPException(404, '事项不存在或已删除')
+    # 清洗：周数键去空白；内容截断 2000；非法周数键（不在 WEEK_RE 口径）拒绝 ——
+    # 防止前端异常把垃圾键写进表
+    items = {}
+    for k, v in (req.items or {}).items():
+        wk = (k or '').strip()
+        if not wk:
+            continue
+        if not WEEK_RE.match(wk):
+            raise HTTPException(400, '周数格式不正确：%s' % wk[:20])
+        items[wk] = (v or '').strip()[:2000]
+    for wk, content in items.items():
+        if content:
+            dbe('''INSERT INTO card_week_progress (card_id, week, content, updated_by, updated_at)
+                   VALUES (?,?,?,?,datetime('now','localtime'))
+                   ON CONFLICT(card_id, week) DO UPDATE SET content=excluded.content,
+                     updated_by=excluded.updated_by, updated_at=excluded.updated_at''',
+                (card_id, wk, content, username))
+        else:
+            dbe('DELETE FROM card_week_progress WHERE card_id=? AND week=?', (card_id, wk))
+    log_action(card_id, username, 'update', '每周进展保存（%d 周）' % len(items))
+    audit_log(username, client_ip(request), 'update', f'事项 {crow[0]["card_name"]}',
+              '保存每周进展（%d 周）' % len(items), 'success')
+    return {'ok': True}
+
 # ---------------- API：消息中心 ----------------
 def _mention_receiver(member_name):
     """把被提及的成员姓名映射到收件人标识。
