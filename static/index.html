@@ -4228,16 +4228,14 @@ function syncTabCounts(){
     }
     el.textContent=n+'/'+N;
   });
-  // 架构节点徽标：n = 筛选后仍有可见板块（或本身无板块）的看板数 / N = 看板总数
+  // 架构节点徽标（T-212-ter-5 用户澄清口径）：n = 当前**选中的看板数**（curBoards ∩
+  // 本架构，与板块筛选无关，选完看板即生效）/ N = 本架构看板总数
   var g=groupBoardsByDept();
   g.depts.forEach(function(d){
     var el=document.querySelector('[data-dept-tab="'+CSS.escape(d.name)+'"]');
     if(!el)return;
     var N=(d.boards||[]).length;
-    var n=(d.boards||[]).filter(function(b){
-      var t=tot[b.board_id];
-      return (t===undefined)||((vis[b.board_id]||0)>0);   // 无板块数据的看板（空板/未选中等）恒计入
-    }).length;
+    var n=(d.boards||[]).filter(function(b){return curBoards.has(b.board_id);}).length;
     el.textContent=n+'/'+N;
   });
 }
