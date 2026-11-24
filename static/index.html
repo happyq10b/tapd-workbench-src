@@ -474,7 +474,9 @@ button{font-family:inherit}
    ⚠️ 配套：`.toolbar` 必须保持 flex-wrap:wrap —— 筛选明细行要靠它换行到独立一行。
    ⚠️ 搜索框宽度改过（135→167，为完整显示 placeholder）→ 本行的锁定值需**同步**调整，
       否则左侧内容会被压缩、搜索框又被压回截断状态。 */
-.toolbar-left{flex:1 1 auto;min-width:640px}
+.toolbar-left{flex:1 1 auto;min-width:745px}
+/* ↑ T-209（2026-11-24）：筛选行新增【类别】框（≈102px，性质与负责人之间），
+   下限 640→745px —— 窄窗口时由搜索框（flex:1）收窄让位，不挤压筛选框。 */
 /* ↑ 2026-11-04 #56：右侧四按钮（展开/折叠/导入导出/新建板块）并入「操作 ▾」→
    右锁 452→158px，左侧不再需要定宽补偿（flex 吸收全部剩余 → 搜索框拉宽填满）。 */
 
@@ -1859,6 +1861,20 @@ function goLogin(){
         </span>
         <div class="cf-drop" id="attrFilterDrop" hidden></div>
       </span>
+      <!-- 类别筛选（T-209 2026-11-24）：按板块类别（board_columns.category）客户端过滤，
+           交互/样式与性质框完全同款（多选+全选/清空+分面计数）。
+           位置：性质与负责人之间（用户指定）。 -->
+      <span class="combo-filter" id="catFilterWrap" title="按板块类别筛选（可多选）">
+        <span class="cf-label">📁 类别</span>
+        <span class="cf-field">
+          <input type="text" class="cf-input" id="catFilterInput" autocomplete="off" readonly
+                 placeholder="" onclick="toggleCatDrop(event)" onfocus="toggleCatDrop(event)"
+                 aria-label="板块类别筛选，可多选">
+          <span class="cf-count" id="catFilterCount"></span>
+          <span class="cf-chips" id="catFilterChips"></span>
+        </span>
+        <div class="cf-drop" id="catFilterDrop" hidden></div>
+      </span>
       <!-- 负责人筛选（T-0189 由「人员」更名；#205x 2026-11-18 改**板块维度**）：
            按**板块负责人**（board_columns.owner，存账号）客户端过滤板块行，
            候选 = 当前看板各板块负责人的姓名（架构树 + 「无负责人」选项）。 -->
@@ -2131,6 +2147,17 @@ function goLogin(){
           <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
           <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
         </div>
+      </div>
+      <!-- 板块类别（T-209 2026-11-24）：必选下拉，默认「年度重点工作」；
+           五大类别枚举与后端 COLUMN_CATEGORIES 同源（顺序一致） -->
+      <div class="form-group"><label>类别 <span style="color:var(--danger)">*</span></label>
+        <select class="form-select" id="c_category" title="板块类别（必选，默认年度重点工作）">
+          <option value="年度重点工作" selected>年度重点工作</option>
+          <option value="业财融合工作">业财融合工作</option>
+          <option value="财务数智化工作">财务数智化工作</option>
+          <option value="其他重点工作">其他重点工作</option>
+          <option value="文化及团队建设">文化及团队建设</option>
+        </select>
       </div>
       <div class="form-group"><label>描述</label><textarea class="form-textarea" id="c_desc" style="min-height:147px" placeholder="板块说明（选填），鼠标悬停板块标题即可查看"></textarea></div>
       <!-- 待办管理（T-0190）：待办的**设置入口只在编辑板块弹窗**（浏览界面只展示和勾选）；
@@ -5993,12 +6020,14 @@ function clearAllRowFilters(){
   curYears=new Set();
   COL_STATUS_SEL=new Set();
   ATTR_SEL=new Set();   // #205j 专项/日常一并清空
+  CAT_SEL=new Set();    // T-209 类别一并清空
   DUE_SEL=new Set();window._dueFilter='';syncDueBtn();   // T-191 到期筛选一并清空
   syncDateFilterUI();     // 日期元素已移除 → 函数内部判空直接跳过（保留防外部引用）
   paintFilterCombos();
   paintYearChips();
   paintColStatus();
   paintAttr();
+  paintCat();
   reload(1);
 }
 function clearFilterSel(kind){
@@ -6061,11 +6090,13 @@ function syncFilterHint(){
   const box=document.getElementById('filterHint');
   if(!box)return;
   const parts=[];
-  // 顺序与筛选栏一致：状态 → 专项/日常 → 负责人 → 参与人 → 年份 → 周数（T-0189/#205j）
+  // 顺序与筛选栏一致：状态 → 专项/日常 → 类别 → 负责人 → 参与人 → 年份 → 周数（T-0189/#205j/T-209）
   if(typeof COL_STATUS_SEL!=='undefined'&&COL_STATUS_SEL.size)
     parts.push('状态：'+[...COL_STATUS_SEL].map(colStatusLabel).join('、'));
   if(typeof ATTR_SEL!=='undefined'&&ATTR_SEL.size)
     parts.push('专项/日常：'+[...ATTR_SEL].join('、'));
+  if(typeof CAT_SEL!=='undefined'&&CAT_SEL.size)
+    parts.push('类别：'+[...CAT_SEL].join('、'));
   if(PERSON_SEL.size)parts.push('负责人：'+[...PERSON_SEL].map(personLabel).join('、'));
   if(typeof curYears!=='undefined'&&curYears.size)
     parts.push('年份：'+[...curYears].map(y=>y+' 年').join('、'));
@@ -6174,6 +6205,7 @@ function openPersonFilterPicker(anchor){
   return _pfPickBusy;
 }
 async function _openPersonFilterPicker(anchor){
+  closeFilterCombo();closeYearDrop();closeColStatusDrop();closeAttrDrop();closeCatDrop();   // 打开选人树前收起全部下拉
   // 强制刷新架构数据：人员筛选要反映最新的任命（免职/任命后立即生效），
   // 同时让「数据刷新后展开状态同步」这条路径被真正走到。
   try{ await Promise.all([ensureOrgTree(true), bcLoadAclMembers()]); }catch(e){ toast('架构数据加载失败'); return; }
@@ -6489,6 +6521,15 @@ function renderBoard(cards,cols,q,colHits){
       return;
     }
   }
+  // 类别过滤（T-209 2026-11-24）：按板块自身类别（board_columns.category，cols 载荷自带）
+  // 客户端过滤；存量/缺省视同「年度重点工作」（与新建默认一致）。
+  if(CAT_SEL&&CAT_SEL.size){
+    names=names.filter(k=>{const m=cmeta[k];return !!m&&CAT_SEL.has(m.category||'年度重点工作')});
+    if(!names.length){
+      c.innerHTML='<div class="empty">没有符合类别条件的板块</div>';
+      return;
+    }
+  }
   // #205x（2026-11-18 用户需求）：【负责人】【参与人】改为**板块维度**筛选——
   // 分别按板块的 owner（单账号）/ participants（逗号分隔账号）匹配；
   // 选择集存**姓名**（架构树勾选），经 BC_ACL_MEMBERS 账号→姓名映射比对（空映射回退账号直比）；
@@ -6540,7 +6581,7 @@ function renderBoard(cards,cols,q,colHits){
     // 标题点击 = 打开板块浏览界面（T-0183：浏览 → 编辑两级，与事项「详情 → 编辑」一致）；
     // 展开/收起只由左侧三角控制，两者互不干扰
     const titleEditable=canEditColumn(boardId);
-    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}" data-completion="${esc(meta?(meta.completion||'open'):'open')}" data-desc="${esc(meta?(meta.description||''):'')}" data-due="${esc(meta?(meta.due_date||''):'')}"`;
+    const titleAttrs=`data-colkey="${esc(colKey)}" data-bid="${esc(boardId)}" data-cname="${esc(k)}" data-year="${esc(year)}" data-nature="${esc(meta?(meta.nature||'日常'):'日常')}" data-category="${esc(meta?(meta.category||'年度重点工作'):'年度重点工作')}" data-created="${esc(meta?(meta.created_at||''):'')}" data-creator="${esc(meta?(meta.creator||''):'')}" data-owner="${esc(meta?(meta.owner||''):'')}" data-parts="${esc(meta?(meta.participants||''):'')}" data-completion="${esc(meta?(meta.completion||'open'):'open')}" data-desc="${esc(meta?(meta.description||''):'')}" data-due="${esc(meta?(meta.due_date||''):'')}"`;
     // 板块描述 tooltip（2026-11-09 #93）：有描述时悬停标题展示，否则提示可查看详情
     const colDesc=(meta&&(meta.description||'').trim())||'';
     const titleTip=colDesc?('【板块描述】'+colDesc):'点击查看板块详情';
@@ -6732,7 +6773,7 @@ function paintYearDrop(){
 function toggleYearDrop(ev){
   if(ev)ev.stopPropagation();
   if(!_yearOptions.length)return;
-  if(!_yearDropOpen){closeFilterCombo();closeColStatusDrop();closeAttrDrop();}
+  if(!_yearDropOpen){closeFilterCombo();closeColStatusDrop();closeAttrDrop();closeCatDrop();}
   _yearDropOpen=true;
   paintYearChips();
 }
@@ -6823,7 +6864,7 @@ function paintAttrDrop(){
 // 幂等「确保打开」（与板块状态 toggleColStatusDrop 同款，防 focus→click 双触发闪退）
 function toggleAttrDrop(ev){
   if(ev)ev.stopPropagation();
-  if(!_attrDropOpen){closeFilterCombo();closeYearDrop();closeColStatusDrop();}
+  if(!_attrDropOpen){closeFilterCombo();closeYearDrop();closeColStatusDrop();closeCatDrop();}
   _attrDropOpen=true;
   paintAttr();
 }
@@ -6844,6 +6885,65 @@ function closeAttrDrop(){
   _attrDropOpen=false;
   paintAttr();
 }
+// ── 类别筛选（T-209 2026-11-24）：按板块类别（board_columns.category）客户端过滤，
+//    交互/分面计数完全镜像性质下拉（#205j/#205v）。存量板块缺省视同「年度重点工作」。
+const CAT_OPTS=[['年度重点工作','年度重点工作'],['业财融合工作','业财融合工作'],
+                ['财务数智化工作','财务数智化工作'],['其他重点工作','其他重点工作'],
+                ['文化及团队建设','文化及团队建设']];
+let CAT_SEL=new Set();            // 已选类别（空 = 全部）
+let _catDropOpen=false;
+function paintCat(){
+  const wrap=document.getElementById('catFilterWrap');
+  const chips=document.getElementById('catFilterChips');
+  const count=document.getElementById('catFilterCount');
+  if(!wrap)return;
+  if(chips)chips.innerHTML=[...CAT_SEL].map(v=>
+    `<span class="cf-chip" title="${esc(v)}"><span>${esc(v)}</span><i onclick="removeCatChip('${esc(v)}')">×</i></span>`).join('');
+  if(count)count.textContent=CAT_SEL.size?('已选 '+CAT_SEL.size):'';
+  wrap.classList.toggle('active',CAT_SEL.size>0);
+  paintCatDrop();
+}
+function paintCatDrop(){
+  const drop=document.getElementById('catFilterDrop');
+  if(!drop)return;
+  if(!_catDropOpen){drop.hidden=true;drop.innerHTML='';return}
+  drop.hidden=false;
+  const _cc=catCounts();   // #205v：一次计算全部选项计数
+  drop.innerHTML='<div class="cf-tip" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'
+    +'<span>板块类别</span>'
+    +'<span style="display:flex;gap:4px;flex-shrink:0">'
+    +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-cat-all="1" title="勾选全部类别">全选</button>'
+    +'<button class="icon-btn" style="padding:2px 8px;font-size:11px" data-cat-clear="1" title="清空已选类别（= 全部）">清空</button>'
+    +'</span></div>'
+    +CAT_OPTS.map(o=>{
+      const on=CAT_SEL.has(o[0]);
+      const n=_cc[o[0]]||0;
+      return `<label class="cf-opt ${on?'on':''}"><input type="checkbox"${on?' checked':''} data-pick-cat="${o[0]}"><span>${o[1]}</span><span class="opt-count" title="当前范围内的板块数量">${n}</span></label>`;
+    }).join('');
+}
+function toggleCatDrop(ev){
+  if(ev)ev.stopPropagation();
+  if(!_catDropOpen){closeFilterCombo();closeYearDrop();closeColStatusDrop();closeAttrDrop();}
+  _catDropOpen=true;
+  paintCat();
+}
+function toggleCatPick(v){
+  if(!v)return;
+  if(CAT_SEL.has(v))CAT_SEL.delete(v);
+  else CAT_SEL.add(v);
+  paintCat();
+  reload(1);
+}
+function removeCatChip(v){
+  CAT_SEL.delete(v);
+  paintCat();
+  reload(1);
+}
+function closeCatDrop(){
+  if(!_catDropOpen)return;
+  _catDropOpen=false;
+  paintCat();
+}
 function colStatusLabel(v){
   const o=COL_STATUS_OPTS.find(x=>x[0]===v);
   return o?o[1]:v;
@@ -6853,11 +6953,12 @@ function colStatusLabel(v){
 // 统计口径 = 分面（faceted）：看板范围由 COLS_META 载荷天然限定（随看板选择下发），
 // 计入年份筛选与**另一维度**的已选（性质↔状态互为对方的前置条件），
 // 排除自身维度已选 —— 否则勾选某项后它自己会显示 0，下拉数字失去导航意义。
-function _facetBase(excludeDim){   // excludeDim: 'status' | 'attr' | ''（参与统计的板块行）
+function _facetBase(excludeDim){   // excludeDim: 'status' | 'attr' | 'cat' | ''（参与统计的板块行）
   return (window.COLS_META||[]).filter(function(m){
     if(curYears&&curYears.size&&!curYears.has(m.year||''))return false;
     if(excludeDim!=='status'&&COL_STATUS_SEL&&COL_STATUS_SEL.size&&!COL_STATUS_SEL.has(m.completion||'open'))return false;
     if(excludeDim!=='attr'&&ATTR_SEL&&ATTR_SEL.size&&!ATTR_SEL.has(m.nature||'日常'))return false;
+    if(excludeDim!=='cat'&&CAT_SEL&&CAT_SEL.size&&!CAT_SEL.has(m.category||'年度重点工作'))return false;
     return true;
   });
 }
@@ -6873,6 +6974,12 @@ function attrCounts(){        // {专项:n, 日常:n}
   _facetBase('attr').forEach(function(m){const k=m.nature||'日常';out[k]=(out[k]||0)+1;});
   return out;
 }
+function catCounts(){        // {年度重点工作:n, ...}（T-209）
+  const out={};
+  CAT_OPTS.forEach(function(o){out[o[0]]=0;});
+  _facetBase('cat').forEach(function(m){const k=m.category||'年度重点工作';out[k]=(out[k]||0)+1;});
+  return out;
+}
 // ---------- 人员筛选计数（#205aa 2026-11-18） ----------
 // 负责人/参与人选人树每个人员行右侧追加「当前筛选范围内该人员担任负责人/参与人的板块数」
 // （截图需求；样式与逻辑参照 #205v 状态/性质下拉的 .opt-count）。
@@ -6884,6 +6991,7 @@ function _facetPeopleBase(excludeDim){   // excludeDim: 'person' | 'cc' | ''（�
     if(curYears&&curYears.size&&!curYears.has(m.year||''))return false;
     if(excludeDim!=='status'&&COL_STATUS_SEL&&COL_STATUS_SEL.size&&!COL_STATUS_SEL.has(m.completion||'open'))return false;
     if(excludeDim!=='attr'&&ATTR_SEL&&ATTR_SEL.size&&!ATTR_SEL.has(m.nature||'日常'))return false;
+    if(excludeDim!=='cat'&&CAT_SEL&&CAT_SEL.size&&!CAT_SEL.has(m.category||'年度重点工作'))return false;
     if(excludeDim!=='person'&&PERSON_SEL&&PERSON_SEL.size&&!_colPeopleHit(PERSON_SEL,m.owner))return false;
     if(excludeDim!=='cc'&&CC_SEL&&CC_SEL.size&&!_colPeopleHit(CC_SEL,m.participants))return false;
     return true;
@@ -6954,7 +7062,7 @@ function paintColStatusDrop(){
 // 收起只由「点击面板外」的 document 委托承担。
 function toggleColStatusDrop(ev){
   if(ev)ev.stopPropagation();
-  if(!_colStatusDropOpen){closeFilterCombo();closeYearDrop();closeAttrDrop();}
+  if(!_colStatusDropOpen){closeFilterCombo();closeYearDrop();closeAttrDrop();closeCatDrop();}
   _colStatusDropOpen=true;
   paintColStatus();
 }
@@ -8510,6 +8618,8 @@ function openColumnModal(){
   document.getElementById('c_due').value='';
   const nat=document.querySelector('input[name="c_nature"]:checked');
   if(nat)nat.checked=true;
+  // 类别（T-209）：新建默认「年度重点工作」
+  document.getElementById('c_category').value='年度重点工作';
   COL_OWNER='';
   Promise.all([bcLoadAclMembers(), ensureOrgTree(false)]).then(colInitPickers);   // T-191l：member-picker 初始化（池加载后）
   // 板块描述（2026-11-09 #93）：新建时清空
@@ -8556,6 +8666,8 @@ async function openColumnEdit(d,fromDetail){
   document.getElementById('c_due').value=(d.due||'').slice(0,10);
   const nat=document.querySelector(`input[name="c_nature"][value="${d.nature||'日常'}"]`);
   if(nat)nat.checked=true;
+  // 类别回填（T-209）：存量板块缺省按默认「年度重点工作」
+  document.getElementById('c_category').value=d.category||'年度重点工作';
   // 板块完成情况回填（2026-11-04 需求3）→ T-191j：头部按钮承载（与事项编辑一致）
   COL_COMPLETION=d.completion||'open';
   const csOps=document.getElementById('c_status_ops');
@@ -8643,7 +8755,7 @@ function renderColumnDetail(d){
                   :(_cd?`<b><span class="fcol-cd${cdOver(_due)?' fcol-cd-over':''}">${esc(_cd)}</span></b>`
                   :'<b>—</b>'));
   document.getElementById('cd_meta').innerHTML=
-    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b><br>`
+    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b>　类别：<b>${esc(d.category||'年度重点工作')}</b><br>`
     // T-191j 界面统一：完成情况不再在元信息里重复呈现 —— 由头部完成情况按钮统一承载（与事项状态同范式）
     +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(parts.length?parts.join('、'):'—')}</b></span><br>`
     // #205r（2026-11-18 用户需求3）：末行统一为「创建人、创建时间、开始时间、截止时间、倒计时」；
@@ -8950,6 +9062,7 @@ async function saveColumn(){
   const due_date=document.getElementById('c_due').value.trim();   // T-0188 倒计时
   const year=document.getElementById('c_year').value.trim();
   const nature=(document.querySelector('input[name="c_nature"]:checked')||{}).value||'日常';
+  const category=document.getElementById('c_category').value||'年度重点工作';   // T-209
   if(!column_name){toast('板块名称不能为空');return}
   if(!board_id){toast('请选择所属看板');return}
   if(!created_at){toast('创建日期为必填项');return}
@@ -8969,7 +9082,7 @@ async function saveColumn(){
       const compPayload=colCanEditCompletion()?{completion:COL_COMPLETION}:{};
       const descPayload={description:document.getElementById('c_desc').value.trim()};
       const duePayload={due_date:due_date};   // T-0188：截止日期随编辑整包提交（空 = 清空）
-      const _saveR=await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,year},ownerPayload,partsPayload,compPayload,descPayload,duePayload))});
+      const _saveR=await api('/api/columns',{method:'PUT',body:JSON.stringify(Object.assign({col_key:COLUMN_EDIT_KEY,board_id,column_name,created_at,nature,category,year},ownerPayload,partsPayload,compPayload,descPayload,duePayload))});
       toast('板块已保存：'+column_name+(_saveR&&_saveR.removed&&_saveR.removed.length?('（已移除超出范围人员：'+_saveR.removed.join('、')+'）'):''));
       releaseEditLock(COLUMN_LOCK_KEY);COLUMN_LOCK_KEY='';   // 保存成功释放板块编辑锁
       // 从浏览界面进来的编辑：保存后带着**最新表单值**回浏览界面（T-0183，
@@ -8978,7 +9091,7 @@ async function saveColumn(){
         // ⚠️ flag 不在这里清 —— 由 columnModal 的关闭钩子统一清并回浏览界面；
         // 先清会让钩子读不到「来自浏览」而直接关窗不返回
         COLUMN_DETAIL={colkey:COLUMN_EDIT_KEY,bid:board_id,cname:column_name,year:year,
-          nature:nature,created:created_at,creator:COLUMN_DETAIL?COLUMN_DETAIL.creator:'',
+          nature:nature,category:category,created:created_at,creator:COLUMN_DETAIL?COLUMN_DETAIL.creator:'',
           owner:(ownerPayload.owner!==undefined&&ownerPayload.owner!=='__CLEAR__')?ownerPayload.owner:(COLUMN_DETAIL?COLUMN_DETAIL.owner:''),
           parts:(partsPayload.participants||COL_PARTS.join(',')),
           completion:compPayload.completion||((COLUMN_DETAIL&&COLUMN_DETAIL.completion)||'open'),
@@ -8992,7 +9105,7 @@ async function saveColumn(){
       const ownerCreate=colCanAssignOwner()?{owner:colOwnerAccounts()[0]||''}:{};
       const compCreate=colCanEditCompletion()?{completion:COL_COMPLETION}:{};
       const descCreate={description:document.getElementById('c_desc').value.trim()};
-      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,year,participants:colPartsAccounts().join(','),due_date:due_date},ownerCreate,compCreate,descCreate))});
+      await api('/api/columns',{method:'POST',body:JSON.stringify(Object.assign({board_id,column_name,created_at,nature,category,year,participants:colPartsAccounts().join(','),due_date:due_date},ownerCreate,compCreate,descCreate))});
       toast('板块已创建：'+column_name);
       closeModal('columnModal');
       // ⚠️ curBoards 是内容区的**权威选择**（#51 多看板语义）——
@@ -10485,6 +10598,19 @@ document.addEventListener('click',e=>{
   }
   if(t.closest('#attrFilterWrap'))return;
   closeAttrDrop();
+  // 类别面板（T-209）：勾选 / 全选 / 清空；点别处 → 收起（与性质面板同模式）
+  const catOpt=t.closest('#catFilterDrop [data-pick-cat]');
+  if(catOpt){toggleCatPick(catOpt.getAttribute('data-pick-cat'));return}
+  if(t.closest('#catFilterDrop [data-cat-all]')){
+    CAT_SEL=new Set(CAT_OPTS.map(o=>o[0]));
+    paintCat(); reload(1); return;
+  }
+  if(t.closest('#catFilterDrop [data-cat-clear]')){
+    CAT_SEL=new Set();
+    paintCat(); reload(1); return;
+  }
+  if(t.closest('#catFilterWrap'))return;
+  closeCatDrop();
   // 事项弹窗的周数 combo（2026-11-09 #94；#205p 改勾选多选）：
   // 勾选由 checkbox onchange（weekComboToggle）处理，面板点内部不收起；点别处 → 收起
   if(t.closest('#e_week_drop')||t.closest('#n_week_drop')||

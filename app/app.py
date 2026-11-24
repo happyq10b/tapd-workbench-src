@@ -1613,6 +1613,10 @@ COLUMN_NATURES = {'日常', '专项'}
 # 板块「完成情况」取值（2026-11-04 需求3）——与事项 status 同一套语义
 # open=未完成 / progressing=进行中 / done=已完成
 COLUMN_COMPLETIONS = ('notstarted', 'progressing', 'done', 'open')   # #205o 追加「未开始」（用户口径排序）
+# 板块「类别」取值（T-209 2026-11-24 用户需求）：必选维度，默认「年度重点工作」。
+# 前端下拉与后端校验共用本枚举（前端另有本地副本 CAT_OPTS，含顺序）。
+COLUMN_CATEGORIES = ('年度重点工作', '业财融合工作', '财务数智化工作', '其他重点工作', '文化及团队建设')
+COLUMN_CATEGORY_DEFAULT = '年度重点工作'
 
 
 def _settle_days(due):
@@ -3176,6 +3180,8 @@ class ColumnCreate(BaseModel):
     column_name: str
     created_at: str = ''     # 创建日期（必填，允许 YYYY-MM-DD 或含时分秒）
     nature: str = '日常'      # 性质：日常 / 专项
+    # 板块类别（T-209 2026-11-24）：必选，默认「年度重点工作」
+    category: str = COLUMN_CATEGORY_DEFAULT
     year: str = ''           # 归属年份（如 2026）
     # 板块参与人（2026-11-03）：账号列表（逗号分隔）。
     # 参与人 = 可修改该板块的**可见内容**，但无增删与指派权（见 perm.py）。
@@ -3198,6 +3204,7 @@ class ColumnUpdate(BaseModel):
     column_name: str = ''    # 新名称
     created_at: str = ''     # 创建日期
     nature: str = ''         # 性质
+    category: str = ''       # 类别（T-209：留空 = 沿用原值，与 nature 同语义）
     year: str = ''           # 归属年份
     owner: str = ''          # 板块负责人账号（'' = 不改；'__CLEAR__' = 清除）
     # 板块「完成情况」（2026-11-04 需求3）：open / progressing / done
@@ -3257,6 +3264,10 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
         raise HTTPException(400, '请选择所属看板')
     if req.nature not in COLUMN_NATURES:
         raise HTTPException(400, '性质只能是「日常」或「专项」')
+    # 类别（T-209）：必选维度，未传取默认「年度重点工作」
+    category = (req.category or '').strip() or COLUMN_CATEGORY_DEFAULT
+    if category not in COLUMN_CATEGORIES:
+        raise HTTPException(400, '类别只能是：「%s」' % '、'.join(COLUMN_CATEGORIES))
     created = (req.created_at or '').strip()
     if not created:
         # 创建日期为必填项：前端日期选择器已默认预填当天，服务端同样强制校验，
@@ -3304,9 +3315,9 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
     new_completion = (req.completion or '').strip() or 'progressing'
     if new_completion not in COLUMN_COMPLETIONS:
         raise HTTPException(400, '完成情况只能是「未开始」「未完成」「进行中」或「已完成」')
-    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, completion, description, due_date)'
-        ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?)',
-        (key, new_cid, req.board_id, name, created, username, req.nature, year, new_owner, parts, new_completion,
+    dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, category, year, pinned, owner, participants, completion, description, due_date)'
+        ' VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)',
+        (key, new_cid, req.board_id, name, created, username, req.nature, category, year, new_owner, parts, new_completion,
          (req.description or '').strip(), _norm_due_date(req.due_date)))
     # T-191j 结算：新建板块即「已完成」且带截止日期 → 直接结算一次
     if new_completion == 'done':
@@ -3314,10 +3325,10 @@ async def create_column(req: ColumnCreate, username: str = Depends(require_write
             (_settle_days(_norm_due_date(req.due_date)), key))
     log_action('__column__', username, 'create', f'新建板块 {name}')
     audit_log(username, client_ip(request), 'create', f'板块 {name}',
-              f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，归属年份 {year}，创建日期 {created}）', 'success')
+              f'新建板块：{name}（看板 {req.board_id}，性质 {req.nature}，类别 {category}，归属年份 {year}，创建日期 {created}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
-            'created_at': created, 'creator': username, 'nature': req.nature,
+            'created_at': created, 'creator': username, 'nature': req.nature, 'category': category,
             'year': year, 'pinned': 0, 'owner': new_owner, 'participants': parts,
             'removed': _account_names(_removed_col_create)}
 
@@ -3378,6 +3389,10 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
     nature = (req.nature or '').strip() or (old['nature'] if old else '日常')
     if nature not in COLUMN_NATURES:
         raise HTTPException(400, '性质只能是「日常」或「专项」')
+    # 类别（T-209）：留空 = 沿用原值（未登记板块回退默认），与 nature 同语义
+    category = (req.category or '').strip() or (old['category'] if old else '') or COLUMN_CATEGORY_DEFAULT
+    if category not in COLUMN_CATEGORIES:
+        raise HTTPException(400, '类别只能是：「%s」' % '、'.join(COLUMN_CATEGORIES))
     # ---- 板块「完成情况」（2026-11-04 需求3）----
     # 2026-11-13（用户裁决「按体系来，不搞特殊」）：完成情况跟随板块编辑权限
     # —— 入口上方 perm_check(OP_UPDATE, LV_COLUMN_OWNER) 已把关（板块负责人及以上，
@@ -3440,8 +3455,8 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
             _parts_norm = ','.join(_kept_parts)
             dbe('UPDATE board_columns SET participants=? WHERE col_key=?',
                 (_parts_norm, req.col_key))
-        dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=?, description=?, due_date=? WHERE col_key=?',
-            (new_key, name, year, created, nature,
+        dbe('UPDATE board_columns SET col_key=?, column_name=?, year=?, created_at=?, nature=?, category=?, description=?, due_date=? WHERE col_key=?',
+            (new_key, name, year, created, nature, category,
              (req.description if req.description is not None else (old['description'] if old and 'description' in old.keys() else '')) or '',
              _norm_due_date(req.due_date) if req.due_date is not None else ((old['due_date'] if old and 'due_date' in old.keys() else '') or ''),
              req.col_key))
@@ -3458,23 +3473,23 @@ async def _update_column_locked(req: ColumnUpdate, username: str, request=None):
         new_cid = 'COL' + str(int(time.time() * 1000))
         parts = _norm_acl_participants(req.participants) if req.participants else ''
         # #205t（2026-11-18）：首次登记同样落 #205n 默认「进行中」（表默认是 'open'）
-        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, year, pinned, owner, participants, description, completion)'
-            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)',
-            (new_key, new_cid, board_id, name, created, username, nature, year, new_owner or '', parts,
+        dbe('INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at, creator, nature, category, year, pinned, owner, participants, description, completion)'
+            ' VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?)',
+            (new_key, new_cid, board_id, name, created, username, nature, category, year, new_owner or '', parts,
              (req.description or '').strip(), 'progressing'))
     log_action('__column__', username, 'update', f'编辑板块 {name}')
     # 板块操作记录（2026-11-13）：创建 / 编辑都落 col_key 流水（板块浏览界面「操作记录」）
     log_column_action(new_key, username, 'update' if old else 'create',
                       f'{"编辑板块" if old else "新建板块"}：{name}')
     audit_log(username, client_ip(request), 'update', f'板块 {name}',
-              f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}）', 'success')
+              f'编辑板块：{name}（归属年份 {year or "未填"}，性质 {nature}，类别 {category}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     # 板块变更实时信号（2026-11-13）：开着板块预览的客户端据此刷新评论/待办/操作记录；
     # 改名换 key 时带 prev_col_key → 预览跟随新 key（否则旧 key 查询失联）
     await _ws_column_change(new_key, username,
                             prev_col_key=(req.col_key if (old and req.col_key != new_key) else ''))
     return {'ok': True, 'col_key': new_key, 'column_name': name, 'year': year,
-            'nature': nature, 'created_at': created,
+            'nature': nature, 'category': category, 'created_at': created,
             'owner': (new_owner if new_owner is not None else (old['owner'] if old else '')),
             'removed': _account_names(_removed_col_owner + _removed_col_parts)}
 
@@ -4498,6 +4513,7 @@ class CopyColumnReq(BaseModel):
     column_name: str = ''      # 副本名称（留空 = 原名 +（副本））
     created_at: str = ''       # 副本创建日期（留空 = 今天）
     nature: str = ''           # 性质（留空 = 沿用原板块）
+    category: str = ''         # 类别（T-209：留空 = 沿用原板块）
     year: str = ''             # 归属年份（留空 = 沿用原板块）
 
 
@@ -4556,6 +4572,10 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     nature = (req.nature or src['nature'] or '日常').strip()
     if nature not in COLUMN_NATURES:
         raise HTTPException(400, '性质只能是「日常」或「专项」')
+    # 类别（T-209）：留空 = 沿用原板块
+    category = (req.category or (src['category'] if 'category' in src.keys() else '') or '').strip() or COLUMN_CATEGORY_DEFAULT
+    if category not in COLUMN_CATEGORIES:
+        raise HTTPException(400, '类别只能是：「%s」' % '、'.join(COLUMN_CATEGORIES))
     year = _norm_year(req.year) or (src['year'] or '') or created[:4]
     new_cid = 'COL' + str(int(time.time() * 1000))
     # #205t（2026-11-18）：副本继承源板块完成情况（原缺省落表默认 'open'，状态凭空改变）
@@ -4569,10 +4589,10 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     try:
         conn.execute(
             'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
-            ' creator, nature, year, pinned, copy_from, completion, owner, participants,'
+            ' creator, nature, category, year, pinned, copy_from, completion, owner, participants,'
             ' description, due_date, overdue_days)'
-            ' VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)',
-            (key, new_cid, req.board_id, name, created, username, nature, year, src['col_key'],
+            ' VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?)',
+            (key, new_cid, req.board_id, name, created, username, nature, category, year, src['col_key'],
              _src_completion, src.get('owner') or '', src.get('participants') or '',
              src.get('description') or '', src.get('due_date') or '', src.get('overdue_days')))
         # #205ab-cis（用户反馈「板块的代办和截止时间没有一并复制」）：板块行补随附
@@ -4602,7 +4622,7 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'board_id': req.board_id, 'copy_from': src['col_key'],
-            'created_at': created, 'creator': username, 'nature': nature, 'year': year,
+            'created_at': created, 'creator': username, 'nature': nature, 'category': category, 'year': year,
             'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks,
             'copied_todos': copied_todos}
 
@@ -4760,11 +4780,11 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
         new_key = new_board_id + '::' + c['column_name']
         conn.execute(
             'INSERT INTO board_columns (col_key, column_id, board_id, column_name, created_at,'
-            ' creator, nature, pinned, year, copy_from, owner, participants, completion,'
+            ' creator, nature, category, pinned, year, copy_from, owner, participants, completion,'
             ' description, due_date, overdue_days)'
-            ' VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)',
+            ' VALUES (?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?)',
             (new_key, new_cid, new_board_id, c['column_name'], c['created_at'],
-             username, c['nature'], c['year'], c['col_key'],
+             username, c['nature'], c['category'], c['year'], c['col_key'],
              c.get('owner') or '', c.get('participants') or '',
              (c.get('completion') or '').strip() or 'progressing',
              c.get('description') or '', c.get('due_date') or '', c.get('overdue_days')))

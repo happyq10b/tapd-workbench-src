@@ -296,6 +296,9 @@ CREATE TABLE IF NOT EXISTS board_columns (
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     creator     TEXT NOT NULL DEFAULT '',
     nature      TEXT NOT NULL DEFAULT '日常' CHECK (nature IN ('日常','专项')),
+    -- 板块类别（T-209 2026-11-24）：五大类别，必选；应用层校验枚举（此处只锁默认值，
+    --   CHECK 不加——历史遗留脏值不该让整表写入炸掉，与 nature 的差异见 T-209）
+    category    TEXT NOT NULL DEFAULT '年度重点工作',
     year        TEXT NOT NULL DEFAULT '',
     pinned      INTEGER NOT NULL DEFAULT 0,
     copy_from   TEXT NOT NULL DEFAULT '',
@@ -628,6 +631,12 @@ def _migrate_schema(conn):
     if bcols and 'description' not in bcols:
         conn.execute('ALTER TABLE board_columns ADD COLUMN description TEXT NOT NULL DEFAULT \'\'')
         conn.execute("UPDATE board_columns SET description='' WHERE description IS NULL")
+
+    # ---- 板块类别（T-209 2026-11-24）：五大类别维度，必选，默认「年度重点工作」----
+    # SQLite 的 ADD COLUMN 常量 DEFAULT 会**同时给存量行填上默认值** →
+    # 已有 226 个板块自动回填「年度重点工作」，无需显式 UPDATE。
+    if bcols and 'category' not in bcols:
+        conn.execute("ALTER TABLE board_columns ADD COLUMN category TEXT NOT NULL DEFAULT '年度重点工作'")
 
     # ---- 逾期天数（T-191j 结算）：旧库幂等加列 ----
     # ⚠️ 不回填存量已完成行：系统未记录历史完成时间（completed 恒为空），
