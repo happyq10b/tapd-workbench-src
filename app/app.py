@@ -2781,11 +2781,16 @@ def me(username: str = Depends(require_auth)):
     # 与 POST /api/boards 的 _arch_head_nodes 校验完全同口径
     can_create_board = True if not PERM_ENABLED else (
         username == SUPER_ADMIN or is_admin(username) or bool(_arch_head_nodes(dbq, username)))
+    # T-211 综合看板能力位：syn_edit_depts = 默认可见（=可编辑）部门；syn_depts = 可见（含追加）
+    _syn_edit = _syn_default_depts(username)
+    syn_depts = sorted(_syn_edit | _syn_extra_depts(username))
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
             'arch_owner': arch_owner,              # #205ad 封存/启用看板入口显隐
             'can_create_board': can_create_board,  # #205ad-cis 新建看板入口显隐（部门负责人及以上）
+            'syn_edit_depts': sorted(_syn_edit),   # T-211 综合编辑按钮显隐（默认可见人员）
+            'syn_depts': syn_depts,                # T-211 综合看板按钮显隐（默认 ∪ 追加）
             'can_manage_staff': _sp[0],            # T-191d 人员管理入口显隐（部门负责人及以上）
             'staff_scope_all': _sp[1],             # T-191d True=全部部门 / False=仅本部门
             'login_notice': _get_setting('login_notice', ''),  # T-013b：超管「登入通知」字段回显（个人状态不受影响）
@@ -6350,6 +6355,203 @@ def _my_bindable_boards(username: str) -> set:
         if username in [x.strip() for x in (r['participants'] or '').split(',')]:
             out.add(r['board_id'])
     return out
+
+
+def _syn_default_depts(username: str) -> set:
+    """T-211 综合看板：默认可见（= 可编辑）的**部门节点**集合。
+
+    默认可见角色（用户需求）：部门长 / 总经理 / 中心负责人 / 管理员 / 超管。
+    · 管理员/超管 或 PERM_ENABLED=False → 全部部门
+    · center 级负责岗位（center_head / gm，任一 center 节点任命）→ 全部部门
+    · dept_head → 该部门自身
+    （追加可见人员走 syn_board_config.extra_members，不含在本集合 —— 追加人员
+      不可见【综合编辑】按钮，所以两个集合必须分开维护。）
+    """
+    depts = {r['id'] for r in dbq("SELECT id FROM org_nodes WHERE node_type='dept'")}
+    if not PERM_ENABLED or username == SUPER_ADMIN or is_admin(username):
+        return depts
+    rows = dbq("""SELECT DISTINCT a.node_id, n.node_type FROM org_appointments a
+                  JOIN team_members m ON m.id=a.member_id
+                  JOIN org_nodes n ON n.id=a.node_id
+                  WHERE m.account=? AND a.role_key IN ('center_head','gm','dept_head')""",
+               (username,))
+    appointed = {r['node_id'] for r in rows}
+    if any(r['node_type'] == 'center' for r in rows):
+        return depts
+    return appointed & depts
+
+
+def _syn_extra_depts(username: str) -> set:
+    """T-211：用户被【综合编辑】追加为可见人员的部门节点集合。"""
+    try:
+        rows = dbq("SELECT dept_node_id FROM syn_board_config "
+                   "WHERE (','||IFNULL(extra_members,'')||',') LIKE ?",
+                   ('%,{},%'.format(username),))
+        return {r['dept_node_id'] for r in rows}
+    except Exception:
+        return set()   # 表未迁移（旧库）时按「无追加」处理
+
+
+def _syn_subtree_member_candidates(nid: int):
+    """T-211：节点子树下的**活跃成员**（账号 → 姓名），追加可见人员的候选池。
+
+    跨部门约束（用户需求）：除【财务中心】（center 型，综合配置可选全员）外，
+    各部门的追加候选 = 本部门架构子树内的成员。
+    """
+    rows = [dict(r) for r in dbq('SELECT id, parent_id, node_type FROM org_nodes')]
+    nmap = {r['id']: r for r in rows}
+    root = nmap.get(nid)
+    if not root:
+        return []
+    kids = defaultdict(list)
+    for r in rows:
+        kids[r['parent_id']].append(r['id'])
+    subtree, stack = set(), [nid]
+    while stack:
+        x = stack.pop()
+        if x in subtree:
+            continue
+        subtree.add(x)
+        stack.extend(kids.get(x, []))
+    if root['node_type'] == 'center':
+        q = ("SELECT DISTINCT m.account, m.name FROM org_appointments a "
+             "JOIN team_members m ON m.id=a.member_id "
+             "WHERE IFNULL(m.status,'active')='active' AND IFNULL(m.account,'')!='' "
+             "ORDER BY m.name")
+        return [{'account': r['account'], 'name': r['name']} for r in dbq(q)]
+    marks = ','.join('?' * len(subtree))
+    q = ("SELECT DISTINCT m.account, m.name FROM org_appointments a "
+         "JOIN team_members m ON m.id=a.member_id "
+         f"WHERE a.node_id IN ({marks}) AND IFNULL(m.status,'active')='active' "
+         "AND IFNULL(m.account,'')!='' ORDER BY m.name")
+    return [{'account': r['account'], 'name': r['name']} for r in dbq(q, tuple(subtree))]
+
+
+def _syn_subtree_board_ids(nid: int):
+    """T-211：节点子树下挂载的看板（board_config.dept_node_id ∈ 子树）。
+
+    用于 PUT 保存时校验板块白名单不越出本部门架构。
+    """
+    rows = [dict(r) for r in dbq('SELECT id, parent_id FROM org_nodes')]
+    nmap = {r['id'] for r in rows}
+    kids = defaultdict(list)
+    for r in rows:
+        kids[r['parent_id']].append(r['id'])
+    subtree, stack = set(), [nid]
+    while stack:
+        x = stack.pop()
+        if x not in nmap or x in subtree:
+            continue
+        subtree.add(x)
+        stack.extend(kids.get(x, []))
+    marks = ','.join('?' * len(subtree))
+    return {r['board_id'] for r in
+            dbq(f'SELECT board_id FROM board_config WHERE dept_node_id IN ({marks})', tuple(subtree))}
+
+
+@app.get('/api/syn-config')
+def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
+    """T-211 综合看板配置读取（配置弹窗与模式进入共用）。
+
+    可见性：默认可见人员（部门长/总经理/中心负责人/管理员/超管）∪ 追加人员。
+    can_edit = 默认可见人员（追加人员不可编辑）。候选池仅编辑者需要。
+    """
+    node = _org_node(dept_node_id)
+    if not node or node['node_type'] not in ('dept', 'center'):
+        raise HTTPException(404, '部门架构不存在')
+    default_depts = _syn_default_depts(username)
+    extra_depts = _syn_extra_depts(username)
+    if dept_node_id not in default_depts and dept_node_id not in extra_depts:
+        raise HTTPException(403, '你无权查看该部门的综合看板')
+    cfg = dbq('SELECT columns, extra_members, updated_by, updated_at FROM syn_board_config WHERE dept_node_id=?',
+              (dept_node_id,))
+    can_edit = dept_node_id in default_depts
+    # 弹窗勾选清单 = 子树下挂载 ∩ 当前用户可见 的全部看板（不受白名单过滤 —— 否则
+    # 已配置白名单的用户无法看到/取消勾选未入选看板）
+    all_boards = []
+    if can_edit:
+        boards_v, _cv = user_allowed(username)
+        subtree_boards = _syn_subtree_board_ids(dept_node_id)
+        for r in dbq('SELECT board_id, board_name FROM boards WHERE archived=0 ORDER BY sort, board_id'):
+            if r['board_id'] not in subtree_boards:
+                continue
+            if boards_v is not None and r['board_id'] not in boards_v:
+                continue
+            all_boards.append({'board_id': r['board_id'], 'board_name': r['board_name']})
+    return {'dept_node_id': dept_node_id, 'dept_name': node['name'],
+            'node_type': node['node_type'],
+            'columns': [x for x in ((cfg[0]['columns'] if cfg else '') or '').split(',') if x],
+            'extra_members': [x for x in ((cfg[0]['extra_members'] if cfg else '') or '').split(',') if x],
+            'updated_by': (cfg[0]['updated_by'] if cfg else '') or '',
+            'updated_at': (cfg[0]['updated_at'] if cfg else '') or '',
+            'can_edit': can_edit,
+            'all_boards': all_boards,
+            'candidates': _syn_subtree_member_candidates(dept_node_id) if can_edit else []}
+
+
+class SynConfigReq(BaseModel):
+    columns: str = ''          # 逗号分隔 board_id（空 = 该架构下全部看板）
+    extra_members: str = ''    # 逗号分隔账号
+
+
+@app.put('/api/syn-config/{nid}')
+def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require_auth),
+                    request: Request = None):
+    """T-211 保存综合看板配置。权限：**默认可见人员**（追加人员 403）。"""
+    node = _org_node(nid)
+    if not node or node['node_type'] not in ('dept', 'center'):
+        raise HTTPException(404, '部门架构不存在')
+    if nid not in _syn_default_depts(username):
+        raise HTTPException(403, '只有部门长/总经理/中心负责人/管理员/超管可以配置综合看板')
+    # 追加人员候选校验：必须在子树成员内（center 全员 / dept 本架构），防越权追加
+    cand = {c['account'] for c in _syn_subtree_member_candidates(nid)}
+    extra = [x.strip() for x in (req.extra_members or '').split(',') if x.strip()]
+    bad = [x for x in extra if x not in cand]
+    if bad:
+        raise HTTPException(400, '追加人员不在本架构之下：%s' % '、'.join(bad))
+    # 板块白名单校验：看板必须挂载在本架构子树下（防跨部门错配）
+    allowed_boards = _syn_subtree_board_ids(nid)
+    cols = [x.strip() for x in (req.columns or '').split(',') if x.strip()]
+    bad_cols = [x for x in cols if x not in allowed_boards]
+    if bad_cols:
+        raise HTTPException(400, '看板不属于本架构：%s' % '、'.join(bad_cols))
+    dbe('INSERT INTO syn_board_config (dept_node_id, columns, extra_members, updated_by, updated_at) '
+        "VALUES (?,?,?,?,datetime('now','localtime')) "
+        'ON CONFLICT(dept_node_id) DO UPDATE SET columns=excluded.columns, '
+        'extra_members=excluded.extra_members, updated_by=excluded.updated_by, '
+        "updated_at=datetime('now','localtime')",
+        (nid, ','.join(cols), ','.join(extra), username))
+    audit_log(username, client_ip(request), 'update', f'综合看板配置 {node["name"]}',
+              f'综合看板配置：{node["name"]}（看板白名单 {len(cols)} 项，追加人员 {len(extra)} 人）', 'success')
+    return {'ok': True}
+
+
+@app.get('/api/syn-boards')
+def syn_boards(dept_node_id: int, username: str = Depends(require_auth)):
+    """T-211 综合模式数据：部门架构下**全部可见看板**（经白名单过滤）与板块清单。
+
+    数据权限仍走 user_allowed（看板/板块可见性不变，综合模式只是聚合展示 +
+    排序变化，不放开越权数据）。
+    """
+    node = _org_node(dept_node_id)
+    if not node or node['node_type'] not in ('dept', 'center'):
+        raise HTTPException(404, '部门架构不存在')
+    if dept_node_id not in _syn_default_depts(username) and dept_node_id not in _syn_extra_depts(username):
+        raise HTTPException(403, '你无权查看该部门的综合看板')
+    cfg = dbq('SELECT columns FROM syn_board_config WHERE dept_node_id=?', (dept_node_id,))
+    whitelist = [x for x in ((cfg[0]['columns'] if cfg else '') or '').split(',') if x]
+    boards, _cols = user_allowed(username)
+    rows = dbq('SELECT b.board_id, b.board_name, bc.dept FROM boards b '
+               'LEFT JOIN board_config bc ON bc.board_id=b.board_id '
+               'WHERE b.archived=0')
+    out = []
+    for r in rows:
+        if boards is not None and r['board_id'] not in boards:
+            continue   # 数据可见性守门（综合模式不越权）
+        if whitelist and r['board_id'] not in whitelist:
+            continue
+        out.append({'board_id': r['board_id'], 'board_name': r['board_name']})
+    return {'dept_name': node['name'], 'boards': out}
 
 
 def _arch_owner_nodes(username: str) -> set:

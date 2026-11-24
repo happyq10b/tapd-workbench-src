@@ -1729,6 +1729,16 @@ function goLogin(){
                显隐 = renderPermissionEntries() 按新建看板权限控制
                （管理员/超管 或 架构负责人及以上，与后端 POST /api/boards
                的 perm_check_arch_scope 同口径）；无权限用户不渲染。 -->
+          <!-- T-211 综合看板（2026-11-24 用户需求）：位于【＋ 新建看板】左侧，样式一致。
+               非综合模式显示【综合看板】（进入该部门综合模式：展示本架构下全部看板的
+               全部板块，类别优先于置顶排序）；综合模式下按钮变【普通看板】（退出），
+               左侧追加【综合编辑】（仅默认可见人员可见，追加人员不可见）。 -->
+          <span class="tb-band-head-entry" id="synEntry" style="display:none">
+            <button id="bandSynEditBtn" class="btn-primary" style="padding:3px 12px;font-size:12px;display:none"
+              onclick="openSynConfigModal()" title="配置综合看板：可见板块与追加可见人员">综合编辑</button>
+            <button id="bandSynBtn" class="btn-primary" style="padding:3px 12px;font-size:12px"
+              onclick="toggleSynMode()" title="切换至综合看板模式：展示所选部门架构下全部看板中的全部板块">综合看板</button>
+          </span>
           <span class="tb-band-head-entry" id="boardNewEntry">
             <button id="bandNewBoardBtn" class="btn-primary" style="padding:3px 12px;font-size:12px"
               onclick="bandNewBoard()" title="打开看板管理并新建看板">＋ 新建看板</button>
@@ -2262,6 +2272,26 @@ function goLogin(){
       <div class="cp-tip" id="cp_tip"></div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('copyModal')">取消</button><button class="btn-primary" id="cp_submit" onclick="submitCopy()">创建副本</button></div>
+  </div>
+</div>
+
+<!-- 综合看板配置弹窗（T-211 2026-11-24）：仅默认可见人员（部门长/总经理/中心负责人/管理员/超管）；
+     追加可见人员不可见本弹窗入口。内容 = 可见板块（看板白名单）+ 追加可见人员（子树成员候选） -->
+<div class="modal-overlay" id="synConfigModal" style="display:none">
+  <div class="modal" style="width:min(560px,94vw)">
+    <div class="modal-header"><h2>⚙️ 综合看板配置 <span id="syn_cfg_dept" style="font-size:13px;color:var(--text2)"></span></h2>
+      <button class="modal-close" onclick="closeModal('synConfigModal')">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>可见板块（按看板选择）</label>
+        <div id="syn_cfg_boards" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;max-height:200px;overflow:auto"></div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px">综合模式下展示所选看板中的全部板块；全部不勾选 = 展示本架构下全部看板。</div>
+      </div>
+      <div class="form-group"><label>追加可见人员</label>
+        <div id="syn_cfg_members" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;max-height:200px;overflow:auto"></div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px">默认可见：部门长 / 总经理 / 中心负责人 / 管理员 / 超管；此处追加的人员可见【综合看板】按钮但不可见【综合编辑】。候选仅限本架构之下成员（财务中心不限）。</div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn-default" onclick="closeModal('synConfigModal')">取消</button><button class="btn-primary" onclick="saveSynConfig()">保存配置</button></div>
   </div>
 </div>
 
@@ -3543,6 +3573,117 @@ function renderPermissionEntries(){
   // ME.can_create_board 由 /api/me 下发，与 POST /api/boards 的 _arch_head_nodes 同口径
   const bnEntry=document.getElementById('boardNewEntry');
   if(bnEntry)bnEntry.style.display=(ME.is_admin||ME.can_create_board)?'':'none';
+  // ── 综合看板（T-211）：syn_depts 非空即显示入口（默认可见 ∪ 追加人员）；
+  //    按钮文案/综合编辑显隐由 applySynBtn() 按 SYN_MODE 与 syn_edit_depts 控制
+  const synE=document.getElementById('synEntry');
+  if(synE)synE.style.display=(ME.syn_depts&&ME.syn_depts.length)?'':'none';
+  applySynBtn();
+}
+
+// ── 综合看板模式（T-211 2026-11-24）────────────────────────────
+// SYN_MODE = {name:部门名, nodeId:部门节点id} ；null = 普通模式。
+// 进入：锚定架构区当前选中的**单个部门**（校验 ME.syn_depts 权限）→
+//       curBoards 临时替换为该架构下全部可见看板（经白名单过滤）→ reload 聚合渲染。
+// 退出：恢复进入前的看板选择（SYN_PREV_BOARDS）。
+// 排序：cmpColumn 综合模式下按「类别（枚举序）→ 置顶 → 原逻辑」。
+var SYN_MODE=null;
+var SYN_PREV_BOARDS=null;
+function applySynBtn(){
+  var btn=document.getElementById('bandSynBtn'), ed=document.getElementById('bandSynEditBtn');
+  if(!btn)return;
+  if(SYN_MODE){
+    btn.textContent='普通看板';
+    btn.title='退出综合看板模式，恢复普通看板选择';
+    // 综合编辑按钮：仅默认可见人员（syn_edit_depts 含当前部门）；追加人员不可见
+    var canEd=ME&&ME.syn_edit_depts&&ME.syn_edit_depts.indexOf(SYN_MODE.nodeId)>=0;
+    if(ed)ed.style.display=canEd?'':'none';
+  }else{
+    btn.textContent='综合看板';
+    btn.title='切换至综合看板模式：展示所选部门架构下全部看板中的全部板块';
+    if(ed)ed.style.display='none';
+  }
+}
+function toggleSynMode(){
+  if(SYN_MODE){exitSynMode();return}
+  // 锚定部门：架构区恰好选中一个部门 → 用它；否则提示先选
+  if(!ARCH_SEL||ARCH_SEL.size!==1){
+    toast('请先在上方架构区单击选中一个部门（再次单击进入该部门的综合看板）');return;
+  }
+  var dname=[...ARCH_SEL][0];
+  // 架构名 → 节点 id（ORG_FLAT 平铺，wgFlat 摊平 ORG_TREE）
+  var node=(typeof ORG_FLAT!=='undefined'?ORG_FLAT:[]).find(function(x){return x.name===dname;});
+  var nid=node?node.id:null;
+  if(nid===null){toast('未找到该部门的架构节点');return}
+  if(!(ME&&ME.syn_depts&&ME.syn_depts.indexOf(nid)>=0)){
+    toast('你无权查看「'+dname+'」的综合看板');return;
+  }
+  enterSynMode(dname,nid);
+}
+async function enterSynMode(dname,nid){
+  try{
+    var cfg=await api('/api/syn-config?dept_node_id='+nid);
+    var sb=await api('/api/syn-boards?dept_node_id='+nid);
+    var ids=(sb.boards||[]).map(function(b){return b.board_id});
+    if(!ids.length){toast('「'+dname+'」综合看板下暂无可见看板');return}
+    SYN_PREV_BOARDS=curBoards;
+    curBoards=new Set(ids);
+    if(curBoard!==(ids[0]||''))curBoard=ids[0];
+    SYN_MODE={name:dname,nodeId:nid};
+    applySynBtn();
+    toast('已进入「'+dname+'」综合看板（'+ids.length+' 个看板）');
+    renderTabs();reload(1);renderProgress();
+  }catch(e){toast(e.message||'进入综合看板失败')}
+}
+function exitSynMode(){
+  var nm=SYN_MODE?SYN_MODE.name:'';
+  SYN_MODE=null;
+  curBoards=SYN_PREV_BOARDS||new Set();
+  SYN_PREV_BOARDS=null;
+  applySynBtn();
+  toast('已退出综合看板'+(nm?('（'+nm+'）'):''));
+  renderTabs();reload(1);renderProgress();
+}
+// 综合编辑弹窗（T-211）：仅默认可见人员（/api/syn-config can_edit 兜底）
+var SYN_CFG=null;   // 弹窗数据缓存 {dept_node_id, all_boards, candidates, columns, extra_members}
+async function openSynConfigModal(){
+  if(!SYN_MODE){toast('请先进入综合看板模式');return}
+  try{
+    SYN_CFG=await api('/api/syn-config?dept_node_id='+SYN_MODE.nodeId);
+    if(!SYN_CFG.can_edit){toast('你无权配置综合看板（追加人员不可编辑）');return}
+    document.getElementById('syn_cfg_dept').textContent='— '+SYN_CFG.dept_name;
+    // 板块勾选清单：子树全部可见看板；已配置白名单的看板预勾选（空 = 全部展示）
+    document.getElementById('syn_cfg_boards').innerHTML=(SYN_CFG.all_boards||[]).map(function(b){
+      var on=(!SYN_CFG.columns.length)||SYN_CFG.columns.indexOf(b.board_id)>=0;
+      return '<label style="display:flex;gap:6px;align-items:center;padding:2px 0;font-size:12.5px">'
+        +'<input type="checkbox" data-syn-board="'+esc(b.board_id)+'"'+(on?' checked':'')+'>'
+        +'<span>'+esc(b.board_name)+'</span></label>';
+    }).join('')||'<div style="font-size:12px;color:var(--text3)">本架构下暂无可见看板</div>';
+    // 追加人员勾选清单：子树成员候选；已追加者预勾选
+    document.getElementById('syn_cfg_members').innerHTML=(SYN_CFG.candidates||[]).map(function(c){
+      var on=SYN_CFG.extra_members.indexOf(c.account)>=0;
+      return '<label style="display:flex;gap:6px;align-items:center;padding:2px 0;font-size:12.5px">'
+        +'<input type="checkbox" data-syn-member="'+esc(c.account)+'"'+(on?' checked':'')+'>'
+        +'<span>'+esc(c.name)+(c.account!==c.name?('（'+esc(c.account)+'）'):'')+'</span></label>';
+    }).join('')||'<div style="font-size:12px;color:var(--text3)">本架构下暂无成员（可在【人员管理】为成员绑定部门后重试）</div>';
+    openModal('synConfigModal');
+  }catch(e){toast(e.message||'配置读取失败')}
+}
+async function saveSynConfig(){
+  if(!SYN_CFG)return;
+  var cols=[...document.querySelectorAll('#syn_cfg_boards input[data-syn-board]:checked')].map(function(x){return x.getAttribute('data-syn-board')});
+  var mem=[...document.querySelectorAll('#syn_cfg_members input[data-syn-member]:checked')].map(function(x){return x.getAttribute('data-syn-member')});
+  // 全部勾选 = 与「全部展示」同义 → 落空串（语义更稳，避免未来新看板被白名单挡住）
+  var allChecked=document.querySelectorAll('#syn_cfg_boards input[data-syn-board]').length===cols.length;
+  try{
+    await api('/api/syn-config/'+SYN_CFG.dept_node_id,{method:'PUT',body:JSON.stringify({
+      columns:allChecked?'':cols.join(','),
+      extra_members:mem.join(','),
+    })});
+    toast('综合看板配置已保存');
+    closeModal('synConfigModal');
+    // 综合模式进行中 → 立即按新白名单刷新展示
+    if(SYN_MODE)enterSynMode(SYN_MODE.name,SYN_MODE.nodeId);
+  }catch(e){toast(e.message||'保存失败')}
 }
 function applyPermissionUI(){
   if(!ME)return;
@@ -3933,7 +4074,10 @@ function renderTabs(){
   //   （选择顺序会随取消/重选漂移，按目录顺序展示更稳定）；全量进悬停提示。
   const selHint=document.getElementById('boardSelHint');
   if(selHint){
-    if(curBoards.size){
+    if(typeof SYN_MODE!=='undefined'&&SYN_MODE){
+      selHint.textContent='🧩 综合看板：'+SYN_MODE.name+'（全部看板聚合展示，类别优先排序）';
+      selHint.title='综合看板模式：展示「'+SYN_MODE.name+'」架构下全部看板中的全部板块；点【普通看板】退出';
+    }else if(curBoards.size){
       const known=(ME&&ME.boards||[]).filter(function(b){return curBoards.has(b.board_id);})
         .map(function(b){return b.board_name||b.board_id;});
       const names=known.concat([...curBoards].filter(function(id){
@@ -7146,6 +7290,14 @@ function srItemHtml(x){
 function colPinKey(name,meta){return (meta&&meta.col_key)?meta.col_key:(curBoard+'::'+name)}
 function cmpColumn(a,b,cmeta,csort){
   const ma=cmeta[a]||{},mb=cmeta[b]||{};
+  // T-211 综合看板模式：**类别优先于置顶**作为第一级排序（枚举固定顺序：
+  // 年度重点工作 → 业财融合 → 财务数智化 → 其他重点 → 文化及团队建设）；
+  // 普通模式维持原序（置顶优先）。未知类别排在枚举之后。
+  if(typeof SYN_MODE!=='undefined'&&SYN_MODE){
+    const ord=v=>{const i=CAT_OPTS.findIndex(o=>o[0]===v);return i>=0?i:CAT_OPTS.length};
+    const ca=ord(ma.category||'年度重点工作'),cb=ord(mb.category||'年度重点工作');
+    if(ca!==cb)return ca-cb;
+  }
   const pa=isPinned('column',colPinKey(a,ma))?0:1,pb=isPinned('column',colPinKey(b,mb))?0:1;
   if(pa!==pb)return pa-pb;            // 置顶恒在最前（不受排序配置影响）
   const r=cmpByCfg(ma,mb,SORT_CFG.col,colSortField);

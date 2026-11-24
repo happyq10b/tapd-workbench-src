@@ -700,6 +700,19 @@ def _migrate_schema(conn):
         PRIMARY KEY (username, board_id)
     )''')
 
+    # ---- 综合看板配置（T-211 2026-11-24）：部门级配置，幂等建表 ----
+    #   columns       = 综合模式下展示的看板 board_id 白名单（逗号分隔；空 = 该部门全部看板）
+    #   extra_members = 追加可见人员账号（逗号分隔；默认可见 = 部门长/总经理/中心负责人/管理员/超管，
+    #                   追加人员不可见【综合编辑】按钮）
+    #   旧库缺表时自动创建（无存量数据需迁移）
+    conn.execute('''CREATE TABLE IF NOT EXISTS syn_board_config (
+        dept_node_id  INTEGER PRIMARY KEY,
+        columns       TEXT NOT NULL DEFAULT '',
+        extra_members TEXT NOT NULL DEFAULT '',
+        updated_by    TEXT NOT NULL DEFAULT '',
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )''')
+
 def _migrate_org(conn):
     """组织架构迁移：workgroups（层级 + 单个 leader + 成员分号串）
     → org_nodes（带类型的节点树） + org_roles（岗位定义） + org_appointments（任职关系）。
