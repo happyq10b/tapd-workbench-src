@@ -3946,6 +3946,7 @@ async function enterSynMode(dname,nid){
     // （不受白名单列限制，展示其全部板块）。单架构模式 free 恒为空 → 行为不变。
     SYN_MODE={name:names.join(' + '),names:names.slice(),nodeIds:nids,
               nodeId:nids[0],
+              boards:sb.boards||[],                  // T-229b：聚合看板清单（含归属架构）
               cols:(sb.col_whitelist&&sb.col_whitelist.length)?new Set(sb.col_whitelist):null,
               free:new Set(sb.free_boards||[])};
     applySynBtn();
@@ -4135,6 +4136,19 @@ async function decideSynInvite(id,accept){
 }
 // T-227：配置弹窗标题处的**架构切换下拉** —— 多架构模式下可在各架构配置间直接
 // 切换（每架构配置/追加人员独立，切换即加载对应架构的配置）；单架构模式保持纯文本
+// T-229b：详情/编辑处看板名解析 —— ME.boards（本人可见）→ 卡片行自带 board_name
+// → 综合聚合清单（追加成员经综合看板同步的看板）→ 兜底 bid
+function _detail_board_name(bid,fallback){
+  bid=bid||'';
+  var b=((ME&&ME.boards)||[]).find(function(x){return x.board_id===bid;});
+  if(b&&b.board_name)return b.board_name;
+  if(fallback)return fallback;
+  if(typeof SYN_MODE!=='undefined'&&SYN_MODE&&SYN_MODE.boards){
+    var s=SYN_MODE.boards.find(function(x){return x.board_id===bid;});
+    if(s&&s.board_name)return s.board_name;
+  }
+  return bid||'—';
+}
 function renderSynCfgDeptSel(curNid){
   var box=document.getElementById('syn_cfg_dept');
   if(!box)return;
@@ -4662,7 +4676,23 @@ function boardTabHtml(b,deptLabel){
 function pickBoardToggle(bid){pickBoard(bid);}   // 兼容旧引用（2026-11-04 起单击即切换）
 function renderTabs(){
   const tabs=document.getElementById('boardTabs');
-  const g=groupBoardsByDept();
+  // T-229b：综合模式 → 按聚合架构分组渲染 SYN_MODE.boards（含追加同步的看板，
+  // 不依赖 ME.boards —— 追加成员的 ME.boards 不含授予看板）。架构带为静态展示
+  // （syn 模式下点击架构不再增删 ARCH_SEL/重载），看板 tab 全量展开可点选。
+  const synOn=(typeof SYN_MODE!=='undefined'&&SYN_MODE&&SYN_MODE.boards);
+  var g;
+  if(synOn){
+    var dm={},order=[];
+    SYN_MODE.boards.forEach(function(b){
+      var dn=b.dept||'综合看板';
+      if(!dm[dn]){dm[dn]=[];order.push({name:dn,boards:dm[dn]});}
+      dm[dn].push(b);
+    });
+    order.forEach(function(d){DEPT_OPEN[d.name]=true;});
+    g={depts:order,unassigned:[]};
+  }else{
+    g=groupBoardsByDept();
+  }
   const deptBox=document.getElementById('tbDepts');
   const boardBox=document.getElementById('tbBoards');
   if(!tabs||!deptBox||!boardBox)return;
@@ -4680,7 +4710,8 @@ function renderTabs(){
     const tip=cnt
       ?('单击选中「'+d.name+'」（统计与列表仅统计该架构自身挂载的看板）；再次单击取消；可多选多个架构累加汇总')
       :(d.name+' 下暂无看板（可在「看板管理」中把看板挂载到该部门）');
-    dhtml+=`<span class="tree-dept${open?' open':''}${sel?' sel':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}" onclick="toggleDept('${esc(d.name)}')">`
+    const clickAttr=synOn?'':' onclick="toggleDept(\''+esc(d.name)+'\')"';
+    dhtml+=`<span class="tree-dept${open?' open':''}${(synOn||sel)?' sel':''}${emptyCls}${CUR_DEPT===d.name?' cur':''}" title="${esc(tip)}"${clickAttr}>`
       // #205u（2026-11-18 用户需求5）：看板数量徽标移到「主页」按钮左侧（名称 flex:1 占满，
       // 徽标与看板行的板块数徽标同款 .tab-col-count 形态），不再紧跟名称
       // T-212-ter-3：徽标改【n/N】——N=该架构挂载看板总数；n=筛选后仍有可见板块的看板数
@@ -4703,7 +4734,7 @@ function renderTabs(){
   // #207-bis：未配置看板 tab 不再对外渲染（同上，入口收敛到【架构管理】）
   // 空状态：账号在【架构管理】里没有任何授权（未被任命到任何节点 / 所属部门未挂载看板）
   // → 明确提示原因，避免用户以为"看板丢了"。可见范围由后端按架构权限计算。
-  if(!(ME.boards||[]).length){
+  if(!synOn&&!(ME.boards||[]).length){
     bhtml+=`<div class="tree-empty-tip" style="grid-column:1/-1">
       当前账号没有可见看板：请联系管理员在【架构管理】中把您任命到相应部门/小组，或为该部门挂载看板。</div>`;
   }
@@ -9582,7 +9613,7 @@ function renderColumnDetail(d){
                   :(_cd?`<b><span class="fcol-cd${cdOver(_due)?' fcol-cd-over':''}">${esc(_cd)}</span></b>`
                   :'<b>—</b>'));
   document.getElementById('cd_meta').innerHTML=
-    `看板：<b>${esc(((ME.boards||[]).find(b=>b.board_id===d.bid)||{}).board_name||d.bid||'—')}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b>　类别：<b>${esc(d.category||'年度重点工作')}</b><br>`
+    `看板：<b>${esc(_detail_board_name(d.bid,d.board_name))}</b>　归属年份：<b>${esc(d.year?d.year+'年':'—')}</b>　性质：<b>${esc(d.nature||'日常')}</b>　类别：<b>${esc(d.category||'年度重点工作')}</b><br>`
     // T-191j 界面统一：完成情况不再在元信息里重复呈现 —— 由头部完成情况按钮统一承载（与事项状态同范式）
     +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(parts.length?parts.join('、'):'—')}</b></span><br>`
     // #205r（2026-11-18 用户需求3）：末行统一为「创建人、创建时间、开始时间、截止时间、倒计时」；

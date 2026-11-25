@@ -6909,6 +6909,7 @@ def syn_boards(dept_node_id: int = None, dept_node_ids: str = '',
     dextra = _syn_extra_depts(username)
     names, agg = [], {}
     whitelist, free_boards = set(), set()
+    agg_dept = {}
     for nid in nids:
         node = _org_node(nid)
         if not node or node['node_type'] not in ('dept', 'center'):
@@ -6933,12 +6934,14 @@ def syn_boards(dept_node_id: int = None, dept_node_ids: str = '',
             free_boards |= use                 # 空白名单 = 该架构全部看板，列不受限
         for b in use:
             agg[b] = True
+            agg_dept[b] = node['name']
     rows = dbq('SELECT b.board_id, b.board_name FROM boards b WHERE b.archived=0')
     out = []
     for r in rows:
         if r['board_id'] not in agg:
             continue
-        out.append({'board_id': r['board_id'], 'board_name': r['board_name']})
+        out.append({'board_id': r['board_id'], 'board_name': r['board_name'],
+                    'dept': agg_dept.get(r['board_id'], '')})
     return {'dept_name': ' + '.join(names), 'boards': out,
             'col_whitelist': sorted(whitelist),   # 各架构白名单并集（空 = 无架构限列）
             'free_boards': sorted(free_boards)}   # 空白名单架构的看板 → 前端放行全部板块列
