@@ -1278,7 +1278,36 @@ def _ensure_board_not_archived(board_id: str):
         raise HTTPException(403, '看板已封存，启用后才能编辑配置')
 
 
+_SYN_CTX = __import__('contextvars').ContextVar('syn_grant_ctx', default=None)
+# T-229 综合看板可见权授予上下文：请求带 syn_depts 参数时由中间件计算并暂存，
+# user_allowed 在返回前应用（boards ∪ 授予看板；授予看板的板块列限制解除）——
+# 覆盖卡片列表/详情/评论/子事项等全部经 user_allowed 的读路径（可见即可评论）。
+
+
 def user_allowed(username: str, arch_only: bool = False, include_archived: bool = False):
+    boards, columns = _user_allowed_impl(username, arch_only, include_archived)
+    # arch_only（@ 候选池等口径）不应用综合授予 —— 成员可见权扩展不改变 @ 池
+    if arch_only:
+        return boards, columns
+    g = _SYN_CTX.get()
+    if not g or g.get('username') != username:
+        return boards, columns
+    gb, gc = g.get('boards') or set(), g.get('cols') or {}
+    if not gb and not gc:
+        return boards, columns
+    if boards is not None:
+        boards = set(boards) | gb
+    if columns is not None:
+        for b, cols in gc.items():
+            if cols is None:
+                columns.pop(b, None)          # 空白名单架构 → 该看板全部板块放开
+            else:
+                cur = columns.get(b)
+                columns[b] = (cur | cols) if cur is not None else cols
+    return boards, columns
+
+
+def _user_allowed_impl(username: str, arch_only: bool = False, include_archived: bool = False):
     """返回 (boards, columns)：
     boards=None=全部看板，否则 set(board_id)（普通用户**永远**是显式集合）
     columns=None=全部板块，否则 dict {board_id: set(column_id)}（缺省=该看板全部板块）
@@ -6444,6 +6473,76 @@ def _syn_default_depts(username: str) -> set:
     return appointed & syn_nodes
 
 
+@app.middleware('http')
+async def _syn_grant_middleware(request, call_next):
+    """T-229：请求带 syn_depts（综合模式进入时前端自动附带）→ 计算该用户的
+    综合可见权授予并存入请求作用域上下文，user_allowed 返回前应用。
+    作用域严格限定：仅携带参数的请求生效（综合模式内），普通请求不变。"""
+    tok = None
+    try:
+        sd = request.query_params.get('syn_depts') or ''
+        if sd:
+            auth = request.headers.get('authorization') or ''
+            uname = verify_token(auth[7:]) if auth.startswith('Bearer ') else None
+            if uname:
+                nids = []
+                for x in sd.split(','):
+                    x = x.strip()
+                    if x.lstrip('-').isdigit():
+                        nids.append(int(x))
+                if nids:
+                    gb, gc = _syn_grant(uname, nids)
+                    tok = _SYN_CTX.set({'username': uname, 'boards': gb, 'cols': gc})
+    except Exception:
+        pass
+    try:
+        return await call_next(request)
+    finally:
+        if tok is not None:
+            _SYN_CTX.reset(tok)
+
+
+def _syn_grant(username: str, nids):
+    """T-229 综合看板可见权授予：对每个 syn 架构，
+    适用配置（追加成员=邀请人配置；配置人员=自己）白名单内的看板，
+    以**配置人**的可见性为口径授予当前用户（综合模式作用域）。
+
+    返回 (grant_boards:set, col_grant:dict{board_id: set(col_id)|None})，
+    None 列集 = 该看板全部板块放开（空白名单架构）。
+    仅授予用户有综合看板能力位（默认可见 ∪ 追加）的架构；越权 nid 跳过。"""
+    grant_boards, col_grant = set(), {}
+    dedit = _syn_default_depts(username)
+    dextra = _syn_extra_depts(username)
+    for nid in nids:
+        if nid not in dedit and nid not in dextra:
+            continue   # 无综合能力位的架构不授予
+        cfg = _syn_cfg_for(username, nid)
+        owner = cfg['owner'] or username
+        ob, _oc = user_allowed(owner)          # 配置人可见口径
+        subtree = _syn_subtree_board_ids(nid)
+        bset = subtree
+        if ob is not None:
+            bset = bset & ob                    # 只授配置人自己能看到的看板
+        wl = [x for x in cfg['columns'].split(',') if x]
+        if wl:
+            wl_boards = {x.split('::')[0] for x in wl}
+            bset = bset & wl_boards
+            keys = set(wl)
+            if bset:
+                marks = ','.join('?' * len(bset))
+                for r in dbq('SELECT col_key, column_id, board_id FROM board_columns '
+                             'WHERE board_id IN (%s)' % marks, tuple(bset)):
+                    if r['col_key'] in keys:
+                        col_grant.setdefault(r['board_id'], set()).add(r['column_id'])
+            for b in bset:
+                col_grant.setdefault(b, set())
+        else:
+            for b in bset:
+                col_grant[b] = None             # 空白名单架构 → 全部板块放开
+        grant_boards |= bset
+    return grant_boards, col_grant
+
+
 def _syn_extra_depts(username: str) -> set:
     """T-211/T-224：用户被【综合编辑】追加为可见人员的部门节点集合。
     T-224 起追加归属在 syn_config_member（UNIQUE(dept,member)，先到先得）。"""
@@ -6792,7 +6891,7 @@ def syn_boards(dept_node_id: int = None, dept_node_ids: str = '',
     dept_node_ids = 逗号分隔多节点（新）：各节点按该用户**适用配置**各自过滤后
     取**并集**聚合 —— 每架构：白名单非空 → 只含白名单板块；空白名单 → 该架构
     子树全部看板且不受白名单列限制（free_boards 下发，前端据此放行全部板块列）。
-    数据权限仍走 user_allowed（综合模式不越权）。
+    T-229：追加成员同步**邀请人配置内看板**的可见权（可见即可评论保持）。
     """
     raw = (dept_node_ids or '').strip() or (str(dept_node_id) if dept_node_id else '')
     nids = []
@@ -6818,25 +6917,27 @@ def syn_boards(dept_node_id: int = None, dept_node_ids: str = '',
             raise HTTPException(403, '你无权查看「%s」的综合看板' % node['name'])
         names.append(node['name'])
         cfg = _syn_cfg_for(username, nid)
+        owner = cfg['owner'] or username
+        # T-229：看板清单以**配置人可见口径**为准（追加成员同步邀请人配置内看板的可见权）
+        ob, _oc = user_allowed(owner)
         wl = [x for x in cfg['columns'].split(',') if x]
         subtree = _syn_subtree_board_ids(nid)
+        use = subtree
+        if ob is not None:
+            use = use & ob                     # 只列配置人自己能看到的看板
         if wl:
             wl_boards = {x.split('::')[0] for x in wl}
-            use = subtree & wl_boards
+            use = use & wl_boards
             whitelist |= set(wl)
         else:
-            use = subtree                      # 空白名单 = 该架构全部看板，列不受限
-            free_boards |= use
+            free_boards |= use                 # 空白名单 = 该架构全部看板，列不受限
         for b in use:
             agg[b] = True
-    boards, _cols = user_allowed(username)
     rows = dbq('SELECT b.board_id, b.board_name FROM boards b WHERE b.archived=0')
     out = []
     for r in rows:
         if r['board_id'] not in agg:
             continue
-        if boards is not None and r['board_id'] not in boards:
-            continue   # 数据可见性守门（综合模式不越权）
         out.append({'board_id': r['board_id'], 'board_name': r['board_name']})
     return {'dept_name': ' + '.join(names), 'boards': out,
             'col_whitelist': sorted(whitelist),   # 各架构白名单并集（空 = 无架构限列）

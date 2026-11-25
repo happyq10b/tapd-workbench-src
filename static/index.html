@@ -3504,6 +3504,11 @@ let EDIT_FROM_DETAIL=''; // 从详情弹窗进入编辑时记录来源，关闭�
 let DETAIL_ID=null, DETAIL_CARD=null, TEAM_MEMBERS=[], expandedAll=false;
 
 function api(path,opts={}){
+  // T-229：综合看板模式下所有 API 自动附带 syn_depts —— 后端按适用配置授予
+  // 邀请人配置内看板的可见权（可见即可评论）；普通模式请求不带，数据权限不变
+  if(typeof SYN_MODE!=='undefined'&&SYN_MODE&&SYN_MODE.nodeIds&&path.indexOf('/api/')===0&&path.indexOf('syn_depts=')<0){
+    path+=(path.indexOf('?')>=0?'&':'?')+'syn_depts='+SYN_MODE.nodeIds.join(',');
+  }
   // T-0170 保存守卫激活期间的变更请求纳入追踪（守卫未激活时零开销，
   //   编辑锁心跳/消息回执等后台写请求不会弹遮罩）
   const _mut=/^(POST|PUT|DELETE|PATCH)$/i.test(String(opts.method||'GET'));
