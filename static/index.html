@@ -4164,6 +4164,26 @@ function openSynArchPick(){
   list.innerHTML=rows||'<div style="color:var(--text3);font-size:12.5px">当前未选中架构</div>';
   openModal('synArchPickModal');
 }
+// T-227：配置弹窗标题处的**架构切换下拉** —— 多架构模式下可在各架构配置间直接
+// 切换（每架构配置/追加人员独立，切换即加载对应架构的配置）；单架构模式保持纯文本
+function renderSynCfgDeptSel(curNid){
+  var box=document.getElementById('syn_cfg_dept');
+  if(!box)return;
+  var nids=(SYN_MODE&&SYN_MODE.nodeIds)||[];
+  var names=(SYN_MODE&&SYN_MODE.names)||[];
+  if(nids.length<=1){box.textContent='— '+(SYN_CFG?SYN_CFG.dept_name:'');return}
+  var editSet=ME&&ME.syn_edit_depts?ME.syn_edit_depts:[];
+  var opts='';
+  nids.forEach(function(id,idx){
+    var nm=names[idx]||('节点 '+id);
+    var can=editSet.indexOf(id)>=0;
+    opts+='<option value="'+id+'"'+(id===curNid?' selected':'')+(can?'':' disabled')
+      +'>'+esc(nm)+(can?'':'（无配置权限）')+'</option>';
+  });
+  box.innerHTML='— <select id="syn_cfg_dept_sel" title="切换要配置的架构（各架构配置与追加人员相互独立，切换即加载对应架构的配置）"'
+    +' style="font-size:13px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);cursor:pointer;margin-left:4px"'
+    +' onchange="openSynConfigModal(parseInt(this.value,10))">'+opts+'</select>';
+}
 async function openSynConfigModal(nid){
   // T-227：nid 可选 —— 多架构模式经架构选择器传入要配置的架构；
   // 单架构模式缺省 = 当前架构（SYN_MODE.nodeId）。配置内容按 (架构, 配置人员)
@@ -4173,8 +4193,7 @@ async function openSynConfigModal(nid){
   try{
     SYN_CFG=await api('/api/syn-config?dept_node_id='+target);
     if(!SYN_CFG.can_edit){toast('你无权配置「'+SYN_CFG.dept_name+'」的综合看板（追加人员不可编辑）');return}
-    document.getElementById('syn_cfg_dept').textContent='— '+SYN_CFG.dept_name;
-    document.getElementById('syn_cfg_dept').textContent='— '+SYN_CFG.dept_name;
+    renderSynCfgDeptSel(target);
     document.getElementById('syn_board_search').value='';
     document.getElementById('syn_member_search').value='';
     SYN_BOARD_OPEN=new Set();
