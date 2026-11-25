@@ -3049,7 +3049,27 @@ def _filter_cards_for_user(username, boards, columns, *, board_id=None, board_id
             if _cowners.get((r['board_id'], r.get('column_id') or '')) == username:
                 return True                                         # 上级板块负责人
             return _me_hit(r.get('owner')) or _me_hit(r.get('cc'))  # 事项负责人 / 事项参与人
-        mine = [r for r in mine if _card_ident_hit(r)]
+        # T-232（2026-11-25 用户需求）：综合看板**追加可见人**的事项级同步。
+        # T-229 已授予看板壳 + 白名单板块（col_grant），但本层身份过滤会把这些
+        # 板块下的事项剔光（追加人无事项身份）→ 板块空壳。现对综合授予范围内
+        # （_SYN_CTX 的 boards ∩ cols）的事项**豁免身份过滤** —— 白名单板块下的
+        # 全部父子事项（子事项随板块可见性在 get_card_children 递归返回，天然
+        # 覆盖任意层级）对追加人整体可见，与「板块本身可见」口径一致。
+        # 作用域仍严格限定综合模式（无 syn_depts 的请求 _SYN_CTX 为空，行为不变）。
+        _g = _SYN_CTX.get()
+        _syn_scope = None
+        if _g and _g.get('username') == username and (_g.get('boards') or _g.get('cols')):
+            _syn_scope = (_g.get('boards') or set(), _g.get('cols') or {})
+
+        def _syn_hit(r):
+            if _syn_scope is None:
+                return False
+            gb, gc = _syn_scope
+            if r['board_id'] not in gb:
+                return False
+            cols = gc.get(r['board_id'])
+            return cols is None or (r.get('column_id') or '') in cols
+        mine = [r for r in mine if _syn_hit(r) or _card_ident_hit(r)]
     # 层级过滤：card_id 精确查询不受层级限制；parent_id → 该父项的子事项；
     # level='top' → 只看顶层；level='all' → 全部层级（导出用）
     if card_id:
