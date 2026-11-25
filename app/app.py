@@ -4682,7 +4682,7 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
              src.get('description') or '', src.get('due_date') or '', src.get('overdue_days')))
         # #205ab-cis（用户反馈「板块的待办和截止时间没有一并复制」）：板块行补随附
         # description（板块说明）/ due_date（截止时间/倒计时）/ overdue_days（逾期结算，T-191j）
-        copied_cards, copied_subtasks = _deep_copy_column_cards(
+        copied_cards, copied_subtasks, copied_wp = _deep_copy_column_cards(
             src, req.board_id, name, new_cid)
         conn.commit()
     except Exception:
@@ -4691,15 +4691,15 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
         except Exception:
             pass
         raise
-    log_action('__column__', username, 'copy', f'复制板块 {name}（含事项 {copied_cards} 条、勾选 {copied_subtasks} 条）')
+    log_action('__column__', username, 'copy', f'复制板块 {name}（含事项 {copied_cards} 条、勾选 {copied_subtasks} 条、每周进展 {copied_wp} 条）')
     audit_log(username, client_ip(request), 'column_copy', f'板块 {src["col_key"]}',
               f'复制板块「{src["column_name"]}」→「{name}」（目标看板 {req.board_id}，'
-              f'连带事项 {copied_cards} / 勾选 {copied_subtasks}）', 'success')
+              f'连带事项 {copied_cards} / 勾选 {copied_subtasks} / 每周进展 {copied_wp}）', 'success')
     await ws_mgr.broadcast({'type': 'card_update', 'card_id': '*', 'by': username})
     return {'ok': True, 'col_key': key, 'column_id': new_cid, 'column_name': name,
             'board_id': req.board_id, 'copy_from': src['col_key'],
             'created_at': created, 'creator': username, 'nature': nature, 'category': category, 'year': year,
-            'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks}
+            'copied_cards': copied_cards, 'copied_subtasks': copied_subtasks, 'copied_week_progress': copied_wp}
 
 
 def _topo_order_cards(cards):
@@ -4810,8 +4810,20 @@ def _deep_copy_column_cards(src_col, dst_board_id, dst_col_name, dst_column_id):
             conn.execute('UPDATE card_subtasks SET parent_id=? WHERE id=?',
                          (sub_id_map.get(old_pid, 0), new_sid))
         copied_subtasks = len(src_subs)
+    # ── 每周进展：随事项一并复制（T-234 2026-11-25 用户需求6：card_week_progress 不得遗漏）──
+    copied_wp = 0
+    if orig_ids:
+        marks = ','.join('?' * len(orig_ids))
+        for r in dbq('SELECT card_id, week, content, updated_by, updated_at FROM card_week_progress '
+                     'WHERE card_id IN (%s) ORDER BY card_id, week' % marks, orig_ids):
+            conn.execute(
+                'INSERT INTO card_week_progress (card_id, week, content, updated_by, updated_at) '
+                'VALUES (?,?,?,?,?)',
+                (card_id_map.get(r['card_id'], ''), r['week'] or '', r['content'] or '',
+                 r['updated_by'] or '', r['updated_at'] or ''))
+            copied_wp += 1
     conn.commit()
-    return len(card_id_map), copied_subtasks
+    return len(card_id_map), copied_subtasks, copied_wp
 
 
 class CopyCardReq(BaseModel):
@@ -4924,6 +4936,17 @@ def _deep_copy_board_content(src_board_id, new_board_id, new_board_name, usernam
         conn.execute('INSERT INTO cards (%s) VALUES (%s)' % (','.join(cols), marks),
                      [vals[k] for k in cols])
         card_id_map[c['card_id']] = new_cid
+    # ── 每周进展：随事项一并复制（T-234 2026-11-25 用户需求6：card_week_progress 不得遗漏）──
+    if card_id_map:
+        _oids = list(card_id_map.keys())
+        _marks = ','.join('?' * len(_oids))
+        for r in dbq('SELECT card_id, week, content, updated_by, updated_at FROM card_week_progress '
+                     'WHERE card_id IN (%s) ORDER BY card_id, week' % _marks, _oids):
+            conn.execute(
+                'INSERT INTO card_week_progress (card_id, week, content, updated_by, updated_at) '
+                'VALUES (?,?,?,?,?)',
+                (card_id_map.get(r['card_id'], ''), r['week'] or '', r['content'] or '',
+                 r['updated_by'] or '', r['updated_at'] or ''))
     return len(col_id_map), len(card_id_map)
 
 
@@ -5029,6 +5052,13 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
     cols = [k for k in CARD_FIELDS if k in vals]
     dbe(f'INSERT INTO cards ({",".join(cols)}) VALUES ({",".join("?"*len(cols))})',
         [vals[k] for k in cols])
+    # 每周进展随事项复制（T-234 2026-11-25 用户需求6：card_week_progress 不得遗漏）
+    _wp_rows = dbq('SELECT week, content, updated_by, updated_at FROM card_week_progress '
+                   'WHERE card_id=? ORDER BY week', (src['card_id'],))
+    for r in _wp_rows:
+        dbe('INSERT INTO card_week_progress (card_id, week, content, updated_by, updated_at) '
+            'VALUES (?,?,?,?,?)', (new_id, r['week'] or '', r['content'] or '',
+                                   r['updated_by'] or '', r['updated_at'] or ''))
     # 目标板块的元信息登记（目标看板下该板块可能尚未登记）
     if vals['column_name'] and not parent_id:
         ensure_column(req.board_id, vals['column_name'], vals['column_id'], username, now)
@@ -9954,6 +9984,8 @@ XLSX_COLUMNS = [
     ('所属板块',   'column_name',  18),
     ('板块年份',   '_col_year',    10),
     ('板块性质',   '_col_nature',  10),
+    # T-234（2026-11-25 用户需求6）：板块类别补齐导出（board_columns.category，UI 综合看板在用）
+    ('板块类别',   '_col_category', 14),
     ('板块负责人', '_col_owner',   12),
     ('板块完成情况', '_col_completion', 12),
     # 2026-11-17 #143：原「完成情况」改名「事项状态」并与 status_name 合并——
@@ -9978,6 +10010,8 @@ XLSX_COLUMNS = [
     ('描述',       'description',  50),
     # 2026-11-17 #143 新增：待办任务（编辑弹窗「待办任务」，card_subtasks 表明细）
     ('待办任务',   '_subtasks_text', 40),
+    # T-234（2026-11-25 用户需求6）：每周进展补齐导出（card_week_progress 表，按周聚合）
+    ('每周进展',   '_wp_text',     40),
     ('是否子事项', '_is_sub',      10),
     ('父事项名称', '_parent_name', 24),
 ]
@@ -10184,6 +10218,35 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
     _pins = [x.strip() for x in (pin_ids or '').split(',') if x.strip()]
     _pinset = {p: i for i, p in enumerate(_pins)}
 
+    # T-234（2026-11-25）：板块元信息提前装载 —— 排序比较需要 nature/category（板块维度字段），
+    # 派生列也需要（板块年份/性质/类别/完成情况）→ 一次查询两处共用。
+    _colmap = {}
+    for r in dbq('SELECT board_id, column_name, year, nature, category, owner, completion '
+                 'FROM board_columns'):
+        _colmap[(r['board_id'], r['column_name'])] = r
+    for c in cards:
+        _cm = _colmap.get((c.get('board_id'), c.get('column_name') or ''))
+        c['_col_nature'] = (_cm['nature'] if _cm else '') or ''
+        c['_col_category'] = (_cm['category'] if _cm else '') or ''
+        c['_col_completion'] = (_cm['completion'] if _cm else '') or ''
+
+    # T-234：排序新增【状态】【性质】【类别】枚举维度（与前端 SORT_ENUM 同值域）——
+    # 枚举值 → 权重；未知值排枚举之后（= 枚举长度）。nature/category 取板块维度值。
+    _ENUM_W = {
+        'status': {'notstarted': 0, 'progressing': 1, 'done': 2, 'open': 3},
+        'nature': {'日常': 0, '专项': 1},
+        'category': {'年度重点工作': 0, '业财融合工作': 1, '财务数智化工作': 2,
+                     '其他重点工作': 3, '文化及团队建设': 4},
+    }
+    _ENUM_KEY = {'status': 'status', 'nature': '_col_nature', 'category': '_col_category'}
+
+    def _w_of(c, k):
+        W = _ENUM_W.get(k)
+        if not W:
+            return None
+        v = str(c.get(_ENUM_KEY[k]) or '')
+        return W.get(v, len(W))
+
     def _cmp(x, y):
         px = _pinset.get(x.get('card_id') or '', 10 ** 9)
         py = _pinset.get(y.get('card_id') or '', 10 ** 9)
@@ -10191,6 +10254,11 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
             return -1 if px < py else 1          # 置顶恒排最前
         for i, k in enumerate(_sk):
             d = -1 if (i < len(_sd) and _sd[i] == 'desc') else 1
+            wx, wy = _w_of(x, k), _w_of(y, k)
+            if wx is not None:                    # 枚举维度：权重比较
+                if wx != wy:
+                    return (-d if wx < wy else d)
+                continue
             tx, ty = _ts(x.get(k)), _ts(y.get(k))
             if (tx is None) != (ty is None):
                 return 1 if tx is None else -1   # 空值恒排最后
@@ -10206,11 +10274,6 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
     else:
         # 稳定排序：按开始时间、卡片名，保证多次导出一致（未配置排序时的兜底）
         cards.sort(key=lambda c: (str(c.get('begin') or ''), str(c.get('card_name') or '')))
-    # 派生列需要板块元信息与父事项名称
-    _colmap = {}
-    for r in dbq('SELECT board_id, column_name, year, nature, owner, completion '
-                 'FROM board_columns'):
-        _colmap[(r['board_id'], r['column_name'])] = r
     _pmap = {}
     _pids = [c.get('parent_id') for c in cards if c.get('parent_id')]
     if _pids:
@@ -10228,7 +10291,6 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
     for c in cards:
         _cm = _colmap.get((c.get('board_id'), c.get('column_name') or ''))
         c['_col_year'] = (_cm['year'] if _cm else '') or ''
-        c['_col_nature'] = (_cm['nature'] if _cm else '') or ''
         c['_col_owner'] = (_cm['owner'] if _cm else '') or ''
         c['_col_completion'] = _completion_text((_cm['completion'] if _cm else '') or 'open')
         c['_status_text'] = _status_text(c.get('status'))
@@ -10248,6 +10310,17 @@ def export_xlsx(board_id: str = '', board_ids: str = '', status: str = '',
         _sts = _stmap.get(c.get('card_id') or '', [])
         c['_subtasks_text'] = '\n'.join(
             ('√ ' if r['done'] else '□ ') + (r['title'] or '') for r in _sts)
+    # 每周进展（T-234 2026-11-25 用户需求6：card_week_progress 表聚合导出）——
+    # 按周数原文逐行「【周】内容」，换行分隔；周数据按 week 字典序（同周多条 = 一次保存覆盖，不应出现）
+    _wpmap = {}
+    if _cids:
+        _marks = ','.join('?' * len(_cids))
+        for r in dbq('SELECT card_id, week, content FROM card_week_progress '
+                     'WHERE card_id IN (%s) ORDER BY card_id, week' % _marks, _cids):
+            _wpmap.setdefault(r['card_id'], []).append(r)
+    for c in cards:
+        c['_wp_text'] = '\n'.join(
+            '【%s】%s' % (r['week'], r['content'] or '') for r in _wpmap.get(c.get('card_id') or '', []))
 
     wb = Workbook()
     ws = wb.active

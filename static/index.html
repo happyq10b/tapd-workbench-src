@@ -199,9 +199,9 @@ button{font-family:inherit}
 /* 设计规范对齐【架构管理】弹窗：蓝色说明横幅 + 分区留白 + 大格热力日历 + 已选 chips */
 .due-info-banner{background:#e6f7ff;border:1px solid #91d5ff;border-radius:6px;
   padding:8px 12px;font-size:12.5px;color:#0050b3;line-height:1.7}
-/* ---------------- 排序设定弹窗（#205y 2026-11-18） ----------------
-   每行 = 一个排序字段：勾选框 + 名称 + 优先级徽标 + 升/降序分段按钮。
-   勾选先后顺序 = 优先级（徽标实时显示「第N优先」）；未勾选行灰显禁用。 */
+/* ---------------- 排序设定弹窗（#205y 2026-11-18；T-234 三态方向） ----------------
+   每行 = 一个排序维度：勾选框 + 名称 + 优先级徽标 + 升序/降序/不排序 分段按钮。
+   勾选先后顺序 = 优先级（徽标实时显示「第N优先」）；【不排序】= 该维度退出排序。 */
 .ss-section{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px}
 .ss-title{font-weight:600;font-size:13px;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px}
 .ss-none{font-weight:400;font-size:11.5px;color:var(--text3)}
@@ -330,11 +330,11 @@ button{font-family:inherit}
 /* ===== 需求2：可选看板默认两行，超出滚动 =====
    ⚠️ 2026-11-10 #122 教训：行高曾写死 38px → max-height:82px；
       #121 卡片加了【编辑】按钮后行高实测 45px → 第二行被裁 14px。
-      → 高度不再写死：CSS 只留 96px 兜底值（45px 行高下的两行完整高度），
-        实际值由 JS syncBoardBandHeight() 按当前行高**动态测量**（两行完整 = 
-        首行高 + rowGap + 次行高），卡片样式再变也不会裁切。 */
+      → 高度不再写死：CSS 只留 102px 兜底值（45px 行高 + 6px 安全余量下的两行完整高度，
+        T-234 2026-11-25 调高），实际值由 JS syncBoardBandHeight() 按当前行高**动态测量**
+        （两行完整 = 首行高 + rowGap + 次行高 + 6px 余量），卡片样式再变也不会裁切。 */
 .tb-board-band .tb-grid{
-  max-height:96px;overflow-y:auto;overflow-x:hidden;
+  max-height:102px;overflow-y:auto;overflow-x:hidden;
   /* 滚动条留出内边距，避免末行文字被滚动条压住 */
   padding-right:2px;
   /* 滚动条样式：细窄低调，不抢视觉 */
@@ -2926,15 +2926,11 @@ function goLogin(){
   <div class="modal" style="width:520px;max-width:94vw">
     <div class="modal-header"><h2>↕️ 排序设定</h2><button class="modal-close" onclick="sortSetCancel()">✕</button></div>
     <div class="modal-body" style="padding:12px 16px;gap:10px">
-      <div class="due-info-banner">
-        勾选字段即参与排序，<strong>勾选的先后顺序 = 优先级</strong>（先勾选的优先级最高）；
-        每个已勾选字段可单独选择<strong>升序 / 降序</strong>。<strong>板块</strong>与<strong>事项</strong>分别独立配置、互不影响；
-        置顶条目始终最优先，不参与排序配置。配置为个人偏好：确定即固化保存到您的账号，换设备/换浏览器不丢失，直到您主动更改（不同账号互不影响）。
-      </div>
+      <div class="due-info-banner">勾选维度参与排序（勾选顺序 = 优先级），逐维度选择升序 / 降序 / 不排序；板块与事项独立配置，置顶始终最优先。</div>
       <div id="sortSetBody"></div>
     </div>
     <div class="modal-footer" style="display:flex;gap:8px;align-items:center">
-      <button class="btn-default" onclick="sortSetReset()" title="恢复默认：仅按创建时间降序">恢复默认</button>
+      <button class="btn-default" onclick="sortSetReset()" title="恢复默认排序配置">恢复默认</button>
       <span style="flex:1"></span>
       <button class="btn-secondary" onclick="sortSetCancel()">取消</button>
       <button class="btn-primary" onclick="sortSetApply()">确定</button>
@@ -4914,7 +4910,9 @@ function syncBoardBandHeight(){
   const h1=items[0].getBoundingClientRect().height;
   const h2=items.length>1?items[1].getBoundingClientRect().height:h1;
   if(h1<=0||h2<=0)return;   // 度量异常（隐藏中）→ 不动现有值
-  grid.style.maxHeight=Math.ceil(h1+gap+h2)+'px';
+  // T-234（2026-11-25 用户需求2）：+6px 安全余量 —— 卡片描边/阴影/文字下伸部不再贴边裁切，
+  // 两行选项始终完整展示；高度略增不影响「两行封顶、第三行起滚动」的语义。
+  grid.style.maxHeight=Math.ceil(h1+gap+h2+6)+'px';
 }
 // 架构选择 → 看板选择联动：重算 curBoards = 选中架构看板并集（覆盖手动微调——
 // 架构选择是批量语义；此后仍可点看板 tab 单独增删微调，统计跟 curBoards 走）
@@ -8127,8 +8125,12 @@ function cmpColumn(a,b,cmeta,csort){
     const ca=ord(ma.category||'年度重点工作'),cb=ord(mb.category||'年度重点工作');
     if(ca!==cb)return ca-cb;
   }
-  const pa=isPinned('column',colPinKey(a,ma))?0:1,pb=isPinned('column',colPinKey(b,mb))?0:1;
-  if(pa!==pb)return pa-pb;            // 置顶恒在最前（不受排序配置影响）
+  const pa=isPinned('column',colPinKey(a,ma)),pb=isPinned('column',colPinKey(b,mb));
+  if(pa!==pb)return pa?-1:1;          // 置顶恒在最前（不受排序配置影响）
+  if(pa&&pb){                         // T-234：置顶组内按置顶时间从新到旧（最新置顶在最上）
+    const ta=pinT('column',colPinKey(a,ma)),tb=pinT('column',colPinKey(b,mb));
+    if(ta!==tb)return tb-ta;
+  }
   const r=cmpByCfg(ma,mb,SORT_CFG.col,colSortField);
   if(r!==null)return r;
   // 末级排序（2026-11-04 用户需求）：按**板块自身的排序字段**（cards.column_sort，
@@ -8141,10 +8143,20 @@ function cmpColumn(a,b,cmeta,csort){
   return String(a).localeCompare(String(b),'zh');
 }
 // 排序配置（#205y/#205z）：{card:{...}, col:{...}} —— 个人偏好按账号持久化（服务端 user_prefs.sort_cfg，localStorage 为本地缓存兜底）
-// order = 勾选的字段清单（数组顺序 = 优先级）；dir = 各字段 asc/desc。
+// order = 勾选的字段清单（数组顺序 = 优先级）；dir = 各字段 asc/desc/none（none = 不排序，等同未勾选）。
 // 默认 = 仅「创建时间」降序（延续 #205w 默认行为）。
-var SORT_FIELDS=['begin','due','created'];
-var SORT_FIELD_LABEL={begin:'开始时间',due:'截止时间',created:'创建时间'};
+// T-234（2026-11-25 用户需求3）：新增【状态】【性质】【类别】三个**枚举**排序维度，
+// 每维度以枚举值序号作为排序权重（值域见 SORT_ENUM）。
+var SORT_FIELDS=['begin','due','created','status','nature','category'];
+var SORT_FIELD_LABEL={begin:'开始时间',due:'截止时间',created:'创建时间',
+  status:'状态',nature:'性质',category:'类别'};
+// 枚举权重表（用户指定值域）：取值 → 序号；未配置的值排枚举之后（__max = 枚举长度）
+var SORT_ENUM={
+  status:{notstarted:0,progressing:1,done:2,open:3},            // 未开始/进行中/已完成/未完成
+  nature:{'日常':0,'专项':1},                                    // 日常/专项
+  category:{'年度重点工作':0,'业财融合工作':1,'财务数智化工作':2,'其他重点工作':3,'文化及团队建设':4}
+};
+Object.keys(SORT_ENUM).forEach(function(f){SORT_ENUM[f].__max=Object.keys(SORT_ENUM[f]).filter(function(k){return k!=='__max'}).length});
 // 默认配置（#205y 2026-11-18 用户指定）：事项 = 开始↑/截止↑/创建↑（优先级 1/2/3），
 // 板块 = 开始↓/截止↓/创建↓。「恢复默认」按钮同用此函数。
 var SORT_CFG_DEFAULT=function(){return {order:['begin','due','created'],
@@ -8194,21 +8206,24 @@ function renderSortSetBody(){
     const title=kind==='card'?'📋 事项排序':'🗂️ 板块排序';
     const rows=SORT_FIELDS.map(function(f){
       const idx=cfg.order.indexOf(f),on=idx>=0,dir=cfg.dir[f]||'asc';
-      const dis=on?'':'disabled';
-      return '<div class="ss-row'+(on?' on':'')+'">'
+      const enumTip=SORT_ENUM[f]?' title="按枚举值排序：'+Object.keys(SORT_ENUM[f]).join(' → ')+'"':'';
+      return '<div class="ss-row'+(on?' on':'')+'"'+enumTip+'>'
         +'<label class="ss-check"><input type="checkbox"'+(on?' checked':'')
         +" onchange=\"sortSetToggle('"+kind+"','"+f+"',this.checked)\">"
         +'<span>'+SORT_FIELD_LABEL[f]+'</span></label>'
         +(on?'<span class="ss-pri">第'+(idx+1)+'优先</span>':'<span class="ss-pri ss-pri-off">不参与</span>')
-        +'<span class="ss-dir'+(on?'':' ss-dir-off')+'">'
-        +'<button class="ss-dir-btn'+(dir==='asc'?' on':'')+'"'+dis
+        +'<span class="ss-dir">'
+        +'<button class="ss-dir-btn'+(on&&dir==='asc'?' on':'')+'"'
         +" onclick=\"sortSetDir('"+kind+"','"+f+"','asc')\">升序</button>"
-        +'<button class="ss-dir-btn'+(dir==='desc'?' on':'')+'"'+dis
+        +'<button class="ss-dir-btn'+(on&&dir==='desc'?' on':'')+'"'
         +" onclick=\"sortSetDir('"+kind+"','"+f+"','desc')\">降序</button>"
+        // T-234（2026-11-25 用户需求4）：追加【不排序】= 该维度不参与排序（自动取消勾选）
+        +'<button class="ss-dir-btn'+(!on?' on':'')+'"'
+        +" onclick=\"sortSetNone('"+kind+"','"+f+"')\">不排序</button>"
         +'</span></div>';
     }).join('');
     return '<div class="ss-section"><div class="ss-title">'+title
-      +(cfg.order.length?'':'<span class="ss-none">（未勾选任何字段 → 按创建时间降序兜底）</span>')+'</div>'+rows+'</div>';
+      +(cfg.order.length?'':'<span class="ss-none">（全部不排序 → 按创建时间降序兜底）</span>')+'</div>'+rows+'</div>';
   }).join('');
 }
 // 勾选 / 取消勾选：order 数组顺序即优先级；取消勾选后后续字段优先级依次前移
@@ -8219,7 +8234,19 @@ function sortSetToggle(kind,f,on){
   else{if(i>=0)ord.splice(i,1);}
   renderSortSetBody();
 }
-function sortSetDir(kind,f,d){SORT_CFG[kind].dir[f]=d;renderSortSetBody();}
+// 升/降序：未参与时点升/降序 = 自动加入排序（追加为最低优先级）再设方向
+function sortSetDir(kind,f,d){
+  const cfg=SORT_CFG[kind];
+  if(cfg.order.indexOf(f)<0)cfg.order.push(f);
+  cfg.dir[f]=d;renderSortSetBody();
+}
+// 不排序（T-234）：该维度退出排序 → 从 order 移除（优先级自动前移），保留勾选框状态同步
+function sortSetNone(kind,f){
+  const ord=SORT_CFG[kind].order;
+  const i=ord.indexOf(f);
+  if(i>=0)ord.splice(i,1);
+  renderSortSetBody();
+}
 function sortSetReset(){
   SORT_CFG={card:SORT_CFG_DEFAULT(),col:SORT_CFG_DEFAULT_COL()};
   renderSortSetBody();
@@ -8229,12 +8256,21 @@ function sortSetCancel(){
   closeModal('sortSetModal');
 }
 function sortSetApply(){saveSortCfg();closeModal('sortSetModal');reload(curPage);}
-// 多级比较（#205y）：按 cfg.order 依次比较（先勾选优先），dir 决定升降；
-// 日期空值恒排最后（与升降方向无关）；配置字段全同分返回 null（由调用方兜底）。
-// get(o,f) 取值器：事项取卡对象自身字段；板块 begin 无独立字段 → created_at 承担。
+// 多级比较（#205y；T-234 增枚举维度）：按 cfg.order 依次比较（先勾选优先），dir 决定升降；
+// 日期字段空值恒排最后（与升降方向无关）；枚举字段按 SORT_ENUM 权重比较（未知值排枚举之后）；
+// 配置字段全同分返回 null（由调用方兜底）。
+// get(o,f) 取值器：事项取卡对象自身字段（nature/category 从板块元信息取）；
+// 板块 begin 无独立字段 → created_at 承担；板块「状态」= completion（四态同枚举）。
 function cmpByCfg(oa,ob,cfg,get){
   for(var i=0;i<cfg.order.length;i++){
     const f=cfg.order[i],d=cfg.dir[f]==='desc'?-1:1;
+    const W=SORT_ENUM[f];
+    if(W){   // 枚举维度：权重比较，未知值排枚举之后（恒定，与升降方向无关地参与比较）
+      const va=W[get(oa,f)],vb=W[get(ob,f)];
+      const xa=(va===undefined)?W.__max:va,xb=(vb===undefined)?W.__max:vb;
+      if(xa!==xb)return (xa<xb?-1:1)*d;
+      continue;
+    }
     const ta=tsVal(get(oa,f)),tb=tsVal(get(ob,f));
     const ea=!ta,eb=!tb;
     if(ea!==eb)return ea?1:-1;          // 空值恒排最后
@@ -8242,11 +8278,34 @@ function cmpByCfg(oa,ob,cfg,get){
   }
   return null;
 }
-function cardSortField(o,f){return o[f];}
-function colSortField(m,f){return f==='due'?m.due_date:m.created_at;}
+// 事项字段取值：状态=卡自身 status；性质/类别 = 所属板块元信息（board_id::column_name → COLS_META，
+// 找不到时按板块名兜底 —— 子事项载荷可能缺 board_id）
+function cardColMeta(o){
+  const cn=o.column_name||'';
+  if(!cn)return {};
+  const cols=window.COLS_META||[];
+  let m=cols.find(x=>x.col_key===((o.board_id||'')+'::'+cn));
+  if(!m)m=cols.find(x=>x.column_name===cn);
+  return m||{};
+}
+function cardSortField(o,f){
+  if(f==='nature'||f==='category')return cardColMeta(o)[f]||'';
+  return o[f];
+}
+function colSortField(m,f){
+  if(f==='due')return m.due_date;
+  if(f==='status')return m.completion||'';    // 板块「状态」= 完成情况（四态同枚举）
+  if(f==='nature')return m.nature||'';
+  if(f==='category')return m.category||'';
+  return m.created_at;                        // begin / created → 板块创建时间（#205w 口径）
+}
 function cmpCard(a,b){
-  const pa=isPinned('card',a.card_id)?0:1,pb=isPinned('card',b.card_id)?0:1;
-  if(pa!==pb)return pa-pb;              // 置顶恒在最前（不受排序配置影响）
+  const pa=isPinned('card',a.card_id),pb=isPinned('card',b.card_id);
+  if(pa!==pb)return pa?-1:1;            // 置顶恒在最前（不受排序配置影响）
+  if(pa&&pb){                           // T-234：置顶组内按置顶时间从新到旧（最新置顶在最上）
+    const ta=pinT('card',a.card_id),tb=pinT('card',b.card_id);
+    if(ta!==tb)return tb-ta;
+  }
   const r=cmpByCfg(a,b,SORT_CFG.card,cardSortField);
   if(r!==null)return r;
   return tsVal(b.created)-tsVal(a.created);   // 兜底：创建时间降序
@@ -8600,7 +8659,10 @@ async function foldAllItems(expand,gid){
 // T-0187：持久化到服务端 user_prefs 表（跨浏览器/设备一致）；localStorage 仍同步写
 // 作为兜底缓存（服务端短暂不可达时界面不丢配置），登录后一次性迁移本地旧数据。
 const PIN_STORE_PREFIX='my_pins_v1:';
-let MY_PINS={card:{},column:{}};   // {card:{card_id:1}, column:{col_key:1}}
+let MY_PINS={card:{},column:{}};   // {card:{card_id:置顶时间戳ms}, column:{col_key:置顶时间戳ms}}
+// T-234（2026-11-25 用户需求1）：置顶值由固定 1 改为**置顶时刻时间戳** ——
+// 置顶组内按时间从新到旧排序（最新置顶在最上）；存量旧值 1（=1970）天然小于
+// 任何新时间戳 → 旧置顶排在组内末尾，新置顶自动浮到最上，无需迁移。
 let _PREF_SAVE_TIMERS={};          // 按 key 防抖：连续变更合并成一次 PUT
 function _prefPush(key,value){
   // 防抖上传（800ms）：置顶/折叠等连续点击只发最后一次，失败静默（内存态已生效）
@@ -8721,9 +8783,11 @@ function savePins(){
   _prefPush('pins',MY_PINS);
 }
 function isPinned(kind,key){return !!(MY_PINS[kind]&&MY_PINS[kind][key])}
+// 置顶时刻（T-234）：存量旧值 1 → 视为 0（最旧），新置顶排其前
+function pinT(kind,key){return Number((MY_PINS[kind]&&MY_PINS[kind][key])||0)}
 function setPinned(kind,key,on){
   if(!MY_PINS[kind])MY_PINS[kind]={};
-  if(on)MY_PINS[kind][key]=1;else delete MY_PINS[kind][key];
+  if(on)MY_PINS[kind][key]=Date.now();else delete MY_PINS[kind][key];
   savePins();
 }
 // 板块置顶 / 取消置顶（个人级：只对当前账号生效）
@@ -14482,7 +14546,10 @@ async function exportXlsx(fields){
       ps.set('sort_keys',sc.order.join(','));
       ps.set('sort_dirs',sc.order.map(f=>sc.dir[f]||'asc').join(','));
     }
-    const pins=Object.keys(MY_PINS.card||{}).filter(id=>ITEM_CHECKED.has(id));
+    // T-234：置顶清单按**置顶时间从新到旧**排序下发（服务端按下发顺序给置顶组排位，
+    // 与页面「最新置顶在最上」口径一致）；存量旧值 1 视为 0（最旧）
+    const pins=Object.keys(MY_PINS.card||{}).filter(id=>ITEM_CHECKED.has(id))
+      .sort((x,y)=>(Number(MY_PINS.card[y])||0)-(Number(MY_PINS.card[x])||0));
     if(pins.length)ps.set('pin_ids',pins.join(','));
     if(fields&&fields.length)ps.set('fields',fields.join(','));
     const q=ps.toString()?('?'+ps.toString()):'';
