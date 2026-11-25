@@ -3519,7 +3519,15 @@ function api(path,opts={}){
   const p=fetch(apiUrl(path),o).then(async r=>{
     if(r.status===401){goLogin();throw new Error('unauth')}
     const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+    if(!r.ok){
+      let m=(d&&typeof d.detail==='string')?d.detail.trim():'';
+      if(!m||m.indexOf('<')>=0||/^HTTP\s/.test(m)){
+        m=({400:'请求参数有误',401:'登录已过期，请重新登录',403:'没有执行此操作的权限',404:'内容不存在或已被删除',
+            409:'数据已被他人修改，请刷新后重试',500:'服务器处理出错，请稍后重试',502:'服务暂不可用，请稍后重试'})[r.status]
+           ||('操作失败（'+r.status+'）');
+      }
+      throw new Error(m);
+    }
     return d;
   });
   return _track?p.finally(function(){sgRelease()}):p;
@@ -9618,7 +9626,7 @@ function renderColumnDetail(d){
     +`负责人：<b>${esc(ownerName||'—')}</b>　参与人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(parts.length?parts.join('、'):'—')}</b></span><br>`
     // #205r（2026-11-18 用户需求3）：末行统一为「创建人、创建时间、开始时间、截止时间、倒计时」；
     // 板块无独立开始时间字段 → 以创建时间作为开始时间（与板块目录「开始」列同口径）
-    +`创建人：<b>${esc(d.creator||'—')}</b>　创建时间：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　开始时间：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　截止时间：<b>${esc(_due||'—')}</b>　倒计时：${_cdHtml}`;
+    +`创建人：<b>${esc(bcMemberName(d.creator)||d.creator||'—')}</b>　创建时间：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　开始时间：<b>${esc((d.created||'').slice(0,10)||'—')}</b>　截止时间：<b>${esc(_due||'—')}</b>　倒计时：${_cdHtml}`;
   metaClampTitles('cd_meta');
   const dd=document.getElementById('cd_desc');
   if((d.desc||'').trim()){dd.style.display='';dd.textContent=d.desc}else{dd.style.display='none'}
@@ -11023,7 +11031,7 @@ async function openDetail(id){
     // T-216-c（用户口径）：参与人与周数同策略 —— 前缀（创建人/负责人）固定，
     // 参与人值占剩余空间折叠/点击展开
     `<span style="display:inline-flex;min-width:0;max-width:100%">`
-      +`<span style="white-space:nowrap;flex-shrink:0">创建人：<b>${esc(c.creator||'-')}</b>　负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'-')}</b></span>　参与人：</span>`
+      +`<span style="white-space:nowrap;flex-shrink:0">创建人：<b>${esc(bcMemberName(c.creator)||c.creator||'-')}</b>　负责人：<span class="m1l" onclick="toggleMetaNames(this)"><b>${esc(c.owner||'-')}</b></span>　参与人：</span>`
       +`<span class="m1l" style="flex:0 1 auto;min-width:0" onclick="toggleMetaNames(this)"><b>${_dCc.length?esc(_dCc.join('、')):'-'}</b></span>`
     +`</span><br>`+
     `创建时间：<b>${esc(fmtDate(c.created)||'-')}</b>　开始时间：<b>${esc(fmtDate(c.begin||c.created)||'-')}</b>　截止时间：<b>${esc(fmtDate(c.due)||'-')}</b>　完成时间：<b>${_dCompHtml}</b>`;
@@ -14336,7 +14344,13 @@ async function exportXlsx(fields){
     const q=ps.toString()?('?'+ps.toString()):'';
     const r=await fetch(apiUrl('/api/export/xlsx'+q),{headers:{'Authorization':'Bearer '+TOKEN}});
     if(r.status===401){goLogin();return}
-    if(!r.ok){let d={};try{d=await r.json()}catch(e){};throw new Error(d.detail||('HTTP '+r.status))}
+    if(!r.ok){let d={};try{d=await r.json()}catch(e){};
+      let m=(d&&typeof d.detail==='string')?d.detail.trim():'';
+      if(!m||m.indexOf('<')>=0||/^HTTP\s/.test(m)){
+        m=({400:'请求参数有误',401:'登录已过期，请重新登录',403:'没有执行此操作的权限',404:'内容不存在或已被删除',
+            409:'数据已被他人修改，请刷新后重试',500:'服务器处理出错，请稍后重试'})[r.status]||('操作失败（'+r.status+'）');
+      }
+      throw new Error(m)}
     const blob=await r.blob();
     // 优先用后端下发的文件名（RFC5987 编码），取不到再本地生成
     let fname='工作台数据_'+new Date().toISOString().slice(0,19).replace(/[-:T]/g,'')+'.xlsx';
@@ -14423,7 +14437,15 @@ function submitImport(){
     .then(async r=>{
       if(r.status===401){goLogin();return}
       let d={};try{d=await r.json()}catch(e){}
-      if(!r.ok)throw new Error(d.detail||('HTTP '+r.status));
+      if(!r.ok){
+      let m=(d&&typeof d.detail==='string')?d.detail.trim():'';
+      if(!m||m.indexOf('<')>=0||/^HTTP\s/.test(m)){
+        m=({400:'请求参数有误',401:'登录已过期，请重新登录',403:'没有执行此操作的权限',404:'内容不存在或已被删除',
+            409:'数据已被他人修改，请刷新后重试',500:'服务器处理出错，请稍后重试',502:'服务暂不可用，请稍后重试'})[r.status]
+           ||('操作失败（'+r.status+'）');
+      }
+      throw new Error(m);
+    }
       impShowResult('✅ 导入完成：新增 <b>'+d.created+'</b> 条，更新 <b>'+d.updated+'</b> 条'
         +(d.skipped?('，跳过 '+d.skipped+' 条'):'')
         +(d.boards?('，涉及 '+d.boards+' 个看板'):''),'ok');
