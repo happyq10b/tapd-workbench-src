@@ -764,7 +764,7 @@ def _migrate_schema(conn):
     # ---- 综合看板配置（T-211 2026-11-24）：部门级配置，幂等建表 ----
     #   columns       = 综合模式下展示的看板 board_id 白名单（逗号分隔；空 = 该部门全部看板）
     #   extra_members = 追加可见人员账号（逗号分隔；默认可见 = 部门长/总经理/中心负责人/管理员/超管，
-    #                   追加人员不可见【综合编辑】按钮）
+    #                   追加人员不可见【综合配置】按钮）
     #   旧库缺表时自动创建（无存量数据需迁移）
     # T-224（2026-11-25）：配置按**配置人员**维度固化隔离 —— PK(dept_node_id, owner)，
     # 每位配置人员对同一部门各自拥有一份配置，互不可见、互不覆盖。
@@ -810,6 +810,33 @@ def _migrate_schema(conn):
         decided_at    TEXT,
         UNIQUE (dept_node_id, member, owner)
     )''')
+    # T-233（2026-11-25 用户需求）：邀请补 scheme_id —— 记录发起邀请时的目标方案，
+    # 成员确认后加入该方案的 extra_members（缺省/旧邀请 → 发起人的外部显示方案）。
+    _inv_cols = [r[1] for r in conn.execute('PRAGMA table_info(syn_config_invite)').fetchall()]
+    if 'scheme_id' not in _inv_cols:
+        conn.execute('ALTER TABLE syn_config_invite ADD COLUMN scheme_id INTEGER')
+    # T-233：多方案表 —— 同一配置人名下每个架构可持续配置多个方案（各自板块白名单
+    # + 追加人员），is_display=1 的「外部显示方案」在点击【综合看板】时生效。
+    # 校验约束（实现于保存端点）：同一 (dept_node_id, owner) 内方案名唯一；
+    # 同一追加人员只能适配一个方案（防配置冲突）。
+    conn.execute('''CREATE TABLE IF NOT EXISTS syn_scheme (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        dept_node_id  INTEGER NOT NULL,
+        owner         TEXT NOT NULL,
+        name          TEXT NOT NULL DEFAULT '',
+        columns       TEXT NOT NULL DEFAULT '',
+        extra_members TEXT NOT NULL DEFAULT '',
+        is_display    INTEGER NOT NULL DEFAULT 0,
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        UNIQUE (dept_node_id, owner, name)
+    )''')
+    # 迁移（幂等）：syn_board_config 每份存量配置 → 「默认方案」（标记外部显示）。
+    # syn_board_config 保留为历史存档，此后综合配置读写全部走 syn_scheme。
+    conn.execute('''INSERT INTO syn_scheme (dept_node_id, owner, name, columns, extra_members, is_display)
+        SELECT dept_node_id, owner, '默认方案', columns, extra_members, 1 FROM syn_board_config
+        WHERE NOT EXISTS (SELECT 1 FROM syn_scheme s
+                          WHERE s.dept_node_id=syn_board_config.dept_node_id
+                            AND s.owner=syn_board_config.owner)''')
 
 def _migrate_org(conn):
     """组织架构迁移：workgroups（层级 + 单个 leader + 成员分号串）

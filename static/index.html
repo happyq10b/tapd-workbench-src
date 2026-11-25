@@ -913,7 +913,7 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .cat-badge.cat-c3{background:#f3f0ff;border:1px solid #d3c9f5;color:#6b4fc3}
 .cat-badge.cat-c4{background:#fff7e6;border:1px solid #ffd591;color:#d46b08}
 .cat-badge.cat-c5{background:#fdf0f5;border:1px solid #f2b8cf;color:#c2185b}
-/* 综合编辑弹窗（T-211-cis）：折叠箭头 + 类别色点（与板块行 cat-badge 五色系一致） */
+/* 综合配置弹窗（T-211-cis）：折叠箭头 + 类别色点（与板块行 cat-badge 五色系一致） */
 .syn-chev{display:inline-block;color:var(--text2);font-size:10px;transition:transform .15s;flex-shrink:0;width:14px;text-align:center;cursor:pointer;user-select:none}
 .syn-chev.open{transform:rotate(90deg)}
 .syn-board-row{border-bottom:1px dashed var(--border);padding-bottom:2px;margin-bottom:2px}
@@ -921,6 +921,12 @@ html{min-width:1200px;overflow-x:auto;overflow-y:visible}
 .cat-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(0,0,0,.08)}
 .cat-dot1{background:#185fa5}.cat-dot2{background:#2e7d32}.cat-dot3{background:#6b4fc3}
 .cat-dot4{background:#d46b08}.cat-dot5{background:#c2185b}
+/* T-233 方案管理条：方案 chip（激活=描边蓝、外部显示方案=★ 黄底） */
+.syn-scheme-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--border);
+  border-radius:16px;font-size:12px;cursor:pointer;white-space:nowrap;background:#fff;color:var(--text);
+  user-select:none;flex-shrink:0;line-height:1.4}
+.syn-scheme-chip.act{border-color:var(--primary);background:#eef5ff;color:var(--primary);font-weight:600}
+.syn-scheme-chip.disp{background:#fffbe6;box-shadow:inset 0 0 0 1px #ffe58f}
 /* 响应式适配（T-210）：格宽/行布局锁定（本站「需求5」约定：窄屏元素大小位置不变），
    窄屏时由 .cat-badge 的 max-width:100% + ellipsis 自然截断（不溢出不破版），
    完整类别名经父格 title 悬停可读。 */
@@ -1895,13 +1901,13 @@ function goLogin(){
           <!-- T-211 综合看板（2026-11-24 用户需求）：位于【＋ 新建看板】左侧，样式一致。
                非综合模式显示【综合看板】（进入该部门综合模式：展示本架构下全部看板的
                全部板块，类别优先于置顶排序）；综合模式下按钮变【普通看板】（退出），
-               左侧追加【综合编辑】（仅默认可见人员可见，追加人员不可见）。 -->
+               左侧追加【综合配置】（仅默认可见人员可见，追加人员不可见）。 -->
           <!-- T-212-ter（2026-11-24 用户反馈）：三按钮统一【启用勾选】形态（白底描边，
                综合模式进行中【普通看板】= 蓝底激活态 .on）；synEntry 去掉 margin-left:auto
                （双 auto 把按钮间距撑乱）→ 间距由 .tb-band-head gap 统一。 -->
           <span class="tb-band-head-entry" id="synEntry" style="display:none;gap:12px;margin-left:0">
             <button id="bandSynEditBtn" class="syn-band-btn" style="display:none"
-              onclick="openSynConfigModal()" title="配置综合看板：可见板块与追加可见人员（标题处下拉可切换架构）">综合编辑</button>
+              onclick="openSynConfigModal()" title="配置综合看板：多方案管理、可见板块与追加可见人员（标题处下拉可切换架构）">综合配置</button>
             <button id="bandSynBtn" class="syn-band-btn"
               onclick="toggleSynMode()" title="切换至综合看板模式：展示所选部门架构下全部看板中的全部板块">综合看板</button>
           </span>
@@ -2484,6 +2490,15 @@ function goLogin(){
     <div class="modal-header"><h2 style="white-space:nowrap">⚙️ 综合看板配置 <span id="syn_cfg_dept" style="font-size:13px;color:var(--text2)"></span></h2>
       <button class="modal-close" onclick="closeModal('synConfigModal')">✕</button></div>
     <div class="modal-body" style="padding-top:12px">
+      <!-- T-233 方案管理条：多方案持续配置；★=外部显示方案（点【综合看板】时生效）；
+           校验规则：同一配置人名下方案名唯一、同一追加人员只能适配一个方案 -->
+      <div id="syn_scheme_bar" style="display:flex;align-items:center;gap:6px;padding:0 0 10px;flex-wrap:nowrap;overflow-x:auto">
+        <b style="font-size:13px;white-space:nowrap;flex-shrink:0">方案</b>
+        <span id="syn_scheme_chips" style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;min-width:0"></span>
+        <button class="icon-btn" style="padding:3px 10px;font-size:11.5px;white-space:nowrap;flex-shrink:0"
+                onclick="synSchemeAdd()" title="新建方案（保存后生效）">＋ 新方案</button>
+        <span style="margin-left:auto;font-size:11.5px;color:var(--text3);white-space:nowrap;flex-shrink:0">点 ★ 设为外部显示方案；同一追加人员只能适配一个方案</span>
+      </div>
       <div style="display:flex;gap:14px;align-items:stretch">
         <!-- 左：可见板块（看板折叠 → 板块级勾选；类别筛选 T-212-ter） -->
         <div style="flex:1.35;min-width:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:10px;overflow:hidden">
@@ -3873,7 +3888,7 @@ function renderPermissionEntries(){
   const bnEntry=document.getElementById('boardNewEntry');
   if(bnEntry)bnEntry.style.display=(ME.is_admin||ME.can_create_board)?'':'none';
   // ── 综合看板（T-211）：syn_depts 非空即显示入口（默认可见 ∪ 追加人员）；
-  //    按钮文案/综合编辑显隐由 applySynBtn() 按 SYN_MODE 与 syn_edit_depts 控制
+  //    按钮文案/综合配置显隐由 applySynBtn() 按 SYN_MODE 与 syn_edit_depts 控制
   const synE=document.getElementById('synEntry');
   if(synE)synE.style.display=(ME.syn_depts&&ME.syn_depts.length)?'':'none';
   applySynBtn();
@@ -3894,7 +3909,7 @@ function applySynBtn(){
     btn.textContent='普通看板';
     btn.title='退出综合看板模式，恢复普通看板选择';
     btn.classList.add('on');   // T-212-ter：综合模式进行中 = 蓝底激活态（同【启用勾选】开启形态）
-    // 综合编辑按钮（T-227）：单架构模式=直接配置该架构；多架构模式=任一选中架构
+    // 综合配置按钮（T-227）：单架构模式=直接配置该架构；多架构模式=任一选中架构
     // 可编辑即显示（点击进入架构选择器，各架构配置/追加人员相互独立）
     var canEd=false;
     if(ME&&ME.syn_edit_depts&&SYN_MODE.nodeIds){
@@ -3971,13 +3986,91 @@ function exitSynMode(){
   toast('已退出综合看板'+(nm?('（'+nm+'）'):''));
   renderTabs();reload(1);renderProgress();
 }
-// 综合编辑弹窗（T-211；T-211-cis 重做：板块级折叠树 + 精修版面）
+// 综合配置弹窗（T-211；T-211-cis 重做：板块级折叠树 + 精修版面；T-233 多方案）
 // ⚠️ 勾选状态存 SYN_CHECKED 集合（渲染从集合读、交互改集合）——原实现从 DOM 读状态
 //    又全量重绘 DOM，搜索/折叠一刷新勾选就丢（状态循环依赖，实测 0/225 bug）。
 var SYN_CFG=null;                       // 弹窗数据缓存
 var SYN_BOARD_OPEN=new Set();           // 展开的看板（board_id）
-var SYN_CHECKED=new Set();              // 勾选的板块 col_key
-var SYN_MEM_CHECKED=new Set();          // 勾选的追加人员账号
+var SYN_CHECKED=new Set();              // 勾选的板块 col_key（= 当前激活方案的工作集）
+var SYN_MEM_CHECKED=new Set();          // 勾选的追加人员账号（= 当前激活方案的工作集）
+// ── T-233 多方案状态机 ──
+// SYN_SCHEMES=[{id?,name,cols:Set,mems:Set,disp:bool}] —— 编辑器内存模型；
+// cols 空集合 = 全部板块（与后端空白名单语义一致）；切换方案时先 flush 再装载。
+// 校验规则：方案名唯一；同一追加人员只能适配一个方案（保存前后端双重校验）。
+var SYN_SCHEMES=[];
+var SYN_SCHEME_IDX=0;
+function synFlushScheme(){              // 工作集 → 当前方案模型
+  var s=SYN_SCHEMES[SYN_SCHEME_IDX];
+  if(!s)return;
+  var total=synCollectBoards().length;
+  s.cols=(total>0&&SYN_CHECKED.size>=total)?new Set():new Set(SYN_CHECKED);
+  s.mems=new Set(SYN_MEM_CHECKED);
+}
+function synLoadScheme(i){              // 方案模型 → 工作集
+  SYN_SCHEME_IDX=i;
+  var s=SYN_SCHEMES[i];
+  var all=synCollectBoards().map(function(c){return c.col_key});
+  SYN_CHECKED=(!s||!s.cols.size)?new Set(all):new Set(s.cols);
+  SYN_MEM_CHECKED=s?new Set(s.mems):new Set();
+}
+function synPaintSchemes(){
+  var box=document.getElementById('syn_scheme_chips');
+  if(!box)return;
+  box.innerHTML=SYN_SCHEMES.map(function(s,i){
+    var act=i===SYN_SCHEME_IDX;
+    var cnt=s.cols.size?s.cols.size+'板块':'全部板块';
+    return '<span class="syn-scheme-chip'+(act?' act':'')+(s.disp?' disp':'')+'" onclick="synSchemeSwitch('+i+')">'
+      +(s.disp
+        ?'<span style="color:#d48806;flex-shrink:0;cursor:pointer" title="外部显示方案：点【综合看板】时生效（点击取消，改设其他方案）" onclick="event.stopPropagation();synSchemeSetDisplay('+i+')">★</span>'
+        :'<span style="color:var(--text3);flex-shrink:0;cursor:pointer" title="设为外部显示方案：点【综合看板】时生效" onclick="event.stopPropagation();synSchemeSetDisplay('+i+')">☆</span>')
+      +'<b style="max-width:120px;overflow:hidden;text-overflow:ellipsis">'+esc(s.name)+'</b>'
+      +'<span style="color:var(--text3);font-size:10.5px;flex-shrink:0">'+cnt+'/'+s.mems.size+'人</span>'
+      +(act?'<span onclick="event.stopPropagation();synSchemeRename()" title="重命名方案" style="cursor:pointer;flex-shrink:0">✎</span>'
+            +'<span onclick="event.stopPropagation();synSchemeDel()" title="删除方案" style="cursor:pointer;flex-shrink:0">✕</span>':'')
+      +'</span>';
+  }).join('')||'<span style="font-size:12px;color:var(--text3)">暂无方案</span>';
+}
+function synSchemeSwitch(i){
+  if(i===SYN_SCHEME_IDX)return;
+  synFlushScheme();
+  synLoadScheme(i);
+  synPaintSchemes();
+  synPaintBoards();
+  synPaintMembers();
+}
+function synSchemeAdd(){
+  synFlushScheme();
+  var n=SYN_SCHEMES.length+1, base='方案';
+  var name=base+n, k=n;
+  while(SYN_SCHEMES.some(function(s){return s.name===name})){k++;name=base+k}
+  SYN_SCHEMES.push({name:name,cols:new Set(),mems:new Set(),disp:!SYN_SCHEMES.some(function(s){return s.disp})});
+  synLoadScheme(SYN_SCHEMES.length-1);   // 空白名单 = 全部板块（装载即全勾）
+  synPaintSchemes();synPaintBoards();synPaintMembers();
+}
+function synSchemeRename(){
+  var s=SYN_SCHEMES[SYN_SCHEME_IDX];
+  if(!s)return;
+  var name=(prompt('方案名称：',s.name)||'').trim();
+  if(!name||name===s.name)return;
+  if(SYN_SCHEMES.some(function(x,i){return i!==SYN_SCHEME_IDX&&x.name===name})){toast('方案名与已有方案重复');return}
+  s.name=name;
+  synPaintSchemes();
+}
+function synSchemeDel(){
+  if(SYN_SCHEMES.length<=1){toast('至少保留一个方案（如需清空，请清空板块与人员后保存）');return}
+  var s=SYN_SCHEMES[SYN_SCHEME_IDX];
+  if(!confirm('确定删除方案「'+s.name+'」？保存后生效'))return;
+  var wasDisp=s.disp;
+  SYN_SCHEMES.splice(SYN_SCHEME_IDX,1);
+  if(wasDisp)SYN_SCHEMES[0].disp=true;   // 显示方案被删 → 首个方案接管
+  synLoadScheme(Math.min(SYN_SCHEME_IDX,SYN_SCHEMES.length-1));
+  synPaintSchemes();synPaintBoards();synPaintMembers();
+}
+function synSchemeSetDisplay(i){
+  SYN_SCHEMES.forEach(function(s,j){s.disp=(j===i)});
+  synPaintSchemes();
+  toast(SYN_SCHEMES[i].name?('外部显示方案已设为「'+SYN_SCHEMES[i].name+'」（保存后生效）'):'');
+}
 function synCollectBoards(){            // 全部板块平铺 [{board_id,board_name,col_key,column_name,category}]
   var out=[];
   (SYN_CFG.all_boards||[]).forEach(function(b){
@@ -4127,7 +4220,8 @@ async function openSynInviteModal(){
     document.getElementById('syn_invite_list').innerHTML=list.map(function(x){
       return '<div style="display:flex;align-items:center;gap:10px;padding:10px 6px;border-bottom:1px dashed var(--border)">'
         +'<div style="flex:1;min-width:0"><div style="font-size:13px"><b>'+esc(x.dept_name)+'</b> 综合看板</div>'
-        +'<div style="font-size:11.5px;color:var(--text3)">发起人：'+esc(x.owner_name||x.owner)+'</div></div>'
+        +'<div style="font-size:11.5px;color:var(--text3)">发起人：'+esc(x.owner_name||x.owner)
+        +(x.scheme_name?(' · 方案：'+esc(x.scheme_name)):'')+'</div></div>'
         +'<button class="btn-primary" style="padding:4px 14px;flex-shrink:0" onclick="decideSynInvite('+x.id+',true)">确认</button>'
         +'<button class="btn-default" style="padding:4px 14px;flex-shrink:0" onclick="decideSynInvite('+x.id+',false)">拒绝</button></div>';
     }).join('')||'<div style="color:var(--text3);font-size:12.5px;padding:8px 4px">暂无待处理的邀请</div>';
@@ -4210,13 +4304,20 @@ async function openSynConfigModal(nid){
     document.getElementById('syn_board_search').value='';
     document.getElementById('syn_member_search').value='';
     SYN_BOARD_OPEN=new Set();
-    // 预勾选：无白名单（= 全部板块）→ 全勾；有白名单 → 只勾白名单内板块
-    var wl=SYN_CFG.columns||[];
-    SYN_CHECKED=new Set();
-    synCollectBoards().forEach(function(c){
-      if(!wl.length||wl.indexOf(c.col_key)>=0)SYN_CHECKED.add(c.col_key);
-    });
-    SYN_MEM_CHECKED=new Set(SYN_CFG.extra_members||[]);
+    // T-233：构建方案内存模型 —— 有方案按服务端；无方案用旧版字段构造草稿
+    //（cols 空集合 = 全部板块）；外部显示方案缺位时首方案接管
+    var scs=SYN_CFG.schemes||[];
+    if(scs.length){
+      SYN_SCHEMES=scs.map(function(s){return {id:s.id,name:s.name||'方案',
+        cols:new Set(s.columns||[]),mems:new Set(s.extra_members||[]),disp:!!s.is_display};});
+    }else{
+      var draft={name:'方案1',cols:new Set(SYN_CFG.columns||[]),
+                 mems:new Set(SYN_CFG.extra_members||[]),disp:true};
+      SYN_SCHEMES=[draft];
+    }
+    if(!SYN_SCHEMES.some(function(s){return s.disp}))SYN_SCHEMES[0].disp=true;
+    synLoadScheme(Math.max(0,SYN_SCHEMES.findIndex(function(s){return s.disp})));
+    synPaintSchemes();
     synPaintBoards();
     synPaintMembers();
     openModal('synConfigModal');
@@ -4224,17 +4325,43 @@ async function openSynConfigModal(nid){
 }
 async function saveSynConfig(){
   if(!SYN_CFG)return;
-  var cols=[...SYN_CHECKED];
-  var mem=[...SYN_MEM_CHECKED];
+  synFlushScheme();
+  if(!SYN_SCHEMES.length){toast('至少保留一个方案');return}
+  // ── T-233 客户端预检（后端保存端点同样校验，双保险）──
+  for(var i=0;i<SYN_SCHEMES.length;i++){
+    if(!SYN_SCHEMES[i].name.trim()){toast('方案名不能为空');return}
+    for(var j=0;j<SYN_SCHEMES.length;j++){
+      if(i!==j&&SYN_SCHEMES[i].name===SYN_SCHEMES[j].name){toast('方案名重复：「'+SYN_SCHEMES[i].name+'」');return}
+    }
+  }
+  var seen={}, conflict=null;
+  SYN_SCHEMES.forEach(function(s,i){
+    s.mems.forEach(function(a){
+      if(seen[a]===undefined)seen[a]=i;
+      else if(!conflict)conflict={a:a,i:seen[a],j:i};
+    });
+  });
+  if(conflict){
+    toast('同一追加人员只能适配一个方案：「'+conflict.a+'」同时出现在方案「'
+      +SYN_SCHEMES[conflict.i].name+'」和「'+SYN_SCHEMES[conflict.j].name+'」中');
+    return;
+  }
+  var di=SYN_SCHEMES.findIndex(function(s){return s.disp});
+  if(di<0){SYN_SCHEMES[0].disp=true;di=0}
   var total=synCollectBoards().length;
-  // 全勾 = 与「全部板块」同义 → 落空串（未来新建板块不被白名单挡住）
-  var colPayload=(total>0&&cols.length>=total)?'':cols.join(',');
+  var payload=SYN_SCHEMES.map(function(s){
+    var arr=[...s.cols];
+    // 全勾 = 与「全部板块」同义 → 落空串（未来新建板块不被白名单挡住）
+    var colPayload=(total>0&&arr.length>=total)?'':arr.join(',');
+    return {name:s.name, columns:colPayload, extra_members:[...s.mems].join(',')};
+  });
   try{
-    await api('/api/syn-config/'+SYN_CFG.dept_node_id,{method:'PUT',body:JSON.stringify({
-      columns:colPayload,
-      extra_members:mem.join(','),
+    var r=await api('/api/syn-config/'+SYN_CFG.dept_node_id,{method:'PUT',body:JSON.stringify({
+      schemes:payload,
+      display_index:di,
     })});
-    toast('综合看板配置已保存（'+(colPayload?(cols.length+' 个板块'):'全部板块')+'，追加 '+mem.length+' 人）');
+    toast('综合看板配置已保存（'+payload.length+' 个方案，外部显示方案「'+(r.display||SYN_SCHEMES[di].name)+'」，追加 '
+      +payload.reduce(function(n,s){return n+(s.extra_members?s.extra_members.split(',').filter(Boolean).length:0)},0)+' 人）');
     closeModal('synConfigModal');
     // 保存后按当前模式刷新：单架构=该架构；多架构=全部选中架构重新聚合（T-227）
     if(SYN_MODE)enterSynMode(SYN_MODE.names||[SYN_MODE.name],SYN_MODE.nodeIds||[SYN_MODE.nodeId]);
@@ -7365,7 +7492,7 @@ function renderBoard(cards,cols,q,colHits,allCols){
     names=names.filter(k=>{const m=cmeta[k];if(!m)return false;
       return (SYN_MODE.free&&SYN_MODE.free.has(m.board_id))||SYN_MODE.cols.has(m.col_key)});
     if(!names.length){
-      c.innerHTML='<div class="empty">综合看板白名单中没有当前范围内的板块（可在【综合编辑】中调整）</div>';
+      c.innerHTML='<div class="empty">综合看板白名单中没有当前范围内的板块（可在【综合配置】中调整）</div>';
       return;
     }
   }

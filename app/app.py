@@ -2829,7 +2829,7 @@ def me(username: str = Depends(require_auth)):
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
             'arch_owner': arch_owner,              # #205ad 封存/启用看板入口显隐
             'can_create_board': can_create_board,  # #205ad-cis 新建看板入口显隐（部门负责人及以上）
-            'syn_edit_depts': sorted(_syn_edit),   # T-211 综合编辑按钮显隐（默认可见人员）
+            'syn_edit_depts': sorted(_syn_edit),   # T-211 综合配置按钮显隐（默认可见人员）
             'syn_depts': syn_depts,                # T-211 综合看板按钮显隐（默认 ∪ 追加）
             'syn_invite_count': dbq('SELECT COUNT(*) n FROM syn_config_invite '
                                     'WHERE member=? AND status=?', (username, 'pending'))[0]['n'],  # T-225
@@ -6476,7 +6476,7 @@ def _syn_default_depts(username: str) -> set:
     · center 级负责岗位（center_head / gm，任一 center 节点任命）→ 全部
     · dept_head → 该部门自身
     （追加可见人员走 syn_config_member 归属表，不含在本集合 —— 追加人员
-      不可见【综合编辑】按钮，所以两个集合必须分开维护。）
+      不可见【综合配置】按钮，所以两个集合必须分开维护。）
     """
     syn_nodes = {r['id'] for r in
                  dbq("SELECT id FROM org_nodes WHERE node_type IN ('dept','center')")}
@@ -6564,7 +6564,7 @@ def _syn_grant(username: str, nids):
 
 
 def _syn_extra_depts(username: str) -> set:
-    """T-211/T-224：用户被【综合编辑】追加为可见人员的部门节点集合。
+    """T-211/T-224：用户被【综合配置】追加为可见人员的部门节点集合。
     T-224 起追加归属在 syn_config_member（UNIQUE(dept,member)，先到先得）。"""
     try:
         rows = dbq('SELECT dept_node_id FROM syn_config_member WHERE member=?', (username,))
@@ -6574,28 +6574,49 @@ def _syn_extra_depts(username: str) -> set:
 
 
 def _syn_cfg_for(username: str, nid: int):
-    """T-224：用户对某部门的**适用配置**。
+    """T-224/T-233：用户对某部门的**适用配置**。
 
-    · 默认可见人员（=配置人员）→ 自己那份配置（配置固化隔离：只看到自己保存的）
-    · 追加成员 → 沿用**追加自己的配置人员**的配置（syn_config_member 归属）
-    返回 dict{columns, extra_members, owner}；无配置 → 空白名单/空追加。
+    · 配置人员（默认可见人员）→ 本人名下的**外部显示方案**（is_display=1；
+      未标记 → 第一份方案）。T-233 起支持多方案，配置人自己点【综合看板】
+      看到的就是这份。
+    · 追加成员 → 沿用**追加自己的配置人员**名下**包含该成员的方案**（T-233
+      校验保证同一配置人名下同一成员只适配一个方案）；该成员不在任何方案内时
+      兜底用配置人员的显示方案。
+    · 旧库兜底：syn_scheme 无该 (dept, owner) 行时回落 syn_board_config（迁移前的库）。
+    返回 dict{columns, extra_members, owner}；无任何配置 → 空白名单/空追加。
     """
     empty = {'columns': '', 'extra_members': '', 'owner': ''}
-    own = dbq('SELECT columns, extra_members, owner FROM syn_board_config '
-              'WHERE dept_node_id=? AND owner=?', (nid, username))
-    if own:
-        r = own[0]
-        return {'columns': r['columns'] or '', 'extra_members': r['extra_members'] or '',
-                'owner': r['owner'] or username}
+
+    def _rows_of(owner):
+        return dbq('SELECT id, name, columns, extra_members, is_display FROM syn_scheme '
+                   'WHERE dept_node_id=? AND owner=? ORDER BY id', (nid, owner))
+
+    def _pick(rows):
+        r = ([x for x in rows if x['is_display']] or rows)[0]
+        return {'columns': r['columns'] or '', 'extra_members': r['extra_members'] or ''}
+
+    rows = _rows_of(username)
+    if rows:
+        return dict(_pick(rows), owner=username)
     m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, username))
     if not m:
         return empty
-    cfg = dbq('SELECT columns, extra_members, owner FROM syn_board_config '
-              'WHERE dept_node_id=? AND owner=?', (nid, m[0]['owner']))
-    if not cfg:
-        return empty
-    return {'columns': cfg[0]['columns'] or '', 'extra_members': cfg[0]['extra_members'] or '',
-            'owner': cfg[0]['owner'] or ''}
+    owner = m[0]['owner']
+    orows = _rows_of(owner)
+    if orows:
+        # 成员适配的方案（校验保证同 owner 名下唯一命中）
+        for r in orows:
+            if username in {x.strip() for x in (r['extra_members'] or '').split(',') if x.strip()}:
+                return {'columns': r['columns'] or '', 'extra_members': r['extra_members'] or '',
+                        'owner': owner}
+        return dict(_pick(orows), owner=owner)
+    # 旧库兜底（syn_scheme 迁移前 / 行缺失）
+    legacy = dbq('SELECT columns, extra_members, owner FROM syn_board_config '
+                 'WHERE dept_node_id=? AND owner=?', (nid, owner))
+    if legacy:
+        return {'columns': legacy[0]['columns'] or '', 'extra_members': legacy[0]['extra_members'] or '',
+                'owner': owner}
+    return empty
 
 
 def _syn_subtree_member_candidates(nid: int):
@@ -6721,10 +6742,20 @@ def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
     inv_states = {r['member']: r['status'] for r in
                   dbq('SELECT member, status FROM syn_config_invite '
                       'WHERE dept_node_id=? AND owner=?', (dept_node_id, username))}
+    # T-233：编辑者名下的**方案清单**（多方案管理；追加成员非编辑者不下发）
+    schemes = []
+    if can_edit:
+        for r in dbq('SELECT id, name, columns, extra_members, is_display FROM syn_scheme '
+                     'WHERE dept_node_id=? AND owner=? ORDER BY id', (dept_node_id, username)):
+            schemes.append({'id': r['id'], 'name': r['name'] or '',
+                            'columns': [x for x in (r['columns'] or '').split(',') if x],
+                            'extra_members': [x for x in (r['extra_members'] or '').split(',') if x],
+                            'is_display': bool(r['is_display'])})
     return {'dept_node_id': dept_node_id, 'dept_name': node['name'],
             'node_type': node['node_type'],
             'columns': [x for x in cfg['columns'].split(',') if x],
             'extra_members': [x for x in cfg['extra_members'].split(',') if x],
+            'schemes': schemes,                     # T-233 多方案（配置人视角）
             'invite_states': inv_states,
             'updated_by': cfg['owner'],
             'updated_at': '',
@@ -6733,68 +6764,52 @@ def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
             'candidates': _syn_subtree_member_candidates(dept_node_id) if can_edit else []}
 
 
+class SynSchemeIn(BaseModel):
+    name: str = ''             # 方案名（空 → 自动「方案N」；同配置人同架构内唯一）
+    columns: str = ''          # 板块白名单（逗号 col_key；空 = 全部板块）
+    extra_members: str = ''    # 追加人员（逗号账号）
+
+
 class SynConfigReq(BaseModel):
-    columns: str = ''          # 逗号分隔 board_id（空 = 该架构下全部看板）
-    extra_members: str = ''    # 逗号分隔账号
+    columns: str = ''          # 旧版单配置字段（兼容：schemes 为空时作为显示方案编辑）
+    extra_members: str = ''
+    schemes: List[SynSchemeIn] = []   # T-233 多方案（整体替换该配置人名下全部方案）
+    display_index: int = -1    # 外部显示方案下标（schemes 非空时生效；越界 → 第一个）
 
 
-@app.put('/api/syn-config/{nid}')
-def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require_auth),
-                    request: Request = None):
-    """T-211 保存综合看板配置。权限：**默认可见人员**（追加人员 403）。"""
-    node = _org_node(nid)
-    if not node or node['node_type'] not in ('dept', 'center'):
-        raise HTTPException(404, '部门架构不存在')
-    if nid not in _syn_default_depts(username):
-        raise HTTPException(403, '只有部门长/总经理/中心负责人/管理员/超管可以配置综合看板')
-    # 追加人员候选校验：必须在子树成员内（center 全员 / dept 本架构），防越权追加
-    cand = {c['account'] for c in _syn_subtree_member_candidates(nid)}
-    extra = [x.strip() for x in (req.extra_members or '').split(',') if x.strip()]
-    bad = [x for x in extra if x not in cand]
-    if bad:
-        raise HTTPException(400, '追加人员不在本架构之下：%s' % '、'.join(bad))
-    # 板块白名单校验（T-211-cis 板块级颗粒度）：col_key 必须属于子树看板
-    allowed_boards = _syn_subtree_board_ids(nid)
-    cols = [x.strip() for x in (req.columns or '').split(',') if x.strip()]
-    bad_cols = [x for x in cols if x.split('::')[0] not in allowed_boards]
-    if bad_cols:
-        raise HTTPException(400, '板块不属于本架构：%s' % '、'.join(bad_cols))
-    # T-224：配置固化到 (dept, username) 自己名下 —— 不同配置人员互不可见、互不覆盖
-    prev_row = dbq('SELECT extra_members FROM syn_board_config WHERE dept_node_id=? AND owner=?',
-                   (nid, username))
-    old_extra = {x.strip() for x in ((prev_row[0]['extra_members'] if prev_row else '') or '').split(',')
-                 if x.strip()}
-    new_extra = set(extra)
-    dbe('INSERT INTO syn_board_config (dept_node_id, owner, columns, extra_members, updated_at) '
-        "VALUES (?,?,?,?,datetime('now','localtime')) "
-        'ON CONFLICT(dept_node_id, owner) DO UPDATE SET columns=excluded.columns, '
-        'extra_members=excluded.extra_members, '
-        "updated_at=datetime('now','localtime')",
-        (nid, username, ','.join(cols), ','.join(extra)))
-    # T-225 追加归属规则（syn_config_member.owner = **已确认生效**的配置人员）：
-    #  · 无归属 → 本次保存者即时生效（单发起人，维持原行为）
-    #  · 归属他人 → 多发起人冲突：发**邀请**，由成员确认（生效切换）/拒绝（本发起人保持为空）
-    #  · 已拒绝的邀请不再重发 —— 该发起人结果中该成员保持为空（不可确认选择）
+def _syn_save_member_mapping(nid: int, username: str, old_extra: set, new_extra: set,
+                             scheme_for):
+    """T-225/T-228/T-233：保存后的成员归属与邀请流（union diff）。
+
+    scheme_for(member) → 该成员新适配的方案 id（新建邀请时记录；成员归属本人时
+    无需邀请）。语义与旧版一致：
+    · 无归属 → 本次保存者即时生效；
+    · 归属他人 → 发邀请（成员确认后切换归属并加入对应方案）/已确认过本人则直接切换；
+    · 移除成员 → 释放归属、其他发起人已确认邀请接手、撤销本人 pending 邀请。
+    返回新发邀请数。
+    """
     mapping = {r['member']: r['owner'] for r in
                dbq('SELECT member, owner FROM syn_config_member WHERE dept_node_id=?', (nid,))}
     my_inv = {r['member']: r['status'] for r in
               dbq('SELECT member, status FROM syn_config_invite '
                   'WHERE dept_node_id=? AND owner=?', (nid, username))}
     invited = 0
-    for m in extra:
+    for m in sorted(new_extra - old_extra):
         cur = mapping.get(m)
         inv = my_inv.get(m)
         if cur == username:
-            continue                      # 已生效（本人归属）
+            continue                      # 已生效（本人归属，方案随本次保存的 extra_members）
         if cur:                           # 归属其他发起人
             if inv == 'confirmed':
                 dbe('UPDATE syn_config_member SET owner=? WHERE dept_node_id=? AND member=?',
                     (username, nid, m))   # 成员此前已确认过本人 → 切换归属
+                _syn_scheme_admit(nid, username, m, scheme_for(m) if scheme_for else None)
             elif inv in ('pending', 'rejected'):
                 continue                  # 等待成员处理 / 已拒绝（保持为空）
             else:
-                dbe('INSERT OR IGNORE INTO syn_config_invite (dept_node_id, member, owner, status) '
-                    'VALUES (?,?,?,?)', (nid, m, username, 'pending'))
+                dbe('INSERT OR IGNORE INTO syn_config_invite (dept_node_id, member, owner, status, scheme_id) '
+                    'VALUES (?,?,?,?,?)', (nid, m, username, 'pending',
+                                           scheme_for(m) if scheme_for else None))
                 _syn_invite_notify(nid, m, username)
                 invited += 1
         else:                             # 无归属
@@ -6805,7 +6820,7 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
             dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
                 (nid, m, username))       # 首次追加，单发起人即时生效
     # 移除的成员：释放本人归属；已确认邀请的其他发起人接手；撤销本人 pending 邀请
-    for m in old_extra - new_extra:
+    for m in sorted(old_extra - new_extra):
         if mapping.get(m) == username:
             dbe('DELETE FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, m))
             conf = dbq("SELECT owner FROM syn_config_invite WHERE dept_node_id=? AND member=? "
@@ -6815,6 +6830,149 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
                     (nid, m, conf[0]['owner']))
         dbe("DELETE FROM syn_config_invite WHERE dept_node_id=? AND member=? AND owner=? AND status='pending'",
             (nid, m, username))
+    return invited
+
+
+def _syn_scheme_admit(nid: int, owner: str, member: str, scheme_id=None):
+    """T-233：把成员写进 owner 名下指定方案的 extra_members（确认邀请/切换归属时用）。
+    scheme_id 缺省/失效 → 落到外部显示方案（无标记取第一份）。"""
+    srow = None
+    if scheme_id:
+        r = dbq('SELECT * FROM syn_scheme WHERE id=?', (scheme_id,))
+        if r and r[0]['owner'] == owner and r[0]['dept_node_id'] == nid:
+            srow = r[0]
+    if srow is None:
+        r = dbq('SELECT * FROM syn_scheme WHERE dept_node_id=? AND owner=? '
+                'ORDER BY is_display DESC, id LIMIT 1', (nid, owner))
+        srow = r[0] if r else None
+    if srow is None:
+        return
+    mems = {x.strip() for x in (srow['extra_members'] or '').split(',') if x.strip()}
+    mems.add(member)
+    dbe('UPDATE syn_scheme SET extra_members=?, updated_at=datetime(\'now\',\'localtime\') '
+        'WHERE id=?', (','.join(sorted(mems)), srow['id']))
+
+
+def _syn_scheme_expel(nid: int, owner: str, member: str):
+    """T-233：把成员从 owner 名下**全部方案**的 extra_members 移除（T-228 归属切换/拒绝时）。"""
+    for r in dbq('SELECT id, extra_members FROM syn_scheme WHERE dept_node_id=? AND owner=?',
+                 (nid, owner)):
+        mems = {x.strip() for x in (r['extra_members'] or '').split(',') if x.strip()}
+        if member in mems:
+            mems.discard(member)
+            dbe('UPDATE syn_scheme SET extra_members=?, updated_at=datetime(\'now\',\'localtime\') '
+                'WHERE id=?', (','.join(sorted(mems)), r['id']))
+
+
+@app.put('/api/syn-config/{nid}')
+def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require_auth),
+                    request: Request = None):
+    """T-211/T-233 保存综合看板配置。权限：**默认可见人员**（追加人员 403）。
+
+    T-233 多方案：req.schemes 非空 → **整体替换**该配置人名下全部方案；
+    req.schemes 为空（旧版字段）→ 编辑外部显示方案（无方案 → 新建「默认方案」），
+    其余方案保持不动。校验规则：
+      ① 方案名唯一（同一配置人同架构内）；
+      ② 每个方案：追加人员 ⊆ 子树成员候选、板块白名单 ⊆ 子树看板（防越权）；
+      ③ **冲突校验：同一配置人名下，同一追加人员只能适配一个方案**（防止同一人
+         被两份不同白名单「适配」导致归属歧义）；
+      ④ 外部显示方案唯一（display_index 指定；越界回落第一个）。
+    """
+    node = _org_node(nid)
+    if not node or node['node_type'] not in ('dept', 'center'):
+        raise HTTPException(404, '部门架构不存在')
+    if nid not in _syn_default_depts(username):
+        raise HTTPException(403, '只有部门长/总经理/中心负责人/管理员/超管可以配置综合看板')
+    cand = {c['account'] for c in _syn_subtree_member_candidates(nid)}
+    allowed_boards = _syn_subtree_board_ids(nid)
+
+    def _check_members(mems, sname):
+        bad = [x for x in mems if x not in cand]
+        if bad:
+            raise HTTPException(400, '方案「%s」追加人员不在本架构之下：%s'
+                                % (sname, '、'.join(_member_display_name(x) or x for x in bad)))
+
+    def _check_cols(cols, sname):
+        bad_cols = [x for x in cols if x.split('::')[0] not in allowed_boards]
+        if bad_cols:
+            raise HTTPException(400, '方案「%s」板块不属于本架构：%s' % (sname, '、'.join(bad_cols)))
+
+    invited = 0
+    if req.schemes:
+        # ── T-233 多方案整体替换 ──
+        schemes = []
+        for i, s in enumerate(req.schemes):
+            schemes.append({'name': (s.name or '').strip() or ('方案%d' % (i + 1)),
+                            'cols': [x.strip() for x in (s.columns or '').split(',') if x.strip()],
+                            'mems': [x.strip() for x in (s.extra_members or '').split(',') if x.strip()]})
+        names = [s['name'] for s in schemes]
+        dup = sorted({n for n in names if names.count(n) > 1})
+        if dup:
+            raise HTTPException(400, '方案名重复：%s（同一配置人名下方案名不可重复）' % '、'.join(dup))
+        for s in schemes:
+            _check_members(s['mems'], s['name'])
+            _check_cols(s['cols'], s['name'])
+        # ③ 冲突校验：同一配置人名下，同一追加人员只能适配一个方案
+        seen = {}
+        for s in schemes:
+            for m in s['mems']:
+                if m in seen and seen[m] != s['name']:
+                    raise HTTPException(400, '追加人员「%s」同时出现在方案「%s」和「%s」中：'
+                                             '同一配置人名下，同一追加人员只能适配一个方案'
+                                             % (_member_display_name(m) or m, seen[m], s['name']))
+                seen[m] = s['name']
+        di = req.display_index if 0 <= req.display_index < len(schemes) else 0
+        old_rows = dbq('SELECT extra_members FROM syn_scheme WHERE dept_node_id=? AND owner=?',
+                       (nid, username))
+        old_extra = set()
+        for r in old_rows:
+            old_extra |= {x.strip() for x in (r['extra_members'] or '').split(',') if x.strip()}
+        new_extra = {m for s in schemes for m in s['mems']}
+        dbe('DELETE FROM syn_scheme WHERE dept_node_id=? AND owner=?', (nid, username))
+        sid_by_idx = []
+        for i, s in enumerate(schemes):
+            dbe('INSERT INTO syn_scheme (dept_node_id, owner, name, columns, extra_members, is_display, '
+                "updated_at) VALUES (?,?,?,?,?,?,datetime('now','localtime'))",
+                (nid, username, s['name'], ','.join(s['cols']), ','.join(s['mems']),
+                 1 if i == di else 0))
+            sid_by_idx.append(dbq('SELECT id FROM syn_scheme WHERE dept_node_id=? AND owner=? AND name=?',
+                                  (nid, username, s['name']))[0]['id'])
+        idx_of = {}
+        for i, s in enumerate(schemes):
+            for m in s['mems']:
+                idx_of.setdefault(m, i)      # 校验后全局唯一，取第一个（=唯一）
+        invited = _syn_save_member_mapping(
+            nid, username, old_extra, new_extra,
+            (lambda m: sid_by_idx[idx_of[m]]) if new_extra - old_extra else None)
+        audit_log(username, client_ip(request), 'update', f'综合看板配置 {node["name"]}',
+                  f'综合看板配置：{node["name"]}（{len(schemes)} 个方案'
+                  f'，外部显示方案「{schemes[di]["name"]}」，追加人员 {len(new_extra)} 人'
+                  + ('，新发邀请 %d 份' % invited if invited else '') + '）', 'success')
+        return {'ok': True, 'invited': invited, 'schemes': len(schemes), 'display': schemes[di]['name']}
+    # ── 旧版单配置（兼容 t211 回归与既有前端语义）：编辑外部显示方案 ──
+    extra = [x.strip() for x in (req.extra_members or '').split(',') if x.strip()]
+    cols = [x.strip() for x in (req.columns or '').split(',') if x.strip()]
+    rows = dbq('SELECT * FROM syn_scheme WHERE dept_node_id=? AND owner=? ORDER BY id', (nid, username))
+    if rows:
+        tgt = ([r for r in rows if r['is_display']] or rows)[0]
+        _check_members(extra, tgt['name'] or '默认方案')
+        _check_cols(cols, tgt['name'] or '默认方案')
+        old_extra = {x.strip() for x in (tgt['extra_members'] or '').split(',') if x.strip()}
+        dbe('UPDATE syn_scheme SET columns=?, extra_members=?, updated_at=datetime(\'now\',\'localtime\') '
+            'WHERE id=?', (','.join(cols), ','.join(extra), tgt['id']))
+        sid = tgt['id']
+    else:
+        _check_members(extra, '默认方案')
+        _check_cols(cols, '默认方案')
+        old_extra = set()
+        dbe('INSERT INTO syn_scheme (dept_node_id, owner, name, columns, extra_members, is_display, '
+            "updated_at) VALUES (?,?,?,?,?,1,datetime('now','localtime'))",
+            (nid, username, '默认方案', ','.join(cols), ','.join(extra)))
+        sid = dbq('SELECT id FROM syn_scheme WHERE dept_node_id=? AND owner=? AND name=?',
+                  (nid, username, '默认方案'))[0]['id']
+    new_extra = set(extra)
+    invited = _syn_save_member_mapping(nid, username, old_extra, new_extra,
+                                       (lambda m: sid) if new_extra - old_extra else None)
     audit_log(username, client_ip(request), 'update', f'综合看板配置 {node["name"]}',
               f'综合看板配置：{node["name"]}（看板白名单 {len(cols)} 项，追加人员 {len(extra)} 人'
               + ('，新发邀请 %d 份' % invited if invited else '') + '）', 'success')
@@ -6822,25 +6980,41 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
 
 
 def _syn_invite_notify(nid: int, member: str, owner: str):
-    """T-225：邀请通知（站内消息，收件人=成员账号）。"""
+    """T-225：邀请通知（站内消息，收件人=成员账号）。T-233：文案带目标方案名。"""
     node = _org_node(nid)
     dname = node['name'] if node else ('节点 %d' % nid)
-    content = ('「%s」综合看板：%s 邀请您作为追加人员（多位发起人已选择您），'
-               '请前往【综合看板】处理邀请') % (dname, _member_display_name(owner) or owner)
+    inv = dbq('SELECT scheme_id FROM syn_config_invite WHERE dept_node_id=? AND member=? AND owner=? '
+              "AND status='pending' ORDER BY id DESC LIMIT 1", (nid, member, owner))
+    sname = ''
+    if inv and inv[0]['scheme_id']:
+        s = dbq('SELECT name FROM syn_scheme WHERE id=?', (inv[0]['scheme_id'],))
+        sname = '（方案：%s）' % s[0]['name'] if s else ''
+    content = ('「%s」综合看板：%s 邀请您作为追加人员%s（多位发起人已选择您），'
+               '请前往【综合看板】处理邀请') % (dname, _member_display_name(owner) or owner, sname)
     dbe('INSERT INTO messages (receiver, sender, card_id, kind, content) VALUES (?,?,?,?,?)',
         (member, owner, '', 'system', content))
 
 
 @app.get('/api/syn-invites')
 def syn_invite_list(username: str = Depends(require_auth)):
-    """T-225：本人的待处理邀请清单（成员自行确认/拒绝）。"""
-    rows = dbq("""SELECT i.id, i.dept_node_id, i.owner, i.created_at, n.name AS dept_name
+    """T-225：本人的待处理邀请清单（成员自行确认/拒绝）。T-233：附带目标方案名。"""
+    rows = dbq("""SELECT i.id, i.dept_node_id, i.owner, i.created_at, i.scheme_id,
+                  n.name AS dept_name
                   FROM syn_config_invite i JOIN org_nodes n ON n.id=i.dept_node_id
                   WHERE i.member=? AND i.status=? ORDER BY i.id DESC""", (username, 'pending'))
     out = []
     for r in rows:
         d = dict(r)
         d['owner_name'] = _member_display_name(r['owner']) or r['owner']
+        sname = ''
+        if r['scheme_id']:
+            s = dbq('SELECT name FROM syn_scheme WHERE id=?', (r['scheme_id'],))
+            sname = s[0]['name'] if s else ''
+        if not sname:   # 旧邀请/方案已删 → 发起人的外部显示方案
+            s = dbq('SELECT name FROM syn_scheme WHERE dept_node_id=? AND owner=? '
+                    'ORDER BY is_display DESC, id LIMIT 1', (r['dept_node_id'], r['owner']))
+            sname = s[0]['name'] if s else ''
+        d['scheme_name'] = sname
         out.append(d)
     return {'invites': out}
 
@@ -6870,16 +7044,13 @@ def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends
         dbe('INSERT INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?) '
             'ON CONFLICT(dept_node_id, member) DO UPDATE SET owner=excluded.owner',
             (inv['dept_node_id'], inv['member'], inv['owner']))
-        # T-228：原归属配置人员同步取消 —— ①其追加清单移除该成员（配置界面不再勾选）
+        # T-233：成员加入邀请记录的目标方案（缺省/方案已删 → 发起人的外部显示方案）
+        _syn_scheme_admit(inv['dept_node_id'], inv['owner'], inv['member'],
+                          inv['scheme_id'] if 'scheme_id' in inv.keys() else None)
+        # T-228：原归属配置人员同步取消 —— ①其全部方案的追加清单移除该成员（T-233）
         # ②其对该成员的邀请（pending/confirmed）标记 rejected（面板显示「已拒绝（不可选）」）
         if prev_owner and prev_owner != inv['owner']:
-            cfg0 = dbq('SELECT extra_members FROM syn_board_config WHERE dept_node_id=? AND owner=?',
-                       (inv['dept_node_id'], prev_owner))
-            if cfg0:
-                keep = [x.strip() for x in (cfg0[0]['extra_members'] or '').split(',')
-                        if x.strip() and x.strip() != username]
-                dbe('UPDATE syn_board_config SET extra_members=? WHERE dept_node_id=? AND owner=?',
-                    (','.join(keep), inv['dept_node_id'], prev_owner))
+            _syn_scheme_expel(inv['dept_node_id'], prev_owner, inv['member'])
             dbe("UPDATE syn_config_invite SET status='rejected', decided_at=datetime('now','localtime') "
                 "WHERE dept_node_id=? AND member=? AND owner=? AND status IN ('pending','confirmed')",
                 (inv['dept_node_id'], inv['member'], prev_owner))
@@ -6890,14 +7061,8 @@ def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends
     else:
         dbe("UPDATE syn_config_invite SET status='rejected', decided_at=datetime('now','localtime') WHERE id=?",
             (iid,))
-        # 发起人的追加清单移除该成员 → 其综合看板结果中该成员保持为空（不可确认选择）
-        cfg = dbq('SELECT extra_members FROM syn_board_config WHERE dept_node_id=? AND owner=?',
-                  (inv['dept_node_id'], inv['owner']))
-        if cfg:
-            keep = [x.strip() for x in (cfg[0]['extra_members'] or '').split(',')
-                    if x.strip() and x.strip() != username]
-            dbe('UPDATE syn_board_config SET extra_members=? WHERE dept_node_id=? AND owner=?',
-                (','.join(keep), inv['dept_node_id'], inv['owner']))
+        # 发起人的全部方案移除该成员 → 其综合看板结果中该成员保持为空（不可确认选择）
+        _syn_scheme_expel(inv['dept_node_id'], inv['owner'], inv['member'])
         audit_log(username, client_ip(request), 'update', '综合看板邀请',
                   '拒绝追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner']), 'success')
     return {'ok': True}
