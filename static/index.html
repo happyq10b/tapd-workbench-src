@@ -2337,10 +2337,10 @@ function goLogin(){
         <div class="form-row" style="grid-template-columns:1fr 1fr 1.3fr">
           <div class="form-group"><label>归属年份 <span style="color:var(--danger)">*</span></label><input type="text" class="form-input" id="c_year" list="c_year_list" maxlength="4" placeholder="例如：2026" title="归属年份（4 位数字，必填；默认取板块创建年份）" oninput="YEAR_TOUCHED=true"><datalist id="c_year_list"><option value="2025"></option><option value="2026"></option><option value="2027"></option><option value="2028"></option><option value="2029"></option><option value="2030"></option></datalist></div>
           <div class="form-group"><label>性质 <span style="color:var(--danger)">*</span></label>
-            <div class="radio-group">
-              <label class="radio-item"><input type="radio" name="c_nature" value="日常" checked><span>日常</span></label>
-              <label class="radio-item"><input type="radio" name="c_nature" value="专项"><span>专项</span></label>
-            </div>
+            <select class="form-select" id="c_nature" title="板块性质（必选）">
+              <option value="日常" selected>日常</option>
+              <option value="专项">专项</option>
+            </select>
           </div>
           <div class="form-group"><label>类别 <span style="color:var(--danger)">*</span></label>
             <select class="form-select" id="c_category" title="板块类别（必选，默认年度重点工作）">
@@ -9331,8 +9331,7 @@ function openColumnModal(){
   // T-191l：创建人字段已移除（创建人由系统按登录账号锁定，仅浏览界面展示）
   // 截止日期：新建时默认空（T-0188 倒计时）
   document.getElementById('c_due').value='';
-  const nat=document.querySelector('input[name="c_nature"]:checked');
-  if(nat)nat.checked=true;
+  document.getElementById('c_nature').value='日常';
   // 类别（T-209）：新建默认「年度重点工作」
   document.getElementById('c_category').value='年度重点工作';
   COL_OWNER='';
@@ -9377,8 +9376,7 @@ async function openColumnEdit(d,fromDetail){
   document.getElementById('c_created').value=(d.created||'').slice(0,10);
   // 截止日期回填（T-0188 倒计时）
   document.getElementById('c_due').value=(d.due||'').slice(0,10);
-  const nat=document.querySelector(`input[name="c_nature"][value="${d.nature||'日常'}"]`);
-  if(nat)nat.checked=true;
+  document.getElementById('c_nature').value=d.nature||'日常';
   // 类别回填（T-209）：存量板块缺省按默认「年度重点工作」
   document.getElementById('c_category').value=d.category||'年度重点工作';
   // 板块完成情况回填（2026-11-04 需求3）→ T-191j：头部按钮承载（与事项编辑一致）
@@ -9636,7 +9634,7 @@ async function saveColumn(){
   const created_at=document.getElementById('c_created').value;
   const due_date=document.getElementById('c_due').value.trim();   // T-0188 倒计时
   const year=document.getElementById('c_year').value.trim();
-  const nature=(document.querySelector('input[name="c_nature"]:checked')||{}).value||'日常';
+  const nature=document.getElementById('c_nature').value||'日常';
   const category=document.getElementById('c_category').value||'年度重点工作';   // T-209
   if(!column_name){toast('板块名称不能为空');return}
   if(!board_id){toast('请选择所属看板');return}
