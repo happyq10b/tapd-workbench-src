@@ -837,6 +837,17 @@ def _migrate_schema(conn):
         WHERE NOT EXISTS (SELECT 1 FROM syn_scheme s
                           WHERE s.dept_node_id=syn_board_config.dept_node_id
                             AND s.owner=syn_board_config.owner)''')
+    # T-235（2026-11-25 用户需求1）：用户的**方案接收/选择态** —— 每个用户对同一
+    # 架构可接收多个方案（不同发起人邀请），并可逐方案选择「适用(active)/退出(exited)」。
+    # 视图口径：active 方案的白名单并集；无任何行时回落 syn_config_member 旧归属路径。
+    conn.execute('''CREATE TABLE IF NOT EXISTS syn_scheme_member (
+        dept_node_id  INTEGER NOT NULL,
+        username      TEXT NOT NULL,
+        scheme_id     INTEGER NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'active',
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        PRIMARY KEY (dept_node_id, username, scheme_id)
+    )''')
 
 def _migrate_org(conn):
     """组织架构迁移：workgroups（层级 + 单个 leader + 成员分号串）

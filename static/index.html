@@ -1900,7 +1900,7 @@ function goLogin(){
                的 perm_check_arch_scope 同口径）；无权限用户不渲染。 -->
           <!-- T-211 综合看板（2026-11-24 用户需求）：位于【＋ 新建看板】左侧，样式一致。
                非综合模式显示【综合看板】（进入该部门综合模式：展示本架构下全部看板的
-               全部板块，类别优先于置顶排序）；综合模式下按钮变【普通看板】（退出），
+               全部板块）；综合模式下按钮变【普通看板】（退出），
                左侧追加【综合配置】（仅默认可见人员可见，追加人员不可见）。 -->
           <!-- T-212-ter（2026-11-24 用户反馈）：三按钮统一【启用勾选】形态（白底描边，
                综合模式进行中【普通看板】= 蓝底激活态 .on）；synEntry 去掉 margin-left:auto
@@ -2479,6 +2479,25 @@ function goLogin(){
     <div class="modal-body">
       <div id="syn_invite_list"></div>
       <div style="font-size:11.5px;color:var(--text3);margin-top:8px">确认后您将沿用对应发起人的综合看板配置；拒绝后该发起人的综合看板中不会包含您（其结果保持为空）。</div>
+    </div>
+  </div>
+</div>
+
+<!-- 综合看板方案选择弹窗（T-235 用户需求1）：点【综合看板】后弹出 ——
+     用户对接收到的多方案选择「适用」，并支持退出已选方案（可随时重新选择） -->
+<div class="modal-overlay" id="synMyModal" style="display:none;z-index:110">
+  <div class="modal" style="width:480px;max-width:94vw">
+    <div class="modal-header"><h2>🧩 选择综合看板方案</h2><button class="modal-close" onclick="synMyCancel()">✕</button></div>
+    <div class="modal-body" style="padding:12px 16px;gap:10px">
+      <div id="synMyList"></div>
+      <div style="font-size:11.5px;color:var(--text3);line-height:1.7">
+        勾选 = 适用（综合视图按勾选方案的白名单并集展示）；<b>退出</b>已选方案后可随时回来重新勾选。
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px;align-items:center">
+      <span style="flex:1"></span>
+      <button class="btn-secondary" onclick="synMyCancel()">取消</button>
+      <button class="btn-primary" onclick="synMyApply()">确定</button>
     </div>
   </div>
 </div>
@@ -3895,7 +3914,7 @@ function renderPermissionEntries(){
 // 进入：锚定架构区当前选中的**单个部门**（校验 ME.syn_depts 权限）→
 //       curBoards 临时替换为该架构下全部可见看板（经白名单过滤）→ reload 聚合渲染。
 // 退出：恢复进入前的看板选择（SYN_PREV_BOARDS）。
-// 排序：cmpColumn 综合模式下按「类别（枚举序）→ 置顶 → 原逻辑」。
+// 排序：与普通模式同一套「排序设定」（T-235 取消类别强排序，用户可自行配置类别维度）。
 var SYN_MODE=null;
 var SYN_PREV_BOARDS=null;
 function applySynBtn(){
@@ -3947,7 +3966,75 @@ async function toggleSynMode(){
     toast('未找到「'+miss.join('、')+'」的架构节点（架构树部门：'+(avail.join('、')||'无')+'）；若刚改过部门名请刷新页面后重试');
     return;
   }
-  enterSynMode(nodes.map(function(x){return x.name;}),nodes.map(function(x){return x.id;}));
+  // T-235（2026-11-25 用户需求1）：已接收方案的架构 → 先弹方案选择弹窗
+  //（勾选适用方案 / 退出已选方案）；无接收方案（纯配置人看自己的显示方案）→ 直接进入
+  await synPickAndEnter(nodes);
+}
+// ── T-235 方案选择弹窗 ──
+var SYN_MY=null;   // {names:[],nids:[],items:[{nid,dept_name,schemes:[{id,name,owner_name,cols_count,status}]}],pick:{sid:bool}}
+async function synPickAndEnter(nodes){
+  var names=nodes.map(function(x){return x.name;}), nids=nodes.map(function(x){return x.id;});
+  var received=[];
+  for(var i=0;i<nids.length;i++){
+    try{
+      var d=await api('/api/syn-my-schemes?dept_node_id='+nids[i]);
+      if(d&&d.schemes&&d.schemes.length)received.push({nid:nids[i],dept_name:d.dept_name,schemes:d.schemes});
+    }catch(e){/* 403/无接收 → 该架构直接按原口径进入 */}
+  }
+  if(!received.length){enterSynMode(names,nids);return}
+  SYN_MY={names:names,nids:nids,items:received,pick:{}};
+  received.forEach(function(it){
+    it.schemes.forEach(function(s){SYN_MY.pick[s.id]=(s.status==='active');});
+  });
+  synPaintMy();
+  openModal('synMyModal');
+}
+function synPaintMy(){
+  var box=document.getElementById('synMyList');
+  if(!box||!SYN_MY)return;
+  box.innerHTML=SYN_MY.items.map(function(it){
+    return '<div style="margin-bottom:10px">'
+      +'<div style="font-size:13px;font-weight:600;margin-bottom:4px">'+esc(it.dept_name)+'</div>'
+      +it.schemes.map(function(s){
+        var on=!!SYN_MY.pick[s.id];
+        return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);'
+          +'border-radius:6px;margin-bottom:4px;cursor:pointer;'+(on?'background:#f5f8ff;':'')+'">'
+          +'<input type="checkbox"'+(on?' checked':'')+' onchange="synMyToggle('+s.id+',this.checked)">'
+          +'<span style="flex:1;min-width:0;font-size:12.5px"><b>'+esc(s.name||('方案'+s.id))+'</b>'
+          +'<span style="color:var(--text3);font-size:11px">　发起人：'+esc(s.owner_name||s.owner)
+          +'　·　'+(s.cols_count?s.cols_count+' 个板块':'全部板块')+'</span></span>'
+          +(s.status==='active'?'<span style="color:#d48806;font-size:11px;flex-shrink:0">适用中</span>':'')
+          +(on?'<span onclick="event.stopPropagation();synMyExit('+s.id+')" title="退出该方案：不再适用于你的综合视图（可随时重新勾选）" '
+              +'style="color:var(--danger);font-size:11.5px;flex-shrink:0;cursor:pointer">退出</span>':'')
+          +'</label>';
+      }).join('')+'</div>';
+  }).join('');
+}
+function synMyToggle(sid,on){if(SYN_MY)SYN_MY.pick[sid]=on;}
+// 退出：取消勾选并**立即保存**（不进综合模式也生效；之后可随时回来重新勾选）
+async function synMyExit(sid){
+  if(!SYN_MY)return;
+  SYN_MY.pick[sid]=false;
+  synPaintMy();
+  for(var i=0;i<SYN_MY.items.length;i++){
+    var it=SYN_MY.items[i];
+    var ids=it.schemes.filter(function(s){return SYN_MY.pick[s.id];}).map(function(s){return s.id;});
+    try{ await api('/api/syn-my-schemes/'+it.nid,{method:'POST',body:JSON.stringify({scheme_ids:ids})}); }catch(e){}
+  }
+  toast('已退出该方案');
+}
+function synMyCancel(){closeModal('synMyModal');}
+async function synMyApply(){
+  if(!SYN_MY)return;
+  for(var i=0;i<SYN_MY.items.length;i++){
+    var it=SYN_MY.items[i];
+    var ids=it.schemes.filter(function(s){return SYN_MY.pick[s.id];}).map(function(s){return s.id;});
+    try{ await api('/api/syn-my-schemes/'+it.nid,{method:'POST',body:JSON.stringify({scheme_ids:ids})}); }catch(e){toast(e.message||'保存失败');return}
+  }
+  closeModal('synMyModal');
+  var names=SYN_MY.names,nids=SYN_MY.nids;
+  SYN_MY=null;
+  enterSynMode(names,nids);
 }
 async function enterSynMode(dname,nid){
   // T-226：多架构累加 —— dname/nid 可为「数组」（多选架构各自过滤后并集）；
@@ -4879,7 +4966,7 @@ function renderTabs(){
   const selHint=document.getElementById('boardSelHint');
   if(selHint){
     if(typeof SYN_MODE!=='undefined'&&SYN_MODE){
-      selHint.textContent='🧩 综合看板：'+SYN_MODE.name+'（全部看板聚合展示，类别优先排序）';
+      selHint.textContent='🧩 综合看板：'+SYN_MODE.name+'（全部看板聚合展示）';
       selHint.title='综合看板模式：展示「'+SYN_MODE.name+'」架构下全部看板中的全部板块'+(SYN_MODE.nodeIds.length>1?'（多架构累加）':'')+'；点【普通看板】退出';
     }else if(curBoards.size){
       const known=(ME&&ME.boards||[]).filter(function(b){return curBoards.has(b.board_id);})
@@ -8117,14 +8204,8 @@ function srItemHtml(x){
 function colPinKey(name,meta){return (meta&&meta.col_key)?meta.col_key:(curBoard+'::'+name)}
 function cmpColumn(a,b,cmeta,csort){
   const ma=cmeta[a]||{},mb=cmeta[b]||{};
-  // T-211 综合看板模式：**类别优先于置顶**作为第一级排序（枚举固定顺序：
-  // 年度重点工作 → 业财融合 → 财务数智化 → 其他重点 → 文化及团队建设）；
-  // 普通模式维持原序（置顶优先）。未知类别排在枚举之后。
-  if(typeof SYN_MODE!=='undefined'&&SYN_MODE){
-    const ord=v=>{const i=CAT_OPTS.findIndex(o=>o[0]===v);return i>=0?i:CAT_OPTS.length};
-    const ca=ord(ma.category||'年度重点工作'),cb=ord(mb.category||'年度重点工作');
-    if(ca!==cb)return ca-cb;
-  }
+  // T-235（2026-11-25 用户需求4）：取消综合模式的「类别优先」强排序 —— 排序设定
+  // 已支持【类别】枚举维度，用户可自行配置，综合模式不再强制插入类别层。
   const pa=isPinned('column',colPinKey(a,ma)),pb=isPinned('column',colPinKey(b,mb));
   if(pa!==pb)return pa?-1:1;          // 置顶恒在最前（不受排序配置影响）
   if(pa&&pb){                         // T-234：置顶组内按置顶时间从新到旧（最新置顶在最上）

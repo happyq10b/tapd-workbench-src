@@ -6595,23 +6595,36 @@ def _syn_grant(username: str, nids):
 
 def _syn_extra_depts(username: str) -> set:
     """T-211/T-224：用户被【综合配置】追加为可见人员的部门节点集合。
-    T-224 起追加归属在 syn_config_member（UNIQUE(dept,member)，先到先得）。"""
+    T-224 起追加归属在 syn_config_member（UNIQUE(dept,member)，先到先得）。
+    T-235：用户已接收方案（syn_scheme_member，含已退出）的架构同样计入
+    能力位 —— 退出全部方案后仍可打开选择弹窗重新选择。"""
+    out = set()
     try:
-        rows = dbq('SELECT dept_node_id FROM syn_config_member WHERE member=?', (username,))
-        return {r['dept_node_id'] for r in rows}
+        for r in dbq('SELECT dept_node_id FROM syn_config_member WHERE member=?', (username,)):
+            out.add(r['dept_node_id'])
     except Exception:
-        return set()   # 表未迁移（旧库）时按「无追加」处理
+        pass   # 表未迁移（旧库）时按「无追加」处理
+    try:
+        for r in dbq('SELECT DISTINCT dept_node_id FROM syn_scheme_member WHERE username=?',
+                     (username,)):
+            out.add(r['dept_node_id'])
+    except Exception:
+        pass
+    return out
 
 
 def _syn_cfg_for(username: str, nid: int):
-    """T-224/T-233：用户对某部门的**适用配置**。
+    """T-224/T-233/T-235：用户对某部门的**适用配置**。
 
     · 配置人员（默认可见人员）→ 本人名下的**外部显示方案**（is_display=1；
       未标记 → 第一份方案）。T-233 起支持多方案，配置人自己点【综合看板】
       看到的就是这份。
-    · 追加成员 → 沿用**追加自己的配置人员**名下**包含该成员的方案**（T-233
-      校验保证同一配置人名下同一成员只适配一个方案）；该成员不在任何方案内时
-      兜底用配置人员的显示方案。
+    · 追加成员（T-235 选择态优先）→ syn_scheme_member 中 status='active' 的
+      **已接收方案**（可多个 —— 不同发起人邀请；白名单取**并集**，任一方案
+      空白名单 = 全部板块放开）；owner 取第一个命中方案的配置人（可见口径）。
+      用户已全部退出 → 空白名单为空串？否 —— 无 active 行时按下方旧路径/兜底。
+    · 旧库兼容（无 syn_scheme_member 行）：沿用 syn_config_member 归属 →
+      配置人名下包含该成员的方案。
     · 旧库兜底：syn_scheme 无该 (dept, owner) 行时回落 syn_board_config（迁移前的库）。
     返回 dict{columns, extra_members, owner}；无任何配置 → 空白名单/空追加。
     """
@@ -6628,6 +6641,36 @@ def _syn_cfg_for(username: str, nid: int):
     rows = _rows_of(username)
     if rows:
         return dict(_pick(rows), owner=username)
+    # T-235：用户选择态 —— 已接收方案（active）的白名单并集；可多方案共存
+    try:
+        sel = dbq("""SELECT s.columns, s.owner, s.extra_members FROM syn_scheme_member sm
+                     JOIN syn_scheme s ON s.id=sm.scheme_id
+                     WHERE sm.dept_node_id=? AND sm.username=? AND sm.status='active'
+                     ORDER BY s.id""", (nid, username))
+    except Exception:
+        sel = []
+    if sel:
+        cols = set()
+        all_free = False
+        for r in sel:
+            wl = [x.strip() for x in (r['columns'] or '').split(',') if x.strip()]
+            if not wl:
+                all_free = True        # 空白名单方案 = 全部板块 → 并集放开
+            else:
+                cols.update(wl)
+        return {'columns': '' if all_free else ','.join(sorted(cols)),
+                'extra_members': ';'.join(sorted({x.strip() for r in sel
+                                                  for x in (r['extra_members'] or '').split(',') if x.strip()})),
+                'owner': sel[0]['owner']}
+    _has_rows = True
+    try:
+        _has_rows = bool(dbq("""SELECT 1 FROM syn_scheme_member sm
+                                JOIN syn_scheme s ON s.id=sm.scheme_id
+                                WHERE sm.dept_node_id=? AND sm.username=? LIMIT 1""", (nid, username)))
+    except Exception:
+        _has_rows = False
+    if _has_rows:
+        return empty   # 用户已接收过方案但全部退出 → 综合视图为空（可在弹窗重新选择）
     m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, username))
     if not m:
         return empty
@@ -6650,67 +6693,18 @@ def _syn_cfg_for(username: str, nid: int):
 
 
 def _syn_subtree_member_candidates(nid: int):
-    """T-211：节点子树下的**在职成员**（账号 → 姓名），追加可见人员的候选池。
+    """T-211：追加可见人员的候选池（账号 → 姓名）。
 
-    跨部门约束（用户需求）：除【财务中心】（center 型，综合配置可选全员）外，
-    各部门的追加候选 = 本部门架构之下成员。两条来源取并集：
-    · 子树岗位任命（org_appointments —— 部门长/组长等，架构树人员层同源）
-    · team_members.departments / workgroups 命中子树节点名（普通成员绑定）
-    在职判定：status != 'departed'（status 默认空串 = 在职；此前误用 ='active'
-    把 70/71 名成员全筛掉 —— T-211-bis 用户实测「可选人员为空」根因）。
+    T-235（2026-11-25 用户需求2）：范围扩展 —— **除 admin 以外的全部用户**均可被
+    选为追加可见人，不再限定架构子树/中心全员（原跨部门约束废止）。
+    账号来源 = users 登录账号表（排除 admin），姓名经 team_members 映射
+    （无档案行时回退账号本身）。
     """
-    rows = [dict(r) for r in dbq('SELECT id, parent_id, name, node_type FROM org_nodes')]
-    nmap = {r['id']: r for r in rows}
-    root = nmap.get(nid)
-    if not root:
-        return []
-    kids = defaultdict(list)
-    for r in rows:
-        kids[r['parent_id']].append(r['id'])
-    subtree, stack = set(), [nid]
-    while stack:
-        x = stack.pop()
-        if x in subtree:
-            continue
-        subtree.add(x)
-        stack.extend(kids.get(x, []))
-    subtree_names = {nmap[x]['name'] for x in subtree}
     out = {}
-    if root['node_type'] == 'center':
-        # 中心级：全员（在职 + 有账号）
-        q = ("SELECT m.account, m.name FROM team_members m "
-             "WHERE IFNULL(m.status,'')!='departed' AND IFNULL(m.account,'')!=''")
-        for r in dbq(q):
-            out[r['account']] = r['name']
-    else:
-        # ① 子树岗位任命成员（架构树人员层同源）
-        marks = ','.join('?' * len(subtree))
-        q = ("SELECT DISTINCT m.account, m.name FROM org_appointments a "
-             "JOIN team_members m ON m.id=a.member_id "
-             f"WHERE a.node_id IN ({marks}) "
-             "AND IFNULL(m.status,'')!='departed' AND IFNULL(m.account,'')!=''")
-        for r in dbq(q, tuple(subtree)):
-            out[r['account']] = r['name']
-        # ② departments / workgroups 绑定命中子树节点名的普通成员
-        q = ("SELECT account, name, departments, workgroups FROM team_members "
-             "WHERE IFNULL(status,'')!='departed' AND IFNULL(account,'')!=''")
-        for r in dbq(q):
-            bound = ((r['departments'] or '') + ',' + (r['workgroups'] or '')).split(',')
-            bound = {x.strip() for x in bound if x.strip()}
-            if bound & subtree_names:
-                out.setdefault(r['account'], r['name'])
-        # ③ T-225（BUG修复）：管理角色成员（部门长/总经理/中心负责人 —— 任命可能在
-        #    本部门子树之外，如总经理挂中心节点）与管理员/超管 —— 全局可被追加
-        q3 = ("SELECT DISTINCT m.account, m.name FROM org_appointments a "
-              "JOIN team_members m ON m.id=a.member_id "
-              "WHERE a.role_key IN ('center_head','gm','dept_head') "
-              "AND IFNULL(m.status,'')!='departed' AND IFNULL(m.account,'')!=''")
-        for r in dbq(q3):
-            out[r['account']] = r['name']
-        for r in dbq("SELECT username FROM users WHERE role='admin'"):
-            nm = r['username']
-            mrow = dbq('SELECT name FROM team_members WHERE account=? LIMIT 1', (nm,))
-            out[nm] = mrow[0]['name'] if mrow else nm
+    for r in dbq("SELECT username FROM users WHERE username<>'' AND username<>'admin'"):
+        nm = r['username']
+        mrow = dbq('SELECT name FROM team_members WHERE account=? LIMIT 1', (nm,))
+        out[nm] = (mrow[0]['name'] if mrow else '') or nm
     return [{'account': a, 'name': n} for a, n in sorted(out.items(), key=lambda x: x[1])]
 
 
@@ -6809,13 +6803,15 @@ class SynConfigReq(BaseModel):
 
 def _syn_save_member_mapping(nid: int, username: str, old_extra: set, new_extra: set,
                              scheme_for):
-    """T-225/T-228/T-233：保存后的成员归属与邀请流（union diff）。
+    """T-225/T-228/T-233/T-235：保存后的成员归属与邀请流（union diff）。
 
-    scheme_for(member) → 该成员新适配的方案 id（新建邀请时记录；成员归属本人时
-    无需邀请）。语义与旧版一致：
-    · 无归属 → 本次保存者即时生效；
-    · 归属他人 → 发邀请（成员确认后切换归属并加入对应方案）/已确认过本人则直接切换；
-    · 移除成员 → 释放归属、其他发起人已确认邀请接手、撤销本人 pending 邀请。
+    scheme_for(member) → 该成员新适配的方案 id（邀请记录目标方案）。
+    T-235（2026-11-25 用户需求3）：**全量邀请制** —— 首次追加也发邀请（不再即时生效），
+    成员确认后加入方案并获接收登记；已生效（此前确认过本人邀请）的成员不再重复发。
+    · 无归属 → 发邀请（pending），成员确认后生效；
+    · 归属他人 → 发邀请（成员可接收多个发起人的方案，确认不互斥）；
+    · 已确认过本人 → 直接生效（补登记方案接收）；
+    · 移除成员 → 释放归属、撤销本人 pending 邀请（多方案下不再驱逐其他发起人方案）。
     返回新发邀请数。
     """
     mapping = {r['member']: r['owner'] for r in
@@ -6828,36 +6824,26 @@ def _syn_save_member_mapping(nid: int, username: str, old_extra: set, new_extra:
         cur = mapping.get(m)
         inv = my_inv.get(m)
         if cur == username:
-            continue                      # 已生效（本人归属，方案随本次保存的 extra_members）
-        if cur:                           # 归属其他发起人
-            if inv == 'confirmed':
-                dbe('UPDATE syn_config_member SET owner=? WHERE dept_node_id=? AND member=?',
-                    (username, nid, m))   # 成员此前已确认过本人 → 切换归属
-                _syn_scheme_admit(nid, username, m, scheme_for(m) if scheme_for else None)
-            elif inv in ('pending', 'rejected'):
-                continue                  # 等待成员处理 / 已拒绝（保持为空）
-            else:
-                dbe('INSERT OR IGNORE INTO syn_config_invite (dept_node_id, member, owner, status, scheme_id) '
-                    'VALUES (?,?,?,?,?)', (nid, m, username, 'pending',
-                                           scheme_for(m) if scheme_for else None))
-                _syn_invite_notify(nid, m, username)
-                invited += 1
-        else:                             # 无归属
-            if inv == 'rejected':
-                continue                  # 已拒绝 → 保持为空（不可确认选择）
-            if inv == 'pending':
-                continue                  # 已有邀请等待处理
-            dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
-                (nid, m, username))       # 首次追加，单发起人即时生效
-    # 移除的成员：释放本人归属；已确认邀请的其他发起人接手；撤销本人 pending 邀请
+            continue                      # 已生效（此前确认过本人邀请）
+        if inv == 'confirmed':
+            # 成员此前已确认过本人邀请（归属被后续其他确认覆盖）→ 直接重新生效
+            dbe('UPDATE syn_config_member SET owner=? WHERE dept_node_id=? AND member=?',
+                (username, nid, m))
+            _syn_scheme_admit(nid, username, m, scheme_for(m) if scheme_for else None)
+            _syn_scheme_receive(nid, m, scheme_for(m) if scheme_for else None, 'active')
+            continue
+        if inv in ('pending', 'rejected'):
+            continue                  # 等待成员处理 / 已拒绝（保持为空）
+        dbe('INSERT OR IGNORE INTO syn_config_invite (dept_node_id, member, owner, status, scheme_id) '
+            'VALUES (?,?,?,?,?)', (nid, m, username, 'pending',
+                                   scheme_for(m) if scheme_for else None))
+        _syn_invite_notify(nid, m, username)
+        invited += 1
+    # 移除的成员：释放本人归属、撤销本人 pending 邀请；
+    # T-235 多方案接收 —— 其他发起人的方案/邀请不受影响（不再「接手归属」）
     for m in sorted(old_extra - new_extra):
         if mapping.get(m) == username:
             dbe('DELETE FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, m))
-            conf = dbq("SELECT owner FROM syn_config_invite WHERE dept_node_id=? AND member=? "
-                       "AND status='confirmed' AND owner<>? LIMIT 1", (nid, m, username))
-            if conf:
-                dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
-                    (nid, m, conf[0]['owner']))
         dbe("DELETE FROM syn_config_invite WHERE dept_node_id=? AND member=? AND owner=? AND status='pending'",
             (nid, m, username))
     return invited
@@ -6884,7 +6870,7 @@ def _syn_scheme_admit(nid: int, owner: str, member: str, scheme_id=None):
 
 
 def _syn_scheme_expel(nid: int, owner: str, member: str):
-    """T-233：把成员从 owner 名下**全部方案**的 extra_members 移除（T-228 归属切换/拒绝时）。"""
+    """T-233：把成员从 owner 名下**全部方案**的 extra_members 移除（拒绝邀请时）。"""
     for r in dbq('SELECT id, extra_members FROM syn_scheme WHERE dept_node_id=? AND owner=?',
                  (nid, owner)):
         mems = {x.strip() for x in (r['extra_members'] or '').split(',') if x.strip()}
@@ -6892,6 +6878,43 @@ def _syn_scheme_expel(nid: int, owner: str, member: str):
             mems.discard(member)
             dbe('UPDATE syn_scheme SET extra_members=?, updated_at=datetime(\'now\',\'localtime\') '
                 'WHERE id=?', (','.join(sorted(mems)), r['id']))
+
+
+def _syn_scheme_receive(nid: int, member: str, scheme_id=None, status: str = 'active'):
+    """T-235：登记/更新用户的**方案接收态**（syn_scheme_member）。
+
+    接受邀请 → status='active'（该方案进入其综合视图）；用户在选择弹窗退出 →
+    status='exited'（可重新选择）。scheme_id 缺省/失效 → 落到发起人外部显示方案。
+    """
+    if not scheme_id:
+        return
+    r = dbq('SELECT id FROM syn_scheme WHERE id=? AND dept_node_id=?', (scheme_id, nid))
+    if not r:
+        return
+    dbe('INSERT INTO syn_scheme_member (dept_node_id, username, scheme_id, status) '
+        'VALUES (?,?,?,?) ON CONFLICT(dept_node_id, username, scheme_id) '
+        'DO UPDATE SET status=excluded.status, updated_at=datetime(\'now\',\'localtime\')',
+        (nid, member, scheme_id, status))
+
+
+def _syn_feedback_notify(nid: int, member: str, owner: str, accept: bool):
+    """T-235（2026-11-25 用户需求3）：邀请裁决的**发起人反馈通知** ——
+    成员接受/拒绝邀请后，向发起人发站内消息（接受=已加入其方案并生效）。"""
+    node = _org_node(nid)
+    dname = node['name'] if node else ('节点 %d' % nid)
+    iid = dbq('SELECT scheme_id FROM syn_config_invite WHERE dept_node_id=? AND member=? AND owner=? '
+              'ORDER BY id DESC LIMIT 1', (nid, member, owner))
+    sname = ''
+    if iid and iid[0]['scheme_id']:
+        s = dbq('SELECT name FROM syn_scheme WHERE id=?', (iid[0]['scheme_id'],))
+        sname = s[0]['name'] if s else ''
+    verb = '已接受' if accept else '已拒绝'
+    tail = ('，方案「%s」已对其生效' % sname) if (accept and sname) else \
+           ('（方案：%s）' % sname if sname else '')
+    content = ('「%s」综合看板：%s %s您发出的追加邀请%s') % (
+        dname, _member_display_name(member) or member, verb, tail)
+    dbe('INSERT INTO messages (receiver, sender, card_id, kind, content) VALUES (?,?,?,?,?)',
+        (owner, member, '', 'system', content))
 
 
 @app.put('/api/syn-config/{nid}')
@@ -6958,6 +6981,13 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
         for r in old_rows:
             old_extra |= {x.strip() for x in (r['extra_members'] or '').split(',') if x.strip()}
         new_extra = {m for s in schemes for m in s['mems']}
+        # T-235：方案整体替换前，快照本配置人名下用户的**方案接收态**（按方案名）——
+        # DELETE+重建会换 scheme_id，接收行按名称重挂，用户的选择/退出不丢。
+        old_sel = dbq("""SELECT sm.username, sm.status, s.name FROM syn_scheme_member sm
+                         JOIN syn_scheme s ON s.id=sm.scheme_id
+                         WHERE sm.dept_node_id=? AND s.owner=?""", (nid, username))
+        dbe('DELETE FROM syn_scheme_member WHERE dept_node_id=? AND scheme_id IN '
+            '(SELECT id FROM syn_scheme WHERE dept_node_id=? AND owner=?)', (nid, nid, username))
         dbe('DELETE FROM syn_scheme WHERE dept_node_id=? AND owner=?', (nid, username))
         sid_by_idx = []
         for i, s in enumerate(schemes):
@@ -6967,6 +6997,14 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
                  1 if i == di else 0))
             sid_by_idx.append(dbq('SELECT id FROM syn_scheme WHERE dept_node_id=? AND owner=? AND name=?',
                                   (nid, username, s['name']))[0]['id'])
+        for r in old_sel:
+            new = dbq('SELECT id FROM syn_scheme WHERE dept_node_id=? AND owner=? AND name=?',
+                      (nid, username, r['name']))
+            if new:
+                dbe('INSERT INTO syn_scheme_member (dept_node_id, username, scheme_id, status) '
+                    'VALUES (?,?,?,?) ON CONFLICT(dept_node_id, username, scheme_id) '
+                    'DO UPDATE SET status=excluded.status, updated_at=datetime(\'now\',\'localtime\')',
+                    (nid, r['username'], new[0]['id'], r['status']))
         idx_of = {}
         for i, s in enumerate(schemes):
             for m in s['mems']:
@@ -7056,38 +7094,31 @@ class SynInviteDecideReq(BaseModel):
 @app.post('/api/syn-invites/{iid}/decide')
 def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends(require_auth),
                       request: Request = None):
-    """T-225：成员处理邀请。确认 → 归属切换到该发起人（生效）；拒绝 → 该发起人的
-    综合看板结果中该成员保持为空（从其追加清单移除，且不可再次确认选择）。"""
+    """T-225：成员处理邀请。确认 → 加入该发起人的目标方案并登记接收态（生效）；
+    拒绝 → 该发起人的综合看板结果中该成员保持为空（从其追加清单移除）。
+    T-235（2026-11-25 用户需求1/3）：①确认**不再驱逐原归属发起人的方案** ——
+    用户可同时接收多个发起人的方案（选择弹窗里自行取舍）；②无论接受或拒绝，
+    均向**发起人**发送反馈通知。"""
     rows = dbq('SELECT * FROM syn_config_invite WHERE id=?', (iid,))
     if not rows or rows[0]['member'] != username:
         raise HTTPException(404, '邀请不存在')
     inv = rows[0]
     if inv['status'] != 'pending':
         raise HTTPException(400, '该邀请已处理')
+    _sid = inv['scheme_id'] if 'scheme_id' in inv.keys() else None
     if req.accept:
-        # T-228：捕获现归属（若有）——确认后原归属配置人员的清单要**同步取消**该成员
-        _cur = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?',
-                   (inv['dept_node_id'], inv['member']))
-        prev_owner = _cur[0]['owner'] if _cur else ''
         dbe("UPDATE syn_config_invite SET status='confirmed', decided_at=datetime('now','localtime') WHERE id=?",
             (iid,))
         dbe('INSERT INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?) '
             'ON CONFLICT(dept_node_id, member) DO UPDATE SET owner=excluded.owner',
             (inv['dept_node_id'], inv['member'], inv['owner']))
         # T-233：成员加入邀请记录的目标方案（缺省/方案已删 → 发起人的外部显示方案）
-        _syn_scheme_admit(inv['dept_node_id'], inv['owner'], inv['member'],
-                          inv['scheme_id'] if 'scheme_id' in inv.keys() else None)
-        # T-228：原归属配置人员同步取消 —— ①其全部方案的追加清单移除该成员（T-233）
-        # ②其对该成员的邀请（pending/confirmed）标记 rejected（面板显示「已拒绝（不可选）」）
-        if prev_owner and prev_owner != inv['owner']:
-            _syn_scheme_expel(inv['dept_node_id'], prev_owner, inv['member'])
-            dbe("UPDATE syn_config_invite SET status='rejected', decided_at=datetime('now','localtime') "
-                "WHERE dept_node_id=? AND member=? AND owner=? AND status IN ('pending','confirmed')",
-                (inv['dept_node_id'], inv['member'], prev_owner))
+        _syn_scheme_admit(inv['dept_node_id'], inv['owner'], inv['member'], _sid)
+        # T-235：登记用户的方案接收态（active = 进入其综合视图；多方案可并存）
+        _syn_scheme_receive(inv['dept_node_id'], inv['member'], _sid, 'active')
         audit_log(username, client_ip(request), 'update', '综合看板邀请',
-                  '确认追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner'])
-                  + ('；原归属 %s 已同步取消' % prev_owner if prev_owner and prev_owner != inv['owner'] else ''),
-                  'success')
+                  '确认追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner']), 'success')
+        _syn_feedback_notify(inv['dept_node_id'], username, inv['owner'], True)
     else:
         dbe("UPDATE syn_config_invite SET status='rejected', decided_at=datetime('now','localtime') WHERE id=?",
             (iid,))
@@ -7095,7 +7126,89 @@ def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends
         _syn_scheme_expel(inv['dept_node_id'], inv['owner'], inv['member'])
         audit_log(username, client_ip(request), 'update', '综合看板邀请',
                   '拒绝追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner']), 'success')
+        _syn_feedback_notify(inv['dept_node_id'], username, inv['owner'], False)
     return {'ok': True}
+
+
+@app.get('/api/syn-my-schemes')
+def syn_my_schemes(dept_node_id: int, username: str = Depends(require_auth)):
+    """T-235（2026-11-25 用户需求1）：当前用户在指定架构下**接收到的方案清单**
+    （含选择态）—— 综合看板选择弹窗数据源。
+
+    received = 已接收方案（syn_scheme_member 行 ∪ 旧归属路径中包含本人的方案）。
+    status：active=适用（综合视图按其白名单并集）/ exited=已退出（不参与视图，
+    可重新选择）。配置人自己名下的方案不在接收清单（其视图=外部显示方案）。
+    """
+    node = _org_node(dept_node_id)
+    if not node or node['node_type'] not in ('dept', 'center'):
+        raise HTTPException(404, '部门架构不存在')
+    dedit = _syn_default_depts(username)
+    if dept_node_id not in dedit and dept_node_id not in _syn_extra_depts(username):
+        raise HTTPException(403, '你未被加入「%s」综合看板的接收名单' % node['name'])
+    received = {}
+    try:
+        for r in dbq("""SELECT sm.scheme_id, sm.status, s.name, s.owner, s.columns
+                        FROM syn_scheme_member sm JOIN syn_scheme s ON s.id=sm.scheme_id
+                        WHERE sm.dept_node_id=? AND sm.username=? ORDER BY s.id""",
+                     (dept_node_id, username)):
+            received[r['scheme_id']] = {'id': r['scheme_id'], 'name': r['name'] or '',
+                                        'owner': r['owner'], 'columns': r['columns'] or '',
+                                        'status': r['status']}
+    except Exception:
+        pass
+    if not received:
+        # 旧归属兼容：syn_config_member 归属的配置人名下包含本人的方案
+        m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?',
+                (dept_node_id, username))
+        if m:
+            for r in dbq('SELECT id, name, columns, extra_members FROM syn_scheme '
+                         'WHERE dept_node_id=? AND owner=? ORDER BY id', (dept_node_id, m[0]['owner'])):
+                if username in {x.strip() for x in (r['extra_members'] or '').split(',') if x.strip()}:
+                    received[r['id']] = {'id': r['id'], 'name': r['name'] or '',
+                                         'owner': m[0]['owner'], 'columns': r['columns'] or '',
+                                         'status': 'active'}
+    out = []
+    for s in received.values():
+        out.append({'id': s['id'], 'name': s['name'],
+                    'owner': s['owner'],
+                    'owner_name': _member_display_name(s['owner']) or s['owner'],
+                    'cols_count': len([x for x in s['columns'].split(',') if x]),
+                    'status': s['status']})
+    out.sort(key=lambda x: x['id'])
+    return {'dept_node_id': dept_node_id, 'dept_name': node['name'],
+            'can_edit': dept_node_id in dedit, 'schemes': out}
+
+
+class SynMySchemesReq(BaseModel):
+    scheme_ids: List[int] = []   # 勾选适用的方案（其余已接收方案 → exited）
+
+
+@app.post('/api/syn-my-schemes/{nid}')
+def syn_my_schemes_select(nid: int, req: SynMySchemesReq, username: str = Depends(require_auth),
+                          request: Request = None):
+    """T-235：保存用户的方案选择/退出 —— 勾选的方案 status='active'（适用），
+    其余已接收方案 status='exited'（退出，可随时重新勾选）。"""
+    node = _org_node(nid)
+    if not node or node['node_type'] not in ('dept', 'center'):
+        raise HTTPException(404, '部门架构不存在')
+    if nid not in _syn_default_depts(username) and nid not in _syn_extra_depts(username):
+        raise HTTPException(403, '你未被加入「%s」综合看板的接收名单' % node['name'])
+    mine = {r['scheme_id'] for r in
+            dbq('SELECT scheme_id FROM syn_scheme_member WHERE dept_node_id=? AND username=?',
+                (nid, username))}
+    if not mine:
+        # 旧归属兼容路径：先按包含本人的方案落登记行，再应用本次选择
+        m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, username))
+        if m:
+            for r in dbq('SELECT id FROM syn_scheme WHERE dept_node_id=? AND owner=?',
+                         (nid, m[0]['owner'])):
+                mine.add(r['id'])
+    want = {x for x in (req.scheme_ids or []) if x in mine}
+    for sid in mine:
+        _syn_scheme_receive(nid, username, sid, 'active' if sid in want else 'exited')
+    audit_log(username, client_ip(request), 'update', '综合看板方案选择',
+              '选择适用方案（架构 %s：%d/%d 个方案适用）' % (node['name'], len(want), len(mine)), 'success')
+    return {'ok': True, 'active': len(want), 'received': len(mine)}
 
 
 @app.get('/api/syn-boards')
