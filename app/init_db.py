@@ -786,6 +786,30 @@ def _migrate_schema(conn):
         created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
         UNIQUE (dept_node_id, member)
     )''')
+    # T-225：追加邀请（同一成员被多位发起人选择时，由成员自行确认/拒绝）
+    # status: pending（待处理）/ confirmed（已确认，归属切换）/ rejected（已拒绝，发起人结果保持为空）
+    conn.execute('''CREATE TABLE IF NOT EXISTS syn_config_invite (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        dept_node_id  INTEGER NOT NULL,
+        member        TEXT NOT NULL,
+        owner         TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        decided_at    TEXT,
+        UNIQUE (dept_node_id, member, owner)
+    )''')
+    # T-225：追加邀请（同一成员被多位发起人选择时，由成员自行确认/拒绝）
+    # status: pending（待处理）/ confirmed（已确认，归属切换）/ rejected（已拒绝，发起人结果保持为空）
+    conn.execute('''CREATE TABLE IF NOT EXISTS syn_config_invite (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        dept_node_id  INTEGER NOT NULL,
+        member        TEXT NOT NULL,
+        owner         TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        decided_at    TEXT,
+        UNIQUE (dept_node_id, member, owner)
+    )''')
 
 def _migrate_org(conn):
     """组织架构迁移：workgroups（层级 + 单个 leader + 成员分号串）

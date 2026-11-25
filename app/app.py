@@ -2802,6 +2802,8 @@ def me(username: str = Depends(require_auth)):
             'can_create_board': can_create_board,  # #205ad-cis 新建看板入口显隐（部门负责人及以上）
             'syn_edit_depts': sorted(_syn_edit),   # T-211 综合编辑按钮显隐（默认可见人员）
             'syn_depts': syn_depts,                # T-211 综合看板按钮显隐（默认 ∪ 追加）
+            'syn_invite_count': dbq('SELECT COUNT(*) n FROM syn_config_invite '
+                                    'WHERE member=? AND status=?', (username, 'pending'))[0]['n'],  # T-225
             'can_manage_staff': _sp[0],            # T-191d 人员管理入口显隐（部门负责人及以上）
             'staff_scope_all': _sp[1],             # T-191d True=全部部门 / False=仅本部门
             'login_notice': _get_setting('login_notice', ''),  # T-013b：超管「登入通知」字段回显（个人状态不受影响）
@@ -6527,6 +6529,18 @@ def _syn_subtree_member_candidates(nid: int):
             bound = {x.strip() for x in bound if x.strip()}
             if bound & subtree_names:
                 out.setdefault(r['account'], r['name'])
+        # ③ T-225（BUG修复）：管理角色成员（部门长/总经理/中心负责人 —— 任命可能在
+        #    本部门子树之外，如总经理挂中心节点）与管理员/超管 —— 全局可被追加
+        q3 = ("SELECT DISTINCT m.account, m.name FROM org_appointments a "
+              "JOIN team_members m ON m.id=a.member_id "
+              "WHERE a.role_key IN ('center_head','gm','dept_head') "
+              "AND IFNULL(m.status,'')!='departed' AND IFNULL(m.account,'')!=''")
+        for r in dbq(q3):
+            out[r['account']] = r['name']
+        for r in dbq("SELECT username FROM users WHERE role='admin'"):
+            nm = r['username']
+            mrow = dbq('SELECT name FROM team_members WHERE account=? LIMIT 1', (nm,))
+            out[nm] = mrow[0]['name'] if mrow else nm
     return [{'account': a, 'name': n} for a, n in sorted(out.items(), key=lambda x: x[1])]
 
 
@@ -6585,10 +6599,14 @@ def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
                                  'WHERE board_id=? ORDER BY rowid', (r['board_id'],))]
             all_boards.append({'board_id': r['board_id'], 'board_name': r['board_name'],
                                'columns': cols})
+    inv_states = {r['member']: r['status'] for r in
+                  dbq('SELECT member, status FROM syn_config_invite '
+                      'WHERE dept_node_id=? AND owner=?', (dept_node_id, username))}
     return {'dept_node_id': dept_node_id, 'dept_name': node['name'],
             'node_type': node['node_type'],
             'columns': [x for x in cfg['columns'].split(',') if x],
             'extra_members': [x for x in cfg['extra_members'].split(',') if x],
+            'invite_states': inv_states,
             'updated_by': cfg['owner'],
             'updated_at': '',
             'can_edit': can_edit,
@@ -6623,9 +6641,10 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
     if bad_cols:
         raise HTTPException(400, '板块不属于本架构：%s' % '、'.join(bad_cols))
     # T-224：配置固化到 (dept, username) 自己名下 —— 不同配置人员互不可见、互不覆盖
-    old_extra_rows = dbq('SELECT member FROM syn_config_member WHERE dept_node_id=? AND owner=?',
-                         (nid, username))
-    old_extra = {r['member'] for r in old_extra_rows}
+    prev_row = dbq('SELECT extra_members FROM syn_board_config WHERE dept_node_id=? AND owner=?',
+                   (nid, username))
+    old_extra = {x.strip() for x in ((prev_row[0]['extra_members'] if prev_row else '') or '').split(',')
+                 if x.strip()}
     new_extra = set(extra)
     dbe('INSERT INTO syn_board_config (dept_node_id, owner, columns, extra_members, updated_at) '
         "VALUES (?,?,?,?,datetime('now','localtime')) "
@@ -6633,24 +6652,116 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
         'extra_members=excluded.extra_members, '
         "updated_at=datetime('now','localtime')",
         (nid, username, ','.join(cols), ','.join(extra)))
-    # 继承规则（追加成员归属，先到先得）：
-    #  · 新追加且无归属 → 挂本次保存者；已被其他配置人员追加 → 保持原归属（隔离）
+    # T-225 追加归属规则（syn_config_member.owner = **已确认生效**的配置人员）：
+    #  · 无归属 → 本次保存者即时生效（单发起人，维持原行为）
+    #  · 归属他人 → 多发起人冲突：发**邀请**，由成员确认（生效切换）/拒绝（本发起人保持为空）
+    #  · 已拒绝的邀请不再重发 —— 该发起人结果中该成员保持为空（不可确认选择）
+    mapping = {r['member']: r['owner'] for r in
+               dbq('SELECT member, owner FROM syn_config_member WHERE dept_node_id=?', (nid,))}
+    my_inv = {r['member']: r['status'] for r in
+              dbq('SELECT member, status FROM syn_config_invite '
+                  'WHERE dept_node_id=? AND owner=?', (nid, username))}
+    invited = 0
     for m in extra:
-        dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
-            (nid, m, username))
-    #  · 从清单移除 → 释放归属；若其他配置人员的清单仍含该成员 → 改挂最近更新的那位
-    for m in old_extra - new_extra:
-        dbe('DELETE FROM syn_config_member WHERE dept_node_id=? AND member=? AND owner=?',
-            (nid, m, username))
-        cand = dbq("SELECT c.owner FROM syn_board_config c "
-                   "WHERE c.dept_node_id=? AND (','||IFNULL(c.extra_members,'')||',') LIKE ? "
-                   "AND c.owner<>? ORDER BY c.updated_at DESC LIMIT 1",
-                   (nid, '%,{},%'.format(m), username))
-        if cand:
+        cur = mapping.get(m)
+        inv = my_inv.get(m)
+        if cur == username:
+            continue                      # 已生效（本人归属）
+        if cur:                           # 归属其他发起人
+            if inv == 'confirmed':
+                dbe('UPDATE syn_config_member SET owner=? WHERE dept_node_id=? AND member=?',
+                    (username, nid, m))   # 成员此前已确认过本人 → 切换归属
+            elif inv in ('pending', 'rejected'):
+                continue                  # 等待成员处理 / 已拒绝（保持为空）
+            else:
+                dbe('INSERT OR IGNORE INTO syn_config_invite (dept_node_id, member, owner, status) '
+                    'VALUES (?,?,?,?)', (nid, m, username, 'pending'))
+                _syn_invite_notify(nid, m, username)
+                invited += 1
+        else:                             # 无归属
+            if inv == 'rejected':
+                continue                  # 已拒绝 → 保持为空（不可确认选择）
+            if inv == 'pending':
+                continue                  # 已有邀请等待处理
             dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
-                (nid, m, cand[0]['owner']))
+                (nid, m, username))       # 首次追加，单发起人即时生效
+    # 移除的成员：释放本人归属；已确认邀请的其他发起人接手；撤销本人 pending 邀请
+    for m in old_extra - new_extra:
+        if mapping.get(m) == username:
+            dbe('DELETE FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, m))
+            conf = dbq("SELECT owner FROM syn_config_invite WHERE dept_node_id=? AND member=? "
+                       "AND status='confirmed' AND owner<>? LIMIT 1", (nid, m, username))
+            if conf:
+                dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
+                    (nid, m, conf[0]['owner']))
+        dbe("DELETE FROM syn_config_invite WHERE dept_node_id=? AND member=? AND owner=? AND status='pending'",
+            (nid, m, username))
     audit_log(username, client_ip(request), 'update', f'综合看板配置 {node["name"]}',
-              f'综合看板配置：{node["name"]}（看板白名单 {len(cols)} 项，追加人员 {len(extra)} 人）', 'success')
+              f'综合看板配置：{node["name"]}（看板白名单 {len(cols)} 项，追加人员 {len(extra)} 人'
+              + ('，新发邀请 %d 份' % invited if invited else '') + '）', 'success')
+    return {'ok': True, 'invited': invited}
+
+
+def _syn_invite_notify(nid: int, member: str, owner: str):
+    """T-225：邀请通知（站内消息，收件人=成员账号）。"""
+    node = _org_node(nid)
+    dname = node['name'] if node else ('节点 %d' % nid)
+    content = ('「%s」综合看板：%s 邀请您作为追加人员（多位发起人已选择您），'
+               '请前往【综合看板】处理邀请') % (dname, _member_display_name(owner) or owner)
+    dbe('INSERT INTO messages (receiver, sender, card_id, kind, content) VALUES (?,?,?,?,?)',
+        (member, owner, '', 'system', content))
+
+
+@app.get('/api/syn-invites')
+def syn_invite_list(username: str = Depends(require_auth)):
+    """T-225：本人的待处理邀请清单（成员自行确认/拒绝）。"""
+    rows = dbq("""SELECT i.id, i.dept_node_id, i.owner, i.created_at, n.name AS dept_name
+                  FROM syn_config_invite i JOIN org_nodes n ON n.id=i.dept_node_id
+                  WHERE i.member=? AND i.status=? ORDER BY i.id DESC""", (username, 'pending'))
+    out = []
+    for r in rows:
+        d = dict(r)
+        d['owner_name'] = _member_display_name(r['owner']) or r['owner']
+        out.append(d)
+    return {'invites': out}
+
+
+class SynInviteDecideReq(BaseModel):
+    accept: bool
+
+
+@app.post('/api/syn-invites/{iid}/decide')
+def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends(require_auth),
+                      request: Request = None):
+    """T-225：成员处理邀请。确认 → 归属切换到该发起人（生效）；拒绝 → 该发起人的
+    综合看板结果中该成员保持为空（从其追加清单移除，且不可再次确认选择）。"""
+    rows = dbq('SELECT * FROM syn_config_invite WHERE id=?', (iid,))
+    if not rows or rows[0]['member'] != username:
+        raise HTTPException(404, '邀请不存在')
+    inv = rows[0]
+    if inv['status'] != 'pending':
+        raise HTTPException(400, '该邀请已处理')
+    if req.accept:
+        dbe("UPDATE syn_config_invite SET status='confirmed', decided_at=datetime('now','localtime') WHERE id=?",
+            (iid,))
+        dbe('INSERT INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?) '
+            'ON CONFLICT(dept_node_id, member) DO UPDATE SET owner=excluded.owner',
+            (inv['dept_node_id'], inv['member'], inv['owner']))
+        audit_log(username, client_ip(request), 'update', '综合看板邀请',
+                  '确认追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner']), 'success')
+    else:
+        dbe("UPDATE syn_config_invite SET status='rejected', decided_at=datetime('now','localtime') WHERE id=?",
+            (iid,))
+        # 发起人的追加清单移除该成员 → 其综合看板结果中该成员保持为空（不可确认选择）
+        cfg = dbq('SELECT extra_members FROM syn_board_config WHERE dept_node_id=? AND owner=?',
+                  (inv['dept_node_id'], inv['owner']))
+        if cfg:
+            keep = [x.strip() for x in (cfg[0]['extra_members'] or '').split(',')
+                    if x.strip() and x.strip() != username]
+            dbe('UPDATE syn_board_config SET extra_members=? WHERE dept_node_id=? AND owner=?',
+                (','.join(keep), inv['dept_node_id'], inv['owner']))
+        audit_log(username, client_ip(request), 'update', '综合看板邀请',
+                  '拒绝追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner']), 'success')
     return {'ok': True}
 
 
