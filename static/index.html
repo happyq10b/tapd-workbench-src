@@ -218,6 +218,14 @@ button{font-family:inherit}
 .ss-dir-btn.on{background:var(--primary);color:#fff;font-weight:600}
 .ss-dir-btn:disabled{color:#c0c6cf;cursor:not-allowed}
 .ss-dir-off{opacity:.55}
+/* T-236 排序方案 chip：与综合配置方案条同形态（激活=蓝底） */
+.ss-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border:1px solid var(--border);
+  border-radius:12px;font-size:12px;color:var(--text2);cursor:pointer;flex-shrink:0;
+  background:#fff;user-select:none;white-space:nowrap}
+.ss-chip:hover{border-color:var(--primary);color:var(--primary)}
+.ss-chip.on{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+.ss-chip-x{color:inherit;opacity:.6;cursor:pointer;font-size:11px}
+.ss-chip-x:hover{opacity:1;color:var(--danger)}
 .due-cal-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .due-cal-title{font-weight:600;font-size:15px;min-width:104px;text-align:center;
   font-variant-numeric:tabular-nums}
@@ -2946,6 +2954,9 @@ function goLogin(){
     <div class="modal-header"><h2>↕️ 排序设定</h2><button class="modal-close" onclick="sortSetCancel()">✕</button></div>
     <div class="modal-body" style="padding:12px 16px;gap:10px">
       <div class="due-info-banner">勾选维度参与排序（勾选顺序 = 优先级），逐维度选择升序 / 降序 / 不排序；板块与事项独立配置，置顶始终最优先。</div>
+      <!-- T-236 排序方案条：多方案保存/快速应用（个人配置，按账号持久化）——
+           chip 点击应用方案（确定后生效）；＋ 存为方案=固化当前配置；✕ 删除 -->
+      <div id="ss_scheme_bar" style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;overflow-x:auto;padding:2px 0"></div>
       <div id="sortSetBody"></div>
     </div>
     <div class="modal-footer" style="display:flex;gap:8px;align-items:center">
@@ -8277,6 +8288,8 @@ function saveSortCfg(){
 // ---------- 排序设定弹窗（#205y） ----------
 function openSortSetModal(){
   SORT_CFG_SNAP=JSON.parse(JSON.stringify(SORT_CFG));
+  loadSortSchemes();       // T-236：排序方案按账号载入（本地缓存，服务端经 loadUserPrefs 同步）
+  ssPaintSchemes();
   renderSortSetBody();
   document.getElementById('sortSetModal').style.display='flex';
 }
@@ -8336,7 +8349,71 @@ function sortSetCancel(){
   if(SORT_CFG_SNAP)SORT_CFG=JSON.parse(JSON.stringify(SORT_CFG_SNAP));
   closeModal('sortSetModal');
 }
-function sortSetApply(){saveSortCfg();closeModal('sortSetModal');reload(curPage);}
+function sortSetApply(){saveSortCfg();saveSortSchemes();closeModal('sortSetModal');reload(curPage);}
+// ---------- 排序方案（T-236 2026-11-25 用户需求）：多方案保存/快速应用 ----------
+// 与排序配置同为**个人配置**：user_prefs.sort_schemes 按账号隔离持久化，
+// localStorage 为本地缓存兜底（与 sort_cfg 同一套防抖上传/登录同步机制）。
+// chip 点击 = 应用方案到弹窗配置（需点【确定】固化并生效）；✕ = 删除；＋ = 固化当前配置。
+var SORT_SCHEMES=[];   // [{name, cfg:{card:{order,dir}, col:{order,dir}}}]
+function loadSortSchemes(){
+  try{
+    const raw=localStorage.getItem('tapd.sortSchemes_'+((ME&&ME.username)||'anon'));
+    if(raw){const v=JSON.parse(raw);if(Array.isArray(v))SORT_SCHEMES=v.filter(x=>x&&x.name&&x.cfg);}
+  }catch(e){SORT_SCHEMES=[]}
+}
+function saveSortSchemes(){
+  try{localStorage.setItem('tapd.sortSchemes_'+((ME&&ME.username)||'anon'),JSON.stringify(SORT_SCHEMES))}catch(e){}
+  _prefPush('sort_schemes',SORT_SCHEMES);   // 防抖上传服务端；失败静默（内存态已生效）
+}
+function ssActive(sc){
+  try{return JSON.stringify(normalizeSortCfg(sc))===JSON.stringify(normalizeSortCfg(SORT_CFG))}catch(e){return false}
+}
+function ssPaintSchemes(){
+  const box=document.getElementById('ss_scheme_bar');
+  if(!box)return;
+  const chips=SORT_SCHEMES.map(function(sc,i){
+    const act=ssActive(sc.cfg);
+    return '<span class="ss-chip'+(act?' on':'')+'" onclick="ssSchemeApply('+i+')" '
+      +'title="应用方案「'+esc(sc.name)+'」到当前配置（确定后生效并保存）">'
+      +(act?'<span style="color:#fff;flex-shrink:0">●</span>':'')
+      +'<b style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(sc.name)+'</b>'
+      +'<span class="ss-chip-x" title="删除方案" onclick="event.stopPropagation();ssSchemeDel('+i+')">✕</span>'
+      +'</span>';
+  }).join('');
+  box.innerHTML='<span style="font-size:12.5px;font-weight:600;color:var(--text);flex-shrink:0">方案</span>'
+    +(chips||'<span style="font-size:11.5px;color:var(--text3)">暂无方案（配置好排序后点「存为方案」固化，之后一键应用）</span>')
+    +'<button class="icon-btn" style="padding:3px 10px;font-size:11.5px;flex-shrink:0" onclick="ssSchemeSave()" '
+    +'title="把当前排序配置保存为一个方案（同名覆盖）">＋ 存为方案</button>';
+}
+function ssSchemeApply(i){
+  const sc=SORT_SCHEMES[i];
+  if(!sc)return;
+  SORT_CFG=normalizeSortCfg(sc.cfg);   // 归一化后应用（弹窗内即时预览；确定后固化）
+  renderSortSetBody();
+  ssPaintSchemes();
+  toast('已应用方案「'+sc.name+'」，点【确定】保存生效');
+}
+function ssSchemeSave(){
+  const def='方案'+(SORT_SCHEMES.length+1);
+  const name=(prompt('方案名称（同名覆盖）：',def)||'').trim();
+  if(!name)return;
+  const cfg=JSON.parse(JSON.stringify(SORT_CFG));
+  const ex=SORT_SCHEMES.findIndex(function(s){return s.name===name;});
+  if(ex>=0)SORT_SCHEMES[ex]={name:name,cfg:cfg};
+  else SORT_SCHEMES.push({name:name,cfg:cfg});
+  saveSortSchemes();
+  ssPaintSchemes();
+  toast('已保存方案「'+name+'」');
+}
+function ssSchemeDel(i){
+  const sc=SORT_SCHEMES[i];
+  if(!sc)return;
+  if(!confirm('删除方案「'+sc.name+'」？'))return;
+  SORT_SCHEMES.splice(i,1);
+  saveSortSchemes();
+  ssPaintSchemes();
+  toast('已删除方案「'+sc.name+'」');
+}
 // 多级比较（#205y；T-234 增枚举维度）：按 cfg.order 依次比较（先勾选优先），dir 决定升降；
 // 日期字段空值恒排最后（与升降方向无关）；枚举字段按 SORT_ENUM 权重比较（未知值排枚举之后）；
 // 配置字段全同分返回 null（由调用方兜底）。
@@ -8795,6 +8872,15 @@ async function loadUserPrefs(){
     }else{
       const _local=(function(){try{const raw=localStorage.getItem('tapd.sortCfg_'+((ME&&ME.username)||'anon'));return raw?JSON.parse(raw):null}catch(e){return null}})();
       _migrateLocalPref('sort_cfg',_local,!!p.sort_cfg);
+    }
+    // 排序方案（T-236）：服务端为真源 —— 登录后拉取覆盖内存并回写本地缓存；
+    // 服务端缺、本地有 → 一次性迁移上传（换设备方案不丢）
+    if(p.sort_schemes&&Array.isArray(p.sort_schemes)){
+      SORT_SCHEMES=p.sort_schemes.filter(x=>x&&x.name&&x.cfg);
+      try{localStorage.setItem('tapd.sortSchemes_'+((ME&&ME.username)||'anon'),JSON.stringify(SORT_SCHEMES))}catch(e){}
+    }else{
+      const _ls=(function(){try{const raw=localStorage.getItem('tapd.sortSchemes_'+((ME&&ME.username)||'anon'));return raw?JSON.parse(raw):null}catch(e){return null}})();
+      _migrateLocalPref('sort_schemes',_ls,false);
     }
   }catch(e){}
 }
