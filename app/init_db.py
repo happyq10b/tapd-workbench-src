@@ -719,6 +719,38 @@ def _migrate_schema(conn):
         PRIMARY KEY (username, board_id)
     )''')
 
+    # ---- T-224 综合看板配置按配置人员隔离：旧库（单配置表）迁移 ----
+    # 旧表无 owner 列 → 备份改名 + 建新表 + 迁移：每份旧配置拆为
+    # (dept, owner=updated_by) 的配置行 + 各追加成员的生效归属映射行。
+    _syn_cols = [r[1] for r in conn.execute('PRAGMA table_info(syn_board_config)').fetchall()]
+    if _syn_cols and 'owner' not in _syn_cols:
+        conn.execute('ALTER TABLE syn_board_config RENAME TO syn_board_config_bak_t224')
+        conn.execute('''CREATE TABLE IF NOT EXISTS syn_board_config (
+            dept_node_id  INTEGER NOT NULL,
+            owner         TEXT NOT NULL DEFAULT '',
+            columns       TEXT NOT NULL DEFAULT '',
+            extra_members TEXT NOT NULL DEFAULT '',
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            PRIMARY KEY (dept_node_id, owner)
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS syn_config_member (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            dept_node_id  INTEGER NOT NULL,
+            member        TEXT NOT NULL,
+            owner         TEXT NOT NULL,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            UNIQUE (dept_node_id, member)
+        )''')
+        for r in conn.execute('SELECT dept_node_id, columns, extra_members, updated_by, updated_at '
+                              'FROM syn_board_config_bak_t224').fetchall():
+            owner = r[3] or '__legacy__'
+            conn.execute("INSERT OR IGNORE INTO syn_board_config (dept_node_id, owner, columns, extra_members, updated_at) "
+                         "VALUES (?,?,?,?,?)", (r[0], owner, r[1] or '', r[2] or '', r[4] or ''))
+            for m in [x.strip() for x in (r[2] or '').split(',') if x.strip()]:
+                conn.execute('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) '
+                             'VALUES (?,?,?)', (r[0], m, owner))
+        conn.execute('DROP TABLE syn_board_config_bak_t224')
+
     # ---- 每周进展（T-215 2026-11-24）：旧库幂等建表 ----
     conn.execute('''CREATE TABLE IF NOT EXISTS card_week_progress (
         card_id     TEXT NOT NULL,
@@ -734,12 +766,25 @@ def _migrate_schema(conn):
     #   extra_members = 追加可见人员账号（逗号分隔；默认可见 = 部门长/总经理/中心负责人/管理员/超管，
     #                   追加人员不可见【综合编辑】按钮）
     #   旧库缺表时自动创建（无存量数据需迁移）
+    # T-224（2026-11-25）：配置按**配置人员**维度固化隔离 —— PK(dept_node_id, owner)，
+    # 每位配置人员对同一部门各自拥有一份配置，互不可见、互不覆盖。
     conn.execute('''CREATE TABLE IF NOT EXISTS syn_board_config (
-        dept_node_id  INTEGER PRIMARY KEY,
+        dept_node_id  INTEGER NOT NULL,
+        owner         TEXT NOT NULL DEFAULT '',
         columns       TEXT NOT NULL DEFAULT '',
         extra_members TEXT NOT NULL DEFAULT '',
-        updated_by    TEXT NOT NULL DEFAULT '',
-        updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        PRIMARY KEY (dept_node_id, owner)
+    )''')
+    # T-224：追加成员的**生效配置归属**（先到先得）—— member 沿用追加自己的
+    # 配置人员的配置；UNIQUE(dept_node_id, member) 保证一人一部门只有一份生效配置。
+    conn.execute('''CREATE TABLE IF NOT EXISTS syn_config_member (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        dept_node_id  INTEGER NOT NULL,
+        member        TEXT NOT NULL,
+        owner         TEXT NOT NULL,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        UNIQUE (dept_node_id, member)
     )''')
 
 def _migrate_org(conn):

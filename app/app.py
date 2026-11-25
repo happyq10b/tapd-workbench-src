@@ -6424,7 +6424,7 @@ def _syn_default_depts(username: str) -> set:
     · 管理员/超管 或 PERM_ENABLED=False → 全部架构节点（含财务中心 center）
     · center 级负责岗位（center_head / gm，任一 center 节点任命）→ 全部
     · dept_head → 该部门自身
-    （追加可见人员走 syn_board_config.extra_members，不含在本集合 —— 追加人员
+    （追加可见人员走 syn_config_member 归属表，不含在本集合 —— 追加人员
       不可见【综合编辑】按钮，所以两个集合必须分开维护。）
     """
     syn_nodes = {r['id'] for r in
@@ -6443,14 +6443,38 @@ def _syn_default_depts(username: str) -> set:
 
 
 def _syn_extra_depts(username: str) -> set:
-    """T-211：用户被【综合编辑】追加为可见人员的部门节点集合。"""
+    """T-211/T-224：用户被【综合编辑】追加为可见人员的部门节点集合。
+    T-224 起追加归属在 syn_config_member（UNIQUE(dept,member)，先到先得）。"""
     try:
-        rows = dbq("SELECT dept_node_id FROM syn_board_config "
-                   "WHERE (','||IFNULL(extra_members,'')||',') LIKE ?",
-                   ('%,{},%'.format(username),))
+        rows = dbq('SELECT dept_node_id FROM syn_config_member WHERE member=?', (username,))
         return {r['dept_node_id'] for r in rows}
     except Exception:
         return set()   # 表未迁移（旧库）时按「无追加」处理
+
+
+def _syn_cfg_for(username: str, nid: int):
+    """T-224：用户对某部门的**适用配置**。
+
+    · 默认可见人员（=配置人员）→ 自己那份配置（配置固化隔离：只看到自己保存的）
+    · 追加成员 → 沿用**追加自己的配置人员**的配置（syn_config_member 归属）
+    返回 dict{columns, extra_members, owner}；无配置 → 空白名单/空追加。
+    """
+    empty = {'columns': '', 'extra_members': '', 'owner': ''}
+    own = dbq('SELECT columns, extra_members, owner FROM syn_board_config '
+              'WHERE dept_node_id=? AND owner=?', (nid, username))
+    if own:
+        r = own[0]
+        return {'columns': r['columns'] or '', 'extra_members': r['extra_members'] or '',
+                'owner': r['owner'] or username}
+    m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, username))
+    if not m:
+        return empty
+    cfg = dbq('SELECT columns, extra_members, owner FROM syn_board_config '
+              'WHERE dept_node_id=? AND owner=?', (nid, m[0]['owner']))
+    if not cfg:
+        return empty
+    return {'columns': cfg[0]['columns'] or '', 'extra_members': cfg[0]['extra_members'] or '',
+            'owner': cfg[0]['owner'] or ''}
 
 
 def _syn_subtree_member_candidates(nid: int):
@@ -6542,8 +6566,7 @@ def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
     extra_depts = _syn_extra_depts(username)
     if dept_node_id not in default_depts and dept_node_id not in extra_depts:
         raise HTTPException(403, '你无权查看该部门的综合看板')
-    cfg = dbq('SELECT columns, extra_members, updated_by, updated_at FROM syn_board_config WHERE dept_node_id=?',
-              (dept_node_id,))
+    cfg = _syn_cfg_for(username, dept_node_id)   # T-224：编辑者=自己那份；追加成员=归属配置人员的
     can_edit = dept_node_id in default_depts
     # 弹窗勾选清单：子树可见看板 → **板块级**清单（T-211-cis 用户反馈颗粒度：
     # 看板选项下折叠展开板块，按板块勾选）。columns 白名单语义随之改为 col_key 集合。
@@ -6564,10 +6587,10 @@ def get_syn_config(dept_node_id: int, username: str = Depends(require_auth)):
                                'columns': cols})
     return {'dept_node_id': dept_node_id, 'dept_name': node['name'],
             'node_type': node['node_type'],
-            'columns': [x for x in ((cfg[0]['columns'] if cfg else '') or '').split(',') if x],
-            'extra_members': [x for x in ((cfg[0]['extra_members'] if cfg else '') or '').split(',') if x],
-            'updated_by': (cfg[0]['updated_by'] if cfg else '') or '',
-            'updated_at': (cfg[0]['updated_at'] if cfg else '') or '',
+            'columns': [x for x in cfg['columns'].split(',') if x],
+            'extra_members': [x for x in cfg['extra_members'].split(',') if x],
+            'updated_by': cfg['owner'],
+            'updated_at': '',
             'can_edit': can_edit,
             'all_boards': all_boards,
             'candidates': _syn_subtree_member_candidates(dept_node_id) if can_edit else []}
@@ -6599,12 +6622,33 @@ def save_syn_config(nid: int, req: SynConfigReq, username: str = Depends(require
     bad_cols = [x for x in cols if x.split('::')[0] not in allowed_boards]
     if bad_cols:
         raise HTTPException(400, '板块不属于本架构：%s' % '、'.join(bad_cols))
-    dbe('INSERT INTO syn_board_config (dept_node_id, columns, extra_members, updated_by, updated_at) '
+    # T-224：配置固化到 (dept, username) 自己名下 —— 不同配置人员互不可见、互不覆盖
+    old_extra_rows = dbq('SELECT member FROM syn_config_member WHERE dept_node_id=? AND owner=?',
+                         (nid, username))
+    old_extra = {r['member'] for r in old_extra_rows}
+    new_extra = set(extra)
+    dbe('INSERT INTO syn_board_config (dept_node_id, owner, columns, extra_members, updated_at) '
         "VALUES (?,?,?,?,datetime('now','localtime')) "
-        'ON CONFLICT(dept_node_id) DO UPDATE SET columns=excluded.columns, '
-        'extra_members=excluded.extra_members, updated_by=excluded.updated_by, '
+        'ON CONFLICT(dept_node_id, owner) DO UPDATE SET columns=excluded.columns, '
+        'extra_members=excluded.extra_members, '
         "updated_at=datetime('now','localtime')",
-        (nid, ','.join(cols), ','.join(extra), username))
+        (nid, username, ','.join(cols), ','.join(extra)))
+    # 继承规则（追加成员归属，先到先得）：
+    #  · 新追加且无归属 → 挂本次保存者；已被其他配置人员追加 → 保持原归属（隔离）
+    for m in extra:
+        dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
+            (nid, m, username))
+    #  · 从清单移除 → 释放归属；若其他配置人员的清单仍含该成员 → 改挂最近更新的那位
+    for m in old_extra - new_extra:
+        dbe('DELETE FROM syn_config_member WHERE dept_node_id=? AND member=? AND owner=?',
+            (nid, m, username))
+        cand = dbq("SELECT c.owner FROM syn_board_config c "
+                   "WHERE c.dept_node_id=? AND (','||IFNULL(c.extra_members,'')||',') LIKE ? "
+                   "AND c.owner<>? ORDER BY c.updated_at DESC LIMIT 1",
+                   (nid, '%,{},%'.format(m), username))
+        if cand:
+            dbe('INSERT OR IGNORE INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?)',
+                (nid, m, cand[0]['owner']))
     audit_log(username, client_ip(request), 'update', f'综合看板配置 {node["name"]}',
               f'综合看板配置：{node["name"]}（看板白名单 {len(cols)} 项，追加人员 {len(extra)} 人）', 'success')
     return {'ok': True}
@@ -6622,8 +6666,7 @@ def syn_boards(dept_node_id: int, username: str = Depends(require_auth)):
         raise HTTPException(404, '部门架构不存在')
     if dept_node_id not in _syn_default_depts(username) and dept_node_id not in _syn_extra_depts(username):
         raise HTTPException(403, '你无权查看该部门的综合看板')
-    cfg = dbq('SELECT columns FROM syn_board_config WHERE dept_node_id=?', (dept_node_id,))
-    whitelist = [x for x in ((cfg[0]['columns'] if cfg else '') or '').split(',') if x]
+    whitelist = [x for x in _syn_cfg_for(username, dept_node_id)['columns'].split(',') if x]
     boards, _cols = user_allowed(username)
     rows = dbq('SELECT b.board_id, b.board_name FROM boards b WHERE b.archived=0')
     out = []
