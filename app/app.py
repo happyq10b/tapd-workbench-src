@@ -6742,13 +6742,32 @@ def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends
     if inv['status'] != 'pending':
         raise HTTPException(400, '该邀请已处理')
     if req.accept:
+        # T-228：捕获现归属（若有）——确认后原归属配置人员的清单要**同步取消**该成员
+        _cur = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?',
+                   (inv['dept_node_id'], inv['member']))
+        prev_owner = _cur[0]['owner'] if _cur else ''
         dbe("UPDATE syn_config_invite SET status='confirmed', decided_at=datetime('now','localtime') WHERE id=?",
             (iid,))
         dbe('INSERT INTO syn_config_member (dept_node_id, member, owner) VALUES (?,?,?) '
             'ON CONFLICT(dept_node_id, member) DO UPDATE SET owner=excluded.owner',
             (inv['dept_node_id'], inv['member'], inv['owner']))
+        # T-228：原归属配置人员同步取消 —— ①其追加清单移除该成员（配置界面不再勾选）
+        # ②其对该成员的邀请（pending/confirmed）标记 rejected（面板显示「已拒绝（不可选）」）
+        if prev_owner and prev_owner != inv['owner']:
+            cfg0 = dbq('SELECT extra_members FROM syn_board_config WHERE dept_node_id=? AND owner=?',
+                       (inv['dept_node_id'], prev_owner))
+            if cfg0:
+                keep = [x.strip() for x in (cfg0[0]['extra_members'] or '').split(',')
+                        if x.strip() and x.strip() != username]
+                dbe('UPDATE syn_board_config SET extra_members=? WHERE dept_node_id=? AND owner=?',
+                    (','.join(keep), inv['dept_node_id'], prev_owner))
+            dbe("UPDATE syn_config_invite SET status='rejected', decided_at=datetime('now','localtime') "
+                "WHERE dept_node_id=? AND member=? AND owner=? AND status IN ('pending','confirmed')",
+                (inv['dept_node_id'], inv['member'], prev_owner))
         audit_log(username, client_ip(request), 'update', '综合看板邀请',
-                  '确认追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner']), 'success')
+                  '确认追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner'])
+                  + ('；原归属 %s 已同步取消' % prev_owner if prev_owner and prev_owner != inv['owner'] else ''),
+                  'success')
     else:
         dbe("UPDATE syn_config_invite SET status='rejected', decided_at=datetime('now','localtime') WHERE id=?",
             (iid,))
