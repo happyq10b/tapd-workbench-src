@@ -1901,7 +1901,7 @@ function goLogin(){
                （双 auto 把按钮间距撑乱）→ 间距由 .tb-band-head gap 统一。 -->
           <span class="tb-band-head-entry" id="synEntry" style="display:none;gap:12px;margin-left:0">
             <button id="bandSynEditBtn" class="syn-band-btn" style="display:none"
-              onclick="openSynConfigModal()" title="配置综合看板：可见板块与追加可见人员">综合编辑</button>
+              onclick="openSynConfigEdit()" title="配置综合看板：可见板块与追加可见人员">综合编辑</button>
             <button id="bandSynBtn" class="syn-band-btn"
               onclick="toggleSynMode()" title="切换至综合看板模式：展示所选部门架构下全部看板中的全部板块">综合看板</button>
           </span>
@@ -2462,6 +2462,17 @@ function goLogin(){
       <div class="cp-tip" id="cp_tip"></div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('copyModal')">取消</button><button class="btn-primary" id="cp_submit" onclick="submitCopy()">创建副本</button></div>
+  </div>
+</div>
+
+<!-- 综合看板架构选择器（T-227）：多架构模式下点击【综合编辑】→ 选择要配置的架构；
+     各架构配置/追加人员按 (架构, 配置人员) 维度独立（T-224），互不影响 -->
+<div class="modal-overlay" id="synArchPickModal" style="display:none">
+  <div class="modal" style="width:min(460px,94vw)">
+    <div class="modal-header"><h2>⚙️ 选择要配置的架构</h2><button class="modal-close" onclick="closeModal('synArchPickModal')">✕</button></div>
+    <div class="modal-body"><div id="syn_arch_pick_list"></div>
+      <div style="font-size:11.5px;color:var(--text3);margin-top:8px">每个架构的板块白名单与追加人员相互独立；保存后仅影响所选架构，其他架构配置不变。</div>
+    </div>
   </div>
 </div>
 
@@ -3881,10 +3892,18 @@ function applySynBtn(){
     btn.textContent='普通看板';
     btn.title='退出综合看板模式，恢复普通看板选择';
     btn.classList.add('on');   // T-212-ter：综合模式进行中 = 蓝底激活态（同【启用勾选】开启形态）
-    // 综合编辑按钮：仅默认可见人员（syn_edit_depts 含当前部门）；追加人员不可见
-    var canEd=ME&&ME.syn_edit_depts&&SYN_MODE.nodeIds&&SYN_MODE.nodeIds.length===1
-              &&ME.syn_edit_depts.indexOf(SYN_MODE.nodeIds[0])>=0;
+    // 综合编辑按钮（T-227）：单架构模式=直接配置该架构；多架构模式=任一选中架构
+    // 可编辑即显示（点击进入架构选择器，各架构配置/追加人员相互独立）
+    var canEd=false;
+    if(ME&&ME.syn_edit_depts&&SYN_MODE.nodeIds){
+      (SYN_MODE.nodeIds||[]).forEach(function(n){
+        if(ME.syn_edit_depts.indexOf(n)>=0)canEd=true;
+      });
+    }
     if(ed)ed.style.display=canEd?'':'none';
+    if(ed)ed.title=SYN_MODE.nodeIds.length>1
+      ?('选择要配置的架构（当前聚合：'+SYN_MODE.name+'）')
+      :'配置当前架构的综合看板（板块白名单 + 追加人员）';
   }else{
     btn.textContent='综合看板';
     btn.title='切换至综合看板模式：展示所选部门架构下全部看板中的全部板块';
@@ -3931,7 +3950,7 @@ async function enterSynMode(dname,nid){
     if(curBoard!==(ids[0]||''))curBoard=ids[0];
     // T-211-cis/T-226：cols = 各架构白名单**并集**；free = 空白名单架构的看板
     // （不受白名单列限制，展示其全部板块）。单架构模式 free 恒为空 → 行为不变。
-    SYN_MODE={name:names.join(' + '),nodeIds:nids,
+    SYN_MODE={name:names.join(' + '),names:names.slice(),nodeIds:nids,
               nodeId:nids[0],
               cols:(sb.col_whitelist&&sb.col_whitelist.length)?new Set(sb.col_whitelist):null,
               free:new Set(sb.free_boards||[])};
@@ -4120,11 +4139,41 @@ async function decideSynInvite(id,accept){
     if(ME.syn_invite_count>0)openSynInviteModal();else closeModal('synInviteModal');
   }catch(e){toast(e.message||'操作失败')}
 }
-async function openSynConfigModal(){
+// ---------- 架构选择器（T-227）：多架构模式下按架构分别进入配置 ----------
+function openSynConfigEdit(){
+  // 综合编辑按钮路由（T-227）：单架构=直接配置；多架构=先选要配置的架构（各架构独立）
+  if(SYN_MODE&&SYN_MODE.nodeIds&&SYN_MODE.nodeIds.length>1)openSynArchPick();
+  else openSynConfigModal();
+}
+function openSynArchPick(){
   if(!SYN_MODE){toast('请先进入综合看板模式');return}
+  var list=document.getElementById('syn_arch_pick_list');
+  if(!list)return;
+  var editSet=ME&&ME.syn_edit_depts?ME.syn_edit_depts:[];
+  var rows=(SYN_MODE.nodeIds||[]).map(function(nid,idx){
+    var can=editSet.indexOf(nid)>=0;
+    var nm=(SYN_MODE.names||[])[idx]||('节点 '+nid);
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 6px;border-bottom:1px dashed var(--border)">'
+      +'<div style="flex:1;min-width:0;font-size:13px"><b>'+esc(nm)+'</b>'
+      +(can?'':'<span style="font-size:11px;color:var(--text3);margin-left:8px">（无配置权限）</span>')+'</div>'
+      +'<button class="btn-primary" style="padding:4px 14px;flex-shrink:0"'
+      +' onclick="closeModal(\'synArchPickModal\');openSynConfigModal('+nid+')"'
+      +(can?'':' disabled')
+      +'>配置</button></div>';
+  }).join('');
+  list.innerHTML=rows||'<div style="color:var(--text3);font-size:12.5px">当前未选中架构</div>';
+  openModal('synArchPickModal');
+}
+async function openSynConfigModal(nid){
+  // T-227：nid 可选 —— 多架构模式经架构选择器传入要配置的架构；
+  // 单架构模式缺省 = 当前架构（SYN_MODE.nodeId）。配置内容按 (架构, 配置人员)
+  // 维度加载（T-224 固化隔离），各架构配置/追加人员相互独立。
+  if(!SYN_MODE){toast('请先进入综合看板模式');return}
+  var target=(nid!==undefined&&nid!==null)?nid:SYN_MODE.nodeId;
   try{
-    SYN_CFG=await api('/api/syn-config?dept_node_id='+SYN_MODE.nodeId);
-    if(!SYN_CFG.can_edit){toast('你无权配置综合看板（追加人员不可编辑）');return}
+    SYN_CFG=await api('/api/syn-config?dept_node_id='+target);
+    if(!SYN_CFG.can_edit){toast('你无权配置「'+SYN_CFG.dept_name+'」的综合看板（追加人员不可编辑）');return}
+    document.getElementById('syn_cfg_dept').textContent='— '+SYN_CFG.dept_name;
     document.getElementById('syn_cfg_dept').textContent='— '+SYN_CFG.dept_name;
     document.getElementById('syn_board_search').value='';
     document.getElementById('syn_member_search').value='';
@@ -4155,7 +4204,8 @@ async function saveSynConfig(){
     })});
     toast('综合看板配置已保存（'+(colPayload?(cols.length+' 个板块'):'全部板块')+'，追加 '+mem.length+' 人）');
     closeModal('synConfigModal');
-    if(SYN_MODE)enterSynMode(SYN_MODE.name,SYN_MODE.nodeId);   // 立即按新白名单刷新
+    // 保存后按当前模式刷新：单架构=该架构；多架构=全部选中架构重新聚合（T-227）
+    if(SYN_MODE)enterSynMode(SYN_MODE.names||[SYN_MODE.name],SYN_MODE.nodeIds||[SYN_MODE.nodeId]);
   }catch(e){toast(e.message||'保存失败')}
 }
 // ---------- T-213 板块结存弹窗（2026-11-24）：勾选=结存，取消勾选=解封 ----------
