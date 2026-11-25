@@ -1901,7 +1901,7 @@ function goLogin(){
                （双 auto 把按钮间距撑乱）→ 间距由 .tb-band-head gap 统一。 -->
           <span class="tb-band-head-entry" id="synEntry" style="display:none;gap:12px;margin-left:0">
             <button id="bandSynEditBtn" class="syn-band-btn" style="display:none"
-              onclick="openSynConfigEdit()" title="配置综合看板：可见板块与追加可见人员">综合编辑</button>
+              onclick="openSynConfigModal()" title="配置综合看板：可见板块与追加可见人员（标题处下拉可切换架构）">综合编辑</button>
             <button id="bandSynBtn" class="syn-band-btn"
               onclick="toggleSynMode()" title="切换至综合看板模式：展示所选部门架构下全部看板中的全部板块">综合看板</button>
           </span>
@@ -2462,17 +2462,6 @@ function goLogin(){
       <div class="cp-tip" id="cp_tip"></div>
     </div>
     <div class="modal-footer"><button class="btn-default" onclick="closeModal('copyModal')">取消</button><button class="btn-primary" id="cp_submit" onclick="submitCopy()">创建副本</button></div>
-  </div>
-</div>
-
-<!-- 综合看板架构选择器（T-227）：多架构模式下点击【综合编辑】→ 选择要配置的架构；
-     各架构配置/追加人员按 (架构, 配置人员) 维度独立（T-224），互不影响 -->
-<div class="modal-overlay" id="synArchPickModal" style="display:none">
-  <div class="modal" style="width:min(460px,94vw)">
-    <div class="modal-header"><h2>⚙️ 选择要配置的架构</h2><button class="modal-close" onclick="closeModal('synArchPickModal')">✕</button></div>
-    <div class="modal-body"><div id="syn_arch_pick_list"></div>
-      <div style="font-size:11.5px;color:var(--text3);margin-top:8px">每个架构的板块白名单与追加人员相互独立；保存后仅影响所选架构，其他架构配置不变。</div>
-    </div>
   </div>
 </div>
 
@@ -4139,31 +4128,6 @@ async function decideSynInvite(id,accept){
     if(ME.syn_invite_count>0)openSynInviteModal();else closeModal('synInviteModal');
   }catch(e){toast(e.message||'操作失败')}
 }
-// ---------- 架构选择器（T-227）：多架构模式下按架构分别进入配置 ----------
-function openSynConfigEdit(){
-  // 综合编辑按钮路由（T-227）：单架构=直接配置；多架构=先选要配置的架构（各架构独立）
-  if(SYN_MODE&&SYN_MODE.nodeIds&&SYN_MODE.nodeIds.length>1)openSynArchPick();
-  else openSynConfigModal();
-}
-function openSynArchPick(){
-  if(!SYN_MODE){toast('请先进入综合看板模式');return}
-  var list=document.getElementById('syn_arch_pick_list');
-  if(!list)return;
-  var editSet=ME&&ME.syn_edit_depts?ME.syn_edit_depts:[];
-  var rows=(SYN_MODE.nodeIds||[]).map(function(nid,idx){
-    var can=editSet.indexOf(nid)>=0;
-    var nm=(SYN_MODE.names||[])[idx]||('节点 '+nid);
-    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 6px;border-bottom:1px dashed var(--border)">'
-      +'<div style="flex:1;min-width:0;font-size:13px"><b>'+esc(nm)+'</b>'
-      +(can?'':'<span style="font-size:11px;color:var(--text3);margin-left:8px">（无配置权限）</span>')+'</div>'
-      +'<button class="btn-primary" style="padding:4px 14px;flex-shrink:0"'
-      +' onclick="closeModal(\'synArchPickModal\');openSynConfigModal('+nid+')"'
-      +(can?'':' disabled')
-      +'>配置</button></div>';
-  }).join('');
-  list.innerHTML=rows||'<div style="color:var(--text3);font-size:12.5px">当前未选中架构</div>';
-  openModal('synArchPickModal');
-}
 // T-227：配置弹窗标题处的**架构切换下拉** —— 多架构模式下可在各架构配置间直接
 // 切换（每架构配置/追加人员独立，切换即加载对应架构的配置）；单架构模式保持纯文本
 function renderSynCfgDeptSel(curNid){
@@ -4171,18 +4135,39 @@ function renderSynCfgDeptSel(curNid){
   if(!box)return;
   var nids=(SYN_MODE&&SYN_MODE.nodeIds)||[];
   var names=(SYN_MODE&&SYN_MODE.names)||[];
-  if(nids.length<=1){box.textContent='— '+(SYN_CFG?SYN_CFG.dept_name:'');return}
   var editSet=ME&&ME.syn_edit_depts?ME.syn_edit_depts:[];
-  var opts='';
-  nids.forEach(function(id,idx){
-    var nm=names[idx]||('节点 '+id);
-    var can=editSet.indexOf(id)>=0;
+  // T-227b 修订：只要本人有 ≥2 个可编辑架构就**永远显示切换下拉**（单/多架构模式
+  // 都可切），选项 = 本人可编辑的全部架构 ∪ 当前聚合中的架构（无权限项禁用标注）。
+  // 单架构模式下切换会同步锚定该架构（保存后刷新语义一致，见 synCfgSwitchTo）。
+  var F=(typeof ORG_FLAT!=='undefined')?ORG_FLAT:[];
+  var opts='', seen={}, editableCount=0;
+  function addOpt(id,nm,can){
+    if(seen[id])return; seen[id]=1;
+    if(can)editableCount++;
     opts+='<option value="'+id+'"'+(id===curNid?' selected':'')+(can?'':' disabled')
       +'>'+esc(nm)+(can?'':'（无配置权限）')+'</option>';
+  }
+  editSet.forEach(function(id){       // T-227c：默认直列本人**全部可编辑架构**（无确认步骤）
+    var node=F.find(function(x){return x.id===id;});
+    addOpt(id,node?node.name:('节点 '+id),true);
   });
+  nids.forEach(function(id,idx){addOpt(id,names[idx]||('节点 '+id),editSet.indexOf(id)>=0);});
+  if(editableCount<2){box.textContent='— '+(SYN_CFG?SYN_CFG.dept_name:'');return}
   box.innerHTML='— <select id="syn_cfg_dept_sel" title="切换要配置的架构（各架构配置与追加人员相互独立，切换即加载对应架构的配置）"'
     +' style="font-size:13px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);cursor:pointer;margin-left:4px"'
-    +' onchange="openSynConfigModal(parseInt(this.value,10))">'+opts+'</select>';
+    +' onchange="synCfgSwitchTo(parseInt(this.value,10))">'+opts+'</select>';
+}
+// T-227b：配置目标切换 —— 多架构模式仅切换弹窗的配置对象（聚合不变）；
+// 单架构模式同步把综合模式锚定到该架构（保存后刷新回到该架构的综合看板）
+async function synCfgSwitchTo(nid){
+  if(SYN_MODE.nodeIds&&SYN_MODE.nodeIds.length>1){openSynConfigModal(nid);return}
+  try{await ensureOrgTree(true);}catch(e){}   // T-227c：单架构模式 SYN_MODE 锚定切换需架构名
+  var F=(typeof ORG_FLAT!=='undefined')?ORG_FLAT:[];
+  var node=F.find(function(x){return x.id===nid&&['dept','center'].indexOf(x.node_type)>=0;});
+  if(!node){toast('未找到该架构节点');return}
+  SYN_MODE.names=[node.name];SYN_MODE.nodeIds=[nid];SYN_MODE.nodeId=nid;SYN_MODE.name=node.name;
+  applySynBtn();
+  openSynConfigModal(nid);
 }
 async function openSynConfigModal(nid){
   // T-227：nid 可选 —— 多架构模式经架构选择器传入要配置的架构；
@@ -4190,6 +4175,7 @@ async function openSynConfigModal(nid){
   // 维度加载（T-224 固化隔离），各架构配置/追加人员相互独立。
   if(!SYN_MODE){toast('请先进入综合看板模式');return}
   var target=(nid!==undefined&&nid!==null)?nid:SYN_MODE.nodeId;
+  try{await ensureOrgTree(true);}catch(e){}   // T-227c：下拉需要架构名
   try{
     SYN_CFG=await api('/api/syn-config?dept_node_id='+target);
     if(!SYN_CFG.can_edit){toast('你无权配置「'+SYN_CFG.dept_name+'」的综合看板（追加人员不可编辑）');return}
