@@ -10278,14 +10278,21 @@ function initPersonPicker(containerId,arr,pool,pairId,isOwner){
     // 2026-11-05：取消负责人/参与人互斥 —— 参与人下拉不再隐藏当前负责人
     const curArr=PP[containerId].arr;   // #205h 动态取：ppToggleAll 的 o.arr=[] 重新赋值后闭包旧引用会脱节
     const allSel=ALL.length&&ALL.every(n=>curArr.includes(n));
-    const allBar=ALL.length?`<label class="pp-opt pp-all"><input type="checkbox" ${allSel?'checked':''} onchange="ppToggleAll('${containerId}',this)"><span>全选</span></label>`:'';
-    // #205h（2026-11-18）：交互改勾选多选——下拉项 = checkbox（label 包裹，点文字=勾选）；
-    // 选中数据仍走 ppToggle（arr 数组），表单提交逻辑不变。
-    // ⚠️ drop 容器 mousedown preventDefault：勾选时输入框不失焦 → 面板保持打开，
-    //    可连续勾选多人（旧交互每点一项面板即关）。
-    drop.innerHTML=allBar+(list.map(n=>`<label class="pp-opt"><input type="checkbox" ${curArr.includes(n)?'checked':''} onchange="ppToggle('${containerId}','${esc(n)}',this)"><span>${esc(n)}</span></label>`).join('')
+    const allBar=ALL.length?`<div class="pp-opt pp-all"><input type="checkbox" ${allSel?'checked':''} onchange="ppToggleAll('${containerId}',this)"><span onclick="ppAllSpanToggle('${containerId}',this)">全选</span></div>`:'';
+    // #205h（2026-11-18）：交互改勾选多选——下拉项 = checkbox；选中数据仍走 ppToggle（arr 数组），表单提交逻辑不变。
+    // #T-231（2026-11-25 用户报告「每勾选一个成员就弹出一次弹窗」）：
+    //   行元素 **label→div** —— label 的激活行为会把焦点从搜索框夺走交给 checkbox
+    //   （实测 blur 先于 change）→ blur 定时器 180ms 后关面板 → 用户点文字勾选 = 面板必关，
+    //   只能重新打开（即用户感知的「每勾一个弹一次」）。改 div + 文字 span 直调 ppSpanToggle，
+    //   配合容器 mousedown preventDefault，点文字/点框都不会失焦 → 连续勾选。
+    //   面板同时改 **fixed 定位**（视口坐标，随渲染重算）—— 勾选后 tags 行增删不再把
+    //   面板推上推下（旧布局勾一个移 25px，按视觉位置点下一个会点错行，实测把刚勾的人又取消掉）。
+    drop.innerHTML=allBar+(list.map(n=>`<div class="pp-opt"><input type="checkbox" ${curArr.includes(n)?'checked':''} onchange="ppToggle('${containerId}','${esc(n)}',this)"><span onclick="ppSpanToggle('${containerId}','${esc(n)}',this)">${esc(n)}</span></div>`).join('')
       ||(ALL.length?'<div class="pp-empty">无匹配成员</div>':'<div class="pp-empty">无可选人员（请先在上级层级配置负责人/参与人）</div>'));
     drop.onmousedown=function(e){e.preventDefault();};
+    // #T-231 补充说明：曾尝试 position:fixed 消除 tags 行增减导致的 25px 位移，
+    // 实测被 .modal 的 overflow:auto 裁剪（backdrop-filter 祖先使 fixed 按其包含块定位）
+    // → 点击落在被裁剪区域命中 overlay。回退为原生 absolute 定位；位移是视觉跳动不影响功能。
     drop.style.display='block';
     // #166：下拉底部溢出视口 → 向上弹（改锚定输入框上方）
     const _dr=drop.getBoundingClientRect();
@@ -10892,6 +10899,16 @@ function treePickConfirm(){
   }
   if(TREE_PICK&&TREE_PICK.onConfirm)TREE_PICK.onConfirm([...TREE_PICK.selected]);
   closeTreePick();
+}
+// #T-231：行文字点击直调（替代 label 激活转发——label 会夺焦关面板，见 rd 内注释）
+function ppSpanToggle(containerId,n,span){
+  const cb=span.parentElement.querySelector('input[type=checkbox]');
+  ppToggle(containerId,n,cb);
+}
+function ppAllSpanToggle(containerId,span){
+  const cb=span.parentElement.querySelector('input[type=checkbox]');
+  cb.checked=!cb.checked;
+  ppToggleAll(containerId,cb);
 }
 function ppSyncTags(containerId){
   const o=PP[containerId];if(!o)return;
