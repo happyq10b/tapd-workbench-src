@@ -1617,18 +1617,21 @@ COLUMN_CATEGORIES = ('年度重点工作', '业财融合工作', '财务数智�
 COLUMN_CATEGORY_DEFAULT = '年度重点工作'
 
 
-def _settle_days(due):
-    """T-191j 结算：完成日（=结算当天）- 截止日。
+def _settle_days(due, ref=None):
+    """T-191j 结算：完成日 - 截止日。
+    参照日 ref = **完成时间**（T-222：事项已有 completed → 用它算，否则=结算当天）。
     逾期完成=正数 / 提前完成=负数 / 当天准时完成=0；无截止日期或日期非法 → None（未结算）。
-    只在状态转入「已完成」时调用一次（含 done 状态下修改截止日期时的重算）。"""
+    只在状态转入「已完成」时调用一次（含 done 状态下改截止日/完成时间的重算）。"""
     d = (due or '')[:10]
     if not d:
         return None
+    r = (ref or '')[:10] or _date.today().isoformat()
     try:
         dd = _date.fromisoformat(d)
+        rr = _date.fromisoformat(r)
     except ValueError:
         return None
-    return (_date.today() - dd).days
+    return (rr - dd).days
 
 
 def col_key(board_id, column_name):
@@ -3929,13 +3932,14 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
               vals + [card_id, cur_ver])
     if res.rowcount == 0:
         raise HTTPException(409, '数据已被他人修改，请刷新后重试')
-    # T-191j 结算：事项处于「已完成」时结算逾期天数（转入 done、或 done 状态下改截止日 → 重算）。
-    # 离开 done 不写（旧结算值留档，前端仅在 done 态展示）。
-    if 'status' in fields or 'due' in fields:
-        _srow = dbq('SELECT status, due FROM cards WHERE card_id=?', (card_id,))
+    # T-191j 结算：事项处于「已完成」时结算逾期天数（转入 done、或 done 状态下改
+    # 截止日/完成时间 → 重算）。T-222：参照日 = **完成时间**（已有 completed → 用它算；
+    # 没有 → 结算当天）。离开 done 不写（旧结算值留档，前端仅在 done 态展示）。
+    if 'status' in fields or 'due' in fields or 'completed' in fields:
+        _srow = dbq('SELECT status, due, completed FROM cards WHERE card_id=?', (card_id,))
         if _srow and _srow[0]['status'] == 'done':
             dbe('UPDATE cards SET overdue_days=? WHERE card_id=?',
-                (_settle_days(_srow[0]['due']), card_id))
+                (_settle_days(_srow[0]['due'], _srow[0]['completed']), card_id))
     # T-216 完成时间自动填充：**首次转入「已完成」**且未显式提供 completed 且原值为空
     #   → 按切换日期填充。已有值保留（用户改过）；离开 done 不清空（留档）。
     #   与倒计时联动：倒计时展示由 status/due/overdue_days 驱动，本字段只作记录，
@@ -3944,7 +3948,7 @@ async def update_card(card_id: str, req: CardUpdate, username: str = Depends(req
             and (cur[0]['status'] or '') != 'done' and 'completed' not in fields \
             and not (cur[0]['completed'] or ''):
         dbe('UPDATE cards SET completed=? WHERE card_id=?',
-            (time.strftime('%Y-%m-%d %H:%M:%S'), card_id))
+            (time.strftime('%Y-%m-%d'), card_id))
     log_action(card_id, username, 'update', json.dumps(fields, ensure_ascii=False)[:500])
     audit_log(username, client_ip(request), 'update', f'卡片 {card_id}', '更新字段：' + '、'.join(fields.keys()), 'success')
     # 释放锁 + 广播

@@ -2212,7 +2212,7 @@ function goLogin(){
           <div class="form-group"><label>截止日期</label><input type="date" class="form-input" id="e_due" oninput="weekAutoRefresh('e')" onchange="weekAutoRefresh('e')"></div>
           <div class="form-group" id="e_completed_group">
             <label>完成时间<span style="color:var(--text3)">（仅事项负责人可改）</span></label>
-            <input type="datetime-local" class="form-input" id="e_completed" title="留空 = 未完成记录；切为「已完成」时后端自动填充（已有值则保留）">
+            <input type="date" class="form-input" id="e_completed" title="留空 = 清除完成时间；切为「已完成」时后端自动填充当天日期（已有值则保留）">
           </div>
         </div>
         <div class="form-group" id="e_week_group">
@@ -8702,7 +8702,7 @@ async function openEdit(id,preloaded){
   {
     const _inp=document.getElementById('e_completed');
     const _can=ME&&(isCardOwnerOf(c.owner)||ME.is_admin||ME.username==='admin');
-    _inp.value=(c.completed||'').slice(0,16).replace(' ','T');
+    _inp.value=(c.completed||'').slice(0,10);   // T-222：完成时间到日
     _inp.disabled=!_can;
     _inp.title=_can?'留空 = 清除完成时间；切为「已完成」时后端自动填充（已有值保留）':'仅事项负责人可修改完成时间';
   }
@@ -8813,7 +8813,7 @@ async function saveEdit(){
     const _ecOwner=(window._editCard||{}).owner||'';
     if(ME&&(isCardOwnerOf(_ecOwner)||ME.is_admin||ME.username==='admin')){
       const _cv=(document.getElementById('e_completed').value||'').trim();
-      fields.completed=_cv?_cv.replace('T',' ')+':00':'';
+      fields.completed=_cv;   // T-222：date 输入直接存 YYYY-MM-DD（到日粒度）
     }
   }
   // 提交守卫（2026-11-17）：**新增**的负责人/参与人必须 ⊆ 上级池
@@ -10854,7 +10854,7 @@ async function openDetail(id){
   //（编辑入口在【编辑事项】弹窗，此处仅展示）
   document.getElementById('d_cd').innerHTML=_dCd;
   // T-216 完成时间：无值时切为「已完成」由后端自动填充；已有值保留
-  const _dComp=fmtDT(c.completed)||'';
+  const _dComp=fmtDate(c.completed)||'';
   const _dCompHtml=_dComp
     ?`<span id="d_completed_val" title="完成时间：${esc(c.completed)}">${esc(_dComp)}</span>`
     :'<span id="d_completed_val" style="color:var(--text3)">—</span>';
