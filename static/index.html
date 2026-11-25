@@ -2465,6 +2465,18 @@ function goLogin(){
   </div>
 </div>
 
+<!-- 综合看板追加邀请（T-225）：同一成员被多位发起人选择时，由成员自行确认/拒绝。
+     确认 → 沿用该发起人的配置（生效）；拒绝 → 该发起人的综合看板结果中不包含本人。 -->
+<div class="modal-overlay" id="synInviteModal" style="display:none">
+  <div class="modal" style="width:min(520px,94vw)">
+    <div class="modal-header"><h2>📨 综合看板邀请</h2><button class="modal-close" onclick="closeModal('synInviteModal')">✕</button></div>
+    <div class="modal-body">
+      <div id="syn_invite_list"></div>
+      <div style="font-size:11.5px;color:var(--text3);margin-top:8px">确认后您将沿用对应发起人的综合看板配置；拒绝后该发起人的综合看板中不会包含您（其结果保持为空）。</div>
+    </div>
+  </div>
+</div>
+
 <!-- 综合看板配置弹窗（T-211；T-211-cis 版面重做）：仅默认可见人员；
      左板块树（看板折叠展开板块级勾选）+ 右追加人员，各带工具条（计数/全选/清空/搜索） -->
 <div class="modal-overlay" id="synConfigModal" style="display:none">
@@ -3870,7 +3882,8 @@ function applySynBtn(){
     btn.title='退出综合看板模式，恢复普通看板选择';
     btn.classList.add('on');   // T-212-ter：综合模式进行中 = 蓝底激活态（同【启用勾选】开启形态）
     // 综合编辑按钮：仅默认可见人员（syn_edit_depts 含当前部门）；追加人员不可见
-    var canEd=ME&&ME.syn_edit_depts&&ME.syn_edit_depts.indexOf(SYN_MODE.nodeId)>=0;
+    var canEd=ME&&ME.syn_edit_depts&&SYN_MODE.nodeIds&&SYN_MODE.nodeIds.length===1
+              &&ME.syn_edit_depts.indexOf(SYN_MODE.nodeIds[0])>=0;
     if(ed)ed.style.display=canEd?'':'none';
   }else{
     btn.textContent='综合看板';
@@ -3881,41 +3894,49 @@ function applySynBtn(){
 }
 async function toggleSynMode(){
   if(SYN_MODE){exitSynMode();return}
-  // 锚定部门：架构区恰好选中一个部门 → 用它；否则提示先选
-  if(!ARCH_SEL||ARCH_SEL.size!==1){
+  // 锚定部门（T-225b）：恰好选中一个 → 用它；多选 → 按**最后单击**的架构进入；
+  // 一个都没选 → 提示先选
+  if(!ARCH_SEL||!ARCH_SEL.size){
     toast('请先在上方架构区单击选中一个部门（再次单击进入该部门的综合看板）');return;
   }
-  var dname=[...ARCH_SEL][0];
+  var dnames=[...ARCH_SEL];   // T-226：多选架构**累加**进入（顺序=单击顺序）
   // 架构名 → 节点 id（ORG_FLAT 平铺，wgFlat 摊平 ORG_TREE）。
   // ⚠️ ORG_FLAT 是懒加载（主界面不拉架构树）→ 先 ensureOrgTree，否则恒为空数组
   //    必然报「未找到该部门的架构节点」（用户实测 bug，T-211-bis）。
   try{ await ensureOrgTree(false); }catch(e){}
-  var node=(typeof ORG_FLAT!=='undefined'?ORG_FLAT:[]).find(function(x){return x.name===dname;});
-  var nid=node?node.id:null;
-  if(nid===null){
+  var nodes=[],miss=[];
+  dnames.forEach(function(dn){
+    var node=(typeof ORG_FLAT!=='undefined'?ORG_FLAT:[]).find(function(x){return x.name===dn;});
+    if(node&&node.id!==null&&node.id!==undefined)nodes.push({name:dn,id:node.id});
+    else miss.push(dn);
+  });
+  if(miss.length){
     var avail=(typeof ORG_FLAT!=='undefined'?ORG_FLAT:[]).filter(function(x){return x.node_type==='dept'||x.node_type==='center';}).map(function(x){return x.name;});
-    toast('未找到「'+dname+'」的架构节点（架构树部门：'+(avail.join('、')||'无')+'）；若刚改过部门名请刷新页面后重试');
+    toast('未找到「'+miss.join('、')+'」的架构节点（架构树部门：'+(avail.join('、')||'无')+'）；若刚改过部门名请刷新页面后重试');
     return;
   }
-  if(!(ME&&ME.syn_depts&&ME.syn_depts.indexOf(nid)>=0)){
-    toast('你无权查看「'+dname+'」的综合看板');return;
-  }
-  enterSynMode(dname,nid);
+  enterSynMode(nodes.map(function(x){return x.name;}),nodes.map(function(x){return x.id;}));
 }
 async function enterSynMode(dname,nid){
+  // T-226：多架构累加 —— dname/nid 可为「数组」（多选架构各自过滤后并集）；
+  // 单值入参（保存配置后的刷新路径）自动包装为单元素数组，行为不变。
+  var names=Array.isArray(dname)?dname:[dname];
+  var nids=Array.isArray(nid)?nid:[nid];
   try{
-    var cfg=await api('/api/syn-config?dept_node_id='+nid);
-    var sb=await api('/api/syn-boards?dept_node_id='+nid);
+    var sb=await api('/api/syn-boards?dept_node_ids='+nids.join(','));
     var ids=(sb.boards||[]).map(function(b){return b.board_id});
-    if(!ids.length){toast('「'+dname+'」综合看板下暂无可见看板');return}
+    if(!ids.length){toast('「'+names.join(' + ')+'」综合看板下暂无可见看板');return}
     SYN_PREV_BOARDS=curBoards;
     curBoards=new Set(ids);
     if(curBoard!==(ids[0]||''))curBoard=ids[0];
-    // T-211-cis：白名单为**板块级**（col_key 集合；空 = 全部板块不过滤）
-    SYN_MODE={name:dname,nodeId:nid,
-              cols:(sb.col_whitelist&&sb.col_whitelist.length)?new Set(sb.col_whitelist):null};
+    // T-211-cis/T-226：cols = 各架构白名单**并集**；free = 空白名单架构的看板
+    // （不受白名单列限制，展示其全部板块）。单架构模式 free 恒为空 → 行为不变。
+    SYN_MODE={name:names.join(' + '),nodeIds:nids,
+              nodeId:nids[0],
+              cols:(sb.col_whitelist&&sb.col_whitelist.length)?new Set(sb.col_whitelist):null,
+              free:new Set(sb.free_boards||[])};
     applySynBtn();
-    toast('已进入「'+dname+'」综合看板（'+ids.length+' 个看板）');
+    toast('已进入「'+names.join(' + ')+'」综合看板（'+ids.length+' 个看板'+(nids.length>1?'，多架构累加':'')+'）');
     renderTabs();reload(1);renderProgress();
   }catch(e){toast(e.message||'进入综合看板失败')}
 }
@@ -4044,19 +4065,28 @@ function synPaintMembers(){
   var cands=(SYN_CFG.candidates||[]).filter(function(c){
     return !q||c.name.toLowerCase().indexOf(q)>=0||c.account.toLowerCase().indexOf(q)>=0;
   });
+  var inv=(SYN_CFG&&SYN_CFG.invite_states)||{};   // T-225：邀请状态 {账号: pending/rejected/confirmed}
   box.innerHTML=cands.map(function(c){
     var on=SYN_MEM_CHECKED.has(c.account);
-    return '<label style="display:flex;gap:8px;align-items:center;padding:3px 6px;font-size:12.5px;cursor:pointer;border-radius:6px;'+(on?'background:#f2f7fc':'')+'">'
-      +'<input type="checkbox" data-syn-mem="'+esc(c.account)+'"'+(on?' checked':'')
+    var st=inv[c.account];
+    var badge=st==='pending'?'<span style="font-size:10.5px;color:#faad14;background:#fffbe6;border:1px solid #ffe58f;border-radius:8px;padding:0 6px;margin-left:6px;flex-shrink:0">⏳ 待成员确认</span>'
+              :st==='rejected'?'<span style="font-size:10.5px;color:var(--text3);background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 6px;margin-left:6px;flex-shrink:0">已拒绝（不可选）</span>'
+              :st==='confirmed'?'<span style="font-size:10.5px;color:#52c41a;background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;padding:0 6px;margin-left:6px;flex-shrink:0">✓ 已确认</span>'
+              :'';
+    var dis=st==='rejected';
+    return '<label style="display:flex;gap:8px;align-items:center;padding:3px 6px;font-size:12.5px;'+(dis?'cursor:not-allowed;opacity:.55;':('cursor:pointer;border-radius:6px;'+(on?'background:#f2f7fc':'')))+'">'
+      +'<input type="checkbox" data-syn-mem="'+esc(c.account)+'"'+(on&&!dis?' checked':'')+(dis?' disabled':'')
       +' onchange="synMemToggle(this)">'
       +'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(c.name)
-      +'<span style="color:var(--text3);font-size:11px;margin-left:6px">'+esc(c.account)+'</span></span></label>';
+      +'<span style="color:var(--text3);font-size:11px;margin-left:6px">'+esc(c.account)+'</span></span>'+badge+'</label>';
   }).join('')||'<div style="padding:12px;font-size:12px;color:var(--text3)">本架构下暂无可选成员（可在【人员管理】为成员配置部门/小组后重试）</div>';
   var cnt=document.getElementById('syn_member_cnt');
   if(cnt)cnt.textContent='已选 '+SYN_MEM_CHECKED.size+' / '+(SYN_CFG.candidates||[]).length+' 人';
 }
 function synMemToggle(inp){
   var a=inp.getAttribute('data-syn-mem');
+  var inv=(SYN_CFG&&SYN_CFG.invite_states)||{};
+  if(inv[a]==='rejected'){inp.checked=false;toast('该成员已拒绝您的邀请，无法选择');return}   // T-225
   SYN_MEM_CHECKED.has(a)?SYN_MEM_CHECKED.delete(a):SYN_MEM_CHECKED.add(a);
   var cnt=document.getElementById('syn_member_cnt');
   if(cnt)cnt.textContent='已选 '+SYN_MEM_CHECKED.size+' / '+(SYN_CFG.candidates||[]).length+' 人';
@@ -4066,6 +4096,29 @@ function synSelectAllMembers(on){
     on?SYN_MEM_CHECKED.add(c.account):SYN_MEM_CHECKED.delete(c.account);
   });
   synPaintMembers();
+}
+// ---------- 追加邀请（T-225）：成员确认 / 拒绝 ----------
+async function openSynInviteModal(){
+  try{
+    var r=await api('/api/syn-invites');
+    var list=r.invites||[];
+    document.getElementById('syn_invite_list').innerHTML=list.map(function(x){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:10px 6px;border-bottom:1px dashed var(--border)">'
+        +'<div style="flex:1;min-width:0"><div style="font-size:13px"><b>'+esc(x.dept_name)+'</b> 综合看板</div>'
+        +'<div style="font-size:11.5px;color:var(--text3)">发起人：'+esc(x.owner_name||x.owner)+'</div></div>'
+        +'<button class="btn-primary" style="padding:4px 14px;flex-shrink:0" onclick="decideSynInvite('+x.id+',true)">确认</button>'
+        +'<button class="btn-default" style="padding:4px 14px;flex-shrink:0" onclick="decideSynInvite('+x.id+',false)">拒绝</button></div>';
+    }).join('')||'<div style="color:var(--text3);font-size:12.5px;padding:8px 4px">暂无待处理的邀请</div>';
+    openModal('synInviteModal');
+  }catch(e){toast(e.message||'邀请读取失败')}
+}
+async function decideSynInvite(id,accept){
+  try{
+    await api('/api/syn-invites/'+id+'/decide',{method:'POST',body:JSON.stringify({accept:accept})});
+    toast(accept?'已确认：将沿用该发起人的综合看板配置':'已拒绝：该发起人的综合看板中将不包含您');
+    ME.syn_invite_count=Math.max(0,(ME.syn_invite_count||1)-1);
+    if(ME.syn_invite_count>0)openSynInviteModal();else closeModal('synInviteModal');
+  }catch(e){toast(e.message||'操作失败')}
 }
 async function openSynConfigModal(){
   if(!SYN_MODE){toast('请先进入综合看板模式');return}
@@ -4389,6 +4442,7 @@ async function init(){
   if(!TOKEN){goLogin();return}
   try{
     ME=await api('/api/me');
+    if(ME.syn_invite_count>0)openSynInviteModal();   // T-225：有待处理的追加邀请 → 自动弹出
     await bcLoadAclMembers().catch(function(){});   // #138 预加载姓名映射：板块目录负责人等显示场景不能回退显示账号
     loadColChecked();   // #158：按当前账号载入板块勾选状态（sessionStorage 按用户分桶）
     loadItemChecked();  // #159：载入勾选开关与事项勾选（按用户分桶）
@@ -4479,7 +4533,9 @@ function synCountVisible(m){
   if(COL_STATUS_SEL&&COL_STATUS_SEL.size&&!COL_STATUS_SEL.has(m.completion||'open'))return false;
   if(ATTR_SEL&&ATTR_SEL.size&&!ATTR_SEL.has(m.nature||'日常'))return false;
   if(CAT_SEL&&CAT_SEL.size&&!CAT_SEL.has(m.category||'年度重点工作'))return false;
-  if(typeof SYN_MODE!=='undefined'&&SYN_MODE&&SYN_MODE.cols&&!SYN_MODE.cols.has(m.col_key))return false;
+  if(typeof SYN_MODE!=='undefined'&&SYN_MODE&&SYN_MODE.cols
+     &&!(SYN_MODE.free&&SYN_MODE.free.has(m.board_id))   // T-226：空白名单架构的看板不受列限
+     &&!SYN_MODE.cols.has(m.col_key))return false;
   if(PERSON_SEL&&PERSON_SEL.size&&!_colPeopleHit(PERSON_SEL,m.owner))return false;
   if(CC_SEL&&CC_SEL.size&&!_colPeopleHit(CC_SEL,m.participants))return false;
   return true;
@@ -4602,7 +4658,7 @@ function renderTabs(){
   if(selHint){
     if(typeof SYN_MODE!=='undefined'&&SYN_MODE){
       selHint.textContent='🧩 综合看板：'+SYN_MODE.name+'（全部看板聚合展示，类别优先排序）';
-      selHint.title='综合看板模式：展示「'+SYN_MODE.name+'」架构下全部看板中的全部板块；点【普通看板】退出';
+      selHint.title='综合看板模式：展示「'+SYN_MODE.name+'」架构下全部看板中的全部板块'+(SYN_MODE.nodeIds.length>1?'（多架构累加）':'')+'；点【普通看板】退出';
     }else if(curBoards.size){
       const known=(ME&&ME.boards||[]).filter(function(b){return curBoards.has(b.board_id);})
         .map(function(b){return b.board_name||b.board_id;});
@@ -4647,9 +4703,11 @@ function syncArchSelection(){
   if(CUR_DEPT)backToBoardList();
 }
 // 架构节点点击 = 多选 toggle（与板块选择同款交互：单击选中 / 再次单击取消）
+var ARCH_LAST='';   // T-225b：最后单击的架构名（多选时综合看板按它进入）
 function toggleDept(name){
   if(ARCH_SEL.has(name)){
     ARCH_SEL.delete(name);
+    if(ARCH_LAST===name)ARCH_LAST=[...ARCH_SEL].pop()||'';   // 取消的是最后点击项 → 回落到剩余任一
     delete DEPT_OPEN[name];
     // #205u（2026-11-18 用户需求3）：取消架构选择 → 该架构下**已选的看板联动取消**——
     // 看板 tab 随 DEPT_OPEN 删除不再显示（renderTabs 只渲染展开部门的看板），
@@ -4665,6 +4723,7 @@ function toggleDept(name){
     }
   }else{
     ARCH_SEL.add(name);
+    ARCH_LAST=name;            // T-225b：多选时综合看板按最后单击的架构进入
     DEPT_OPEN[name]=true;      // 选中即展开该架构的看板 tab（不收其他——多选并存）
   }
   saveDeptOpen();
@@ -7204,7 +7263,8 @@ function renderBoard(cards,cols,q,colHits,allCols){
   // 综合看板板块白名单（T-211-cis）：SYN_MODE.cols = col_key 集合（配置弹窗按板块勾选；
   // null = 全部板块）。白名单外板块整块隐藏。
   if(typeof SYN_MODE!=='undefined'&&SYN_MODE&&SYN_MODE.cols){
-    names=names.filter(k=>{const m=cmeta[k];return !!m&&SYN_MODE.cols.has(m.col_key)});
+    names=names.filter(k=>{const m=cmeta[k];if(!m)return false;
+      return (SYN_MODE.free&&SYN_MODE.free.has(m.board_id))||SYN_MODE.cols.has(m.col_key)});
     if(!names.length){
       c.innerHTML='<div class="empty">综合看板白名单中没有当前范围内的板块（可在【综合编辑】中调整）</div>';
       return;

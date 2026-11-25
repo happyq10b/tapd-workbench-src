@@ -6766,31 +6766,62 @@ def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends
 
 
 @app.get('/api/syn-boards')
-def syn_boards(dept_node_id: int, username: str = Depends(require_auth)):
-    """T-211 综合模式数据：部门架构下**全部可见看板**（经白名单过滤）与板块清单。
+def syn_boards(dept_node_id: int = None, dept_node_ids: str = '',
+               username: str = Depends(require_auth)):
+    """T-211 综合模式数据 + T-226 多架构累加。
 
-    数据权限仍走 user_allowed（看板/板块可见性不变，综合模式只是聚合展示 +
-    排序变化，不放开越权数据）。
+    dept_node_ids = 逗号分隔多节点（新）：各节点按该用户**适用配置**各自过滤后
+    取**并集**聚合 —— 每架构：白名单非空 → 只含白名单板块；空白名单 → 该架构
+    子树全部看板且不受白名单列限制（free_boards 下发，前端据此放行全部板块列）。
+    数据权限仍走 user_allowed（综合模式不越权）。
     """
-    node = _org_node(dept_node_id)
-    if not node or node['node_type'] not in ('dept', 'center'):
-        raise HTTPException(404, '部门架构不存在')
-    if dept_node_id not in _syn_default_depts(username) and dept_node_id not in _syn_extra_depts(username):
-        raise HTTPException(403, '你无权查看该部门的综合看板')
-    whitelist = [x for x in _syn_cfg_for(username, dept_node_id)['columns'].split(',') if x]
+    raw = (dept_node_ids or '').strip() or (str(dept_node_id) if dept_node_id else '')
+    nids = []
+    for x in raw.split(','):
+        x = x.strip()
+        if not x:
+            continue
+        try:
+            nids.append(int(x))
+        except ValueError:
+            raise HTTPException(400, '非法的部门节点：%s' % x[:20])
+    if not nids:
+        raise HTTPException(400, '未指定部门节点')
+    dedit = _syn_default_depts(username)
+    dextra = _syn_extra_depts(username)
+    names, agg = [], {}
+    whitelist, free_boards = set(), set()
+    for nid in nids:
+        node = _org_node(nid)
+        if not node or node['node_type'] not in ('dept', 'center'):
+            raise HTTPException(404, '部门架构不存在：%d' % nid)
+        if nid not in dedit and nid not in dextra:
+            raise HTTPException(403, '你无权查看「%s」的综合看板' % node['name'])
+        names.append(node['name'])
+        cfg = _syn_cfg_for(username, nid)
+        wl = [x for x in cfg['columns'].split(',') if x]
+        subtree = _syn_subtree_board_ids(nid)
+        if wl:
+            wl_boards = {x.split('::')[0] for x in wl}
+            use = subtree & wl_boards
+            whitelist |= set(wl)
+        else:
+            use = subtree                      # 空白名单 = 该架构全部看板，列不受限
+            free_boards |= use
+        for b in use:
+            agg[b] = True
     boards, _cols = user_allowed(username)
     rows = dbq('SELECT b.board_id, b.board_name FROM boards b WHERE b.archived=0')
     out = []
     for r in rows:
+        if r['board_id'] not in agg:
+            continue
         if boards is not None and r['board_id'] not in boards:
             continue   # 数据可见性守门（综合模式不越权）
         out.append({'board_id': r['board_id'], 'board_name': r['board_name']})
-    # T-211-cis：白名单为**板块级**（col_key）→ 派生可见看板集合（白名单板块所属看板）
-    if whitelist:
-        wl_boards = {x.split('::')[0] for x in whitelist}
-        out = [b for b in out if b['board_id'] in wl_boards]
-    return {'dept_name': node['name'], 'boards': out,
-            'col_whitelist': whitelist}   # 空 = 全部板块（前端不过滤）
+    return {'dept_name': ' + '.join(names), 'boards': out,
+            'col_whitelist': sorted(whitelist),   # 各架构白名单并集（空 = 无架构限列）
+            'free_boards': sorted(free_boards)}   # 空白名单架构的看板 → 前端放行全部板块列
 
 
 def _arch_owner_nodes(username: str) -> set:
