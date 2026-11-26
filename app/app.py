@@ -2831,7 +2831,7 @@ def me(username: str = Depends(require_auth)):
         for r in dbq("SELECT DISTINCT dept_node_id, status FROM syn_scheme_member WHERE username=?",
                      (username,)):
             _sm_any.add(r['dept_node_id'])
-            if r['status'] == 'active':
+            if r['status'] in ('active', 'accepted'):   # #129b：accepted（已接受未勾选）也显示按钮
                 _sm_active.add(r['dept_node_id'])
     except Exception:
         pass
@@ -6935,7 +6935,7 @@ def _syn_save_member_mapping(nid: int, username: str, old_extra: set, new_extra:
             dbe('UPDATE syn_config_member SET owner=? WHERE dept_node_id=? AND member=?',
                 (username, nid, m))
             _syn_scheme_admit(nid, username, m, scheme_for(m) if scheme_for else None)
-            _syn_scheme_receive(nid, m, scheme_for(m) if scheme_for else None, 'active')
+            _syn_scheme_receive(nid, m, scheme_for(m) if scheme_for else None, 'accepted')   # #129b：接受≠适用
             continue
         if inv in ('pending', 'rejected'):
             continue                  # 等待成员处理 / 已拒绝（保持为空）
@@ -6988,7 +6988,7 @@ def _syn_scheme_expel(nid: int, owner: str, member: str):
 def _syn_scheme_receive(nid: int, member: str, scheme_id=None, status: str = 'active'):
     """T-235：登记/更新用户的**方案接收态**（syn_scheme_member）。
 
-    接受邀请 → status='active'（该方案进入其综合视图）；用户在选择弹窗退出 →
+    接受邀请 → status='accepted'（已接收未勾选；弹窗勾选并确定 → active 进入综合视图）；用户在选择弹窗退出 →
     status='exited'（可重新选择）。scheme_id 缺省/失效 → 落到发起人外部显示方案。
     """
     if not scheme_id:
@@ -7219,8 +7219,10 @@ def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends
             (inv['dept_node_id'], inv['member'], inv['owner']))
         # T-233：成员加入邀请记录的目标方案（缺省/方案已删 → 发起人的外部显示方案）
         _syn_scheme_admit(inv['dept_node_id'], inv['owner'], inv['member'], _sid)
-        # T-235：登记用户的方案接收态（active = 进入其综合视图；多方案可并存）
-        _syn_scheme_receive(inv['dept_node_id'], inv['member'], _sid, 'active')
+        # T-235：登记用户的方案接收态（#129b 用户口径：接受≠适用——
+        # accepted=已接受未勾选，须在选择弹窗勾选并「确定」后才进入综合视图；
+        # 主动退出才是 exited。accepted 也显示综合看板按钮，否则无法进弹窗勾选）
+        _syn_scheme_receive(inv['dept_node_id'], inv['member'], _sid, 'accepted')
         audit_log(username, client_ip(request), 'update', '综合看板邀请',
                   '确认追加邀请（部门 %d，发起人 %s）' % (inv['dept_node_id'], inv['owner']), 'success')
         _syn_feedback_notify(inv['dept_node_id'], username, inv['owner'], True)
