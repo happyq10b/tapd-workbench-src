@@ -3859,6 +3859,9 @@ def log_action(card_id, username, action, detail=''):
 
 @app.put('/api/cards/{card_id}')
 async def update_card(card_id: str, req: CardUpdate, username: str = Depends(require_writer), request: Request = None):
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 数据变更护栏
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # 编辑锁（2026-11-12 check→acquire）：写路径即认领，堵住「不开弹窗直接调 API」绕锁的口子；
     # 弹窗持锁人（fresh=False）不受影响，保存后仍走末尾的释放。
     _lock_oneshot(card_id, username, '卡片', '保存')
@@ -4075,6 +4078,9 @@ async def create_card(req: CardCreate, username: str = Depends(require_writer), 
     perm_check(username, perm_chain(board_id=req.board_id, column_id=req.column_id),
                OP_CREATE, LV_COLUMN_OWNER, 'board:' + req.board_id, min_level=LV_COLUMN_OWNER)
     check_board_access(req.board_id, username)
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 禁止新增
+    if _syn_write_denied(username, board_id=req.board_id, column_id=req.column_id or ''):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # 指派类字段（owner / cc）单独判定：授予他人权限，权限高于普通新增
     _flds = req.fields or {}
     if _flds.get('owner'):
@@ -4662,6 +4668,9 @@ async def copy_column(req: CopyColumnReq, username: str = Depends(require_writer
     if not req.board_id:
         raise HTTPException(400, '请选择目标看板')
     check_board_access(req.board_id, username)
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 禁止复制到综合授予看板
+    if _syn_write_denied(username, board_id=req.board_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     if not dbq('SELECT board_id FROM boards WHERE board_id=?', (req.board_id,)):
         raise HTTPException(404, '目标看板不存在')
     # ③ 目标板块可见性
@@ -4992,6 +5001,9 @@ async def copy_card(req: CopyCardReq, username: str = Depends(require_writer),
     if not req.board_id:
         raise HTTPException(400, '请选择目标看板')
     check_board_access(req.board_id, username)
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 禁止复制到综合授予看板
+    if _syn_write_denied(username, board_id=req.board_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # ③ 目标板块可见性
     if req.column_id:
         check_column_access(req.board_id, req.column_id, username)
@@ -5129,6 +5141,9 @@ def _delete_card_core(card_id: str, username: str, request=None) -> int:
     cur_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
     if not cur_row:
         raise HTTPException(404, '卡片不存在或已删除')
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 禁止删除
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # ② 分级权限（2026-11-02）：删除事项 = 事项负责人及以上
     # ⚠️ 权限内核先于可见性校验（见 update_card 的同款说明）
     perm_check(username, perm_chain(card_id=card_id),
@@ -5452,6 +5467,10 @@ async def get_week_progress(card_id: str, username: str = Depends(require_auth))
 async def save_week_progress(card_id: str, req: WeekProgressReq,
                              username: str = Depends(require_writer), request: Request = None):
     check_card_access(card_id, username)
+    # T-239（2026-11-26 用户需求）：每周进展保存 = 数据变更 —— 综合追加人员（无原生身份）
+    # 仅可查看与评论，禁止修改
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # T-221：每周进展**独立编辑锁**护栏（week_progress:<card_id>，与事项编辑锁互不影响）——
     # check→acquire 一次性认领：他人持有 → 409「已被 <姓名> 编辑中」；
     # 本人经弹窗认领（/api/locks/acquire）则 fresh=False，写完不释放（交给弹窗生命周期）；
@@ -5655,6 +5674,9 @@ def get_card_children(card_id: str, username: str = Depends(require_auth)):
 
 @app.post('/api/cards/{card_id}/subtasks')
 async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(require_writer), request: Request = None):
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 数据变更护栏
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # 编辑锁（2026-11-12 check→acquire）：父事项被他人编辑中 → 409；新认领写完即释放
     _fresh = _lock_oneshot(card_id, username, '卡片', '新增子事项')
     title = (req.title or '').strip()
@@ -5700,6 +5722,9 @@ async def add_subtask(card_id: str, req: SubtaskReq, username: str = Depends(req
 @app.put('/api/cards/{card_id}/subtasks/{sid}')
 async def update_subtask(card_id: str, sid: int, req: SubtaskReq,
                          username: str = Depends(require_writer), request: Request = None):
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 数据变更护栏
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # 编辑锁（2026-11-12 check→acquire）：父事项被他人编辑中 → 409；新认领写完即释放
     _fresh = _lock_oneshot(card_id, username, '卡片', '修改子事项')
     _cr = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
@@ -5734,6 +5759,9 @@ async def update_subtask(card_id: str, sid: int, req: SubtaskReq,
 
 @app.delete('/api/cards/{card_id}/subtasks/{sid}')
 async def delete_subtask(card_id: str, sid: int, username: str = Depends(require_writer), request: Request = None):
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 数据变更护栏
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # 编辑锁（2026-11-12 check→acquire）：父事项被他人编辑中 → 409；新认领写完即释放
     _fresh = _lock_oneshot(card_id, username, '卡片', '删除子事项')
     _cr2 = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
@@ -6609,6 +6637,45 @@ def _syn_grant(username: str, nids):
                 col_grant[b] = None             # 空白名单架构 → 全部板块放开
         grant_boards |= bset
     return grant_boards, col_grant
+
+
+def _syn_write_denied(username: str, card_id: str = '', board_id: str = '', column_id: str = '') -> bool:
+    """T-239（2026-11-26 用户需求）：综合追加人员的**写权限护栏**。
+
+    规则：被追加人员接受方案后同步获得相应板块的**查看与评论**权限；数据变更
+    （新增/删除/修改事项、待办、每周进展、移动、指派等）一律禁止 —— 但**仅针对
+    无任何原生身份**的纯粹追加者：
+    · 拥有任何原生身份（事项/板块/看板负责人、参与人、架构任命等，哪怕只是参与人）
+      → 返回 False（保持原有权限，由权限内核按身份档位判定，不受综合授予影响）；
+    · 管理员/超管 → 放行；
+    · 非综合模式请求（_SYN_CTX 为空）→ 放行（此时相关看板本就不可见）；
+    · PERM_ENABLED=False（内核未加载）→ 以原生可见性为界 fail-safe
+      （原生不可见的看板禁止变更）。
+    """
+    if not _SYN_CTX.get():
+        return False
+    if is_admin(username) or username == SUPER_ADMIN:
+        return False
+    if PERM_ENABLED:
+        try:
+            chain = perm_chain(card_id=card_id or None,
+                               board_id=board_id or None,
+                               column_id=column_id or None)
+            return not has_role(dbq, username, chain, LV_PARTICIPANT)
+        except Exception:
+            return False
+    # 内核未加载 → 原生可见性为界（fail-safe）
+    try:
+        bid = board_id
+        if not bid and card_id:
+            row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
+            bid = row[0]['board_id'] if row else ''
+        if not bid:
+            return False
+        raw_b, _rc = _user_allowed_impl(username)
+        return raw_b is not None and bid not in raw_b
+    except Exception:
+        return False
 
 
 def _syn_extra_depts(username: str) -> set:
@@ -8898,6 +8965,9 @@ async def set_column_participants(col_key: str, req: AclReq, username: str = Dep
 @app.put('/api/cards/{card_id}/participants')
 async def set_card_participants(card_id: str, req: AclReq, username: str = Depends(require_writer),
                                 request: Request = None):
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 数据变更护栏
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # 指派事项参与人（事项负责人及以上）。
     # 参与人 = 可修改该事项的**可见内容**，但无增删与指派权限。
     row = dbq('SELECT board_id, column_id, column_name, parent_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
@@ -10087,6 +10157,9 @@ class MoveReq(BaseModel):
 
 @app.put('/api/cards/{card_id}/move')
 async def move_card(card_id: str, req: MoveReq, username: str = Depends(require_writer), request: Request = None):
+    # T-239：综合追加人员（无原生身份）仅可查看与评论 —— 数据变更护栏
+    if _syn_write_denied(username, card_id=card_id):
+        raise HTTPException(403, '综合看板追加人员仅可查看与评论，如需编辑请联系负责人或管理员')
     # 编辑锁（2026-11-12 check→acquire）：被他人编辑中 → 409；新认领写完即释放
     _fresh = _lock_oneshot(card_id, username, '卡片', '移动')
     src_row = dbq('SELECT board_id FROM cards WHERE card_id=? AND deleted=0', (card_id,))
