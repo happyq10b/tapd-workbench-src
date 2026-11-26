@@ -343,12 +343,16 @@ button{font-family:inherit}
    现顺序唯一来源 = 后端 ME.depts（org_nodes.sort 架构排序，见 #103）：
    架构管理界面从上到下 = 目录界面从左上到右下；架构排序保存后
    orgMoveNode 重拉 ME + renderTabs → 目录实时更新。 */
-/* ===== 需求2：可选看板默认两行，超出滚动 =====
+/* ===== 需求2（T-240 2026-11-26 扩展至两带）：架构带 + 看板带高度固定为完整两行，
+   超出部分在各自区域内滚动 =====
    ⚠️ 2026-11-10 #122 教训：行高曾写死 38px → max-height:82px；
       #121 卡片加了【编辑】按钮后行高实测 45px → 第二行被裁 14px。
-      → 高度不再写死：CSS 只留 102px 兜底值（45px 行高 + 6px 安全余量下的两行完整高度，
-        T-234 2026-11-25 调高），实际值由 JS syncBoardBandHeight() 按当前行高**动态测量**
-        （两行完整 = 首行高 + rowGap + 次行高 + 6px 余量），卡片样式再变也不会裁切。 */
+      → 高度不写死：CSS 留 102px 兜底值（45px 行高 + 6px 余量下的两行完整高度），
+        实际值由 JS syncBoardBandHeight() 按当前行高**动态实测**（首行高 + rowGap +
+        次行高 + 6px 余量），卡片样式再变也不会裁切；
+      T-240：JS 改设 inline **height**（非 max-height）—— 只有 1 行内容时也撑出
+        第二行空位；两带同规则，超出各自区域内滚动。 */
+.tb-dept-band .tb-grid,
 .tb-board-band .tb-grid{
   max-height:102px;overflow-y:auto;overflow-x:hidden;
   /* 滚动条留出内边距，避免末行文字被滚动条压住 */
@@ -1874,6 +1878,7 @@ function goLogin(){
   <div class="msg-head">
     <h3>消息中心</h3>
     <button class="btn-default" onclick="readAllMessages()" title="全部标记为已读">全部已读</button>
+    <button class="btn-default" id="msgClearBtn" onclick="clearAllMessages()" title="一键清除全部消息（不可恢复）">清空消息</button>
     <button class="drawer-close" onclick="closeMsgPanel()" title="关闭">✕</button>
   </div>
   <div class="msg-list" id="msgList"></div>
@@ -3657,6 +3662,9 @@ function closeMsgPanel(){
 function renderMsgList(list){
   const box=document.getElementById('msgList');
   if(!box)return;
+  window._msgCount=list.length;   // T-240：清空按钮可用性依据
+  const cb=document.getElementById('msgClearBtn');
+  if(cb)cb.disabled=!list.length;
   if(!list.length){
     box.innerHTML='<div class="msg-empty">暂无消息<br><span style="font-size:11.5px">在事项评论里 @ 某人，就会出现在这里</span></div>';
     return;
@@ -3717,6 +3725,17 @@ async function readAllMessages(){
     await api('/api/messages/read-all',{method:'POST'});
     await refreshMessages();
     toast('已全部标记为已读');
+  }catch(e){toast(e.message)}
+}
+// T-240：清空全部消息（二次确认防误操作；物理删除不可恢复）
+async function clearAllMessages(){
+  const n=window._msgCount||0;
+  if(!n){toast('暂无消息可清空');return}
+  if(!confirm('确定清空全部消息吗？共 '+n+' 条，清空后不可恢复。'))return;
+  try{
+    const d=await api('/api/messages/clear-all',{method:'POST'});
+    await refreshMessages();
+    toast('已清空 '+((d&&d.cleared)||n)+' 条消息');
   }catch(e){toast(e.message)}
 }
 // 密码可见性切换（小眼睛）
@@ -5002,24 +5021,28 @@ function renderTabs(){
     }
   }
 }
-// 可选看板带高度（2026-11-10 #122）：恒定**完整两行**（首行高 + rowGap + 次行高），
-//   第三行起容器内滚动。行高由 JS 实测 —— 此前写死 82px（按旧行高 38px 测量），
-//   卡片加【编辑】按钮后行高变 45px → 第二行被裁 14px。
+// 架构带 + 可选看板带高度（2026-11-10 #122；T-240 2026-11-26 用户需求2）：两带**高度固定 =
+// 完整两行**（首行高 + rowGap + 次行高 + 6px 余量）—— 只有 1 行内容时也保留第二行空位；
+// 超出部分在各自区域内滚动。行高由 JS 按当前卡片样式动态实测（此前写死 82px 被加高卡片
+// 裁切，#122 教训），测量失败时回落 CSS 兜底值。 */
 function syncBoardBandHeight(){
-  const grid=document.getElementById('tbBoards');
-  if(!grid)return;
-  // ⚠️ 弹层/视图隐藏时 offsetHeight=0，量出来是假的 → 跳过（CSS 兜底值 96px 生效），
-  //    等下一次可见状态的 renderTabs 再纠正。
-  if(!grid.offsetParent)return;
-  const items=grid.children;
-  if(!items.length){grid.style.maxHeight='none';return;}
-  const gap=parseFloat(getComputedStyle(grid).rowGap)||6;
-  const h1=items[0].getBoundingClientRect().height;
-  const h2=items.length>1?items[1].getBoundingClientRect().height:h1;
-  if(h1<=0||h2<=0)return;   // 度量异常（隐藏中）→ 不动现有值
-  // T-234（2026-11-25 用户需求2）：+6px 安全余量 —— 卡片描边/阴影/文字下伸部不再贴边裁切，
-  // 两行选项始终完整展示；高度略增不影响「两行封顶、第三行起滚动」的语义。
-  grid.style.maxHeight=Math.ceil(h1+gap+h2+6)+'px';
+  ['tbDepts','tbBoards'].forEach(function(id){
+    const grid=document.getElementById(id);
+    if(!grid)return;
+    // ⚠️ 弹层/视图隐藏时 offsetHeight=0，量出来是假的 → 跳过（CSS 兜底值生效），
+    //    等下一次可见状态的 renderTabs 再纠正。
+    if(!grid.offsetParent){grid.style.height='';grid.style.maxHeight='';return;}
+    const items=grid.children;
+    if(!items.length){grid.style.height='';grid.style.maxHeight='none';return;}
+    const gap=parseFloat(getComputedStyle(grid).rowGap)||6;
+    const h1=items[0].getBoundingClientRect().height;
+    const h2=items.length>1?items[1].getBoundingClientRect().height:h1;
+    if(h1<=0||h2<=0)return;   // 度量异常（隐藏中）→ 不动现有值
+    // +6px 安全余量：卡片描边/阴影/文字下伸部不贴边裁切；
+    // height（而非 max-height）：只有一行内容时也撑出第二行空位
+    grid.style.maxHeight='none';
+    grid.style.height=Math.ceil(h1+gap+h2+6)+'px';
+  });
 }
 // 架构选择 → 看板选择联动：重算 curBoards = 选中架构看板并集（覆盖手动微调——
 // 架构选择是批量语义；此后仍可点看板 tab 单独增删微调，统计跟 curBoards 走）

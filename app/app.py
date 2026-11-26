@@ -5563,6 +5563,23 @@ def read_all_messages(username: str = Depends(require_auth)):
         tuple(names))
     return {'ok': True}
 
+@app.post('/api/messages/clear-all')
+def clear_all_messages(username: str = Depends(require_auth), request: Request = None):
+    """T-240（2026-11-26 用户需求）：清空当前用户的**全部消息**（一键清除，前端二次确认）。
+
+    范围与 GET /api/messages 完全一致（receiver = 账号 ∪ 绑定成员姓名）——
+    只删自己的消息，不影响其他用户。物理删除（清空语义，非软删）。"""
+    names = [username]
+    rows = dbq('SELECT name FROM team_members WHERE account=?', (username,))
+    for r in rows:
+        if r['name'] and r['name'] not in names:
+            names.append(r['name'])
+    marks = ','.join('?' * len(names))
+    cur = dbe(f"DELETE FROM messages WHERE receiver IN ({marks})", tuple(names))
+    audit_log(username, client_ip(request), 'message_clear', '消息中心',
+              '清空全部消息（%d 条）' % (cur.rowcount or 0), 'success')
+    return {'ok': True, 'cleared': cur.rowcount or 0}
+
 @app.get('/api/cards/{card_id}/actions')
 def get_actions(card_id: str, username: str = Depends(require_auth)):
     check_card_access(card_id, username)
