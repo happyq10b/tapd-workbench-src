@@ -2823,14 +2823,32 @@ def me(username: str = Depends(require_auth)):
         username == SUPER_ADMIN or is_admin(username) or bool(_arch_head_nodes(dbq, username)))
     # T-211 综合看板能力位：syn_edit_depts = 默认可见（=可编辑）部门；syn_depts = 可见（含追加）
     _syn_edit = _syn_default_depts(username)
-    syn_depts = sorted(_syn_edit | _syn_extra_depts(username))
+    # T-237（2026-11-26 用户需求2）：综合看板按钮显隐 —— 追加接收部分只按 **active** 方案判定：
+    # 接受任一方案 → 显示；退出全部方案 → 自动隐藏。有接收行（含 exited）的架构不再回落
+    # 旧归属（syn_config_member）；无接收行的存量归属照旧；默认可见人员恒显示（不受退出影响）。
+    _sm_active, _sm_any = set(), set()
+    try:
+        for r in dbq("SELECT DISTINCT dept_node_id, status FROM syn_scheme_member WHERE username=?",
+                     (username,)):
+            _sm_any.add(r['dept_node_id'])
+            if r['status'] == 'active':
+                _sm_active.add(r['dept_node_id'])
+    except Exception:
+        pass
+    _cm_legacy = set()
+    try:
+        _cm_legacy = {r['dept_node_id'] for r in
+                      dbq('SELECT dept_node_id FROM syn_config_member WHERE member=?', (username,))}
+    except Exception:
+        pass
+    syn_depts = sorted(_syn_edit | _sm_active | (_cm_legacy - _sm_any))
     return {'username': username, 'display_name': display_name, 'boards': boards_out, 'role': user_role(username),
             'can_edit': can_edit(username), 'is_admin': is_admin(username),
             'is_super': username == SUPER_ADMIN,   # #111 在线用户管理：前端按此显隐入口
             'arch_owner': arch_owner,              # #205ad 封存/启用看板入口显隐
             'can_create_board': can_create_board,  # #205ad-cis 新建看板入口显隐（部门负责人及以上）
             'syn_edit_depts': sorted(_syn_edit),   # T-211 综合配置按钮显隐（默认可见人员）
-            'syn_depts': syn_depts,                # T-211 综合看板按钮显隐（默认 ∪ 追加）
+            'syn_depts': syn_depts,                # T-211/T-237 综合看板按钮显隐（默认 ∪ active 接收）
             'syn_invite_count': dbq('SELECT COUNT(*) n FROM syn_config_invite '
                                     'WHERE member=? AND status=?', (username, 'pending'))[0]['n'],  # T-225
             'can_manage_staff': _sp[0],            # T-191d 人员管理入口显隐（部门负责人及以上）
@@ -6638,10 +6656,7 @@ def _syn_cfg_for(username: str, nid: int):
         r = ([x for x in rows if x['is_display']] or rows)[0]
         return {'columns': r['columns'] or '', 'extra_members': r['extra_members'] or ''}
 
-    rows = _rows_of(username)
-    if rows:
-        return dict(_pick(rows), owner=username)
-    # T-235：用户选择态 —— 已接收方案（active）的白名单并集；可多方案共存
+    # T-237：用户选择态**优先**（含配置人勾选自己方案的接收行 —— 方案选择弹窗落库后生效）
     try:
         sel = dbq("""SELECT s.columns, s.owner, s.extra_members FROM syn_scheme_member sm
                      JOIN syn_scheme s ON s.id=sm.scheme_id
@@ -6669,8 +6684,14 @@ def _syn_cfg_for(username: str, nid: int):
                                 WHERE sm.dept_node_id=? AND sm.username=? LIMIT 1""", (nid, username)))
     except Exception:
         _has_rows = False
-    if _has_rows:
-        return empty   # 用户已接收过方案但全部退出 → 综合视图为空（可在弹窗重新选择）
+    if not _has_rows:
+        # 无任何选择行：配置人 → 本人名下**外部显示方案**（原默认行为，T-237 保持兼容）；
+        # 非配置人 → 走下方旧归属/兜底
+        rows = _rows_of(username)
+        if rows:
+            return dict(_pick(rows), owner=username)
+    else:
+        return empty   # 用户有选择行但全部退出 → 综合视图为空（可在弹窗重新选择）
     m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, username))
     if not m:
         return empty
@@ -7132,12 +7153,13 @@ def syn_invite_decide(iid: int, req: SynInviteDecideReq, username: str = Depends
 
 @app.get('/api/syn-my-schemes')
 def syn_my_schemes(dept_node_id: int, username: str = Depends(require_auth)):
-    """T-235（2026-11-25 用户需求1）：当前用户在指定架构下**接收到的方案清单**
-    （含选择态）—— 综合看板选择弹窗数据源。
+    """T-235/T-237：当前用户在指定架构下的**方案选择清单**（含选择态）——
+    综合看板选择弹窗数据源。
 
-    received = 已接收方案（syn_scheme_member 行 ∪ 旧归属路径中包含本人的方案）。
+    清单 = 已接收方案（syn_scheme_member 行 ∪ 旧归属路径中包含本人的方案）
+    ∪ **自己提交的方案**（T-237 用户需求1：owner=本人，self=True）。
     status：active=适用（综合视图按其白名单并集）/ exited=已退出（不参与视图，
-    可重新选择）。配置人自己名下的方案不在接收清单（其视图=外部显示方案）。
+    可重新选择）。自建方案无接收行时按「外部显示方案=适用、其余=已退出」取默认态。
     """
     node = _org_node(dept_node_id)
     if not node or node['node_type'] not in ('dept', 'center'):
@@ -7156,6 +7178,13 @@ def syn_my_schemes(dept_node_id: int, username: str = Depends(require_auth)):
                                         'status': r['status']}
     except Exception:
         pass
+    # T-237：自己提交的方案一并入列（接收行缺省 → 显示方案 active / 其余 exited 的默认态）
+    for r in dbq('SELECT id, name, columns, is_display FROM syn_scheme '
+                 'WHERE dept_node_id=? AND owner=? ORDER BY id', (dept_node_id, username)):
+        if r['id'] not in received:
+            received[r['id']] = {'id': r['id'], 'name': r['name'] or '', 'owner': username,
+                                 'columns': r['columns'] or '',
+                                 'status': 'active' if r['is_display'] else 'exited'}
     if not received:
         # 旧归属兼容：syn_config_member 归属的配置人名下包含本人的方案
         m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?',
@@ -7172,6 +7201,7 @@ def syn_my_schemes(dept_node_id: int, username: str = Depends(require_auth)):
         out.append({'id': s['id'], 'name': s['name'],
                     'owner': s['owner'],
                     'owner_name': _member_display_name(s['owner']) or s['owner'],
+                    'self': s['owner'] == username,          # T-237：我提交的方案
                     'cols_count': len([x for x in s['columns'].split(',') if x]),
                     'status': s['status']})
     out.sort(key=lambda x: x['id'])
@@ -7186,8 +7216,9 @@ class SynMySchemesReq(BaseModel):
 @app.post('/api/syn-my-schemes/{nid}')
 def syn_my_schemes_select(nid: int, req: SynMySchemesReq, username: str = Depends(require_auth),
                           request: Request = None):
-    """T-235：保存用户的方案选择/退出 —— 勾选的方案 status='active'（适用），
-    其余已接收方案 status='exited'（退出，可随时重新勾选）。"""
+    """T-235/T-237：保存用户的方案选择/退出 —— 勾选的方案 status='active'（适用），
+    其余已接收方案 status='exited'（退出，可随时重新勾选）。
+    T-237：自己提交的方案同样参与选择（mine 含 owner=本人的方案）。"""
     node = _org_node(nid)
     if not node or node['node_type'] not in ('dept', 'center'):
         raise HTTPException(404, '部门架构不存在')
@@ -7196,6 +7227,8 @@ def syn_my_schemes_select(nid: int, req: SynMySchemesReq, username: str = Depend
     mine = {r['scheme_id'] for r in
             dbq('SELECT scheme_id FROM syn_scheme_member WHERE dept_node_id=? AND username=?',
                 (nid, username))}
+    for r in dbq('SELECT id FROM syn_scheme WHERE dept_node_id=? AND owner=?', (nid, username)):
+        mine.add(r['id'])   # T-237：自建方案参与选择
     if not mine:
         # 旧归属兼容路径：先按包含本人的方案落登记行，再应用本次选择
         m = dbq('SELECT owner FROM syn_config_member WHERE dept_node_id=? AND member=?', (nid, username))
